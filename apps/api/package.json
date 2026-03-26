@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
+    "@google-cloud/storage": "^7.19.0",
     "@workside/branding": "file:../../packages/branding",
     "@workside/prompts": "file:../../packages/prompts",
     "@workside/utils": "file:../../packages/utils",

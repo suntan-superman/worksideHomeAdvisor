@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 
 import { env } from '../../config/env.js';
-import { sendOtpEmail } from '../../services/emailService.js';
+import { sendOtpEmail, sendWelcomeEmail } from '../../services/emailService.js';
 import { signSessionToken } from '../../services/sessionService.js';
 import { UserModel } from './auth.model.js';
 
@@ -73,13 +73,13 @@ export async function login(payload) {
     };
   }
 
-    return {
-      token: signSessionToken(user),
-      user: {
-        id: user._id.toString(),
-        email: user.email,
-        role: user.role,
-        firstName: user.firstName,
+  return {
+    token: signSessionToken(user),
+    user: {
+      id: user._id.toString(),
+      email: user.email,
+      role: user.role,
+      firstName: user.firstName,
       lastName: user.lastName,
     },
   };
@@ -115,6 +115,10 @@ export async function verifyEmailOtp(payload) {
   user.emailVerifiedAt = new Date();
   user.verificationOtp = null;
   await user.save();
+  await sendWelcomeEmail({
+    to: user.email,
+    firstName: user.firstName,
+  });
 
   return {
     token: signSessionToken(user),

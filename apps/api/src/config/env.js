@@ -22,12 +22,14 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(16).default('development-secret-change-me'),
   JWT_EXPIRES_IN: z.string().default('7d'),
   BCRYPT_SALT_ROUNDS: z.coerce.number().default(12),
-  EMAIL_PROVIDER: z.enum(['console', 'smtp']).default('console'),
+  EMAIL_PROVIDER: z.enum(['console', 'smtp', 'sendgrid']).default('console'),
   EMAIL_FROM: z.string().email().default('hello@workside.software'),
   SMTP_HOST: z.string().default('localhost'),
   SMTP_PORT: z.coerce.number().default(1025),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
+  SENDGRID_API_KEY: z.string().optional(),
+  SENDGRID_FROM_EMAIL: z.string().email().optional(),
   OTP_LENGTH: z.coerce.number().default(6),
   OTP_TTL_MINUTES: z.coerce.number().default(15),
   OPENAI_API_KEY: z.string().optional(),
@@ -37,11 +39,15 @@ const envSchema = z.object({
   MARKET_DATA_API_KEY: z.string().optional(),
   RENTCAST_API_KEY: z.string().optional(),
   RENTCAST_BASE_URL: z.string().url().default('https://api.rentcast.io/v1'),
-  STORAGE_PROVIDER: z.enum(['local']).default('local'),
+  STORAGE_PROVIDER: z.enum(['local', 'gcs']).default('local'),
   STORAGE_LOCAL_DIR: z.string().optional(),
+  GCS_PROJECT_ID: z.string().optional(),
+  GCS_BUCKET_NAME: z.string().optional(),
+  GCS_UPLOAD_PREFIX: z.string().default('media-assets'),
 });
 
 export const env = envSchema.parse({
   ...process.env,
   OPENAI_API_KEY: stripSecret(process.env.OPENAI_API_KEY),
+  SENDGRID_API_KEY: stripSecret(process.env.SENDGRID_API_KEY),
 });

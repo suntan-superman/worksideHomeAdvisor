@@ -293,12 +293,12 @@ export function RootScreen() {
         </Text>
         <View style={styles.segmentRow}>
           <ActionButton
-            label="Log in"
+            label="Password login"
             onPress={() => setAuthMode('login')}
             variant={authMode === 'login' ? 'primary' : 'secondary'}
           />
           <ActionButton
-            label="Verify OTP"
+            label="Enter OTP"
             onPress={() => setAuthMode('verify')}
             variant={authMode === 'verify' ? 'primary' : 'secondary'}
           />
@@ -332,7 +332,7 @@ export function RootScreen() {
         )}
         <View style={styles.segmentRow}>
           <ActionButton
-            label={busy ? 'Working...' : authMode === 'login' ? 'Log in' : 'Verify'}
+            label={busy ? 'Working...' : authMode === 'login' ? 'Continue' : 'Verify email'}
             onPress={authMode === 'login' ? handleLogin : handleVerifyOtp}
             disabled={busy}
           />

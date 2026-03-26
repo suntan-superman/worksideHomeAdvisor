@@ -27,7 +27,7 @@ export function buildApp() {
 
   app.register(authRoutes, { prefix: '/api/v1/auth' });
   app.register(propertyRoutes, { prefix: '/api/v1/properties' });
-  app.register(mediaRoutes, { prefix: '/api/v1/properties' });
+  app.register(mediaRoutes, { prefix: '/api/v1' });
   app.register(pricingRoutes, { prefix: '/api/v1/properties' });
   app.register(dashboardRoutes, { prefix: '/api/v1/properties' });
   app.register(aiRoutes, { prefix: '/api/v1/ai' });

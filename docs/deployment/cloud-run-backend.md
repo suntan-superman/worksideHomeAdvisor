@@ -23,7 +23,7 @@ You need:
   - `RENTCAST_API_KEY`
 - any email provider settings you plan to use in production
 
-Important: the current media layer still uses `STORAGE_PROVIDER=local`. That is acceptable for local development, but it is not durable on Cloud Run because the filesystem is ephemeral. You can still deploy the backend now for auth, properties, pricing, and AI flows, but seller-uploaded images should move to Google Cloud Storage before production use.
+Important: Cloud Run uses an ephemeral filesystem, so production media should use Google Cloud Storage instead of local disk. The GCS migration steps now live in `docs/deployment/google-cloud-storage-media.md`.
 
 ## 1. Pick Your Deployment Values
 
@@ -106,7 +106,7 @@ gcloud projects add-iam-policy-binding PROJECT_ID `
   --role="roles/secretmanager.secretAccessor"
 ```
 
-If you later move media storage to Google Cloud Storage, you will also grant this account storage access at that point.
+After the media migration, this same service account should also receive Cloud Storage bucket access. The exact command is documented in `docs/deployment/google-cloud-storage-media.md`.
 
 ## 6. Create Or Update Secret Manager Secrets
 
@@ -116,6 +116,7 @@ Recommended secret names:
 - `workside-jwt-secret`
 - `workside-openai-api-key`
 - `workside-rentcast-api-key`
+- `workside-sendgrid-api-key`
 - `workside-smtp-user`
 - `workside-smtp-pass`
 
@@ -177,7 +178,7 @@ gcloud run deploy SERVICE `
   --cpu 1 `
   --concurrency 80 `
   --timeout 300 `
-  --set-env-vars NODE_ENV=production,MONGODB_DB_NAME=workside-home-seller,PUBLIC_API_URL=https://SERVICE-URL,PUBLIC_WEB_URL=https://your-netlify-site.netlify.app,EMAIL_PROVIDER=console,EMAIL_FROM=hello@workside.software,MARKET_DATA_PROVIDER=rentcast,RENTCAST_BASE_URL=https://api.rentcast.io/v1,STORAGE_PROVIDER=local `
+  --set-env-vars NODE_ENV=production,MONGODB_DB_NAME=workside-home-seller,PUBLIC_API_URL=https://SERVICE-URL,PUBLIC_WEB_URL=https://your-netlify-site.netlify.app,EMAIL_PROVIDER=console,EMAIL_FROM=hello@workside.software,MARKET_DATA_PROVIDER=rentcast,RENTCAST_BASE_URL=https://api.rentcast.io/v1,STORAGE_PROVIDER=gcs,GCS_PROJECT_ID=PROJECT_ID,GCS_BUCKET_NAME=your-media-bucket,GCS_UPLOAD_PREFIX=media-assets `
   --set-secrets MONGODB_URI=workside-mongodb-uri:latest,JWT_SECRET=workside-jwt-secret:latest,OPENAI_API_KEY=workside-openai-api-key:latest,RENTCAST_API_KEY=workside-rentcast-api-key:latest
 ```
 
@@ -186,6 +187,7 @@ Notes:
 - Replace `SERVICE-URL` after the first deploy with the actual Cloud Run URL, then run the deploy command again so `PUBLIC_API_URL` matches reality.
 - If you want the API private, replace `--allow-unauthenticated` with `--no-allow-unauthenticated`, but that will require another public access strategy for Netlify and Expo clients.
 - If you are using SMTP in production, add the SMTP settings with `--set-env-vars` and `--set-secrets`.
+- If you are using SendGrid in production, add the SendGrid settings below instead of SMTP.
 - For stricter production change control, replace `:latest` with a numbered secret version after your initial setup.
 
 Suggested SMTP additions:
@@ -193,6 +195,13 @@ Suggested SMTP additions:
 ```text
 --set-env-vars EMAIL_PROVIDER=smtp,SMTP_HOST=smtp.your-provider.com,SMTP_PORT=587
 --set-secrets SMTP_USER=workside-smtp-user:latest,SMTP_PASS=workside-smtp-pass:latest
+```
+
+Suggested SendGrid additions:
+
+```text
+--set-env-vars EMAIL_PROVIDER=sendgrid,SENDGRID_FROM_EMAIL=noreply@yourdomain.com
+--set-secrets SENDGRID_API_KEY=workside-sendgrid-api-key:latest
 ```
 
 ## 9. Verify The Deployment
@@ -262,7 +271,7 @@ gcloud run deploy workside-api `
   --cpu 1 `
   --concurrency 80 `
   --timeout 300 `
-  --set-env-vars NODE_ENV=production,MONGODB_DB_NAME=workside-home-seller,PUBLIC_API_URL=https://YOUR_CLOUD_RUN_URL,PUBLIC_WEB_URL=https://your-netlify-site.netlify.app,EMAIL_PROVIDER=console,EMAIL_FROM=hello@workside.software,MARKET_DATA_PROVIDER=rentcast,RENTCAST_BASE_URL=https://api.rentcast.io/v1,STORAGE_PROVIDER=local `
+  --set-env-vars NODE_ENV=production,MONGODB_DB_NAME=workside-home-seller,PUBLIC_API_URL=https://YOUR_CLOUD_RUN_URL,PUBLIC_WEB_URL=https://your-netlify-site.netlify.app,EMAIL_PROVIDER=console,EMAIL_FROM=hello@workside.software,MARKET_DATA_PROVIDER=rentcast,RENTCAST_BASE_URL=https://api.rentcast.io/v1,STORAGE_PROVIDER=gcs,GCS_PROJECT_ID=PROJECT_ID,GCS_BUCKET_NAME=your-media-bucket,GCS_UPLOAD_PREFIX=media-assets `
   --set-secrets MONGODB_URI=workside-mongodb-uri:latest,JWT_SECRET=workside-jwt-secret:latest,OPENAI_API_KEY=workside-openai-api-key:latest,RENTCAST_API_KEY=workside-rentcast-api-key:latest
 ```
 
@@ -310,15 +319,14 @@ After Cloud Run is live:
 - keep the backend public unless you plan to add a secure proxy layer
 - if the frontend domain changes, redeploy the API with the updated `PUBLIC_WEB_URL`
 
-## 15. What Changes When We Move Media To Google Cloud Storage
+## 15. Media Storage On Google Cloud
 
-When we do the storage migration, this deployment guide will change in three places:
+Production media storage now targets Google Cloud Storage. Use `docs/deployment/google-cloud-storage-media.md` for:
 
-1. `STORAGE_PROVIDER` will switch from `local` to a GCS-backed provider.
-2. the runtime service account will need storage permissions
-3. media URLs and upload behavior will point at Cloud Storage instead of the local container filesystem
-
-Until that migration is done, Cloud Run is ready for the core backend, but not yet for durable photo storage.
+1. bucket creation
+2. runtime service account permissions
+3. Cloud Run env var changes
+4. verification steps for photo uploads
 
 ## Official References
 

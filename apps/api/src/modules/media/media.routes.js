@@ -19,7 +19,7 @@ const assetParamsSchema = z.object({
 });
 
 export async function mediaRoutes(fastify) {
-  fastify.get('/:propertyId/media', async (request, reply) => {
+  fastify.get('/properties/:propertyId/media', async (request, reply) => {
     try {
       const { propertyId } = paramsSchema.parse(request.params);
       const assets = await listMediaAssets(propertyId);
@@ -29,7 +29,7 @@ export async function mediaRoutes(fastify) {
     }
   });
 
-  fastify.post('/:propertyId/media/analyze-photo', async (request, reply) => {
+  fastify.post('/properties/:propertyId/media/analyze-photo', async (request, reply) => {
     try {
       const { propertyId } = paramsSchema.parse(request.params);
       const payload = photoAnalysisSchema.parse(request.body);
@@ -56,7 +56,7 @@ export async function mediaRoutes(fastify) {
     }
   });
 
-  fastify.post('/:propertyId/media', async (request, reply) => {
+  fastify.post('/properties/:propertyId/media', async (request, reply) => {
     try {
       const { propertyId } = paramsSchema.parse(request.params);
       const payload = photoAnalysisSchema.parse(request.body);
@@ -86,7 +86,10 @@ export async function mediaRoutes(fastify) {
       }
 
       if (asset.storageKey) {
-        const stored = await readStoredAsset(asset.storageKey);
+        const stored = await readStoredAsset({
+          storageProvider: asset.storageProvider,
+          storageKey: asset.storageKey,
+        });
         reply.header('Content-Type', asset.mimeType);
         reply.header('Cache-Control', 'public, max-age=31536000, immutable');
         return reply.send(stored.buffer);
