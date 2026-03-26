@@ -1,0 +1,81 @@
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+
+async function request(path, options = {}) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+    cache: 'no-store',
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.message || 'Request failed.');
+  }
+
+  return data;
+}
+
+export function signup(payload) {
+  return request('/api/v1/auth/signup', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function login(payload) {
+  return request('/api/v1/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function verifyEmailOtp(payload) {
+  return request('/api/v1/auth/verify-email', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function requestOtp(payload) {
+  return request('/api/v1/auth/request-otp', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listProperties(ownerUserId) {
+  const search = ownerUserId ? `?ownerUserId=${encodeURIComponent(ownerUserId)}` : '';
+  return request(`/api/v1/properties${search}`);
+}
+
+export function createProperty(payload, ownerUserId) {
+  return request('/api/v1/properties', {
+    method: 'POST',
+    headers: {
+      'x-user-id': ownerUserId,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getProperty(propertyId) {
+  return request(`/api/v1/properties/${propertyId}`);
+}
+
+export function getDashboard(propertyId) {
+  return request(`/api/v1/properties/${propertyId}/dashboard`);
+}
+
+export function analyzePricing(propertyId) {
+  return request(`/api/v1/properties/${propertyId}/pricing/analyze`, {
+    method: 'POST',
+  });
+}
+
+export function getLatestPricing(propertyId) {
+  return request(`/api/v1/properties/${propertyId}/pricing/latest`);
+}

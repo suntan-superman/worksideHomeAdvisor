@@ -1,0 +1,26 @@
+{
+  "name": "workside-home-seller",
+  "private": true,
+  "packageManager": "pnpm@10.7.1",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\" \"npm run dev:mobile\" \"npm run dev:admin\" \"npm run dev:ai\"",
+    "dev:web": "npm run dev --workspace=@workside/web",
+    "dev:mobile": "npm run dev --workspace=@workside/mobile",
+    "dev:api": "npm run dev --workspace=@workside/api",
+    "dev:admin": "npm run dev --workspace=@workside/admin-web",
+    "dev:ai": "npm run dev --workspace=@workside/ai-orchestrator",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "seed": "npm run seed --workspace=@workside/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "eslint": "^9.23.0"
+  }
+}

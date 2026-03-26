@@ -1,0 +1,715 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SELLER
+  COLLABORATOR
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum PropertyType {
+  SINGLE_FAMILY
+  CONDO
+  TOWNHOME
+  MULTI_FAMILY
+  MANUFACTURED
+  LAND
+  OTHER
+}
+
+enum OccupancyStatus {
+  OWNER_OCCUPIED
+  TENANT_OCCUPIED
+  VACANT
+  PARTIAL
+  OTHER
+}
+
+enum SaleTimeline {
+  ASAP
+  THIRTY_DAYS
+  SIXTY_DAYS
+  NINETY_DAYS
+  FLEXIBLE
+}
+
+enum UrgencyLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum RiskTolerance {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum DIYPreference {
+  NONE
+  LIGHT
+  MODERATE
+  HEAVY
+}
+
+enum RoomType {
+  EXTERIOR_FRONT
+  EXTERIOR_REAR
+  ENTRY
+  LIVING_ROOM
+  FAMILY_ROOM
+  DINING_ROOM
+  KITCHEN
+  PRIMARY_BEDROOM
+  BEDROOM
+  PRIMARY_BATHROOM
+  BATHROOM
+  OFFICE
+  LOFT
+  BONUS_ROOM
+  LAUNDRY
+  GARAGE
+  BACKYARD
+  PATIO
+  POOL
+  OTHER
+}
+
+enum AssetType {
+  IMAGE
+  PDF
+  DOCX
+  OTHER
+}
+
+enum MediaProcessingStatus {
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum RecommendationPriority {
+  MUST_DO
+  HIGH_ROI
+  OPTIONAL
+  AVOID
+}
+
+enum RecommendationCategory {
+  PAINT
+  REPAIR
+  STAGING
+  DECLUTTER
+  LANDSCAPING
+  LIGHTING
+  CLEANING
+  CURB_APPEAL
+  PHOTOGRAPHY
+  PRICING_STRATEGY
+  OTHER
+}
+
+enum RecommendationStatus {
+  NEW
+  ACCEPTED
+  DEFERRED
+  COMPLETED
+  DISMISSED
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  CANCELED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum SourceType {
+  USER
+  AI
+  SYSTEM
+  ADMIN
+}
+
+enum PricingScenarioType {
+  CONSERVATIVE
+  TARGET
+  STRETCH
+}
+
+enum DocumentType {
+  PROPERTY_SUMMARY
+  PRE_LISTING_PLAN
+  OFFER_COMPARISON
+  SELLER_RESPONSE
+  REPAIR_RESPONSE
+  BUYER_QA_RESPONSE
+  DISCLOSURE_PREP_CHECKLIST
+  OPEN_HOUSE_INFO
+  FLYER
+  GENERIC
+}
+
+enum DocumentStatus {
+  DRAFT
+  READY_FOR_REVIEW
+  REVIEWED
+  EXPORTED
+  ARCHIVED
+}
+
+enum FlyerStatus {
+  DRAFT
+  READY
+  EXPORTED
+  ARCHIVED
+}
+
+enum ConversationRole {
+  SYSTEM
+  USER
+  ASSISTANT
+  TOOL
+}
+
+enum AnalysisJobType {
+  PRICING
+  IMPROVEMENTS
+  ROOM_ANALYSIS
+  MARKETING_COPY
+  FLYER_GENERATION
+  DOCUMENT_GENERATION
+  CHAT_RESPONSE
+  PHOTO_ANALYSIS
+}
+
+enum AnalysisJobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  RETRYING
+}
+
+enum NotificationChannel {
+  EMAIL
+  PUSH
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  GENERATE
+  LOGIN
+  LOGOUT
+  EXPORT
+  REVIEW
+  COMPLETE
+  FLAG
+}
+
+enum PromptCategory {
+  PRICING
+  IMPROVEMENTS
+  ROOM_ANALYSIS
+  MARKETING
+  FLYER
+  DOCUMENT
+  CHAT
+  MODERATION
+}
+
+enum PromptStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+model User {
+  id                    String                 @id @default(cuid())
+  email                 String                 @unique
+  hashedPassword        String?
+  firstName             String?
+  lastName              String?
+  displayName           String?
+  phone                 String?
+  role                  UserRole               @default(SELLER)
+  isEmailVerified       Boolean                @default(false)
+  isActive              Boolean                @default(true)
+  lastLoginAt           DateTime?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  sellerProfiles        SellerProfile[]
+  propertyMemberships   PropertyMembership[]
+  aiMessages            AIConversationMessage[]
+  tasksCreated          Task[]                 @relation("TaskCreatedBy")
+  documentsCreated      Document[]             @relation("DocumentCreatedBy")
+  documentsReviewed     Document[]             @relation("DocumentReviewedBy")
+  flyersCreated         Flyer[]                @relation("FlyerCreatedBy")
+  notifications         Notification[]
+  auditLogs             AuditLog[]             @relation("AuditActor")
+}
+
+model Property {
+  id                         String                      @id @default(cuid())
+  ownerUserId                String
+  title                      String?
+  addressLine1               String
+  addressLine2               String?
+  city                       String
+  state                      String
+  zip                        String
+  county                     String?
+  country                    String                      @default("US")
+  latitude                   Decimal?                    @db.Decimal(10, 7)
+  longitude                  Decimal?                    @db.Decimal(10, 7)
+  propertyType               PropertyType
+  yearBuilt                  Int?
+  squareFeet                 Int?
+  lotSizeSqFt                Int?
+  bedrooms                   Decimal?                    @db.Decimal(4, 1)
+  bathrooms                  Decimal?                    @db.Decimal(4, 1)
+  garageSpaces               Int?
+  hoa                        Boolean?
+  hoaFeeMonthly              Decimal?                    @db.Decimal(10, 2)
+  occupancyStatus            OccupancyStatus?
+  currentConditionScore      Int?
+  estimatedOriginalListPrice Decimal?                    @db.Decimal(12, 2)
+  estimatedCurrentValue      Decimal?                    @db.Decimal(12, 2)
+  readinessScore             Int?
+  publicMicrositeSlug        String?                     @unique
+  notes                      String?
+  createdAt                  DateTime                    @default(now())
+  updatedAt                  DateTime                    @updatedAt
+
+  owner                      User                        @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  sellerProfile              SellerProfile?
+  memberships                PropertyMembership[]
+  rooms                      Room[]
+  mediaAssets                MediaAsset[]
+  comparableSales            ComparableSale[]
+  pricingAnalyses            PricingAnalysis[]
+  improvementRecommendations ImprovementRecommendation[]
+  tasks                      Task[]
+  documents                  Document[]
+  flyers                     Flyer[]
+  aiMessages                 AIConversationMessage[]
+  analysisJobs               AnalysisJob[]
+  notifications              Notification[]
+  auditLogs                  AuditLog[]
+}
+
+model PropertyMembership {
+  id          String    @id @default(cuid())
+  propertyId  String
+  userId      String
+  roleLabel   String
+  canEdit     Boolean   @default(false)
+  canComment  Boolean   @default(true)
+  canUpload   Boolean   @default(true)
+  canViewDocs Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  property    Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, userId])
+  @@index([userId])
+}
+
+model SellerProfile {
+  id               String        @id @default(cuid())
+  userId           String
+  propertyId       String        @unique
+  saleTimeline     SaleTimeline?
+  budgetMin        Decimal?      @db.Decimal(12, 2)
+  budgetMax        Decimal?      @db.Decimal(12, 2)
+  urgencyLevel     UrgencyLevel?
+  targetMoveDate   DateTime?
+  riskTolerance    RiskTolerance?
+  diyPreference    DIYPreference?
+  goalsJson        Json?
+  sellerNotes      String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property         Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Room {
+  id                     String      @id @default(cuid())
+  propertyId             String
+  roomType               RoomType
+  customLabel            String?
+  levelLabel             String?
+  squareFeet             Int?
+  conditionScore         Int?
+  paintRecommended       Boolean?
+  paintNotes             String?
+  stagingNotes           String?
+  repairNotes            String?
+  declutterNotes         String?
+  lightingNotes          String?
+  photoReadinessScore    Int?
+  aiSummary              String?
+  aiConfidenceScore      Decimal?    @db.Decimal(4, 3)
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+
+  property               Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  mediaAssets            MediaAsset[]
+  recommendations        ImprovementRecommendation[]
+
+  @@index([propertyId, roomType])
+}
+
+model MediaAsset {
+  id                   String                  @id @default(cuid())
+  propertyId           String
+  roomId               String?
+  assetType            AssetType               @default(IMAGE)
+  originalFilename     String
+  mimeType             String
+  fileSizeBytes        Int?
+  storagePath          String
+  publicUrl            String?
+  thumbnailPath        String?
+  thumbnailUrl         String?
+  width                Int?
+  height               Int?
+  sha256Checksum       String?
+  processingStatus     MediaProcessingStatus   @default(UPLOADED)
+  metadataJson         Json?
+  aiTagsJson           Json?
+  qualityScore         Int?
+  isRecommended        Boolean                 @default(false)
+  isHeroCandidate      Boolean                 @default(false)
+  uploadedAt           DateTime                @default(now())
+  processedAt          DateTime?
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+
+  property             Property                @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  room                 Room?                   @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  flyersAsHero         Flyer[]                 @relation("FlyerHeroImage")
+
+  @@index([propertyId])
+  @@index([roomId])
+  @@index([processingStatus])
+}
+
+model ComparableSale {
+  id                    String      @id @default(cuid())
+  propertyId            String
+  externalSourceId      String?
+  sourceName            String?
+  addressLine1          String
+  city                  String
+  state                 String
+  zip                   String?
+  latitude              Decimal?    @db.Decimal(10, 7)
+  longitude             Decimal?    @db.Decimal(10, 7)
+  saleDate              DateTime?
+  salePrice             Decimal?    @db.Decimal(12, 2)
+  originalListPrice     Decimal?    @db.Decimal(12, 2)
+  daysOnMarket          Int?
+  pricePerSqFt          Decimal?    @db.Decimal(10, 2)
+  propertyType          PropertyType?
+  yearBuilt             Int?
+  squareFeet            Int?
+  lotSizeSqFt           Int?
+  bedrooms              Decimal?    @db.Decimal(4, 1)
+  bathrooms             Decimal?    @db.Decimal(4, 1)
+  distanceMiles         Decimal?    @db.Decimal(6, 3)
+  conditionEstimate     String?
+  relevanceScore        Decimal?    @db.Decimal(5, 4)
+  notesJson             Json?
+  rawPayloadJson        Json?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  property              Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+  @@index([saleDate])
+  @@index([relevanceScore])
+}
+
+model PricingAnalysis {
+  id                       String                  @id @default(cuid())
+  propertyId               String
+  recommendedListLow       Decimal                 @db.Decimal(12, 2)
+  recommendedListMid       Decimal                 @db.Decimal(12, 2)
+  recommendedListHigh      Decimal                 @db.Decimal(12, 2)
+  confidenceScore          Decimal?                @db.Decimal(4, 3)
+  assumptionsJson          Json?
+  compSnapshotJson         Json?
+  marketSnapshotJson       Json?
+  aiNarrative              String?
+  createdAt                DateTime                @default(now())
+  createdBySource          SourceType              @default(AI)
+
+  property                 Property                @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  scenarios                PricingScenario[]
+
+  @@index([propertyId, createdAt])
+}
+
+model PricingScenario {
+  id                 String               @id @default(cuid())
+  pricingAnalysisId  String
+  scenarioType       PricingScenarioType
+  listPrice          Decimal              @db.Decimal(12, 2)
+  expectedDaysOnMkt  Int?
+  rationale          String?
+  createdAt          DateTime             @default(now())
+
+  pricingAnalysis    PricingAnalysis      @relation(fields: [pricingAnalysisId], references: [id], onDelete: Cascade)
+
+  @@unique([pricingAnalysisId, scenarioType])
+}
+
+model ImprovementRecommendation {
+  id                    String                    @id @default(cuid())
+  propertyId            String
+  roomId                String?
+  category              RecommendationCategory
+  title                 String
+  description           String
+  priority              RecommendationPriority
+  roiScore              Decimal?                  @db.Decimal(5, 2)
+  costLow               Decimal?                  @db.Decimal(12, 2)
+  costHigh              Decimal?                  @db.Decimal(12, 2)
+  estimatedImpact       String?
+  recommendationType    String?
+  confidenceScore       Decimal?                  @db.Decimal(4, 3)
+  status                RecommendationStatus      @default(NEW)
+  sourceType            SourceType                @default(AI)
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+
+  property              Property                  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  room                  Room?                     @relation(fields: [roomId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId, priority])
+  @@index([roomId])
+  @@index([status])
+}
+
+model Task {
+  id                  String        @id @default(cuid())
+  propertyId          String
+  createdByUserId     String?
+  title               String
+  description         String?
+  dueDate             DateTime?
+  status              TaskStatus    @default(TODO)
+  priority            TaskPriority  @default(MEDIUM)
+  sourceType          SourceType    @default(USER)
+  sourceReferenceId   String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  completedAt         DateTime?
+
+  property            Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  createdBy           User?         @relation("TaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId, status])
+  @@index([createdByUserId])
+}
+
+model Document {
+  id                    String           @id @default(cuid())
+  propertyId            String
+  createdByUserId       String?
+  reviewedByUserId      String?
+  documentType          DocumentType
+  title                 String
+  status                DocumentStatus   @default(DRAFT)
+  bodyMarkdown          String?
+  bodyHtml              String?
+  pdfPath               String?
+  pdfUrl                String?
+  disclaimersJson       Json?
+  jurisdictionState     String?
+  promptVersionId       String?
+  requiresReview        Boolean          @default(true)
+  reviewedAt            DateTime?
+  exportedAt            DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  property              Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  createdBy             User?            @relation("DocumentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  reviewedBy            User?            @relation("DocumentReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  promptVersion         PromptVersion?   @relation(fields: [promptVersionId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId, documentType])
+  @@index([status])
+  @@index([promptVersionId])
+}
+
+model Flyer {
+  id                    String           @id @default(cuid())
+  propertyId            String
+  createdByUserId       String?
+  templateKey           String
+  title                 String
+  status                FlyerStatus      @default(DRAFT)
+  pdfPath               String?
+  pdfUrl                String?
+  heroImageAssetId      String?
+  selectedAssetIdsJson  Json?
+  highlightsJson        Json?
+  promptVersionId       String?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  exportedAt            DateTime?
+
+  property              Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  createdBy             User?            @relation("FlyerCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  heroImage             MediaAsset?      @relation("FlyerHeroImage", fields: [heroImageAssetId], references: [id], onDelete: SetNull)
+  promptVersion         PromptVersion?   @relation(fields: [promptVersionId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId])
+  @@index([status])
+  @@index([promptVersionId])
+}
+
+model AIConversationMessage {
+  id                    String             @id @default(cuid())
+  propertyId            String
+  userId                String?
+  role                  ConversationRole
+  content               String
+  citationsJson         Json?
+  promptVersionId       String?
+  metadataJson          Json?
+  createdAt             DateTime           @default(now())
+
+  property              Property           @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  user                  User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  promptVersion         PromptVersion?     @relation(fields: [promptVersionId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId, createdAt])
+  @@index([userId])
+  @@index([promptVersionId])
+}
+
+model AnalysisJob {
+  id                    String               @id @default(cuid())
+  propertyId            String
+  jobType               AnalysisJobType
+  status                AnalysisJobStatus    @default(QUEUED)
+  requestedByUserId     String?
+  idempotencyKey        String?
+  inputJson             Json?
+  outputJson            Json?
+  errorMessage          String?
+  promptVersionId       String?
+  queuedAt              DateTime             @default(now())
+  startedAt             DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  property              Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  promptVersion         PromptVersion?       @relation(fields: [promptVersionId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId, jobType, status])
+  @@index([idempotencyKey])
+  @@index([promptVersionId])
+}
+
+model Notification {
+  id                    String               @id @default(cuid())
+  propertyId            String?
+  userId                String
+  channel               NotificationChannel
+  status                NotificationStatus   @default(PENDING)
+  title                 String
+  body                  String
+  payloadJson           Json?
+  sentAt                DateTime?
+  readAt                DateTime?
+  createdAt             DateTime             @default(now())
+
+  property              Property?            @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  user                  User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([propertyId])
+}
+
+model AuditLog {
+  id                    String         @id @default(cuid())
+  actorUserId           String?
+  propertyId            String?
+  entityType            String
+  entityId              String
+  action                AuditAction
+  beforeJson            Json?
+  afterJson             Json?
+  metadataJson          Json?
+  createdAt             DateTime       @default(now())
+
+  actor                 User?          @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  property              Property?      @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([propertyId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model PromptVersion {
+  id                    String                 @id @default(cuid())
+  category              PromptCategory
+  name                  String
+  version               Int
+  status                PromptStatus           @default(DRAFT)
+  systemPrompt          String
+  developerPrompt       String?
+  outputSchemaJson      Json?
+  metadataJson          Json?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  documents             Document[]
+  flyers                Flyer[]
+  aiMessages            AIConversationMessage[]
+  analysisJobs          AnalysisJob[]
+
+  @@unique([category, version])
+  @@index([category, status])
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@workside/ai-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "build": "node -e \"console.log('ai orchestrator build placeholder')\"",
+    "lint": "node -e \"console.log('ai orchestrator lint placeholder')\"",
+    "test": "node -e \"console.log('ai orchestrator test placeholder')\""
+  },
+  "dependencies": {
+    "@workside/prompts": "file:../../packages/prompts"
+  }
+}

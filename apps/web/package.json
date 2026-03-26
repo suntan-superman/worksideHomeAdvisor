@@ -1,0 +1,20 @@
+{
+  "name": "@workside/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "node -e \"console.log('web lint placeholder')\"",
+    "test": "node -e \"console.log('web test placeholder')\""
+  },
+  "dependencies": {
+    "@workside/branding": "file:../../packages/branding",
+    "@workside/utils": "file:../../packages/utils",
+    "next": "^15.2.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

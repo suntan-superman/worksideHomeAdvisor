@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Workside Home Seller",
+    "slug": "workside-home-seller",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Capture room photos so Workside can analyze quality and listing readiness.",
+        "NSPhotoLibraryUsageDescription": "Select property photos so Workside can analyze quality and suggest retakes."
+      }
+    },
+    "android": {
+      "package": "software.workside.homeseller",
+      "permissions": ["CAMERA", "READ_MEDIA_IMAGES"]
+    },
+    "extra": {
+      "apiUrl": "http://localhost:4000"
+    }
+  }
+}

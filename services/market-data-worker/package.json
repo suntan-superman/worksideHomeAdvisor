@@ -1,0 +1,12 @@
+{
+  "name": "@workside/market-data-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "build": "node -e \"console.log('market data worker build placeholder')\"",
+    "lint": "node -e \"console.log('market data worker lint placeholder')\"",
+    "test": "node -e \"console.log('market data worker test placeholder')\""
+  }
+}

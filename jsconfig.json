@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@workside/branding": ["packages/branding/src/index.js"],
+      "@workside/config": ["packages/config/src/index.js"],
+      "@workside/prompts": ["packages/prompts/src/index.js"],
+      "@workside/types": ["packages/types/src/index.js"],
+      "@workside/utils": ["packages/utils/src/index.js"],
+      "@workside/validation": ["packages/validation/src/index.js"]
+    }
+  }
+}

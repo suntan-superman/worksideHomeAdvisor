@@ -1,0 +1,18 @@
+substitutions:
+  _AR_HOST: us-central1-docker.pkg.dev
+  _AR_REPO: workside-backend
+  _IMAGE_NAME: workside-api
+  _IMAGE_TAG: latest
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - apps/api/Dockerfile
+      - -t
+      - ${_AR_HOST}/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:${_IMAGE_TAG}
+      - .
+
+images:
+  - ${_AR_HOST}/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:${_IMAGE_TAG}

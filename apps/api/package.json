@@ -1,0 +1,27 @@
+{
+  "name": "@workside/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "lint": "node -e \"console.log('api lint placeholder')\"",
+    "test": "node -e \"console.log('api test placeholder')\"",
+    "seed": "node scripts/seed-demo.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@workside/branding": "file:../../packages/branding",
+    "@workside/prompts": "file:../../packages/prompts",
+    "@workside/utils": "file:../../packages/utils",
+    "@workside/validation": "file:../../packages/validation",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.11.0",
+    "nodemailer": "^6.10.0",
+    "zod": "^3.24.2"
+  }
+}

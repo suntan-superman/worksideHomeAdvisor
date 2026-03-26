@@ -1,0 +1,55 @@
+import { signupSchema, verifyOtpSchema } from '@workside/validation';
+import { z } from 'zod';
+
+import { login, requestOtp, signup, verifyEmailOtp } from './auth.service.js';
+
+const loginSchema = signupSchema.pick({
+  email: true,
+  password: true,
+});
+
+const requestOtpSchema = z.object({
+  email: z.string().email(),
+});
+
+export async function authRoutes(fastify) {
+  fastify.post('/signup', async (request, reply) => {
+    try {
+      const payload = signupSchema.parse(request.body);
+      const result = await signup(payload);
+      return reply.code(201).send(result);
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/login', async (request, reply) => {
+    try {
+      const payload = loginSchema.parse(request.body);
+      const result = await login(payload);
+      return reply.send(result);
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/request-otp', async (request, reply) => {
+    try {
+      const payload = requestOtpSchema.parse(request.body);
+      const result = await requestOtp(payload.email);
+      return reply.send(result);
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/verify-email', async (request, reply) => {
+    try {
+      const payload = verifyOtpSchema.parse(request.body);
+      const result = await verifyEmailOtp(payload);
+      return reply.send(result);
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+}
