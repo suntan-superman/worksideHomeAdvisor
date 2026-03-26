@@ -1,0 +1,106 @@
+Netlify Build                                                 
+1:04:26 PM: ────────────────────────────────────────────────────────────────
+1:04:26 PM: ​
+1:04:26 PM: ❯ Version
+1:04:26 PM:   @netlify/build 35.11.1
+1:04:26 PM: ​
+1:04:26 PM: ❯ Flags
+1:04:26 PM:   accountId: 65d054ab91a5a74cfeec959e
+1:04:26 PM:   baseRelDir: true
+1:04:26 PM:   buildId: 69c591386562a2378748bd0c
+1:04:26 PM:   deployId: 69c591386562a2378748bd0e
+1:04:26 PM:   packagePath: apps/web
+1:04:26 PM: ​
+1:04:26 PM: ❯ Current directory
+1:04:26 PM:   /opt/build/repo
+1:04:26 PM: ​
+1:04:26 PM: ❯ Config file
+1:04:26 PM:   No config file was defined: using default values.
+1:04:26 PM: ​
+1:04:26 PM: ❯ Context
+1:04:26 PM:   production
+1:04:26 PM: ​
+1:04:26 PM: ❯ Using Next.js Runtime - v5.15.9
+1:04:28 PM: No Next.js cache to restore
+1:04:28 PM: ​
+1:04:28 PM: Build command from Netlify app                                
+1:04:28 PM: ────────────────────────────────────────────────────────────────
+1:04:28 PM: ​
+1:04:28 PM: $ pnpm --filter @workside/web... run build
+1:04:28 PM: Scope: 3 of 16 workspace projects
+1:04:28 PM: apps/web build$ next build
+1:04:29 PM: apps/web build: ⚠ No build cache found. Please configure build caching for faster rebuilds. Read more: https://nextjs.org/docs/messages/no-cache
+1:04:29 PM: apps/web build:    ▲ Next.js 15.5.14
+1:04:29 PM: apps/web build:    Creating an optimized production build ...
+1:04:34 PM: apps/web build:  ✓ Compiled successfully in 3.6s
+1:04:34 PM: apps/web build:    Skipping linting
+1:04:34 PM: apps/web build:    Checking validity of types ...
+1:04:34 PM: apps/web build:    Collecting page data ...
+1:04:34 PM: apps/web build: unhandledRejection [Error: Incompatible React versions: The "react" and "react-dom" packages must have the exact same version. Instead got:
+1:04:34 PM: apps/web build:   - react:      19.0.0
+1:04:34 PM: apps/web build:   - react-dom:  19.2.4
+1:04:34 PM: apps/web build: Learn more: https://react.dev/warnings/version-mismatch] {
+1:04:34 PM: apps/web build:   type: 'Error'
+1:04:34 PM: apps/web build: }
+1:04:34 PM: apps/web build: Failed
+1:04:34 PM: /opt/build/repo/apps/web:
+1:04:34 PM:  ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @workside/web@0.1.0 build: `next build`
+1:04:34 PM: Exit status 1
+1:04:34 PM: ​
+1:04:34 PM: "build.command" failed                                        
+1:04:34 PM: ────────────────────────────────────────────────────────────────
+1:04:34 PM: ​
+1:04:34 PM:   Error message
+1:04:34 PM:   Command failed with exit code 1: pnpm --filter @workside/web... run build (https://ntl.fyi/exit-code-1)
+1:04:34 PM: ​
+1:04:34 PM:   Error location
+1:04:34 PM:   In Build command from Netlify app:
+1:04:34 PM:   pnpm --filter @workside/web... run build
+1:04:34 PM: ​
+1:04:34 PM:   Resolved config
+1:04:34 PM:   build:
+1:04:34 PM:     command: pnpm --filter @workside/web... run build
+1:04:34 PM:     commandOrigin: ui
+1:04:34 PM:     environment:
+1:04:34 PM:       - BCRYPT_SALT_ROUNDS
+1:04:34 PM:       - EMAIL_FROM
+1:04:34 PM:       - EMAIL_PROVIDER
+1:04:34 PM:       - EXPO_PUBLIC_API_URL
+1:04:34 PM:       - FRONTEND_URL
+1:04:34 PM:       - GOOGLE_MAPS_API_KEY
+1:04:34 PM:       - JWT_EXPIRES_IN
+1:04:34 PM:       - JWT_SECRET
+1:04:34 PM:       - MARKET_DATA_API_KEY
+1:04:34 PM:       - MARKET_DATA_PROVIDER
+1:04:34 PM:       - MONGODB_DB_NAME
+1:04:34 PM:       - MONGODB_URI
+1:04:34 PM:       - ONBOARDING_MAGIC_LINK_SECRET
+1:04:34 PM:       - OPENAI_API_KEY
+1:04:34 PM:       - OPENAI_MODEL_DEFAULT
+1:04:34 PM:       - OPENAI_MODEL_REASONING
+1:04:34 PM:       - OPENAI_MODEL_VISION
+1:04:34 PM:       - OTP_LENGTH
+1:04:34 PM:       - OTP_TTL_MINUTES
+1:04:34 PM:       - REDIS_URL
+1:04:34 PM:       - RENTCAST_API_KEY
+1:04:34 PM:       - RENTCAST_BASE_URL
+1:04:34 PM:       - SENDGRID_API_KEY
+1:04:34 PM:       - SENDGRID_FROM_EMAIL
+1:04:34 PM:       - SENDGRID_ORDER_CONFIRMATION_ID
+1:04:34 PM:       - SENDGRID_ORDER_TEMPLATE_ID
+1:04:34 PM:       - SENDGRID_RESERVATION_TEMPLATE_ID
+1:04:34 PM:       - SENDGRID_TRANSCRIPT_SUMMARY_ID
+1:04:34 PM:       - SMTP_HOST
+1:04:34 PM:       - SMTP_PASS
+1:04:34 PM:       - SMTP_PORT
+1:04:34 PM:       - SMTP_USER
+1:04:34 PM:     publish: /opt/build/repo/apps/web/.next
+1:04:34 PM:     publishOrigin: ui
+1:04:34 PM:   plugins:
+1:04:34 PM:     - inputs: {}
+1:04:34 PM:       origin: ui
+1:04:34 PM:       package: "@netlify/plugin-nextjs"
+1:04:34 PM: Build failed due to a user error: Build script returned non-zero exit code: 2
+1:04:34 PM: Failing build: Failed to build site
+1:04:35 PM: Finished processing build request in 25.468s
+1:04:34 PM: Failed during stage 'building site': Build script returned non-zero exit code: 2 (https://ntl.fyi/exit-code-2)
