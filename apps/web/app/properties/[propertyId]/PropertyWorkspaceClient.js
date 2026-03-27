@@ -10,6 +10,7 @@ import {
   analyzePricing,
   createBillingCheckoutSession,
   generateFlyer,
+  getFlyerExportUrl,
   getDashboard,
   getLatestFlyer,
   getLatestPricing,
@@ -17,7 +18,32 @@ import {
 } from '../../../lib/api';
 import { getStoredSession, setStoredSession } from '../../../lib/session';
 
-export function PropertyWorkspaceClient({ propertyId }) {
+function buildAddressQuery(property) {
+  return [
+    property?.addressLine1,
+    property?.city,
+    property?.state,
+    property?.zip,
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function buildMapEmbedUrl(addressQuery, mapsApiKey) {
+  if (!addressQuery) {
+    return null;
+  }
+
+  if (mapsApiKey) {
+    return `https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(
+      mapsApiKey,
+    )}&q=${encodeURIComponent(addressQuery)}`;
+  }
+
+  return `https://maps.google.com/maps?q=${encodeURIComponent(addressQuery)}&z=15&output=embed`;
+}
+
+export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const flyerPreviewRef = useRef(null);
   const [property, setProperty] = useState(null);
   const [dashboard, setDashboard] = useState(null);
@@ -162,6 +188,17 @@ export function PropertyWorkspaceClient({ propertyId }) {
       setStatus('');
     }
   }
+
+  function handleDownloadFlyerPdf() {
+    const exportUrl = getFlyerExportUrl(propertyId, flyerType);
+    window.open(exportUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  const addressQuery = buildAddressQuery(property);
+  const mapEmbedUrl = buildMapEmbedUrl(addressQuery, mapsApiKey);
+  const googleMapsUrl = addressQuery
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addressQuery)}`
+    : null;
 
   return (
     <AppFrame busy={Boolean(status)}>
@@ -327,8 +364,16 @@ export function PropertyWorkspaceClient({ propertyId }) {
                 >
                   {status.includes('Generating') ? 'Generating flyer...' : 'Generate flyer'}
                 </button>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={handleDownloadFlyerPdf}
+                  disabled={Boolean(status)}
+                >
+                  Download PDF
+                </button>
                 <span className="flyer-generator-helper">
-                  Creates a stored draft from your latest pricing and property details.
+                  Generate for preview, then export a simple PDF flyer from the current property.
                 </span>
               </div>
             </div>
@@ -378,6 +423,43 @@ export function PropertyWorkspaceClient({ propertyId }) {
             </div>
           ) : (
             <p>No flyer draft yet. Generate one to preview sale or rental marketing output.</p>
+          )}
+        </div>
+      </section>
+
+      <section className="dashboard-content-grid">
+        <div className="content-card property-map-card">
+          <div className="property-map-header">
+            <div>
+              <span className="label">Property map</span>
+              <h2>Neighborhood context</h2>
+              <p>
+                A quick visual for location, nearby streets, and the property&apos;s surrounding
+                area.
+              </p>
+            </div>
+            {googleMapsUrl ? (
+              <a
+                href={googleMapsUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="button-secondary inline-button"
+              >
+                Open in Google Maps
+              </a>
+            ) : null}
+          </div>
+          {mapEmbedUrl ? (
+            <div className="property-map-frame">
+              <iframe
+                title="Property map"
+                src={mapEmbedUrl}
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+            </div>
+          ) : (
+            <p>No map available until the property address is complete.</p>
           )}
         </div>
       </section>

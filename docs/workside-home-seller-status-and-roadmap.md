@@ -1,6 +1,6 @@
 # Workside Home Seller Status And Roadmap
 
-Last updated: 2026-03-26
+Last updated: 2026-03-27
 
 This document is the working reference for what has already been built in the `HomeAdvisor` monorepo and what remains to take the product from a strong prototype to a polished production system.
 
@@ -156,6 +156,9 @@ Current pricing status:
 - [x] Human-readable toast messaging implemented
 - [x] Raw JSON/Zod validation dumps replaced with cleaner user-facing errors
 - [x] Body-less POST pricing bug fixed in shared API helper
+- [x] Property workspace comp cards improved
+- [x] Property workspace map section added
+- [x] Flyer generation now scrolls users directly to the preview state
 
 ### 2.8 Mobile App
 
@@ -203,6 +206,16 @@ Important note:
 - [x] `.gitignore` improved for local build/debug artifacts
 - [x] Local output/debug file noise reduced
 - [x] Build verification has been run repeatedly across the workspace
+
+### 2.12 Flyers, Documents, And Billing Hooks
+
+- [x] AI flyer draft generation implemented for sale and rental use
+- [x] Flyer drafts saved in MongoDB
+- [x] Flyer preview UI added to the property workspace
+- [x] First-pass flyer PDF export endpoint implemented
+- [x] Flyer PDF download control added to the web app
+- [x] Stripe checkout UI added to the dashboard
+- [x] Demo/sample Stripe plans added for low-cost live testing
 
 ## 3. Current Product Strengths
 
@@ -276,6 +289,15 @@ This section is the working checklist for the next waves of development.
 - [ ] add thumbnail generation and upload resizing
 - [ ] support multiple photos per room
 - [ ] support batch analysis of a full photo set
+- [ ] add in-app photo editing for listing photos
+- [ ] support quick edits such as:
+  - crop
+  - rotate
+  - brightness
+  - straightening
+  - light cleanup
+- [ ] let sellers approve which mobile photos are eligible for flyer/export use
+- [ ] sync selected listing photos cleanly from mobile into the web workspace
 
 ### 4.4 AI-Driven Improvement Guidance
 
@@ -299,16 +321,16 @@ This is one of the most important next-level features and should become a first-
   - rental flyer
   - open house flyer
   - agent/shareable summary flyer
-- [ ] generate flyer content from:
+- [x] generate flyer content from:
   - property data
   - pricing analysis
   - feature highlights
   - selected photos
   - AI-generated marketing copy
-- [ ] let AI choose which photos should appear in the flyer
-- [ ] generate headline, subheadline, highlights, and CTA automatically
-- [ ] create PDF-ready flyer templates
-- [ ] support both web preview and downloadable PDF
+- [x] let AI choose which photos should appear in the flyer
+- [x] generate headline, subheadline, highlights, and CTA automatically
+- [x] create first-pass PDF-ready flyer templates
+- [x] support both web preview and downloadable PDF
 - [ ] allow the seller to regenerate with different tones:
   - luxury
   - family-friendly
@@ -317,6 +339,12 @@ This is one of the most important next-level features and should become a first-
 - [ ] add compliance/disclaimer handling where needed
 - [ ] support a rental flyer flow in addition to a sale flyer flow
 - [ ] save flyer versions in MongoDB and object storage
+- [ ] improve PDF export quality with:
+  - stronger image placement
+  - print-ready spacing
+  - richer branding
+  - multi-page layouts when needed
+- [ ] add flyer sharing/export options beyond PDF
 
 ### 4.5.1 Flyer Monetization Hook
 
@@ -338,6 +366,11 @@ This is one of the most important next-level features and should become a first-
 - [ ] build feature-highlights UI into seller workspace
 - [ ] let seller select tone and emphasis
 - [ ] surface suggested best hero photo and photo ordering
+- [ ] provide seller-facing guidance on:
+  - where to market the property
+  - how to position the listing
+  - when to hold showings
+  - what actions may improve response rate
 
 ### 4.7 Timing And Market Guidance
 
@@ -345,6 +378,7 @@ This is one of the most important next-level features and should become a first-
 - [ ] improve “best listing day(s)” logic with clearer rationale
 - [ ] incorporate seasonality and local listing activity where possible
 - [ ] show simple seller-friendly explanation of timing confidence
+- [ ] suggest ideal showing windows and open-house timing
 
 ### 4.8 Document And Drafting Workflows
 
@@ -354,6 +388,7 @@ This is one of the most important next-level features and should become a first-
   - disclosure question checklist
   - showing readiness checklist
   - marketing summary sheet
+- [ ] add non-binding seller agreement / sales agreement drafting with lawyer-review disclaimers
 - [ ] make clear what is not legal advice
 - [ ] add review warnings and required human review steps
 
@@ -372,6 +407,7 @@ This is one of the most important next-level features and should become a first-
   - review recommendations
   - generate flyer
 - [ ] add better success states and progress indicators
+- [ ] turn the new map section into a stronger neighborhood/context module
 
 ### 4.10 Mobile App UX And Product Polish
 
@@ -394,7 +430,7 @@ This is one of the most important next-level features and should become a first-
 
 ### 4.12 Billing, Monetization, And Stripe
 
-- [ ] define Stripe product catalog
+- [x] define Stripe product catalog
 - [ ] create Stripe products such as:
   - `workside-home-advisor-seller`
   - `workside-home-advisor-agent`
@@ -404,22 +440,59 @@ This is one of the most important next-level features and should become a first-
   - free tier
   - one-time unlock
   - or light subscription
-- [ ] implement Stripe checkout session creation endpoint
-- [ ] implement Stripe webhook endpoint
+- [x] implement Stripe checkout session creation endpoint
+- [x] implement Stripe webhook endpoint
 - [ ] handle webhook events:
   - `checkout.session.completed`
   - `invoice.paid`
   - `customer.subscription.updated`
   - `customer.subscription.deleted`
-- [ ] store subscription state in MongoDB
-- [ ] create `subscriptions` collection
-- [ ] create `usageTracking` collection or equivalent usage model
-- [ ] implement feature gating based on subscription or unlock status
+- [x] store subscription state in MongoDB
+- [x] create `subscriptions` collection
+- [x] create `usageTracking` collection or equivalent usage model
+- [x] implement feature gating based on subscription or unlock status
 - [ ] gate high-value moments instead of hard-locking the whole app
 - [ ] support free trial flow for agent plans
-- [ ] add billing/account management UI on web
+- [x] add first-pass billing/account management UI on web
 - [ ] decide whether mobile routes to Stripe web checkout for paid features
 - [ ] ensure iOS avoids in-app payment flow for this product and uses web checkout
+
+### 4.17 Seller Checklist And Provider Marketplace
+
+- [ ] add seller checklist schema and persistence
+- [ ] add checklist UI with phases:
+  - pre-listing
+  - listing launch
+  - under contract
+  - closing
+- [ ] add checklist progress widget to the dashboard
+- [ ] add checklist item detail screens with education and next actions
+- [ ] add provider schema and provider search API
+- [ ] add Google Places integration for nearby providers
+- [ ] normalize provider results and cache/store reusable providers
+- [ ] add provider ranking logic that balances relevance, distance, rating, reviews, and sponsorship
+- [ ] add saved providers and provider comparison flow
+- [ ] add provider click/contact/save tracking
+- [ ] add provider onboarding flow and provider-facing billing setup
+- [ ] add provider analytics/admin moderation groundwork
+- [ ] add clear sponsored-label and provider-disclaimer handling
+
+### 4.18 Listing Vision Mode And Room Visualization
+
+- [ ] add room visualization schema and storage
+- [ ] add room classification workflow for uploaded photos
+- [ ] support concept transforms such as:
+  - declutter
+  - paint color changes
+  - flooring changes
+  - light staging
+  - combined mode
+- [ ] store before/after variants with room metadata
+- [ ] add before/after compare UI in web and mobile
+- [ ] connect visualization output to pricing and prep recommendations
+- [ ] connect improvement suggestions to nearby providers
+- [ ] add conceptual-preview disclaimers everywhere this appears
+- [ ] add safeguard limits and duplicate-job protection for visualization jobs
 
 ### 4.13 Realtor / Agent Mode
 
@@ -492,18 +565,20 @@ If the goal is to take the product to the next level without spreading effort to
 - [ ] make room-photo capture and AI evaluation a standout feature
 - [ ] add room detection, retake guidance, and missing-shot suggestions
 - [ ] connect photo insights to prep/improvement recommendations
+- [ ] add photo editing and photo-selection workflow for flyer-ready images
 
 ### Phase 3: Flyer Generation
 
-- [ ] build automatic sale flyer generation
-- [ ] build automatic rental flyer generation
-- [ ] support template preview + PDF export
+- [x] build automatic sale flyer generation
+- [x] build automatic rental flyer generation
+- [x] support template preview + PDF export
 - [ ] store generated flyers and versions
+- [ ] improve export quality, layout sophistication, and sharing options
 
 ### Phase 4: Monetization And Agent Mode
 
-- [ ] implement Stripe checkout + webhooks
-- [ ] implement feature gating
+- [x] implement Stripe checkout + webhooks
+- [x] implement feature gating
 - [ ] launch initial agent subscription structure
 - [ ] add agent mode and presentation-friendly output
 
@@ -512,6 +587,7 @@ If the goal is to take the product to the next level without spreading effort to
 - [ ] expand improvement recommendations into a true prep planner
 - [ ] expand marketing outputs beyond one-off copy
 - [ ] combine pricing, photos, and improvements into one listing-readiness workflow
+- [ ] build checklist + provider marketplace flow
 
 ### Phase 6: Merxus And Internal Hardening
 
@@ -519,6 +595,11 @@ If the goal is to take the product to the next level without spreading effort to
 - [ ] define/administer internal admin workflows
 - [ ] improve observability and tests
 - [ ] tighten security and deployment maturity
+
+### Phase 7: Signature Differentiators
+
+- [ ] launch Listing Vision Mode / room transformation previews
+- [ ] connect visualization to prep ROI, pricing confidence, and provider monetization
 
 ## 6. Suggested “Next Level” Feature Ideas
 
@@ -530,6 +611,9 @@ These are additive ideas that fit the product direction well.
 - [ ] “should I list now or wait?” advisor
 - [ ] AI-generated open house sheet
 - [ ] AI-generated rental listing package
+- [ ] one-click PDF flyer export with map/photo layout options
+- [ ] room-by-room visualization previews before repainting or decluttering
+- [ ] provider marketplace recommendations tied directly to AI improvement advice
 - [ ] side-by-side “before cleanup vs after cleanup” recommendation engine
 - [ ] advertiser/sponsor placements for title companies, inspectors, stagers, lenders, or photographers
 - [ ] trusted-vendor recommendation slots tied to seller workflow
@@ -544,7 +628,10 @@ These are the most sensible concrete next steps from today’s state.
 - [ ] add comp-selection explanation and better comp UI
 - [ ] add pricing debug metadata to saved analyses
 - [ ] improve photo-analysis schema and user-facing output
-- [ ] begin automatic flyer generation workflow
+- [ ] improve flyer PDF export quality and sharing controls
+- [ ] expand map/neighborhood visuals in the property workspace
+- [ ] begin checklist + provider marketplace schema work
+- [ ] design the first pass of listing vision mode / room visualization
 - [ ] define seller vs agent mode requirements before pricing/billing work expands
 - [ ] define Stripe products, plans, and webhook data model
 - [ ] improve seller onboarding and property workspace flow

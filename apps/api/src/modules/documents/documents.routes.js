@@ -7,7 +7,11 @@ import {
   finalizeFreshAnalysisRun,
   releaseAnalysisLock,
 } from '../usage/usage-enforcement.service.js';
-import { generatePropertyFlyer, getLatestPropertyFlyer } from './flyer.service.js';
+import {
+  exportPropertyFlyerPdf,
+  generatePropertyFlyer,
+  getLatestPropertyFlyer,
+} from './flyer.service.js';
 
 const flyerRequestSchema = z.object({
   flyerType: z.enum(['sale', 'rental']).default('sale'),
@@ -110,6 +114,29 @@ export async function documentsRoutes(fastify) {
     try {
       const flyer = await getLatestPropertyFlyer(request.params.propertyId);
       return reply.send({ flyer });
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/:propertyId/flyer/export.pdf', async (request, reply) => {
+    try {
+      const payload = flyerRequestSchema.parse(request.query || {});
+      const property = await getPropertyById(request.params.propertyId);
+      if (!property) {
+        return reply.code(404).send({ message: 'Property not found.' });
+      }
+
+      const { bytes, filename } = await exportPropertyFlyerPdf({
+        propertyId: request.params.propertyId,
+        flyerType: payload.flyerType,
+      });
+
+      reply
+        .header('Content-Type', 'application/pdf')
+        .header('Content-Disposition', `attachment; filename="${filename}"`);
+
+      return reply.send(Buffer.from(bytes));
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }

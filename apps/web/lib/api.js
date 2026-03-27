@@ -2,6 +2,10 @@ import { formatApiErrorMessage } from './errors';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
+export function getApiBaseUrl() {
+  return API_BASE_URL;
+}
+
 async function request(path, options = {}) {
   const headers = {
     ...(options.headers || {}),
@@ -119,4 +123,9 @@ export function generateFlyer(propertyId, flyerType = 'sale') {
 
 export function getLatestFlyer(propertyId) {
   return request(`/api/v1/properties/${propertyId}/flyer/latest`);
+}
+
+export function getFlyerExportUrl(propertyId, flyerType = 'sale') {
+  const search = new URLSearchParams({ flyerType });
+  return `${API_BASE_URL}/api/v1/properties/${propertyId}/flyer/export.pdf?${search.toString()}`;
 }
