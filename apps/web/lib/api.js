@@ -104,3 +104,14 @@ export function createBillingCheckoutSession(payload, userId) {
     body: JSON.stringify(payload),
   });
 }
+
+export function generateFlyer(propertyId, flyerType = 'sale') {
+  return request(`/api/v1/properties/${propertyId}/flyer/generate`, {
+    method: 'POST',
+    body: JSON.stringify({ flyerType }),
+  });
+}
+
+export function getLatestFlyer(propertyId) {
+  return request(`/api/v1/properties/${propertyId}/flyer/latest`);
+}

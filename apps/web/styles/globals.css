@@ -72,6 +72,13 @@ p {
   padding: 20px 0 28px;
 }
 
+.brand-lockup {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .brandmark {
   display: inline-block;
   font-size: 1.25rem;
@@ -171,6 +178,11 @@ select {
 .button-primary:hover,
 .button-secondary:hover {
   transform: translateY(-1px);
+}
+
+.button-busy {
+  background: linear-gradient(135deg, #be683c, #f1ad71);
+  box-shadow: 0 0 0 4px rgba(200, 116, 71, 0.14), 0 22px 48px rgba(200, 116, 71, 0.3);
 }
 
 .mini-stats,
@@ -409,6 +421,11 @@ select {
   width: fit-content;
 }
 
+.page-shell-busy,
+.page-shell-busy * {
+  cursor: progress !important;
+}
+
 .dashboard-content-grid {
   margin-top: 24px;
 }
@@ -420,6 +437,59 @@ select {
 .plain-list {
   margin: 14px 0 0;
   padding-left: 18px;
+  color: var(--muted);
+}
+
+.comp-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.comp-card {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.comp-card strong {
+  color: var(--ink);
+}
+
+.flyer-preview {
+  display: grid;
+  gap: 18px;
+}
+
+.flyer-hero {
+  display: grid;
+  gap: 10px;
+}
+
+.flyer-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.flyer-photo-card {
+  display: grid;
+  gap: 8px;
+}
+
+.flyer-photo-card img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+}
+
+.flyer-photo-card span {
   color: var(--muted);
 }
 
@@ -447,5 +517,9 @@ select {
     right: 16px;
     top: 16px;
     width: auto;
+  }
+
+  .flyer-photo-grid {
+    grid-template-columns: 1fr;
   }
 }

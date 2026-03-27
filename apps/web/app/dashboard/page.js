@@ -295,7 +295,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <AppFrame>
+    <AppFrame busy={Boolean(actionState)}>
       <Toast
         tone={toast?.tone}
         title={toast?.title}
@@ -358,11 +358,13 @@ export default function DashboardPage() {
               <div className="button-stack">
                 <button
                   type="button"
-                  className="button-primary"
+                  className={
+                    actionState.includes('pricing') ? 'button-primary button-busy' : 'button-primary'
+                  }
                   onClick={handleAnalyzePricing}
                   disabled={!selectedPropertyId || Boolean(actionState)}
                 >
-                  Run pricing analysis
+                  {actionState.includes('pricing') ? 'Running analysis...' : 'Run pricing analysis'}
                 </button>
                 {selectedPropertyId ? (
                   <Link className="button-secondary inline-button" href={`/properties/${selectedPropertyId}`}>
