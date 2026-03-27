@@ -3,6 +3,8 @@ import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -49,8 +51,14 @@ function ActionButton({ label, onPress, variant = 'primary', disabled = false })
   );
 }
 
+function getDisplayName(user) {
+  const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
+  return fullName || 'Signed-in user';
+}
+
 export function RootScreen() {
   const [authMode, setAuthMode] = useState('login');
+  const [showPassword, setShowPassword] = useState(false);
   const [session, setSession] = useState(null);
   const [properties, setProperties] = useState([]);
   const [propertyId, setPropertyId] = useState('');
@@ -275,90 +283,105 @@ export function RootScreen() {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <View style={styles.hero}>
-        <Text style={styles.kicker}>Powered by Workside Software</Text>
-        <Text style={styles.title}>Capture photos and improve them fast.</Text>
-        <Text style={styles.body}>
-          The mobile app now focuses on the seller’s field workflow: sign in,
-          pick a property, capture room photos, and get AI feedback on quality
-          and retake suggestions.
-        </Text>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Mobile sign-in</Text>
-        <Text style={styles.cardBody}>
-          Use the same verified seller account you created on the web portal.
-        </Text>
-        <View style={styles.segmentRow}>
-          <ActionButton
-            label="Password login"
-            onPress={() => setAuthMode('login')}
-            variant={authMode === 'login' ? 'primary' : 'secondary'}
-          />
-          <ActionButton
-            label="Enter OTP"
-            onPress={() => setAuthMode('verify')}
-            variant={authMode === 'verify' ? 'primary' : 'secondary'}
-          />
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 32 : 0}
+    >
+      <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <View style={styles.hero}>
+          <Text style={styles.titleSingleLine} numberOfLines={1}>
+            Workside Home Advisor
+          </Text>
         </View>
-        <TextInput
-          style={styles.input}
-          placeholder="seller@example.com"
-          placeholderTextColor="#7d8a8f"
-          autoCapitalize="none"
-          keyboardType="email-address"
-          value={form.email}
-          onChangeText={(value) => updateField('email', value)}
-        />
-        {authMode === 'login' ? (
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            placeholderTextColor="#7d8a8f"
-            secureTextEntry
-            value={form.password}
-            onChangeText={(value) => updateField('password', value)}
-          />
-        ) : (
-          <TextInput
-            style={styles.input}
-            placeholder="6-digit OTP"
-            placeholderTextColor="#7d8a8f"
-            value={form.otpCode}
-            onChangeText={(value) => updateField('otpCode', value)}
-          />
-        )}
-        <View style={styles.segmentRow}>
-          <ActionButton
-            label={busy ? 'Working...' : authMode === 'login' ? 'Continue' : 'Verify email'}
-            onPress={authMode === 'login' ? handleLogin : handleVerifyOtp}
-            disabled={busy}
-          />
-          {authMode === 'verify' ? (
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Mobile sign-in</Text>
+          <Text style={styles.cardBody}>
+            Use the same verified seller account you created on the web portal.
+          </Text>
+          <View style={styles.segmentRow}>
             <ActionButton
-              label="Resend OTP"
-              onPress={handleResendOtp}
-              variant="secondary"
-              disabled={busy || !form.email}
+              label="Password login"
+              onPress={() => setAuthMode('login')}
+              variant={authMode === 'login' ? 'primary' : 'secondary'}
             />
-          ) : null}
+            <ActionButton
+              label="Enter OTP"
+              onPress={() => setAuthMode('verify')}
+              variant={authMode === 'verify' ? 'primary' : 'secondary'}
+            />
+          </View>
+          <TextInput
+            style={styles.input}
+            placeholder="seller@example.com"
+            placeholderTextColor="#7d8a8f"
+            autoCapitalize="none"
+            keyboardType="email-address"
+            value={form.email}
+            onChangeText={(value) => updateField('email', value)}
+          />
+          {authMode === 'login' ? (
+            <View style={styles.passwordField}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Password"
+                placeholderTextColor="#7d8a8f"
+                secureTextEntry={!showPassword}
+                value={form.password}
+                onChangeText={(value) => updateField('password', value)}
+              />
+              <TouchableOpacity
+                onPress={() => setShowPassword((current) => !current)}
+                style={styles.passwordToggle}
+              >
+                <Text style={styles.passwordToggleIcon}>{showPassword ? '🙈' : '👁'}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TextInput
+              style={styles.input}
+              placeholder="6-digit OTP"
+              placeholderTextColor="#7d8a8f"
+              value={form.otpCode}
+              onChangeText={(value) => updateField('otpCode', value)}
+            />
+          )}
+          <View style={styles.segmentRow}>
+            <ActionButton
+              label={busy ? 'Working...' : authMode === 'login' ? 'Continue' : 'Verify email'}
+              onPress={authMode === 'login' ? handleLogin : handleVerifyOtp}
+              disabled={busy}
+            />
+            {authMode === 'verify' ? (
+              <ActionButton
+                label="Resend OTP"
+                onPress={handleResendOtp}
+                variant="secondary"
+                disabled={busy || !form.email}
+              />
+            ) : null}
+          </View>
         </View>
-      </View>
 
-      {status ? <Text style={styles.status}>{status}</Text> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+        {status ? <Text style={styles.status}>{status}</Text> : null}
+        {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      {busy ? <ActivityIndicator color={colors.clay} style={styles.spinner} /> : null}
+        {busy ? <ActivityIndicator color={colors.clay} style={styles.spinner} /> : null}
 
-      {session?.user ? (
-        <>
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Property workspace</Text>
-            <Text style={styles.cardBody}>
-              Signed in as {session.user.email}. Choose a property to inspect and photograph.
-            </Text>
+        {session?.user ? (
+          <>
+            <View style={styles.identityCard}>
+              <Text style={styles.identityLabel}>Signed in as</Text>
+              <Text style={styles.identityName}>{getDisplayName(session.user)}</Text>
+              <Text style={styles.identityEmail}>{session.user.email}</Text>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Property workspace</Text>
+              <Text style={styles.cardBody}>
+                Choose a property to inspect and photograph.
+              </Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.propertyRow}>
               {properties.map((property) => (
                 <TouchableOpacity
@@ -395,104 +418,105 @@ export function RootScreen() {
                 />
               </View>
             ) : null}
-          </View>
+            </View>
 
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Photo capture + AI review</Text>
-            <Text style={styles.cardBody}>
-              Capture the room, then let AI score lighting, composition, clarity, and retake value.
-            </Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Room label"
-              placeholderTextColor="#7d8a8f"
-              value={form.roomLabel}
-              onChangeText={(value) => updateField('roomLabel', value)}
-            />
-            <View style={styles.segmentRow}>
-              <ActionButton label="Use camera" onPress={() => pickImage('camera')} disabled={busy || !propertyId} />
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Photo capture + AI review</Text>
+              <Text style={styles.cardBody}>
+                Capture the room, then let AI score lighting, composition, clarity, and retake value.
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Room label"
+                placeholderTextColor="#7d8a8f"
+                value={form.roomLabel}
+                onChangeText={(value) => updateField('roomLabel', value)}
+              />
+              <View style={styles.segmentRow}>
+                <ActionButton label="Use camera" onPress={() => pickImage('camera')} disabled={busy || !propertyId} />
+                <ActionButton
+                  label="Photo library"
+                  onPress={() => pickImage('library')}
+                  variant="secondary"
+                  disabled={busy || !propertyId}
+                />
+              </View>
+              {photoAsset?.uri ? (
+                <Image source={{ uri: photoAsset.uri }} style={styles.photoPreview} />
+              ) : null}
               <ActionButton
-                label="Photo library"
-                onPress={() => pickImage('library')}
-                variant="secondary"
-                disabled={busy || !propertyId}
+                label="Save + analyze photo"
+                onPress={handleSavePhoto}
+                disabled={busy || !propertyId || !photoAsset?.base64}
               />
             </View>
-            {photoAsset?.uri ? (
-              <Image source={{ uri: photoAsset.uri }} style={styles.photoPreview} />
-            ) : null}
-            <ActionButton
-              label="Save + analyze photo"
-              onPress={handleSavePhoto}
-              disabled={busy || !propertyId || !photoAsset?.base64}
-            />
-          </View>
 
-          {analysis ? (
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>AI photo analysis</Text>
-              <Text style={styles.analysisHeadline}>
-                {analysis.roomGuess} · {analysis.overallQualityScore}/100
-              </Text>
-              <Text style={styles.cardBody}>{analysis.summary}</Text>
-              <View style={styles.scoreRow}>
-                <View style={styles.scorePill}>
-                  <Text style={styles.scorePillLabel}>Lighting</Text>
-                  <Text style={styles.scorePillValue}>{analysis.lightingScore}</Text>
-                </View>
-                <View style={styles.scorePill}>
-                  <Text style={styles.scorePillLabel}>Composition</Text>
-                  <Text style={styles.scorePillValue}>{analysis.compositionScore}</Text>
-                </View>
-                <View style={styles.scorePill}>
-                  <Text style={styles.scorePillLabel}>Clarity</Text>
-                  <Text style={styles.scorePillValue}>{analysis.clarityScore}</Text>
-                </View>
-              </View>
-              <Text style={styles.analysisSubhead}>Best use</Text>
-              <Text style={styles.cardBody}>{analysis.bestUse}</Text>
-              <Text style={styles.analysisSubhead}>Suggestions</Text>
-              {analysis.suggestions.map((item) => (
-                <Text key={item} style={styles.listItem}>
-                  • {item}
+            {analysis ? (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>AI photo analysis</Text>
+                <Text style={styles.analysisHeadline}>
+                  {analysis.roomGuess} · {analysis.overallQualityScore}/100
                 </Text>
-              ))}
-              <Text style={styles.analysisSubhead}>Issues</Text>
-              {analysis.issues.map((item) => (
-                <Text key={item} style={styles.listItem}>
-                  • {item}
-                </Text>
-              ))}
-            </View>
-          ) : null}
-
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Saved photo gallery</Text>
-            <Text style={styles.cardBody}>
-              Each saved photo is now tied to the selected property in MongoDB along with its latest AI review.
-            </Text>
-            {gallery.length === 0 ? (
-              <Text style={styles.cardBody}>No saved photos yet for this property.</Text>
-            ) : (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.galleryRow}>
-                {gallery.map((asset) => (
-                  <View key={asset.id} style={styles.galleryCard}>
-                    <Image
-                      source={{ uri: asset.imageUrl || asset.imageDataUrl }}
-                      style={styles.galleryImage}
-                    />
-                    <Text style={styles.galleryTitle}>{asset.roomLabel}</Text>
-                    <Text style={styles.galleryMeta}>
-                      {asset.analysis?.overallQualityScore || '--'}/100 · {asset.analysis?.retakeRecommended ? 'Retake' : 'Usable'}
-                    </Text>
+                <Text style={styles.cardBody}>{analysis.summary}</Text>
+                <View style={styles.scoreRow}>
+                  <View style={styles.scorePill}>
+                    <Text style={styles.scorePillLabel}>Lighting</Text>
+                    <Text style={styles.scorePillValue}>{analysis.lightingScore}</Text>
                   </View>
+                  <View style={styles.scorePill}>
+                    <Text style={styles.scorePillLabel}>Composition</Text>
+                    <Text style={styles.scorePillValue}>{analysis.compositionScore}</Text>
+                  </View>
+                  <View style={styles.scorePill}>
+                    <Text style={styles.scorePillLabel}>Clarity</Text>
+                    <Text style={styles.scorePillValue}>{analysis.clarityScore}</Text>
+                  </View>
+                </View>
+                <Text style={styles.analysisSubhead}>Best use</Text>
+                <Text style={styles.cardBody}>{analysis.bestUse}</Text>
+                <Text style={styles.analysisSubhead}>Suggestions</Text>
+                {analysis.suggestions.map((item) => (
+                  <Text key={item} style={styles.listItem}>
+                    • {item}
+                  </Text>
                 ))}
-              </ScrollView>
-            )}
-          </View>
-        </>
-      ) : null}
-    </ScrollView>
+                <Text style={styles.analysisSubhead}>Issues</Text>
+                {analysis.issues.map((item) => (
+                  <Text key={item} style={styles.listItem}>
+                    • {item}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Saved photo gallery</Text>
+              <Text style={styles.cardBody}>
+                Each saved photo is now tied to the selected property in MongoDB along with its latest AI review.
+              </Text>
+              {gallery.length === 0 ? (
+                <Text style={styles.cardBody}>No saved photos yet for this property.</Text>
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.galleryRow}>
+                  {gallery.map((asset) => (
+                    <View key={asset.id} style={styles.galleryCard}>
+                      <Image
+                        source={{ uri: asset.imageUrl || asset.imageDataUrl }}
+                        style={styles.galleryImage}
+                      />
+                      <Text style={styles.galleryTitle}>{asset.roomLabel}</Text>
+                      <Text style={styles.galleryMeta}>
+                        {asset.analysis?.overallQualityScore || '--'}/100 · {asset.analysis?.retakeRecommended ? 'Retake' : 'Usable'}
+                      </Text>
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+          </>
+        ) : null}
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -506,25 +530,13 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   hero: {
-    paddingTop: 24,
-    gap: 12,
+    paddingTop: 18,
   },
-  kicker: {
-    color: colors.moss,
-    fontSize: 12,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-  },
-  title: {
+  titleSingleLine: {
     color: colors.cream,
-    fontSize: 34,
+    fontSize: 30,
     fontWeight: '700',
-    lineHeight: 40,
-  },
-  body: {
-    color: colors.sand,
-    fontSize: 16,
-    lineHeight: 24,
+    lineHeight: 34,
   },
   card: {
     padding: 18,
@@ -552,6 +564,32 @@ const styles = StyleSheet.create({
     color: colors.cream,
     borderWidth: 1,
     borderColor: colors.line,
+  },
+  passwordField: {
+    minHeight: 48,
+    borderRadius: 14,
+    paddingLeft: 14,
+    paddingRight: 6,
+    backgroundColor: colors.panelSoft,
+    borderWidth: 1,
+    borderColor: colors.line,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  passwordInput: {
+    flex: 1,
+    minHeight: 48,
+    color: colors.cream,
+  },
+  passwordToggle: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+  },
+  passwordToggleIcon: {
+    fontSize: 18,
   },
   segmentRow: {
     flexDirection: 'row',
@@ -600,6 +638,29 @@ const styles = StyleSheet.create({
   },
   spinner: {
     marginVertical: 8,
+  },
+  identityCard: {
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: 'rgba(124, 162, 127, 0.1)',
+    borderWidth: 1,
+    borderColor: colors.line,
+    gap: 4,
+  },
+  identityLabel: {
+    color: colors.moss,
+    fontSize: 12,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
+  identityName: {
+    color: colors.cream,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  identityEmail: {
+    color: colors.sand,
+    fontSize: 14,
   },
   propertyRow: {
     gap: 10,

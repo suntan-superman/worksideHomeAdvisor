@@ -7,6 +7,11 @@ import { useRouter } from 'next/navigation';
 import { BRANDING } from '@workside/branding';
 import { clearStoredSession, getStoredSession } from '../lib/session';
 
+function getDisplayName(user) {
+  const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
+  return fullName || 'Signed-in user';
+}
+
 export function AppFrame({ children, busy = false }) {
   const router = useRouter();
   const [session, setSession] = useState(null);
@@ -26,6 +31,12 @@ export function AppFrame({ children, busy = false }) {
         </div>
 
         <nav className="topnav">
+          {session?.user?.email ? (
+            <div className="session-pill">
+              <strong>{getDisplayName(session.user)}</strong>
+              <span>{session.user.email}</span>
+            </div>
+          ) : null}
           {session?.user?.email ? (
             <>
               <Link href="/dashboard">Dashboard</Link>
