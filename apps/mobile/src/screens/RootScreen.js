@@ -290,7 +290,12 @@ export function RootScreen() {
     >
       <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.hero}>
-          <Text style={styles.titleSingleLine} numberOfLines={1}>
+          <Text
+            style={styles.titleSingleLine}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
+          >
             Workside Home Advisor
           </Text>
         </View>
@@ -534,9 +539,10 @@ const styles = StyleSheet.create({
   },
   titleSingleLine: {
     color: colors.cream,
-    fontSize: 30,
+    fontSize: 26,
     fontWeight: '700',
-    lineHeight: 34,
+    lineHeight: 30,
+    textAlign: 'center',
   },
   card: {
     padding: 18,
