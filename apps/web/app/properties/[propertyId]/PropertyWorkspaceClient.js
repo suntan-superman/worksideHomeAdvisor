@@ -8,6 +8,7 @@ import { AppFrame } from '../../../components/AppFrame';
 import { Toast } from '../../../components/Toast';
 import {
   analyzePricing,
+  createBillingCheckoutSession,
   generateFlyer,
   getDashboard,
   getLatestFlyer,
@@ -112,6 +113,39 @@ export function PropertyWorkspaceClient({ propertyId }) {
         message: 'A fresh flyer draft is ready for review.',
       });
     } catch (requestError) {
+      if (
+        requestError.status === 402 &&
+        requestError.details?.suggestedPlan
+      ) {
+        const session = getStoredSession();
+        if (session?.user?.id) {
+          setStatus('Opening Stripe checkout...');
+
+          try {
+            const checkout = await createBillingCheckoutSession(
+              {
+                userId: session.user.id,
+                planKey: requestError.details.suggestedPlan,
+              },
+              session.user.id,
+            );
+
+            if (checkout.url) {
+              window.location.href = checkout.url;
+              return;
+            }
+          } catch (checkoutError) {
+            setToast({
+              tone: 'error',
+              title: 'Billing required',
+              message: checkoutError.message,
+            });
+            setStatus('');
+            return;
+          }
+        }
+      }
+
       setToast({
         tone: 'error',
         title: 'Flyer generation failed',

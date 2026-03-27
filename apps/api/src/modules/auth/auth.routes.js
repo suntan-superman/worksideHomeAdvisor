@@ -1,6 +1,7 @@
 import { signupSchema, verifyOtpSchema } from '@workside/validation';
 import { z } from 'zod';
 
+import { enforceAuthAction } from '../usage/usage-enforcement.service.js';
 import { login, requestOtp, signup, verifyEmailOtp } from './auth.service.js';
 
 const loginSchema = signupSchema.pick({
@@ -16,6 +17,13 @@ export async function authRoutes(fastify) {
   fastify.post('/signup', async (request, reply) => {
     try {
       const payload = signupSchema.parse(request.body);
+      const authDecision = await enforceAuthAction(payload.email.toLowerCase());
+      if (!authDecision.allowed) {
+        return reply
+          .code(429)
+          .header('Retry-After', String(authDecision.retryAfterSeconds))
+          .send({ message: 'Too many auth/email actions. Please wait and try again.' });
+      }
       const result = await signup(payload);
       return reply.code(201).send(result);
     } catch (error) {
@@ -26,6 +34,13 @@ export async function authRoutes(fastify) {
   fastify.post('/login', async (request, reply) => {
     try {
       const payload = loginSchema.parse(request.body);
+      const authDecision = await enforceAuthAction(payload.email.toLowerCase());
+      if (!authDecision.allowed) {
+        return reply
+          .code(429)
+          .header('Retry-After', String(authDecision.retryAfterSeconds))
+          .send({ message: 'Too many auth/email actions. Please wait and try again.' });
+      }
       const result = await login(payload);
       return reply.send(result);
     } catch (error) {
@@ -36,6 +51,13 @@ export async function authRoutes(fastify) {
   fastify.post('/request-otp', async (request, reply) => {
     try {
       const payload = requestOtpSchema.parse(request.body);
+      const authDecision = await enforceAuthAction(payload.email.toLowerCase());
+      if (!authDecision.allowed) {
+        return reply
+          .code(429)
+          .header('Retry-After', String(authDecision.retryAfterSeconds))
+          .send({ message: 'Too many auth/email actions. Please wait and try again.' });
+      }
       const result = await requestOtp(payload.email);
       return reply.send(result);
     } catch (error) {
@@ -46,6 +68,13 @@ export async function authRoutes(fastify) {
   fastify.post('/verify-email', async (request, reply) => {
     try {
       const payload = verifyOtpSchema.parse(request.body);
+      const authDecision = await enforceAuthAction(payload.email.toLowerCase());
+      if (!authDecision.allowed) {
+        return reply
+          .code(429)
+          .header('Retry-After', String(authDecision.retryAfterSeconds))
+          .send({ message: 'Too many auth/email actions. Please wait and try again.' });
+      }
       const result = await verifyEmailOtp(payload);
       return reply.send(result);
     } catch (error) {

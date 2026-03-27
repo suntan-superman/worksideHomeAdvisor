@@ -26,11 +26,14 @@ export function AppFrame({ children, busy = false }) {
         </div>
 
         <nav className="topnav">
-          <Link href="/dashboard">Dashboard</Link>
-          <Link href="/auth">Auth</Link>
-          <Link href={session?.lastPropertyId ? `/properties/${session.lastPropertyId}` : '/dashboard'}>
-            Last property
-          </Link>
+          {session?.user?.email ? (
+            <>
+              <Link href="/dashboard">Dashboard</Link>
+              <Link href={session?.lastPropertyId ? `/properties/${session.lastPropertyId}` : '/dashboard'}>
+                Last property
+              </Link>
+            </>
+          ) : null}
           {session?.user?.email ? (
             <button
               type="button"
@@ -43,11 +46,21 @@ export function AppFrame({ children, busy = false }) {
             >
               Sign out
             </button>
-          ) : null}
+          ) : (
+            <Link href="/auth" className="nav-button nav-link-button">
+              Log in
+            </Link>
+          )}
         </nav>
       </header>
 
       <main>{children}</main>
+      <footer className="site-footer">
+        <span>Copyright 2026 Workside Software LLC.</span>
+        <a href="mailto:support@worksidesoftware.com">support@worksidesoftware.com</a>
+        <a href="mailto:sales@worksidesoftware.com">sales@worksidesoftware.com</a>
+        <a href="mailto:feedback@worksidesoftware.com">feedback@worksidesoftware.com</a>
+      </footer>
     </div>
   );
 }

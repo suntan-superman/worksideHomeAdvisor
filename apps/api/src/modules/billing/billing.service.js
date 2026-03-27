@@ -24,6 +24,16 @@ const ADMIN_FEATURES = [
   'reports.client_ready',
   'team.multi_user',
 ];
+const DEMO_FEATURES = [
+  'pricing.full',
+  'flyer.generate',
+  'flyer.export',
+  'marketing.export',
+  'presentation.mode',
+  'branding.custom',
+  'reports.client_ready',
+  'team.multi_user',
+];
 
 function toDateFromUnixTimestamp(value) {
   return value ? new Date(value * 1000) : null;
@@ -368,6 +378,20 @@ export async function getBillingSummary(userId) {
         planKey: 'admin_bypass',
         status: 'active',
         features: ADMIN_FEATURES,
+      },
+      subscription: null,
+    };
+  }
+
+  if (user.isDemoAccount) {
+    return {
+      userId,
+      isStripeConfigured: isStripeConfigured(),
+      access: {
+        audience: 'demo',
+        planKey: 'demo_bypass',
+        status: 'active',
+        features: DEMO_FEATURES,
       },
       subscription: null,
     };

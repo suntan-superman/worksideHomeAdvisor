@@ -98,6 +98,7 @@ p {
   display: flex;
   gap: 18px;
   font-size: 0.95rem;
+  align-items: center;
 }
 
 .hero-grid,
@@ -334,6 +335,12 @@ select {
   cursor: pointer;
 }
 
+.nav-link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .mode-chip.active {
   background: rgba(70, 99, 79, 0.12);
   color: var(--moss);
@@ -430,6 +437,21 @@ select {
   margin-top: 24px;
 }
 
+.site-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 22px;
+  padding: 28px 0 8px;
+  margin-top: 28px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.94rem;
+}
+
+.site-footer a {
+  color: var(--moss);
+}
+
 .align-end {
   align-items: flex-end;
 }
@@ -509,6 +531,10 @@ select {
   .topbar,
   .panel-header,
   .dashboard-header {
+    flex-direction: column;
+  }
+
+  .site-footer {
     flex-direction: column;
   }
 
