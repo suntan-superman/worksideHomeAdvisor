@@ -13,6 +13,17 @@ function numberOrZero(...values) {
   return 0;
 }
 
+function numberOrNull(...values) {
+  for (const value of values) {
+    const numericValue = Number(value);
+    if (Number.isFinite(numericValue)) {
+      return numericValue;
+    }
+  }
+
+  return null;
+}
+
 function median(values) {
   if (!Array.isArray(values) || values.length === 0) {
     return 0;
@@ -87,6 +98,23 @@ export function normalizeComp(rawComp, subject) {
     rawComp.status ||
     rawComp.listingStatus ||
     (saleDate ? 'sold' : 'sale');
+  const latitude = numberOrNull(
+    rawComp.latitude,
+    rawComp.lat,
+    rawComp.location?.lat,
+    rawComp.location?.latitude,
+    rawComp.coordinates?.lat,
+    rawComp.coordinates?.latitude,
+  );
+  const longitude = numberOrNull(
+    rawComp.longitude,
+    rawComp.lng,
+    rawComp.lon,
+    rawComp.location?.lng,
+    rawComp.location?.longitude,
+    rawComp.coordinates?.lng,
+    rawComp.coordinates?.longitude,
+  );
 
   return {
     _id: String(rawComp.id || rawComp._id || rawComp.propertyId || crypto.randomUUID()),
@@ -102,6 +130,8 @@ export function normalizeComp(rawComp, subject) {
     daysOnMarket: Number(rawComp.daysOnMarket || 0) || undefined,
     propertyType,
     listingType,
+    latitude,
+    longitude,
     score: undefined,
     raw: rawComp,
     createdAt: new Date().toISOString(),

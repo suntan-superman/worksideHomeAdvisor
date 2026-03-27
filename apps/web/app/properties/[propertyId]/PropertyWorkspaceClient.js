@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { formatCurrency } from '@workside/utils';
 
 import { AppFrame } from '../../../components/AppFrame';
+import { PropertyLocationMap } from '../../../components/PropertyLocationMap';
 import { Toast } from '../../../components/Toast';
 import {
   analyzePricing,
@@ -27,20 +28,6 @@ function buildAddressQuery(property) {
   ]
     .filter(Boolean)
     .join(', ');
-}
-
-function buildMapEmbedUrl(addressQuery, mapsApiKey) {
-  if (!addressQuery) {
-    return null;
-  }
-
-  if (mapsApiKey) {
-    return `https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(
-      mapsApiKey,
-    )}&q=${encodeURIComponent(addressQuery)}`;
-  }
-
-  return `https://maps.google.com/maps?q=${encodeURIComponent(addressQuery)}&z=15&output=embed`;
 }
 
 export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
@@ -195,7 +182,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   const addressQuery = buildAddressQuery(property);
-  const mapEmbedUrl = buildMapEmbedUrl(addressQuery, mapsApiKey);
   const googleMapsUrl = addressQuery
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addressQuery)}`
     : null;
@@ -292,29 +278,27 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   area.
                 </p>
               </div>
-              {googleMapsUrl ? (
-                <a
-                  href={googleMapsUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="button-secondary inline-button"
-                >
-                  Open in Google Maps
-                </a>
-              ) : null}
-            </div>
-            {mapEmbedUrl ? (
-              <div className="property-map-frame">
-                <iframe
-                  title="Property map"
-                  src={mapEmbedUrl}
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
-                />
-              </div>
-            ) : (
-              <p>No map available until the property address is complete.</p>
-            )}
+            {googleMapsUrl ? (
+              <a
+                href={googleMapsUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="button-secondary inline-button button-no-wrap"
+              >
+                Open in Google Maps
+              </a>
+            ) : null}
+          </div>
+          {addressQuery ? (
+            <PropertyLocationMap
+              property={property}
+              comps={latestPricing?.selectedComps || dashboard?.comps || []}
+              mapsApiKey={mapsApiKey}
+              googleMapsUrl={googleMapsUrl}
+            />
+          ) : (
+            <p>No map available until the property address is complete.</p>
+          )}
           </div>
         </div>
 

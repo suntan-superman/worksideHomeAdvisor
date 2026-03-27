@@ -108,6 +108,8 @@ export async function analyzePropertyPricing(propertyId) {
       daysOnMarket: comp.daysOnMarket,
       propertyType: comp.propertyType,
       listingType: comp.listingType,
+      latitude: comp.latitude,
+      longitude: comp.longitude,
       score: comp.score,
       raw: comp.raw,
     })),

@@ -14,6 +14,8 @@ const compSnapshotSchema = new mongoose.Schema(
     daysOnMarket: { type: Number },
     propertyType: { type: String },
     listingType: { type: String },
+    latitude: { type: Number },
+    longitude: { type: Number },
     score: { type: Number },
     raw: { type: mongoose.Schema.Types.Mixed },
   },
