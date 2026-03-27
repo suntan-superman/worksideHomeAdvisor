@@ -269,21 +269,66 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         </article>
       </section>
 
-      <section className="content-grid dashboard-content-grid">
-        <div className="content-card">
-          <span className="label">Pricing narrative</span>
-          <h2>Latest analysis</h2>
-          <p>{latestPricing?.summary || dashboard?.pricingSummary || 'No stored narrative yet.'}</p>
-          {latestPricing?.pricingStrategy ? (
-            <p>
-              <strong>Strategy:</strong> {latestPricing.pricingStrategy}
-            </p>
-          ) : null}
+      <section className="workspace-grid dashboard-content-grid">
+        <div className="workspace-primary-column">
+          <div className="content-card">
+            <span className="label">Pricing narrative</span>
+            <h2>Latest analysis</h2>
+            <p>{latestPricing?.summary || dashboard?.pricingSummary || 'No stored narrative yet.'}</p>
+            {latestPricing?.pricingStrategy ? (
+              <p>
+                <strong>Strategy:</strong> {latestPricing.pricingStrategy}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="content-card property-map-card">
+            <div className="property-map-header">
+              <div>
+                <span className="label">Property map</span>
+                <h2>Neighborhood context</h2>
+                <p>
+                  A quick visual for location, nearby streets, and the property&apos;s surrounding
+                  area.
+                </p>
+              </div>
+              {googleMapsUrl ? (
+                <a
+                  href={googleMapsUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="button-secondary inline-button"
+                >
+                  Open in Google Maps
+                </a>
+              ) : null}
+            </div>
+            {mapEmbedUrl ? (
+              <div className="property-map-frame">
+                <iframe
+                  title="Property map"
+                  src={mapEmbedUrl}
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
+              </div>
+            ) : (
+              <p>No map available until the property address is complete.</p>
+            )}
+          </div>
         </div>
 
-        <div className="content-card">
-          <span className="label">Selected comps</span>
-          <div className="comp-grid">
+        <div className="content-card workspace-secondary-card">
+          <div className="section-header-tight">
+            <div>
+              <span className="label">Selected comps</span>
+              <h2>Nearby sales context</h2>
+            </div>
+            <span className="section-header-meta">
+              {(latestPricing?.selectedComps || dashboard?.comps || []).slice(0, 8).length} comps shown
+            </span>
+          </div>
+          <div className="comp-grid comp-grid-scroll">
             {(latestPricing?.selectedComps || dashboard?.comps || []).slice(0, 8).map((comp) => (
               <article key={comp.externalId || comp._id || comp.address} className="comp-card">
                 <strong>{comp.address}</strong>
@@ -427,42 +472,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         </div>
       </section>
 
-      <section className="dashboard-content-grid">
-        <div className="content-card property-map-card">
-          <div className="property-map-header">
-            <div>
-              <span className="label">Property map</span>
-              <h2>Neighborhood context</h2>
-              <p>
-                A quick visual for location, nearby streets, and the property&apos;s surrounding
-                area.
-              </p>
-            </div>
-            {googleMapsUrl ? (
-              <a
-                href={googleMapsUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="button-secondary inline-button"
-              >
-                Open in Google Maps
-              </a>
-            ) : null}
-          </div>
-          {mapEmbedUrl ? (
-            <div className="property-map-frame">
-              <iframe
-                title="Property map"
-                src={mapEmbedUrl}
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-              />
-            </div>
-          ) : (
-            <p>No map available until the property address is complete.</p>
-          )}
-        </div>
-      </section>
     </AppFrame>
   );
 }
