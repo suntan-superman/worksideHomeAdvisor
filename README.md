@@ -107,6 +107,21 @@ The current auth foundation is designed around:
 - `POST /api/v1/properties/:propertyId/pricing/analyze`
 - `GET /api/v1/properties/:propertyId/pricing/latest`
 - `GET /api/v1/properties/:propertyId/dashboard`
+
+## Billing Endpoints
+
+- `GET /api/v1/billing/plans`
+- `GET /api/v1/billing/summary/:userId`
+- `POST /api/v1/billing/checkout-session`
+- `POST /api/v1/billing/webhook`
+
+## Admin Bootstrap
+
+Create or update a verified admin or demo account:
+
+```bash
+npm run admin:user --workspace=@workside/api
+```
 //////////////////////////////////////////////////////////
 To deploy backend:
 
@@ -126,5 +141,3 @@ or
 cd C:\Users\sjroy\Source\HomeAdvisor\apps\admin-web
 npm run dev
 //////////////////////////////////////////////////////////
-
-

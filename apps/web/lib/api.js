@@ -86,3 +86,21 @@ export function analyzePricing(propertyId) {
 export function getLatestPricing(propertyId) {
   return request(`/api/v1/properties/${propertyId}/pricing/latest`);
 }
+
+export function getBillingPlans() {
+  return request('/api/v1/billing/plans');
+}
+
+export function getBillingSummary(userId) {
+  return request(`/api/v1/billing/summary/${userId}`);
+}
+
+export function createBillingCheckoutSession(payload, userId) {
+  return request('/api/v1/billing/checkout-session', {
+    method: 'POST',
+    headers: {
+      'x-user-id': userId,
+    },
+    body: JSON.stringify(payload),
+  });
+}

@@ -2,6 +2,17 @@ function roundCurrency(value) {
   return Math.round(value / 1000) * 1000;
 }
 
+function numberOrZero(...values) {
+  for (const value of values) {
+    const numericValue = Number(value);
+    if (Number.isFinite(numericValue) && numericValue > 0) {
+      return numericValue;
+    }
+  }
+
+  return 0;
+}
+
 function median(values) {
   if (!Array.isArray(values) || values.length === 0) {
     return 0;
@@ -45,13 +56,37 @@ export function buildCompCacheKey(subject) {
 }
 
 export function normalizeComp(rawComp, subject) {
-  const price = Number(rawComp.price || rawComp.lastSalePrice || rawComp.salePrice || 0);
-  const sqft = Number(rawComp.squareFootage || rawComp.livingArea || rawComp.sqft || 0);
-  const beds = Number(rawComp.bedrooms || rawComp.beds || 0);
-  const baths = Number(rawComp.bathrooms || rawComp.baths || 0);
-  const distanceMiles = Number(rawComp.distance || rawComp.distanceMiles || 0);
-  const saleDate = rawComp.saleDate || rawComp.lastSaleDate || rawComp.soldDate || null;
+  const price = numberOrZero(
+    rawComp.price,
+    rawComp.lastSalePrice,
+    rawComp.salePrice,
+    rawComp.listPrice,
+    rawComp.closePrice,
+  );
+  const sqft = numberOrZero(rawComp.squareFootage, rawComp.livingArea, rawComp.sqft);
+  const beds = numberOrZero(rawComp.bedrooms, rawComp.beds);
+  const baths = numberOrZero(rawComp.bathrooms, rawComp.baths);
+  const distanceMiles = numberOrZero(
+    rawComp.distance,
+    rawComp.distanceMiles,
+    rawComp.miles,
+    rawComp.distanceFromSubject,
+  );
+  const saleDate =
+    rawComp.saleDate ||
+    rawComp.lastSaleDate ||
+    rawComp.soldDate ||
+    rawComp.closedDate ||
+    rawComp.listedDate ||
+    null;
   const pricePerSqft = sqft > 0 ? price / sqft : 0;
+  const propertyType =
+    rawComp.propertyType || rawComp.type || rawComp.homeType || subject.propertyType;
+  const listingType =
+    rawComp.listingType ||
+    rawComp.status ||
+    rawComp.listingStatus ||
+    (saleDate ? 'sold' : 'sale');
 
   return {
     _id: String(rawComp.id || rawComp._id || rawComp.propertyId || crypto.randomUUID()),
@@ -65,8 +100,8 @@ export function normalizeComp(rawComp, subject) {
     distanceMiles,
     saleDate,
     daysOnMarket: Number(rawComp.daysOnMarket || 0) || undefined,
-    propertyType: rawComp.propertyType || rawComp.type || subject.propertyType,
-    listingType: rawComp.listingType || 'sale',
+    propertyType,
+    listingType,
     score: undefined,
     raw: rawComp,
     createdAt: new Date().toISOString(),
@@ -181,6 +216,54 @@ export function calculatePricingFromComps(comps, subject) {
     },
     variance: Number(variance.toFixed(3)),
     confidence: Number(confidence.toFixed(2)),
+  };
+}
+
+export function calculatePricingFromAvm(avm, subject) {
+  const subjectSqft = Number(subject.squareFeet || 0);
+  const low =
+    numberOrZero(
+      avm?.priceRangeLow,
+      avm?.low,
+      avm?.valueRangeLow,
+      avm?.lowerValue,
+      avm?.lower,
+    ) || 0;
+  const high =
+    numberOrZero(
+      avm?.priceRangeHigh,
+      avm?.high,
+      avm?.valueRangeHigh,
+      avm?.upperValue,
+      avm?.upper,
+    ) || 0;
+  const mid =
+    numberOrZero(
+      avm?.price,
+      avm?.value,
+      avm?.avm,
+      avm?.estimatedValue,
+      avm?.priceEstimate,
+    ) || 0;
+
+  const resolvedMid =
+    mid ||
+    (low > 0 && high > 0 ? (low + high) / 2 : 0);
+  const resolvedLow = low || (resolvedMid > 0 ? resolvedMid * 0.95 : 0);
+  const resolvedHigh = high || (resolvedMid > 0 ? resolvedMid * 1.05 : 0);
+  const medianPricePerSqft =
+    subjectSqft > 0 && resolvedMid > 0 ? resolvedMid / subjectSqft : 0;
+
+  return {
+    selectedComps: [],
+    medianPricePerSqft: Number(medianPricePerSqft.toFixed(2)),
+    range: {
+      low: roundCurrency(resolvedLow),
+      mid: roundCurrency(resolvedMid),
+      high: roundCurrency(resolvedHigh),
+    },
+    variance: 0.08,
+    confidence: 0.45,
   };
 }
 

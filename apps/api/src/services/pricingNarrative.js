@@ -1,5 +1,15 @@
 export function buildPricingNarrative(pricingAnalysis) {
   const confidence = pricingAnalysis.pricing.confidence;
+  const midpoint = pricingAnalysis.pricing.range?.mid || 0;
+
+  if (!midpoint) {
+    return {
+      summary:
+        'Comparable sales and AVM support were both too thin to produce a dependable pricing band for this property.',
+      pricingStrategy:
+        'Do not publish this estimate as-is. Broaden the search radius, refresh market data, or get a local agent or appraiser review before setting a list price.',
+    };
+  }
 
   return {
     summary:

@@ -175,7 +175,8 @@ select {
 
 .mini-stats,
 .metric-grid,
-.tag-row {
+.tag-row,
+.billing-plan-meta {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
@@ -235,7 +236,8 @@ select {
 
 .pill,
 .score-badge,
-.tag-row span {
+.tag-row span,
+.billing-pill {
   padding: 10px 14px;
   border-radius: 999px;
   background: rgba(70, 99, 79, 0.12);

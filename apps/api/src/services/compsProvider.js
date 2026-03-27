@@ -1,6 +1,7 @@
 import { demoDashboard } from '../data/demoData.js';
 import {
   buildCompCacheKey,
+  calculatePricingFromAvm,
   calculatePricingFromComps,
   filterComparableSales,
   normalizeComp,
@@ -57,8 +58,28 @@ export async function getComparableSalesForProperty(property) {
       );
       const filteredComps = filterComparableSales(normalizedComps, subject);
       const scoredComps = scoreComparableSales(filteredComps, subject);
-      const pricing = calculatePricingFromComps(scoredComps, subject);
-      const summary = summarizePricingStrengths(pricing.selectedComps);
+      const compPricing = calculatePricingFromComps(scoredComps, subject);
+      const hasCompPricing =
+        compPricing.selectedComps.length > 0 && compPricing.range.mid > 0;
+      const pricing = hasCompPricing
+        ? compPricing
+        : calculatePricingFromAvm(rentcastResult.avm, subject);
+      const summary = summarizePricingStrengths(compPricing.selectedComps);
+      const risks = [...summary.risks];
+      let warning = null;
+
+      if (!hasCompPricing) {
+        warning =
+          pricing.range.mid > 0
+            ? 'No sold comps survived the current filters, so the recommendation is using a lower-confidence RentCast AVM fallback.'
+            : 'No usable sold comps or AVM estimate were available from RentCast for this property.';
+
+        if (pricing.range.mid > 0) {
+          risks.push(
+            'The current price band is based on the RentCast AVM fallback because nearby sold comps were limited.',
+          );
+        }
+      }
 
       return {
         source: 'rentcast',
@@ -69,7 +90,8 @@ export async function getComparableSalesForProperty(property) {
         selectedComps: pricing.selectedComps,
         pricing,
         strengths: summary.strengths,
-        risks: summary.risks,
+        risks,
+        warning,
       };
     }
   } catch (error) {

@@ -6,7 +6,15 @@ import { formatCurrency } from '@workside/utils';
 
 import { AppFrame } from '../../components/AppFrame';
 import { Toast } from '../../components/Toast';
-import { analyzePricing, createProperty, getDashboard, listProperties } from '../../lib/api';
+import {
+  analyzePricing,
+  createBillingCheckoutSession,
+  createProperty,
+  getBillingPlans,
+  getBillingSummary,
+  getDashboard,
+  listProperties,
+} from '../../lib/api';
 import { getStoredSession, setStoredSession } from '../../lib/session';
 
 export default function DashboardPage() {
@@ -14,6 +22,9 @@ export default function DashboardPage() {
   const [properties, setProperties] = useState([]);
   const [selectedPropertyId, setSelectedPropertyId] = useState('');
   const [dashboard, setDashboard] = useState(null);
+  const [billingPlans, setBillingPlans] = useState([]);
+  const [billingSummary, setBillingSummary] = useState(null);
+  const [selectedPlanKey, setSelectedPlanKey] = useState('sample_monthly');
   const [loading, setLoading] = useState(true);
   const [actionState, setActionState] = useState('');
   const [toast, setToast] = useState(null);
@@ -29,14 +40,52 @@ export default function DashboardPage() {
     squareFeet: 2460,
   });
 
+  const configuredPlans = useMemo(
+    () => (billingPlans || []).filter((plan) => plan.configured),
+    [billingPlans],
+  );
+
   const selectedProperty = useMemo(
     () => properties.find((property) => property.id === selectedPropertyId) || null,
     [properties, selectedPropertyId],
   );
 
+  const selectedBillingPlan = useMemo(
+    () =>
+      configuredPlans.find((plan) => plan.planKey === selectedPlanKey) ||
+      configuredPlans[0] ||
+      null,
+    [configuredPlans, selectedPlanKey],
+  );
+
   useEffect(() => {
     const stored = getStoredSession();
     setSession(stored);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const billingStatus = new URLSearchParams(window.location.search).get('billing');
+    if (!billingStatus) {
+      return;
+    }
+
+    if (billingStatus === 'success') {
+      setToast({
+        tone: 'success',
+        title: 'Billing completed',
+        message: 'Stripe returned successfully. Refresh billing to confirm the latest access state.',
+      });
+    } else if (billingStatus === 'cancelled') {
+      setToast({
+        tone: 'info',
+        title: 'Checkout cancelled',
+        message: 'No changes were made to the current plan.',
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -71,6 +120,56 @@ export default function DashboardPage() {
     }
 
     loadProperties();
+  }, [session]);
+
+  useEffect(() => {
+    async function loadBillingState() {
+      try {
+        const planResponse = await getBillingPlans();
+        const plans = planResponse.plans || [];
+        setBillingPlans(plans);
+
+        const preferredPlan =
+          plans.find((plan) => plan.planKey === 'sample_monthly' && plan.configured)?.planKey ||
+          plans.find((plan) => plan.planKey === 'sample_onboarding' && plan.configured)?.planKey ||
+          plans.find((plan) => plan.configured)?.planKey ||
+          '';
+
+        if (preferredPlan) {
+          setSelectedPlanKey(preferredPlan);
+        }
+      } catch (requestError) {
+        setToast({
+          tone: 'error',
+          title: 'Could not load billing plans',
+          message: requestError.message,
+        });
+      }
+    }
+
+    loadBillingState();
+  }, []);
+
+  useEffect(() => {
+    if (!session?.user?.id) {
+      setBillingSummary(null);
+      return;
+    }
+
+    async function loadBillingSummary() {
+      try {
+        const response = await getBillingSummary(session.user.id);
+        setBillingSummary(response);
+      } catch (requestError) {
+        setToast({
+          tone: 'error',
+          title: 'Could not load billing summary',
+          message: requestError.message,
+        });
+      }
+    }
+
+    loadBillingSummary();
   }, [session]);
 
   useEffect(() => {
@@ -163,6 +262,38 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleStartCheckout() {
+    if (!session?.user?.id || !selectedBillingPlan) {
+      return;
+    }
+
+    setActionState(`Starting ${selectedBillingPlan.displayName} checkout...`);
+    setToast(null);
+
+    try {
+      const response = await createBillingCheckoutSession(
+        {
+          userId: session.user.id,
+          planKey: selectedBillingPlan.planKey,
+        },
+        session.user.id,
+      );
+
+      if (!response.url) {
+        throw new Error('Stripe did not return a checkout URL.');
+      }
+
+      window.location.href = response.url;
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not start checkout',
+        message: requestError.message,
+      });
+      setActionState('');
+    }
+  }
+
   return (
     <AppFrame>
       <Toast
@@ -239,6 +370,75 @@ export default function DashboardPage() {
                   </Link>
                 ) : null}
               </div>
+            </article>
+          </section>
+
+          <section className="dashboard-grid">
+            <article className="feature-card">
+              <span className="label">Billing access</span>
+              <h3>
+                {billingSummary?.access?.planKey === 'free'
+                  ? 'Free access'
+                  : billingSummary?.access?.planKey === 'admin_bypass'
+                    ? 'Admin access'
+                    : billingSummary?.subscription?.planKey || 'No active plan'}
+              </h3>
+              <p>
+                {billingSummary?.access?.status
+                  ? `Current status: ${billingSummary.access.status}.`
+                  : 'Load a session to see the current billing state.'}
+              </p>
+              <div className="tag-row">
+                {(billingSummary?.access?.features || []).slice(0, 4).map((feature) => (
+                  <span key={feature}>{feature}</span>
+                ))}
+              </div>
+            </article>
+
+            <article className="feature-card">
+              <span className="label">Stripe checkout</span>
+              <select
+                className="select-input"
+                value={selectedBillingPlan?.planKey || ''}
+                onChange={(event) => setSelectedPlanKey(event.target.value)}
+              >
+                <option value="">Choose a plan</option>
+                {configuredPlans.map((plan) => (
+                  <option key={plan.planKey} value={plan.planKey}>
+                    {plan.displayName}
+                  </option>
+                ))}
+              </select>
+              <p>
+                {selectedBillingPlan?.description ||
+                  'Pick a configured plan to launch Stripe Checkout.'}
+              </p>
+              {selectedBillingPlan ? (
+                <div className="billing-plan-meta">
+                  <span className="billing-pill">{selectedBillingPlan.mode}</span>
+                  <span className="billing-pill">{selectedBillingPlan.audience}</span>
+                  <span className="billing-pill">{selectedBillingPlan.planKey}</span>
+                </div>
+              ) : null}
+              <div className="button-stack">
+                <button
+                  type="button"
+                  className="button-primary"
+                  onClick={handleStartCheckout}
+                  disabled={!session?.user?.id || !selectedBillingPlan || Boolean(actionState)}
+                >
+                  Start Stripe checkout
+                </button>
+              </div>
+            </article>
+
+            <article className="feature-card">
+              <span className="label">Demo billing notes</span>
+              <h3>Live-flow testing</h3>
+              <p>
+                Use the sample onboarding or sample monthly plans for low-cost live demos. Admin
+                accounts bypass billing, while demo accounts can complete the full Stripe flow.
+              </p>
             </article>
           </section>
 

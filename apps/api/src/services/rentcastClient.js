@@ -2,6 +2,49 @@ import { env } from '../config/env.js';
 
 const responseCache = new Map();
 
+function toArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (Array.isArray(value?.results)) {
+    return value.results;
+  }
+
+  return [];
+}
+
+function buildComparableKey(comp) {
+  return (
+    comp?.id ||
+    comp?._id ||
+    comp?.propertyId ||
+    comp?.formattedAddress ||
+    comp?.addressLine1 ||
+    comp?.address ||
+    null
+  );
+}
+
+function mergeComparableSets(...sets) {
+  const seen = new Set();
+  const merged = [];
+
+  for (const set of sets) {
+    for (const comp of toArray(set)) {
+      const key = buildComparableKey(comp) || crypto.randomUUID();
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      merged.push(comp);
+    }
+  }
+
+  return merged;
+}
+
 function getApiKey() {
   return env.RENTCAST_API_KEY || env.MARKET_DATA_API_KEY;
 }
@@ -100,6 +143,7 @@ export async function fetchRentcastPricingData({
   };
 
   const avm = await rentcastGet('/avm/value', commonParams);
+  const avmComparables = avm?.comparables || avm?.comps || [];
 
   let listings = [];
   try {
@@ -108,14 +152,14 @@ export async function fetchRentcastPricingData({
       ? listingsResponse
       : listingsResponse?.results || [];
   } catch (error) {
-    listings = avm?.comparables || avm?.comps || [];
+    listings = [];
   }
 
   const result = {
     source: 'rentcast',
     usedLiveData: true,
     avm,
-    comparables: listings,
+    comparables: mergeComparableSets(avmComparables, listings),
   };
 
   if (cacheKey) {
