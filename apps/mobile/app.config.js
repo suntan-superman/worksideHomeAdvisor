@@ -1,10 +1,7 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+const fs = require('node:fs');
+const path = require('node:path');
 
-import appJson from './app.json' with { type: 'json' };
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const appJson = require('./app.json');
 
 function readEnvFile(filename) {
   const filePath = path.join(__dirname, filename);
@@ -34,23 +31,25 @@ function readEnvFile(filename) {
   return values;
 }
 
-const localEnv = {
-  ...readEnvFile('.env'),
-  ...readEnvFile('.env.local'),
+module.exports = () => {
+  const localEnv = {
+    ...readEnvFile('.env'),
+    ...readEnvFile('.env.local'),
+  };
+
+  const apiUrl =
+    localEnv.EXPO_PUBLIC_API_URL ||
+    process.env.EXPO_PUBLIC_API_URL ||
+    appJson.expo.extra?.apiUrl ||
+    'http://localhost:4000';
+
+  process.env.EXPO_PUBLIC_API_URL = apiUrl;
+
+  return {
+    ...appJson.expo,
+    extra: {
+      ...(appJson.expo.extra || {}),
+      apiUrl,
+    },
+  };
 };
-
-const apiUrl =
-  localEnv.EXPO_PUBLIC_API_URL ||
-  process.env.EXPO_PUBLIC_API_URL ||
-  appJson.expo.extra?.apiUrl ||
-  'http://localhost:4000';
-
-process.env.EXPO_PUBLIC_API_URL = apiUrl;
-
-export default () => ({
-  ...appJson.expo,
-  extra: {
-    ...(appJson.expo.extra || {}),
-    apiUrl,
-  },
-});

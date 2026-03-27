@@ -17,7 +17,9 @@
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "seed": "npm run seed --workspace=@workside/api"
+    "seed": "npm run seed --workspace=@workside/api",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "overrides": {
     "react": "19.0.0",
@@ -28,5 +30,11 @@
     "eslint": "^9.23.0",
     "react": "19.0.0",
     "react-dom": "19.0.0"
+  },
+  "version": "1.0.0",
+  "dependencies": {
+    "expo": "~53.0.27",
+    "react": "19.0.0",
+    "react-native": "0.79.6"
   }
 }
