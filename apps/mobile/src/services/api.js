@@ -1,12 +1,17 @@
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
 async function request(path, options = {}) {
+  const headers = {
+    ...(options.headers || {}),
+  };
+
+  if (options.body && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
+    headers,
   });
 
   const data = await response.json().catch(() => ({}));

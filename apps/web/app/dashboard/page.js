@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { formatCurrency } from '@workside/utils';
 
 import { AppFrame } from '../../components/AppFrame';
+import { Toast } from '../../components/Toast';
 import { analyzePricing, createProperty, getDashboard, listProperties } from '../../lib/api';
 import { getStoredSession, setStoredSession } from '../../lib/session';
 
@@ -15,7 +16,7 @@ export default function DashboardPage() {
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [actionState, setActionState] = useState('');
-  const [error, setError] = useState('');
+  const [toast, setToast] = useState(null);
   const [createForm, setCreateForm] = useState({
     title: '',
     addressLine1: '',
@@ -46,7 +47,7 @@ export default function DashboardPage() {
 
     async function loadProperties() {
       setLoading(true);
-      setError('');
+      setToast(null);
 
       try {
         const response = await listProperties(session.user.id);
@@ -59,7 +60,11 @@ export default function DashboardPage() {
 
         setSelectedPropertyId(preferredPropertyId);
       } catch (requestError) {
-        setError(requestError.message);
+        setToast({
+          tone: 'error',
+          title: 'Could not load properties',
+          message: requestError.message,
+        });
       } finally {
         setLoading(false);
       }
@@ -76,7 +81,7 @@ export default function DashboardPage() {
 
     async function loadDashboard() {
       setActionState('Loading property dashboard...');
-      setError('');
+      setToast(null);
 
       try {
         const response = await getDashboard(selectedPropertyId);
@@ -86,7 +91,11 @@ export default function DashboardPage() {
           lastPropertyId: selectedPropertyId,
         });
       } catch (requestError) {
-        setError(requestError.message);
+        setToast({
+          tone: 'error',
+          title: 'Dashboard unavailable',
+          message: requestError.message,
+        });
       } finally {
         setActionState('');
       }
@@ -98,7 +107,7 @@ export default function DashboardPage() {
   async function handleCreateProperty(event) {
     event.preventDefault();
     setActionState('Creating property workspace...');
-    setError('');
+    setToast(null);
 
     try {
       const response = await createProperty(createForm, session.user.id);
@@ -110,8 +119,17 @@ export default function DashboardPage() {
         title: '',
         addressLine1: '',
       }));
+      setToast({
+        tone: 'success',
+        title: 'Property created',
+        message: `${response.property.title} is ready for pricing and photo review.`,
+      });
     } catch (requestError) {
-      setError(requestError.message);
+      setToast({
+        tone: 'error',
+        title: 'Could not create property',
+        message: requestError.message,
+      });
     } finally {
       setActionState('');
     }
@@ -123,14 +141,23 @@ export default function DashboardPage() {
     }
 
     setActionState('Running RentCast + AI pricing analysis...');
-    setError('');
+    setToast(null);
 
     try {
       await analyzePricing(selectedPropertyId);
       const response = await getDashboard(selectedPropertyId);
       setDashboard(response);
+      setToast({
+        tone: 'success',
+        title: 'Pricing refreshed',
+        message: 'The latest RentCast and AI pricing snapshot is ready.',
+      });
     } catch (requestError) {
-      setError(requestError.message);
+      setToast({
+        tone: 'error',
+        title: 'Pricing refresh failed',
+        message: requestError.message,
+      });
     } finally {
       setActionState('');
     }
@@ -138,6 +165,12 @@ export default function DashboardPage() {
 
   return (
     <AppFrame>
+      <Toast
+        tone={toast?.tone}
+        title={toast?.title}
+        message={toast?.message}
+        onClose={() => setToast(null)}
+      />
       <section className="dashboard-header">
         <div>
           <span className="label">Seller dashboard</span>
@@ -210,7 +243,6 @@ export default function DashboardPage() {
           </section>
 
           {actionState ? <p className="status-copy">{actionState}</p> : null}
-          {error ? <p className="error-copy">{error}</p> : null}
 
           <section className="content-grid dashboard-content-grid">
             <form className="form-card" onSubmit={handleCreateProperty}>

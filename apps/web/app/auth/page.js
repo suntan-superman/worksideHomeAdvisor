@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { AppFrame } from '../../components/AppFrame';
+import { Toast } from '../../components/Toast';
 import {
   login,
   requestOtp,
@@ -23,7 +24,7 @@ export default function AuthPage() {
     otpCode: '',
   });
   const [status, setStatus] = useState('Use signup to create an account, then verify the OTP sent to your email.');
-  const [error, setError] = useState('');
+  const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const isVerificationMode = useMemo(() => mode === 'verify', [mode]);
@@ -38,7 +39,7 @@ export default function AuthPage() {
   async function handlePrimaryAction(event) {
     event.preventDefault();
     setLoading(true);
-    setError('');
+    setToast(null);
 
     try {
       if (mode === 'signup') {
@@ -50,6 +51,11 @@ export default function AuthPage() {
         });
         setMode('verify');
         setStatus('Account created. Enter the OTP from your email to finish verification.');
+        setToast({
+          tone: 'success',
+          title: 'Account created',
+          message: 'Check your inbox for the verification code.',
+        });
       } else if (mode === 'login') {
         const result = await login({
           email: form.email,
@@ -59,6 +65,11 @@ export default function AuthPage() {
         if (result.requiresOtpVerification) {
           setMode('verify');
           setStatus('Your email still needs verification. Enter the OTP we just sent.');
+          setToast({
+            tone: 'info',
+            title: 'Verification needed',
+            message: 'We sent a fresh verification code to your email.',
+          });
           return;
         }
 
@@ -78,10 +89,19 @@ export default function AuthPage() {
           user: result.user,
         });
         setStatus('Email verified. Redirecting to your dashboard.');
+        setToast({
+          tone: 'success',
+          title: 'Email verified',
+          message: 'Your seller dashboard is ready.',
+        });
         router.push('/dashboard');
       }
     } catch (requestError) {
-      setError(requestError.message);
+      setToast({
+        tone: 'error',
+        title: mode === 'signup' ? 'Could not create account' : mode === 'login' ? 'Login failed' : 'Verification failed',
+        message: requestError.message,
+      });
     } finally {
       setLoading(false);
     }
@@ -89,13 +109,22 @@ export default function AuthPage() {
 
   async function handleResendOtp() {
     setLoading(true);
-    setError('');
+    setToast(null);
 
     try {
       await requestOtp({ email: form.email });
       setStatus('A fresh verification code was sent.');
+      setToast({
+        tone: 'success',
+        title: 'Code resent',
+        message: 'A fresh verification code is on its way.',
+      });
     } catch (requestError) {
-      setError(requestError.message);
+      setToast({
+        tone: 'error',
+        title: 'Could not resend code',
+        message: requestError.message,
+      });
     } finally {
       setLoading(false);
     }
@@ -103,6 +132,12 @@ export default function AuthPage() {
 
   return (
     <AppFrame>
+      <Toast
+        tone={toast?.tone}
+        title={toast?.title}
+        message={toast?.message}
+        onClose={() => setToast(null)}
+      />
       <section className="content-grid">
         <div className="content-card">
           <span className="label">Auth foundation</span>
@@ -136,7 +171,6 @@ export default function AuthPage() {
             </button>
           </div>
           <p className="status-copy">{status}</p>
-          {error ? <p className="error-copy">{error}</p> : null}
         </div>
 
         <form className="form-card" onSubmit={handlePrimaryAction}>

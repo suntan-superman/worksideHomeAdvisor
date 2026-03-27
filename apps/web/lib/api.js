@@ -1,19 +1,26 @@
+import { formatApiErrorMessage } from './errors';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 async function request(path, options = {}) {
+  const headers = {
+    ...(options.headers || {}),
+  };
+
+  if (options.body && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
+    headers,
     cache: 'no-store',
   });
 
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.message || 'Request failed.');
+    throw new Error(formatApiErrorMessage(data.message || data.error || 'Request failed.'));
   }
 
   return data;

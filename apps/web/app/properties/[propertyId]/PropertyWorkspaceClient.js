@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { formatCurrency } from '@workside/utils';
 
 import { AppFrame } from '../../../components/AppFrame';
+import { Toast } from '../../../components/Toast';
 import { analyzePricing, getDashboard, getLatestPricing, getProperty } from '../../../lib/api';
 
 export function PropertyWorkspaceClient({ propertyId }) {
@@ -12,12 +13,12 @@ export function PropertyWorkspaceClient({ propertyId }) {
   const [dashboard, setDashboard] = useState(null);
   const [latestPricing, setLatestPricing] = useState(null);
   const [status, setStatus] = useState('Loading property workspace...');
-  const [error, setError] = useState('');
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     async function loadWorkspace() {
       setStatus('Loading property workspace...');
-      setError('');
+      setToast(null);
 
       try {
         const [propertyResponse, dashboardResponse] = await Promise.all([
@@ -35,7 +36,11 @@ export function PropertyWorkspaceClient({ propertyId }) {
           setLatestPricing(null);
         }
       } catch (requestError) {
-        setError(requestError.message);
+        setToast({
+          tone: 'error',
+          title: 'Could not load property',
+          message: requestError.message,
+        });
       } finally {
         setStatus('');
       }
@@ -46,15 +51,24 @@ export function PropertyWorkspaceClient({ propertyId }) {
 
   async function handleAnalyzePricing() {
     setStatus('Refreshing RentCast + AI pricing analysis...');
-    setError('');
+    setToast(null);
 
     try {
       const analysisResponse = await analyzePricing(propertyId);
       const dashboardResponse = await getDashboard(propertyId);
       setLatestPricing(analysisResponse.analysis);
       setDashboard(dashboardResponse);
+      setToast({
+        tone: 'success',
+        title: 'Pricing refreshed',
+        message: 'The latest analysis and comp set are ready.',
+      });
     } catch (requestError) {
-      setError(requestError.message);
+      setToast({
+        tone: 'error',
+        title: 'Pricing refresh failed',
+        message: requestError.message,
+      });
     } finally {
       setStatus('');
     }
@@ -62,6 +76,12 @@ export function PropertyWorkspaceClient({ propertyId }) {
 
   return (
     <AppFrame>
+      <Toast
+        tone={toast?.tone}
+        title={toast?.title}
+        message={toast?.message}
+        onClose={() => setToast(null)}
+      />
       <section className="dashboard-header">
         <div>
           <span className="label">Property workspace</span>
@@ -81,7 +101,6 @@ export function PropertyWorkspaceClient({ propertyId }) {
       </section>
 
       {status ? <p className="status-copy">{status}</p> : null}
-      {error ? <p className="error-copy">{error}</p> : null}
 
       <section className="dashboard-grid">
         <article className="feature-card">

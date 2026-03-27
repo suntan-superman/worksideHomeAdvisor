@@ -10,14 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.7.1
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile=false
-      - run: pnpm lint
-      - run: pnpm build
-      - run: pnpm test
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test

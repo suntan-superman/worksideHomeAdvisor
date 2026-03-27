@@ -342,6 +342,67 @@ select {
   color: #8a3f33;
 }
 
+.toast {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  width: min(420px, calc(100vw - 32px));
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 22px 50px rgba(39, 28, 19, 0.18);
+}
+
+.toast-info,
+.toast-success {
+  background: rgba(255, 250, 243, 0.96);
+}
+
+.toast-error {
+  background: rgba(255, 243, 239, 0.98);
+  border-color: rgba(173, 74, 55, 0.22);
+}
+
+.toast-copy {
+  display: grid;
+  gap: 6px;
+  flex: 1;
+}
+
+.toast-copy strong {
+  font-size: 0.96rem;
+}
+
+.toast-copy span {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.toast-error .toast-copy strong {
+  color: #8a3f33;
+}
+
+.toast-success .toast-copy strong,
+.toast-info .toast-copy strong {
+  color: var(--ink);
+}
+
+.toast-dismiss {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(25, 33, 42, 0.06);
+  color: var(--ink);
+  cursor: pointer;
+}
+
 .inline-button {
   width: fit-content;
 }
@@ -377,5 +438,12 @@ select {
   .panel-header,
   .dashboard-header {
     flex-direction: column;
+  }
+
+  .toast {
+    left: 16px;
+    right: 16px;
+    top: 16px;
+    width: auto;
   }
 }
