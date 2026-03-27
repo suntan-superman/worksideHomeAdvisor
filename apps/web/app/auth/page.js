@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { AppFrame } from '../../components/AppFrame';
@@ -15,7 +15,7 @@ import { setStoredSession } from '../../lib/session';
 
 export default function AuthPage() {
   const router = useRouter();
-  const [mode, setMode] = useState('signup');
+  const [mode, setMode] = useState('login');
   const [form, setForm] = useState({
     email: '',
     password: '',
@@ -23,17 +23,28 @@ export default function AuthPage() {
     lastName: '',
     otpCode: '',
   });
-  const [status, setStatus] = useState('Use signup to create an account, then verify the OTP sent to your email.');
+  const [status, setStatus] = useState('Log in with your email and password to open your seller workspace.');
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [showVerificationOption, setShowVerificationOption] = useState(false);
 
-  const isVerificationMode = useMemo(() => mode === 'verify', [mode]);
+  const isVerificationMode = mode === 'verify';
 
   function updateField(field, value) {
     setForm((current) => ({
       ...current,
       [field]: value,
     }));
+  }
+
+  function switchToLogin() {
+    setMode('login');
+    setStatus('Log in with your email and password to open your seller workspace.');
+  }
+
+  function switchToSignup() {
+    setMode('signup');
+    setStatus('Create an account first, then verify your email with the OTP we send.');
   }
 
   async function handlePrimaryAction(event) {
@@ -50,6 +61,7 @@ export default function AuthPage() {
           lastName: form.lastName,
         });
         setMode('verify');
+        setShowVerificationOption(true);
         setStatus('Account created. Enter the OTP from your email to finish verification.');
         setToast({
           tone: 'success',
@@ -64,6 +76,7 @@ export default function AuthPage() {
 
         if (result.requiresOtpVerification) {
           setMode('verify');
+          setShowVerificationOption(true);
           setStatus('Your email still needs verification. Enter the OTP we just sent.');
           setToast({
             tone: 'info',
@@ -89,6 +102,7 @@ export default function AuthPage() {
           user: result.user,
         });
         setStatus('Email verified. Redirecting to your dashboard.');
+        setShowVerificationOption(false);
         setToast({
           tone: 'success',
           title: 'Email verified',
@@ -150,25 +164,30 @@ export default function AuthPage() {
           <div className="mode-switch">
             <button
               type="button"
-              className={mode === 'signup' ? 'mode-chip active' : 'mode-chip'}
-              onClick={() => setMode('signup')}
-            >
-              Sign up
-            </button>
-            <button
-              type="button"
               className={mode === 'login' ? 'mode-chip active' : 'mode-chip'}
-              onClick={() => setMode('login')}
+              onClick={switchToLogin}
             >
               Log in
             </button>
             <button
               type="button"
-              className={mode === 'verify' ? 'mode-chip active' : 'mode-chip'}
-              onClick={() => setMode('verify')}
+              className={mode === 'signup' ? 'mode-chip active' : 'mode-chip'}
+              onClick={switchToSignup}
             >
-              Verify OTP
+              Sign up
             </button>
+            {showVerificationOption ? (
+              <button
+                type="button"
+                className={mode === 'verify' ? 'mode-chip active' : 'mode-chip'}
+                onClick={() => {
+                  setMode('verify');
+                  setStatus('Enter the OTP from your email to complete verification.');
+                }}
+              >
+                Verify OTP
+              </button>
+            ) : null}
           </div>
           <p className="status-copy">{status}</p>
         </div>
