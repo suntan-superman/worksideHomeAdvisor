@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { formatCurrency } from '@workside/utils';
 
@@ -18,6 +18,7 @@ import {
 import { getStoredSession, setStoredSession } from '../../../lib/session';
 
 export function PropertyWorkspaceClient({ propertyId }) {
+  const flyerPreviewRef = useRef(null);
   const [property, setProperty] = useState(null);
   const [dashboard, setDashboard] = useState(null);
   const [latestPricing, setLatestPricing] = useState(null);
@@ -110,7 +111,13 @@ export function PropertyWorkspaceClient({ propertyId }) {
       setToast({
         tone: 'success',
         title: 'Flyer generated',
-        message: 'A fresh flyer draft is ready for review.',
+        message: 'A fresh flyer draft is ready below. We scrolled you to the preview.',
+      });
+      requestAnimationFrame(() => {
+        flyerPreviewRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
       });
     } catch (requestError) {
       if (
@@ -261,42 +268,74 @@ export function PropertyWorkspaceClient({ propertyId }) {
       </section>
 
       <section className="content-grid dashboard-content-grid">
-        <div className="content-card">
-          <span className="label">Flyer generator</span>
-          <h2>AI flyer draft</h2>
-          <p>
-            Generate a seller-facing flyer draft from live pricing, property details, and the best
-            available photos.
-          </p>
-          <div className="mode-switch">
-            <button
-              type="button"
-              className={flyerType === 'sale' ? 'mode-chip active' : 'mode-chip'}
-              onClick={() => setFlyerType('sale')}
-            >
-              Sale flyer
-            </button>
-            <button
-              type="button"
-              className={flyerType === 'rental' ? 'mode-chip active' : 'mode-chip'}
-              onClick={() => setFlyerType('rental')}
-            >
-              Rental flyer
-            </button>
-          </div>
-          <div className="button-stack">
-            <button
-              type="button"
-              className={status.includes('Generating') ? 'button-primary button-busy' : 'button-primary'}
-              onClick={handleGenerateFlyer}
-              disabled={Boolean(status)}
-            >
-              {status.includes('Generating') ? 'Generating flyer...' : 'Generate flyer'}
-            </button>
+        <div className="content-card flyer-generator-card">
+          <div className="flyer-generator-layout">
+            <div className="flyer-generator-copy">
+              <span className="label">Flyer generator</span>
+              <h2>AI flyer draft</h2>
+              <p>
+                Generate a seller-facing flyer draft from live pricing, property details, and the
+                best available photos.
+              </p>
+              <div className="mode-switch">
+                <button
+                  type="button"
+                  className={flyerType === 'sale' ? 'mode-chip active' : 'mode-chip'}
+                  onClick={() => setFlyerType('sale')}
+                >
+                  Sale flyer
+                </button>
+                <button
+                  type="button"
+                  className={flyerType === 'rental' ? 'mode-chip active' : 'mode-chip'}
+                  onClick={() => setFlyerType('rental')}
+                >
+                  Rental flyer
+                </button>
+              </div>
+              <p className="flyer-generator-note">
+                Best for testing listing language, layout direction, and which photos deserve top
+                placement.
+              </p>
+            </div>
+
+            <div className="flyer-generator-side">
+              <div className="flyer-generator-meta">
+                <div className="stat-card">
+                  <strong>Pricing</strong>
+                  <span>{latestPricing ? 'Live pricing attached' : 'Uses latest saved pricing'}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Photos</strong>
+                  <span>
+                    {latestFlyer?.selectedPhotos?.length
+                      ? `${latestFlyer.selectedPhotos.length} selected for the latest draft`
+                      : 'Uses top available property photos'}
+                  </span>
+                </div>
+                <div className="stat-card">
+                  <strong>Output</strong>
+                  <span>Headline, highlights, CTA, and preview draft</span>
+                </div>
+              </div>
+              <div className="button-stack flyer-generator-actions">
+                <button
+                  type="button"
+                  className={status.includes('Generating') ? 'button-primary button-busy' : 'button-primary'}
+                  onClick={handleGenerateFlyer}
+                  disabled={Boolean(status)}
+                >
+                  {status.includes('Generating') ? 'Generating flyer...' : 'Generate flyer'}
+                </button>
+                <span className="flyer-generator-helper">
+                  Creates a stored draft from your latest pricing and property details.
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="content-card">
+        <div ref={flyerPreviewRef} className="content-card">
           <span className="label">Latest flyer preview</span>
           {latestFlyer ? (
             <div className="flyer-preview">

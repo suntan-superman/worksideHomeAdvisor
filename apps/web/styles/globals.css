@@ -482,6 +482,83 @@ select {
   color: var(--ink);
 }
 
+.flyer-generator-card {
+  background:
+    linear-gradient(180deg, rgba(255, 251, 245, 0.94), rgba(255, 246, 236, 0.9)),
+    var(--panel);
+}
+
+.flyer-generator-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.95fr);
+  gap: 26px;
+  align-items: start;
+}
+
+.flyer-generator-copy {
+  display: grid;
+  gap: 14px;
+}
+
+.flyer-generator-copy h2 {
+  font-size: clamp(2rem, 3vw, 2.5rem);
+}
+
+.flyer-generator-copy p {
+  margin: 0;
+  max-width: 42rem;
+  color: var(--muted);
+}
+
+.flyer-generator-note {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(70, 99, 79, 0.08);
+  border: 1px solid rgba(70, 99, 79, 0.12);
+}
+
+.flyer-generator-side {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(25, 33, 42, 0.08);
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.flyer-generator-meta {
+  display: grid;
+  gap: 12px;
+}
+
+.flyer-generator-meta .stat-card {
+  min-width: 0;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: rgba(255, 250, 244, 0.92);
+  box-shadow: none;
+}
+
+.flyer-generator-meta .stat-card strong {
+  font-size: 0.98rem;
+}
+
+.flyer-generator-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.flyer-generator-actions .button-primary {
+  width: 100%;
+}
+
+.flyer-generator-helper {
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
 .flyer-preview {
   display: grid;
   gap: 18px;
@@ -543,6 +620,14 @@ select {
     right: 16px;
     top: 16px;
     width: auto;
+  }
+
+  .flyer-generator-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .flyer-generator-copy h2 {
+    font-size: 1.85rem;
   }
 
   .flyer-photo-grid {
