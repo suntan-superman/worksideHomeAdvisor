@@ -8,7 +8,6 @@ node_modules
 .next
 .expo
 .netlify
-package-lock.json
 package-lock.yaml
 yarn.lock
 dist

@@ -15,7 +15,6 @@ build
 coverage
 tmp
 *.log
-package-lock.json
 apps/api/uploads
 apps/mobile/.expo
 apps/mobile/dist
@@ -25,4 +24,3 @@ latest-mobile-app2
 legacy-merxus-mobile
 legacy-root-expo
 mobile-archive-20260328-083609
-
