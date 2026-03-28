@@ -14,7 +14,16 @@ import {
 
 import * as ImagePicker from 'expo-image-picker';
 
-import { API_URL, getDashboard, listProperties, login, requestOtp, savePhoto, verifyEmailOtp } from '../services/api';
+import {
+  API_URL,
+  getDashboard,
+  listMediaAssets,
+  listProperties,
+  login,
+  requestOtp,
+  savePhoto,
+  verifyEmailOtp,
+} from '../services/api';
 
 const ROOM_LABEL_OPTIONS = ['Living room', 'Kitchen', 'Primary bedroom', 'Bathroom', 'Exterior'];
 
@@ -31,6 +40,21 @@ function formatCurrency(value) {
   }).format(Number(value || 0));
 }
 
+function formatCreatedAt(value) {
+  if (!value) {
+    return '';
+  }
+
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+    }).format(new Date(value));
+  } catch (error) {
+    return '';
+  }
+}
+
 export function RootScreen() {
   const [authMode, setAuthMode] = useState('login');
   const [showPassword, setShowPassword] = useState(false);
@@ -42,6 +66,8 @@ export function RootScreen() {
   const [properties, setProperties] = useState([]);
   const [propertyId, setPropertyId] = useState('');
   const [dashboard, setDashboard] = useState(null);
+  const [gallery, setGallery] = useState([]);
+  const [selectedAssetId, setSelectedAssetId] = useState('');
   const [photoAsset, setPhotoAsset] = useState(null);
   const [form, setForm] = useState({
     email: '',
@@ -51,6 +77,7 @@ export function RootScreen() {
   });
 
   const selectedProperty = properties.find((property) => property.id === propertyId) || null;
+  const selectedAsset = gallery.find((asset) => asset.id === selectedAssetId) || gallery[0] || null;
 
   function updateField(field, value) {
     setForm((current) => ({
@@ -71,8 +98,13 @@ export function RootScreen() {
       return;
     }
 
-    const dashboardResponse = await getDashboard(nextPropertyId);
+    const [dashboardResponse, mediaResponse] = await Promise.all([
+      getDashboard(nextPropertyId),
+      listMediaAssets(nextPropertyId),
+    ]);
     setDashboard(dashboardResponse);
+    setGallery(mediaResponse.assets || []);
+    setSelectedAssetId(mediaResponse.assets?.[0]?.id || '');
   }
 
   async function handleLogin() {
@@ -139,6 +171,8 @@ export function RootScreen() {
     setProperties([]);
     setPropertyId('');
     setDashboard(null);
+    setGallery([]);
+    setSelectedAssetId('');
     setAuthMode('login');
     setShowPassword(false);
     setError('');
@@ -152,8 +186,13 @@ export function RootScreen() {
     try {
       setPropertyId(nextPropertyId);
       setPropertyDetailsCollapsed(false);
-      const dashboardResponse = await getDashboard(nextPropertyId);
+      const [dashboardResponse, mediaResponse] = await Promise.all([
+        getDashboard(nextPropertyId),
+        listMediaAssets(nextPropertyId),
+      ]);
       setDashboard(dashboardResponse);
+      setGallery(mediaResponse.assets || []);
+      setSelectedAssetId(mediaResponse.assets?.[0]?.id || '');
       const nextProperty = properties.find((property) => property.id === nextPropertyId);
       setStatus(nextProperty ? `Loaded ${nextProperty.title}.` : 'Property loaded.');
     } catch (requestError) {
@@ -228,6 +267,9 @@ export function RootScreen() {
         width: photoAsset.width,
         height: photoAsset.height,
       });
+      const mediaResponse = await listMediaAssets(propertyId);
+      setGallery(mediaResponse.assets || []);
+      setSelectedAssetId(mediaResponse.assets?.[0]?.id || '');
       setPhotoAsset(null);
       setStatus('Photo saved to the selected property.');
     } catch (requestError) {
@@ -362,8 +404,8 @@ export function RootScreen() {
                         </Pressable>
                       </View>
 
-                      {photoAsset ? (
-                        <View style={styles.photoPreviewCard}>
+                    {photoAsset ? (
+                      <View style={styles.photoPreviewCard}>
                           <Image source={{ uri: photoAsset.uri }} style={styles.photoPreview} />
                           <Text style={styles.body}>
                             Ready to save as {form.roomLabel.toLowerCase()} for this property.
@@ -377,6 +419,63 @@ export function RootScreen() {
                           </Pressable>
                         </View>
                       ) : null}
+                    </View>
+
+                    <View style={styles.galleryCard}>
+                      <Text style={styles.label}>Saved photo gallery</Text>
+                      <Text style={styles.body}>
+                        Saved photos stay attached to this property and can feed later flyer and vision workflows.
+                      </Text>
+
+                      {gallery.length ? (
+                        <>
+                          <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.galleryRail}
+                          >
+                            {gallery.map((asset) => (
+                              <Pressable
+                                key={asset.id}
+                                onPress={() => setSelectedAssetId(asset.id)}
+                                style={[
+                                  styles.galleryTile,
+                                  asset.id === selectedAsset?.id ? styles.galleryTileActive : null,
+                                ]}
+                              >
+                                <Image source={{ uri: asset.imageUrl }} style={styles.galleryTileImage} />
+                                <Text style={styles.galleryTileLabel} numberOfLines={1}>
+                                  {asset.roomLabel}
+                                </Text>
+                              </Pressable>
+                            ))}
+                          </ScrollView>
+
+                          {selectedAsset ? (
+                            <View style={styles.selectedAssetCard}>
+                              <Image source={{ uri: selectedAsset.imageUrl }} style={styles.selectedAssetImage} />
+                              <Text style={styles.selectedAssetTitle}>{selectedAsset.roomLabel}</Text>
+                              <Text style={styles.selectedAssetMeta}>
+                                Saved {formatCreatedAt(selectedAsset.createdAt) || 'recently'}
+                                {selectedAsset.analysis?.roomGuess
+                                  ? ` · AI sees ${selectedAsset.analysis.roomGuess.toLowerCase()}`
+                                  : ''}
+                              </Text>
+                              {selectedAsset.analysis?.summary ? (
+                                <Text style={styles.body}>{selectedAsset.analysis.summary}</Text>
+                              ) : null}
+                              {typeof selectedAsset.analysis?.overallQualityScore === 'number' ? (
+                                <Text style={styles.assetScore}>
+                                  Quality score {selectedAsset.analysis.overallQualityScore}/100
+                                  {selectedAsset.analysis?.retakeRecommended ? ' · Retake suggested' : ''}
+                                </Text>
+                              ) : null}
+                            </View>
+                          ) : null}
+                        </>
+                      ) : (
+                        <Text style={styles.body}>No saved photos yet for this property.</Text>
+                      )}
                     </View>
                   </>
                 ) : (
@@ -753,6 +852,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingTop: 4,
   },
+  galleryCard: {
+    gap: 12,
+    marginTop: 8,
+    paddingTop: 4,
+  },
   roomChipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -796,5 +900,62 @@ const styles = StyleSheet.create({
     height: 220,
     borderRadius: 14,
     backgroundColor: '#1b252d',
+  },
+  galleryRail: {
+    gap: 12,
+    paddingVertical: 2,
+  },
+  galleryTile: {
+    width: 108,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  galleryTileActive: {
+    borderColor: '#d28859',
+  },
+  galleryTileImage: {
+    width: '100%',
+    aspectRatio: 1,
+    backgroundColor: '#1b252d',
+  },
+  galleryTileLabel: {
+    color: '#f8f1e6',
+    fontSize: 13,
+    fontWeight: '700',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  selectedAssetCard: {
+    gap: 10,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  selectedAssetImage: {
+    width: '100%',
+    height: 220,
+    borderRadius: 14,
+    backgroundColor: '#1b252d',
+  },
+  selectedAssetTitle: {
+    color: '#f8f1e6',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  selectedAssetMeta: {
+    color: '#dbcbb7',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  assetScore: {
+    color: '#93a982',
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '700',
   },
 });

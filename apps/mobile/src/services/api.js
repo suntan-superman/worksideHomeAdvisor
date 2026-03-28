@@ -55,6 +55,10 @@ export function getDashboard(propertyId) {
   return request(`/api/v1/properties/${propertyId}/dashboard`);
 }
 
+export function listMediaAssets(propertyId) {
+  return request(`/api/v1/properties/${propertyId}/media`);
+}
+
 export function savePhoto(propertyId, payload) {
   return request(`/api/v1/properties/${propertyId}/media`, {
     method: 'POST',
