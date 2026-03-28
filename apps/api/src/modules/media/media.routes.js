@@ -8,6 +8,7 @@ import {
   createMediaAssetAndAnalysis,
   getMediaAssetById,
   listMediaAssets,
+  updateMediaAsset,
 } from './media.service.js';
 
 const paramsSchema = z.object({
@@ -16,6 +17,12 @@ const paramsSchema = z.object({
 
 const assetParamsSchema = z.object({
   assetId: z.string().min(1),
+});
+
+const updateMediaAssetSchema = z.object({
+  roomLabel: z.string().min(1).max(120).optional(),
+  listingCandidate: z.boolean().optional(),
+  listingNote: z.string().max(280).optional(),
 });
 
 export async function mediaRoutes(fastify) {
@@ -72,6 +79,18 @@ export async function mediaRoutes(fastify) {
       return reply.code(201).send(result);
     } catch (error) {
       const statusCode = error.message === 'Property not found.' ? 404 : 400;
+      return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
+  fastify.patch('/media/assets/:assetId', async (request, reply) => {
+    try {
+      const { assetId } = assetParamsSchema.parse(request.params);
+      const payload = updateMediaAssetSchema.parse(request.body);
+      const asset = await updateMediaAsset(assetId, payload);
+      return reply.send({ asset });
+    } catch (error) {
+      const statusCode = error.message === 'Media asset not found.' ? 404 : 400;
       return reply.code(statusCode).send({ message: error.message });
     }
   });

@@ -85,3 +85,10 @@ export function savePhoto(propertyId, payload) {
 export function listMediaAssets(propertyId) {
   return request(`/api/v1/properties/${propertyId}/media`);
 }
+
+export function updateMediaAsset(assetId, payload) {
+  return request(`/api/v1/media/assets/${assetId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}

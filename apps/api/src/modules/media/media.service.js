@@ -28,6 +28,8 @@ function serializeMediaAsset(document) {
       document.imageUrl ||
       (document._id ? buildMediaAssetUrl(document._id.toString()) : null),
     imageDataUrl: document.imageDataUrl || null,
+    listingCandidate: Boolean(document.listingCandidate),
+    listingNote: document.listingNote || '',
     analysis: document.analysis || null,
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
@@ -94,6 +96,32 @@ export async function createMediaAssetAndAnalysis({
     asset: serializeMediaAsset(asset.toObject()),
     analysis,
   };
+}
+
+export async function updateMediaAsset(assetId, updates) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to update media assets.');
+  }
+
+  const asset = await MediaAssetModel.findById(assetId);
+  if (!asset) {
+    throw new Error('Media asset not found.');
+  }
+
+  if (typeof updates.roomLabel === 'string') {
+    asset.roomLabel = updates.roomLabel.trim() || asset.roomLabel;
+  }
+
+  if (typeof updates.listingCandidate === 'boolean') {
+    asset.listingCandidate = updates.listingCandidate;
+  }
+
+  if (typeof updates.listingNote === 'string') {
+    asset.listingNote = updates.listingNote.trim().slice(0, 280);
+  }
+
+  await asset.save();
+  return serializeMediaAsset(asset.toObject());
 }
 
 export async function getMediaAssetById(assetId) {

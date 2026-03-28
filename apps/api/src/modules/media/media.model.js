@@ -37,6 +37,8 @@ const mediaAssetSchema = new mongoose.Schema(
     byteSize: { type: Number },
     imageUrl: { type: String },
     imageDataUrl: { type: String },
+    listingCandidate: { type: Boolean, default: false },
+    listingNote: { type: String, default: '' },
     analysis: { type: photoAnalysisSnapshotSchema, default: null },
   },
   {
