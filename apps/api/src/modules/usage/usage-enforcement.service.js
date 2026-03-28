@@ -21,7 +21,7 @@ const PLAN_DEFINITIONS = {
     monthlyPropertyLimit: 3,
     pricingCooldownHours: 24,
     flyerCooldownHours: 1,
-    features: ['pricing.full', 'flyer.generate', 'flyer.export', 'marketing.export'],
+    features: ['pricing.full', 'flyer.generate', 'flyer.export', 'marketing.export', 'reports.client_ready'],
   },
   seller_pro: {
     planCode: 'seller_pro',
@@ -29,7 +29,7 @@ const PLAN_DEFINITIONS = {
     monthlyPropertyLimit: 3,
     pricingCooldownHours: 24,
     flyerCooldownHours: 1,
-    features: ['pricing.full', 'flyer.generate', 'flyer.export', 'marketing.export'],
+    features: ['pricing.full', 'flyer.generate', 'flyer.export', 'marketing.export', 'reports.client_ready'],
   },
   agent_starter: {
     planCode: 'agent_starter',
@@ -42,6 +42,7 @@ const PLAN_DEFINITIONS = {
       'flyer.generate',
       'flyer.export',
       'marketing.export',
+      'reports.client_ready',
       'presentation.mode',
     ],
   },
@@ -84,7 +85,7 @@ const PLAN_DEFINITIONS = {
     monthlyPropertyLimit: 30,
     pricingCooldownHours: 24,
     flyerCooldownHours: 1,
-    features: ['pricing.full', 'flyer.generate', 'flyer.export', 'marketing.export'],
+    features: ['pricing.full', 'flyer.generate', 'flyer.export', 'marketing.export', 'reports.client_ready'],
   },
   sample_monthly: {
     planCode: 'sample_monthly',
@@ -97,6 +98,7 @@ const PLAN_DEFINITIONS = {
       'flyer.generate',
       'flyer.export',
       'marketing.export',
+      'reports.client_ready',
       'presentation.mode',
     ],
   },
@@ -421,6 +423,8 @@ export async function finalizeFreshAnalysisRun({
     update.$inc.pricingRunsTotal = 1;
   } else if (analysisType === 'flyer') {
     update.$inc.flyersGenerated = 1;
+  } else if (analysisType === 'report') {
+    update.$inc.documentGenerations = 1;
   }
 
   await UsageTrackingModel.updateOne({ _id: usage._id }, update);

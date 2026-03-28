@@ -1,33 +1,66 @@
 import { BRANDING } from '@workside/branding';
 
-const cards = [
-  { title: 'Prompt versions', value: '12', note: 'Pricing, improvements, marketing, documents, chat' },
-  { title: 'Flagged outputs', value: '3', note: 'Low-confidence or manual review items waiting' },
-  { title: 'Active pilot properties', value: '27', note: 'Current seller workspaces across demo + pilot' },
-  { title: 'Pricing jobs today', value: '54', note: 'Including retries and cached analyses' },
-  { title: 'Document drafts today', value: '16', note: 'All generated with disclaimer injection' },
-  { title: 'Notification failures', value: '0', note: 'Email and push pipelines healthy in preview' },
-];
+import { AdminSection } from './_components/AdminSection';
+import { MetricCard } from './_components/MetricCard';
+import { StatusBadge } from './_components/StatusBadge';
+import { getAdminBilling, getAdminOverview, getAdminWorkers } from '../lib/admin-api';
 
-export default function AdminHomePage() {
+export const dynamic = 'force-dynamic';
+
+export default async function AdminHomePage() {
+  const [overview, billing, workersPayload] = await Promise.all([
+    getAdminOverview(),
+    getAdminBilling(),
+    getAdminWorkers(),
+  ]);
+
+  const metrics = overview.metrics || {};
+  const workers = workersPayload.workers || [];
+  const onlineWorkers = workers.filter((worker) => worker.status === 'online').length;
+
   return (
-    <main className="admin-shell">
-      <span className="pill">Internal console</span>
-      <h1>{BRANDING.companyName} Admin</h1>
-      <p className="muted">
-        Prompt governance, auditability, feature flags, and support tooling for
-        the home seller platform.
-      </p>
+    <AdminSection
+      eyebrow="Internal Console"
+      title={`${BRANDING.companyName} Admin`}
+      description="Operational command surface for seller accounts, pricing activity, billing state, safeguard pressure, and worker health."
+      actions={<StatusBadge tone="success">{overview.dataSource || 'unknown data source'}</StatusBadge>}
+    >
+      {overview.error ? <div className="notice error">{overview.error}</div> : null}
 
-      <section className="admin-grid">
-        {cards.map((card) => (
-          <article key={card.title} className="admin-card">
-            <div className="muted">{card.title}</div>
-            <div className="metric">{card.value}</div>
-            <p className="muted">{card.note}</p>
-          </article>
-        ))}
-      </section>
-    </main>
+      <div className="card-grid">
+        <MetricCard label="Total Users" value={metrics.totalUsers || 0} note={`${metrics.verifiedUsers || 0} verified`} />
+        <MetricCard label="Properties" value={metrics.totalProperties || 0} note={`${metrics.mediaAssets || 0} media assets`} />
+        <MetricCard label="Pricing Analyses" value={metrics.pricingAnalyses || 0} note={`${metrics.flyersGenerated || 0} flyers`} />
+        <MetricCard label="Active Subscriptions" value={metrics.activeSubscriptions || 0} note={`${billing.plans?.filter((plan) => plan.configured).length || 0} configured plans`} />
+        <MetricCard label="Usage Records" value={metrics.usageRecords || 0} note={`${metrics.recentRateLimitEvents || 0} recent rate-limit events`} />
+        <MetricCard label="Workers Online" value={`${onlineWorkers}/${workers.length || 0}`} note="Health probes from the admin API" />
+      </div>
+
+      <div className="split-layout">
+        <div className="subpanel">
+          <h2>What this console now covers</h2>
+          <ul className="bullet-list muted">
+            <li>Live admin overview aggregated from MongoDB.</li>
+            <li>Users and property inventory inspection.</li>
+            <li>Billing plan catalog and recent subscription sync.</li>
+            <li>Usage safeguards and worker health visibility.</li>
+          </ul>
+        </div>
+
+        <div className="subpanel">
+          <h2>Worker Snapshot</h2>
+          <div className="stack-list">
+            {workers.map((worker) => (
+              <div key={worker.key} className="stack-row">
+                <strong>{worker.name}</strong>
+                <StatusBadge tone={worker.status === 'online' ? 'success' : 'warn'}>
+                  {worker.status}
+                </StatusBadge>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </AdminSection>
   );
 }

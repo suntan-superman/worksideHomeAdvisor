@@ -610,6 +610,12 @@ select {
     var(--panel);
 }
 
+.report-generator-card {
+  background:
+    linear-gradient(180deg, rgba(246, 250, 255, 0.94), rgba(237, 245, 255, 0.88)),
+    var(--panel);
+}
+
 .flyer-generator-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.95fr);
@@ -766,10 +772,87 @@ select {
   color: var(--muted);
 }
 
+.flyer-photo-badge {
+  display: inline-flex;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(70, 99, 79, 0.12);
+  color: var(--moss);
+  font-size: 0.8rem;
+}
+
+.flyer-photo-note {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .property-media-layout {
   display: grid;
   gap: 18px;
   margin-top: 14px;
+}
+
+.property-media-candidate-strip {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.property-media-candidate-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.property-media-candidate-header h3 {
+  margin-top: 6px;
+  font-size: 1.3rem;
+}
+
+.property-media-candidate-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.property-media-candidate-card {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.68);
+  text-align: left;
+}
+
+.property-media-candidate-card.active {
+  border-color: var(--clay);
+  box-shadow: 0 10px 22px rgba(200, 116, 71, 0.14);
+}
+
+.property-media-candidate-card img {
+  width: 88px;
+  height: 88px;
+  object-fit: cover;
+  border-radius: 14px;
+}
+
+.property-media-candidate-card strong {
+  display: block;
+  color: var(--ink);
+}
+
+.property-media-candidate-card span {
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.5;
 }
 
 .property-media-rail {
@@ -827,6 +910,22 @@ select {
   gap: 10px;
 }
 
+.property-media-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.report-preview {
+  display: grid;
+  gap: 16px;
+}
+
+.report-preview-section {
+  display: grid;
+  gap: 10px;
+}
+
 .property-media-badges {
   display: flex;
   flex-wrap: wrap;
@@ -840,6 +939,23 @@ select {
   color: var(--moss);
   font-size: 0.88rem;
   font-weight: 700;
+}
+
+.property-media-note-field {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.property-media-note-field textarea {
+  min-height: 96px;
+  resize: vertical;
+  padding: 12px 14px;
+  border: 1px solid rgba(25, 33, 42, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--ink);
+  font: inherit;
 }
 
 @media (max-width: 900px) {

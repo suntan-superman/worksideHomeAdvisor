@@ -6,6 +6,8 @@ const flyerPhotoSchema = new mongoose.Schema(
     roomLabel: { type: String },
     imageUrl: { type: String },
     score: { type: Number },
+    listingCandidate: { type: Boolean, default: false },
+    listingNote: { type: String, default: '' },
   },
   { _id: false },
 );

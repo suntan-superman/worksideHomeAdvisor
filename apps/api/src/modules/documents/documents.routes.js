@@ -12,6 +12,11 @@ import {
   generatePropertyFlyer,
   getLatestPropertyFlyer,
 } from './flyer.service.js';
+import {
+  exportPropertyReportPdf,
+  generatePropertyReport,
+  getLatestPropertyReport,
+} from './report.service.js';
 
 const flyerRequestSchema = z.object({
   flyerType: z.enum(['sale', 'rental']).default('sale'),
@@ -130,6 +135,125 @@ export async function documentsRoutes(fastify) {
       const { bytes, filename } = await exportPropertyFlyerPdf({
         propertyId: request.params.propertyId,
         flyerType: payload.flyerType,
+      });
+
+      reply
+        .header('Content-Type', 'application/pdf')
+        .header('Content-Disposition', `attachment; filename="${filename}"`);
+
+      return reply.send(Buffer.from(bytes));
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/:propertyId/report/generate', async (request, reply) => {
+    try {
+      const property = await getPropertyById(request.params.propertyId);
+      if (!property) {
+        return reply.code(404).send({ message: 'Property not found.' });
+      }
+
+      const latestReport = await getLatestPropertyReport(request.params.propertyId);
+      const decision = await enforceAnalysisRequest({
+        userId: property.ownerUserId,
+        propertyId: request.params.propertyId,
+        analysisType: 'report',
+        featureKey: 'reports.client_ready',
+        latestResult: latestReport,
+        resultTimestamp: latestReport?.createdAt,
+        cooldownHours: 6,
+        inputSignature: {
+          propertyId: request.params.propertyId,
+          updatedAt: property.updatedAt,
+        },
+      });
+
+      if (decision.action === 'RETURN_CACHED_RESULT') {
+        await finalizeCachedAnalysisReturn({
+          userId: property.ownerUserId,
+          propertyId: request.params.propertyId,
+          analysisType: 'report',
+          usageContext: decision.context,
+        });
+        return reply.send({
+          report: decision.cachedResult,
+          metadata: {
+            servedFromCache: true,
+            cacheReason: decision.cacheReason,
+            cachedAt: decision.cachedAt,
+          },
+        });
+      }
+
+      if (decision.action === 'DENY_UPGRADE_REQUIRED') {
+        return reply.code(402).send({
+          message: 'Plan limit reached or feature not included.',
+          ...decision,
+        });
+      }
+
+      if (decision.action === 'DENY_RATE_LIMIT') {
+        return reply
+          .code(429)
+          .header('Retry-After', String(decision.retryAfterSeconds))
+          .send({
+            message: 'Too many report requests in a short time.',
+            ...decision,
+          });
+      }
+
+      let report;
+      try {
+        report = await generatePropertyReport({
+          propertyId: request.params.propertyId,
+        });
+        await finalizeFreshAnalysisRun({
+          userId: property.ownerUserId,
+          propertyId: request.params.propertyId,
+          analysisType: 'report',
+          usageContext: decision.context,
+          inputHash: decision.inputHash,
+        });
+      } catch (error) {
+        await releaseAnalysisLock({
+          userId: property.ownerUserId,
+          propertyId: request.params.propertyId,
+          analysisType: 'report',
+          inputHash: decision.inputHash,
+        });
+        throw error;
+      }
+
+      return reply.code(201).send({
+        report,
+        metadata: {
+          servedFromCache: false,
+        },
+      });
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/:propertyId/report/latest', async (request, reply) => {
+    try {
+      const report = await getLatestPropertyReport(request.params.propertyId);
+      return reply.send({ report });
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/:propertyId/report/export.pdf', async (request, reply) => {
+    try {
+      const property = await getPropertyById(request.params.propertyId);
+      if (!property) {
+        return reply.code(404).send({ message: 'Property not found.' });
+      }
+
+      const { bytes, filename } = await exportPropertyReportPdf({
+        propertyId: request.params.propertyId,
       });
 
       reply

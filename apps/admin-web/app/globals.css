@@ -7,6 +7,8 @@
   --muted: #aab9bb;
   --accent: #d9986a;
   --success: #89c59a;
+  --warn: #d9b466;
+  --danger: #e49788;
 }
 
 * {
@@ -26,29 +28,85 @@ a {
   text-decoration: none;
 }
 
-.admin-shell {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 24px;
+.admin-layout {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
 }
 
-.admin-grid {
+.sidebar {
+  padding: 28px 20px;
+  border-right: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.sidebar-brand h1 {
+  margin: 12px 0 8px;
+}
+
+.sidebar-nav {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
+  gap: 10px;
   margin-top: 28px;
 }
 
-.admin-card {
+.sidebar-link {
+  display: block;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.sidebar-link:hover {
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.admin-main {
+  padding: 28px;
+}
+
+.panel {
+  display: grid;
+  gap: 24px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.section-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.card-grid.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric-card,
+.subpanel,
+.worker-card {
   padding: 22px;
   border: 1px solid var(--line);
   border-radius: 22px;
   background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
 }
 
-.metric {
-  font-size: 2rem;
-  font-weight: 700;
+.metric-value {
+  font-size: 2.2rem;
+  font-weight: 800;
   margin-top: 12px;
 }
 
@@ -56,6 +114,7 @@ a {
   color: var(--muted);
 }
 
+.small-label,
 .pill {
   display: inline-flex;
   padding: 8px 12px;
@@ -65,8 +124,143 @@ a {
   font-size: 0.85rem;
 }
 
+.small-label {
+  padding: 0;
+  background: transparent;
+}
+
+.split-layout {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 18px;
+}
+
+.subpanel h2,
+.worker-card h2 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+}
+
+.bullet-list {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.7;
+}
+
+.stack-list {
+  display: grid;
+  gap: 12px;
+}
+
+.stack-row,
+.worker-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.worker-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.worker-health-block {
+  margin: 0;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.18);
+  overflow: auto;
+  color: #d7e0e1;
+  font-size: 0.85rem;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.status-neutral {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.status-success {
+  background: rgba(137, 197, 154, 0.15);
+  color: var(--success);
+}
+
+.status-warn {
+  background: rgba(217, 180, 102, 0.16);
+  color: var(--warn);
+}
+
+.table-shell {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.data-table th {
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.data-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.empty-state,
+.notice {
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+}
+
+.notice.error {
+  border-style: solid;
+  border-color: rgba(228, 151, 136, 0.24);
+  color: var(--danger);
+  background: rgba(228, 151, 136, 0.08);
+}
+
 @media (max-width: 900px) {
-  .admin-grid {
+  .admin-layout,
+  .split-layout,
+  .card-grid,
+  .card-grid.compact {
     grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .section-header {
+    flex-direction: column;
   }
 }

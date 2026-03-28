@@ -11,12 +11,16 @@ import {
   analyzePricing,
   createBillingCheckoutSession,
   generateFlyer,
+  generateReport,
   getFlyerExportUrl,
   getDashboard,
+  getLatestReport,
   listMediaAssets,
   getLatestFlyer,
   getLatestPricing,
   getProperty,
+  getReportExportUrl,
+  updateMediaAsset,
 } from '../../../lib/api';
 import { getStoredSession, setStoredSession } from '../../../lib/session';
 
@@ -37,15 +41,33 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [dashboard, setDashboard] = useState(null);
   const [latestPricing, setLatestPricing] = useState(null);
   const [latestFlyer, setLatestFlyer] = useState(null);
+  const [latestReport, setLatestReport] = useState(null);
   const [mediaAssets, setMediaAssets] = useState([]);
   const [selectedMediaAssetId, setSelectedMediaAssetId] = useState('');
   const [flyerType, setFlyerType] = useState('sale');
+  const [listingNoteDraft, setListingNoteDraft] = useState('');
   const [status, setStatus] = useState('Loading property workspace...');
   const [toast, setToast] = useState(null);
   const selectedMediaAsset = useMemo(
     () => mediaAssets.find((asset) => asset.id === selectedMediaAssetId) || mediaAssets[0] || null,
     [mediaAssets, selectedMediaAssetId],
   );
+  const listingCandidateAssets = useMemo(
+    () => mediaAssets.filter((asset) => asset.listingCandidate),
+    [mediaAssets],
+  );
+
+  useEffect(() => {
+    setListingNoteDraft(selectedMediaAsset?.listingNote || '');
+  }, [selectedMediaAsset?.id, selectedMediaAsset?.listingNote]);
+
+  async function refreshMediaAssets(preferredAssetId = selectedMediaAssetId) {
+    const mediaResponse = await listMediaAssets(propertyId);
+    const nextAssets = mediaResponse.assets || [];
+    setMediaAssets(nextAssets);
+    setSelectedMediaAssetId(preferredAssetId || nextAssets?.[0]?.id || '');
+    return nextAssets;
+  }
 
   useEffect(() => {
     const nextSession = {
@@ -84,9 +106,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         }
 
         try {
-          const mediaResponse = await listMediaAssets(propertyId);
-          setMediaAssets(mediaResponse.assets || []);
-          setSelectedMediaAssetId(mediaResponse.assets?.[0]?.id || '');
+          const reportResponse = await getLatestReport(propertyId);
+          setLatestReport(reportResponse.report);
+        } catch {
+          setLatestReport(null);
+        }
+
+        try {
+          await refreshMediaAssets();
         } catch {
           setMediaAssets([]);
           setSelectedMediaAssetId('');
@@ -192,8 +219,130 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
   }
 
+  async function handleGenerateReport() {
+    setStatus('Generating seller intelligence report...');
+    setToast(null);
+
+    try {
+      const response = await generateReport(propertyId);
+      setLatestReport(response.report);
+      setToast({
+        tone: 'success',
+        title: 'Report generated',
+        message: 'A fresh property report preview is ready below.',
+      });
+    } catch (requestError) {
+      if (
+        requestError.status === 402 &&
+        requestError.details?.suggestedPlan
+      ) {
+        const session = getStoredSession();
+        if (session?.user?.id) {
+          setStatus('Opening Stripe checkout...');
+
+          try {
+            const checkout = await createBillingCheckoutSession(
+              {
+                userId: session.user.id,
+                planKey: requestError.details.suggestedPlan,
+              },
+              session.user.id,
+            );
+
+            if (checkout.url) {
+              window.location.href = checkout.url;
+              return;
+            }
+          } catch (checkoutError) {
+            setToast({
+              tone: 'error',
+              title: 'Billing required',
+              message: checkoutError.message,
+            });
+            setStatus('');
+            return;
+          }
+        }
+      }
+
+      setToast({
+        tone: 'error',
+        title: 'Report generation failed',
+        message: requestError.message,
+      });
+    } finally {
+      setStatus('');
+    }
+  }
+
+  async function handleToggleListingCandidate() {
+    if (!selectedMediaAsset) {
+      return;
+    }
+
+    const nextValue = !selectedMediaAsset.listingCandidate;
+    setStatus(nextValue ? 'Marking photo as listing candidate...' : 'Removing listing-candidate mark...');
+    setToast(null);
+
+    try {
+      await updateMediaAsset(selectedMediaAsset.id, {
+        listingCandidate: nextValue,
+      });
+      await refreshMediaAssets(selectedMediaAsset.id);
+      setToast({
+        tone: 'success',
+        title: nextValue ? 'Listing candidate selected' : 'Listing candidate removed',
+        message: nextValue
+          ? 'This photo will now be prioritized for flyer generation.'
+          : 'This photo will no longer be prioritized for the flyer.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not update photo',
+        message: requestError.message,
+      });
+    } finally {
+      setStatus('');
+    }
+  }
+
+  async function handleSaveListingNote() {
+    if (!selectedMediaAsset) {
+      return;
+    }
+
+    setStatus('Saving photo note...');
+    setToast(null);
+
+    try {
+      await updateMediaAsset(selectedMediaAsset.id, {
+        listingNote: listingNoteDraft,
+      });
+      await refreshMediaAssets(selectedMediaAsset.id);
+      setToast({
+        tone: 'success',
+        title: 'Photo note saved',
+        message: 'Your note will stay attached to this photo for listing review.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not save note',
+        message: requestError.message,
+      });
+    } finally {
+      setStatus('');
+    }
+  }
+
   function handleDownloadFlyerPdf() {
     const exportUrl = getFlyerExportUrl(propertyId, flyerType);
+    window.open(exportUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  function handleDownloadReportPdf() {
+    const exportUrl = getReportExportUrl(propertyId);
     window.open(exportUrl, '_blank', 'noopener,noreferrer');
   }
 
@@ -396,6 +545,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   </span>
                 </div>
                 <div className="stat-card">
+                  <strong>Listing picks</strong>
+                  <span>
+                    {listingCandidateAssets.length
+                      ? `${listingCandidateAssets.length} manually selected`
+                      : 'No manual listing picks yet'}
+                  </span>
+                </div>
+                <div className="stat-card">
                   <strong>Output</strong>
                   <span>Headline, highlights, CTA, and preview draft</span>
                 </div>
@@ -452,6 +609,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         <img src={photo.imageUrl} alt={photo.roomLabel || 'Property photo'} />
                       ) : null}
                       <span>{photo.roomLabel || 'Selected photo'}</span>
+                      {photo.listingCandidate ? (
+                        <strong className="flyer-photo-badge">Seller selected</strong>
+                      ) : null}
+                      {photo.listingNote ? (
+                        <em className="flyer-photo-note">{photo.listingNote}</em>
+                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -473,6 +636,121 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       </section>
 
       <section className="content-grid dashboard-content-grid">
+        <div className="content-card report-generator-card">
+          <div className="flyer-generator-layout">
+            <div className="flyer-generator-copy">
+              <span className="label">Seller report</span>
+              <h2>Property intelligence report</h2>
+              <p>
+                Generate a richer PDF-ready report that combines pricing, comps, selected photos,
+                improvement priorities, and launch checklist context.
+              </p>
+              <p className="flyer-generator-note">
+                This is the next premium deliverable after the flyer: a stronger presentation-ready
+                asset for review and export.
+              </p>
+            </div>
+
+            <div className="flyer-generator-side">
+              <div className="flyer-generator-meta">
+                <div className="stat-card">
+                  <strong>Pricing</strong>
+                  <span>{latestPricing ? 'Included from latest analysis' : 'Will reflect saved pricing when available'}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Photos</strong>
+                  <span>
+                    {latestReport?.selectedPhotos?.length
+                      ? `${latestReport.selectedPhotos.length} photos in the latest report`
+                      : `${listingCandidateAssets.length || mediaAssets.length} photos available for report selection`}
+                  </span>
+                </div>
+                <div className="stat-card">
+                  <strong>Checklist + prep</strong>
+                  <span>Includes current prep tasks, top improvements, and marketing highlights</span>
+                </div>
+              </div>
+              <div className="button-stack flyer-generator-actions">
+                <button
+                  type="button"
+                  className={status.includes('report') ? 'button-primary button-busy' : 'button-primary'}
+                  onClick={handleGenerateReport}
+                  disabled={Boolean(status)}
+                >
+                  {status.includes('report') ? 'Generating report...' : 'Generate report'}
+                </button>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={handleDownloadReportPdf}
+                  disabled={Boolean(status)}
+                >
+                  Download report PDF
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="content-card">
+          <span className="label">Latest report preview</span>
+          {latestReport ? (
+            <div className="report-preview">
+              <div className="flyer-hero">
+                <span className="label">{latestReport.reportType}</span>
+                <h2>{latestReport.title}</h2>
+                <p>{latestReport.executiveSummary}</p>
+              </div>
+              <div className="mini-stats">
+                <div className="stat-card">
+                  <strong>Price band</strong>
+                  <span>
+                    {latestReport.pricingSummary?.low
+                      ? `${formatCurrency(latestReport.pricingSummary.low)} to ${formatCurrency(latestReport.pricingSummary.high)}`
+                      : 'Pricing pending'}
+                  </span>
+                </div>
+                <div className="stat-card">
+                  <strong>Confidence</strong>
+                  <span>
+                    {latestReport.pricingSummary?.confidence
+                      ? `${Math.round(latestReport.pricingSummary.confidence * 100)}%`
+                      : 'Pending'}
+                  </span>
+                </div>
+              </div>
+              <div className="report-preview-section">
+                <strong>Top checklist items</strong>
+                <ul className="plain-list">
+                  {(latestReport.checklistItems || []).slice(0, 4).map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="report-preview-section">
+                <strong>Top improvements</strong>
+                <ul className="plain-list">
+                  {(latestReport.improvementItems || []).slice(0, 4).map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="report-preview-section">
+                <strong>Marketing highlights</strong>
+                <div className="tag-row">
+                  {(latestReport.marketingHighlights || []).map((item) => (
+                    <span key={item}>{item}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p>No seller report has been generated yet. Create one to preview the premium report flow.</p>
+          )}
+        </div>
+      </section>
+
+      <section className="content-grid dashboard-content-grid">
         <div className="content-card">
           <div className="section-header-tight">
             <div>
@@ -480,12 +758,44 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               <h2>Photos captured in mobile</h2>
             </div>
             <span className="section-header-meta">
-              {mediaAssets.length} saved photo{mediaAssets.length === 1 ? '' : 's'}
+              {mediaAssets.length} saved photo{mediaAssets.length === 1 ? '' : 's'} · {listingCandidateAssets.length} listing candidate{listingCandidateAssets.length === 1 ? '' : 's'}
             </span>
           </div>
 
           {mediaAssets.length ? (
             <div className="property-media-layout">
+              {listingCandidateAssets.length ? (
+                <div className="property-media-candidate-strip">
+                  <div className="property-media-candidate-header">
+                    <div>
+                      <span className="label">Best listing photos</span>
+                      <h3>Seller-selected candidates</h3>
+                    </div>
+                    <span className="section-header-meta">{listingCandidateAssets.length} chosen</span>
+                  </div>
+                  <div className="property-media-candidate-list">
+                    {listingCandidateAssets.map((asset) => (
+                      <button
+                        key={`candidate-${asset.id}`}
+                        type="button"
+                        className={
+                          asset.id === selectedMediaAsset?.id
+                            ? 'property-media-candidate-card active'
+                            : 'property-media-candidate-card'
+                        }
+                        onClick={() => setSelectedMediaAssetId(asset.id)}
+                      >
+                        <img src={asset.imageUrl} alt={asset.roomLabel || 'Listing candidate'} />
+                        <div>
+                          <strong>{asset.roomLabel}</strong>
+                          <span>{asset.listingNote || 'Ready for flyer and listing materials'}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               <div className="property-media-rail">
                 {mediaAssets.map((asset) => (
                   <button
@@ -502,11 +812,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
               {selectedMediaAsset ? (
                 <div className="property-media-detail">
-                  <img
-                    src={selectedMediaAsset.imageUrl}
-                    alt={selectedMediaAsset.roomLabel || 'Selected property photo'}
-                    className="property-media-hero"
-                  />
+                    <img
+                      src={selectedMediaAsset.imageUrl}
+                      alt={selectedMediaAsset.roomLabel || 'Selected property photo'}
+                      className="property-media-hero"
+                    />
                   <div className="property-media-copy">
                     <h3>{selectedMediaAsset.roomLabel}</h3>
                     <p>
@@ -534,8 +844,38 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         ) : (
                           <span>Ready for listing review</span>
                         )}
+                        {selectedMediaAsset.listingCandidate ? <span>Listing candidate</span> : null}
                       </div>
                     ) : null}
+                    <div className="property-media-actions">
+                      <button
+                        type="button"
+                        className={selectedMediaAsset.listingCandidate ? 'button-secondary' : 'button-primary'}
+                        onClick={handleToggleListingCandidate}
+                        disabled={Boolean(status)}
+                      >
+                        {selectedMediaAsset.listingCandidate ? 'Remove from listing picks' : 'Mark as listing candidate'}
+                      </button>
+                    </div>
+                    <label className="property-media-note-field">
+                      Listing note
+                      <textarea
+                        value={listingNoteDraft}
+                        onChange={(event) => setListingNoteDraft(event.target.value)}
+                        maxLength={280}
+                        placeholder="Why this photo is strong, what it should lead with, or where it belongs in the story."
+                      />
+                    </label>
+                    <div className="button-stack">
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={handleSaveListingNote}
+                        disabled={Boolean(status)}
+                      >
+                        Save photo note
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : null}

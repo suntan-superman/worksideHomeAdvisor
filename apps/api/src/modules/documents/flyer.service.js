@@ -37,13 +37,26 @@ function serializeFlyer(document) {
 }
 
 function chooseFlyerPhotos(assets) {
-  return (assets || [])
+  const rankedAssets = [...(assets || [])].sort((left, right) => {
+    if (Boolean(left.listingCandidate) !== Boolean(right.listingCandidate)) {
+      return left.listingCandidate ? -1 : 1;
+    }
+
+    return (
+      Number(right.analysis?.overallQualityScore || 0) -
+      Number(left.analysis?.overallQualityScore || 0)
+    );
+  });
+
+  return rankedAssets
     .slice(0, 4)
     .map((asset) => ({
       assetId: asset.id,
       roomLabel: asset.roomLabel,
       imageUrl: asset.imageUrl || asset.imageDataUrl || null,
       score: asset.analysis?.overallQualityScore || null,
+      listingCandidate: Boolean(asset.listingCandidate),
+      listingNote: asset.listingNote || '',
     }));
 }
 

@@ -23,6 +23,7 @@ import {
   login,
   requestOtp,
   savePhoto,
+  updateMediaAsset,
   verifyEmailOtp,
 } from '../services/api';
 
@@ -75,6 +76,7 @@ export function RootScreen() {
   const [dashboard, setDashboard] = useState(null);
   const [gallery, setGallery] = useState([]);
   const [selectedAssetId, setSelectedAssetId] = useState('');
+  const [listingNoteDraft, setListingNoteDraft] = useState('');
   const [photoAsset, setPhotoAsset] = useState(null);
   const [form, setForm] = useState({
     email: '',
@@ -92,9 +94,16 @@ export function RootScreen() {
   const bestCandidates = [...gallery]
     .filter((asset) => typeof asset.analysis?.overallQualityScore === 'number')
     .sort(
-      (left, right) =>
-        Number(right.analysis?.overallQualityScore || 0) -
-        Number(left.analysis?.overallQualityScore || 0),
+      (left, right) => {
+        if (Boolean(left.listingCandidate) !== Boolean(right.listingCandidate)) {
+          return left.listingCandidate ? -1 : 1;
+        }
+
+        return (
+          Number(right.analysis?.overallQualityScore || 0) -
+          Number(left.analysis?.overallQualityScore || 0)
+        );
+      },
     )
     .slice(0, 3);
   const retakeCount = gallery.filter((asset) => asset.analysis?.retakeRecommended).length;
@@ -126,6 +135,10 @@ export function RootScreen() {
         },
       ]
     : [];
+
+  useEffect(() => {
+    setListingNoteDraft(selectedAsset?.listingNote || '');
+  }, [selectedAsset?.id, selectedAsset?.listingNote]);
 
   useEffect(() => {
     let active = true;
@@ -194,6 +207,14 @@ export function RootScreen() {
     setGallery(mediaResponse.assets || []);
     setSelectedAssetId(mediaResponse.assets?.[0]?.id || '');
     setPropertySection('overview');
+  }
+
+  async function refreshGallery(preferredAssetId = selectedAssetId) {
+    const mediaResponse = await listMediaAssets(propertyId);
+    const nextAssets = mediaResponse.assets || [];
+    setGallery(nextAssets);
+    setSelectedAssetId(preferredAssetId || nextAssets?.[0]?.id || '');
+    return nextAssets;
   }
 
   async function handleLogin() {
@@ -360,12 +381,57 @@ export function RootScreen() {
         width: photoAsset.width,
         height: photoAsset.height,
       });
-      const mediaResponse = await listMediaAssets(propertyId);
-      setGallery(mediaResponse.assets || []);
-      setSelectedAssetId(mediaResponse.assets?.[0]?.id || '');
+      await refreshGallery();
       setPhotoAsset(null);
       setPropertySection('gallery');
       setStatus('Photo saved to the selected property.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleToggleListingCandidate() {
+    if (!selectedAsset) {
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+
+    try {
+      const nextValue = !selectedAsset.listingCandidate;
+      await updateMediaAsset(selectedAsset.id, {
+        listingCandidate: nextValue,
+      });
+      await refreshGallery(selectedAsset.id);
+      setStatus(
+        nextValue
+          ? 'Photo marked as a listing candidate.'
+          : 'Photo removed from the listing-candidate set.',
+      );
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveListingNote() {
+    if (!selectedAsset) {
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+
+    try {
+      await updateMediaAsset(selectedAsset.id, {
+        listingNote: listingNoteDraft,
+      });
+      await refreshGallery(selectedAsset.id);
+      setStatus('Listing note saved to this photo.');
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -600,6 +666,45 @@ export function RootScreen() {
                                     {selectedAsset.analysis?.retakeRecommended ? ' · Retake suggested' : ''}
                                   </Text>
                                 ) : null}
+                                {selectedAsset.listingCandidate ? (
+                                  <Text style={styles.listingCandidateTag}>Listing candidate selected</Text>
+                                ) : null}
+                                <View style={styles.actionRow}>
+                                  <Pressable
+                                    onPress={handleToggleListingCandidate}
+                                    style={[
+                                      styles.button,
+                                      selectedAsset.listingCandidate ? styles.buttonSecondary : styles.buttonPrimary,
+                                      styles.flexButton,
+                                    ]}
+                                    disabled={busy}
+                                  >
+                                    <Text
+                                      style={
+                                        selectedAsset.listingCandidate
+                                          ? styles.buttonSecondaryText
+                                          : styles.buttonText
+                                      }
+                                    >
+                                      {selectedAsset.listingCandidate ? 'Remove candidate' : 'Mark candidate'}
+                                    </Text>
+                                  </Pressable>
+                                </View>
+                                <TextInput
+                                  placeholder="Add a listing note for this photo"
+                                  placeholderTextColor="#7d8a8f"
+                                  style={[styles.input, styles.noteInput]}
+                                  value={listingNoteDraft}
+                                  onChangeText={setListingNoteDraft}
+                                  multiline
+                                />
+                                <Pressable
+                                  onPress={handleSaveListingNote}
+                                  style={[styles.button, styles.buttonSecondary]}
+                                  disabled={busy}
+                                >
+                                  <Text style={styles.buttonSecondaryText}>Save note</Text>
+                                </Pressable>
                               </View>
                             ) : null}
                           </>
@@ -636,6 +741,11 @@ export function RootScreen() {
                                     Quality {asset.analysis?.overallQualityScore || 0}/100
                                     {asset.analysis?.bestUse ? ` · ${asset.analysis.bestUse}` : ''}
                                   </Text>
+                                  {asset.listingCandidate ? (
+                                    <Text style={styles.candidateSelectedTag}>
+                                      Seller selected{asset.listingNote ? ` · ${asset.listingNote}` : ''}
+                                    </Text>
+                                  ) : null}
                                 </View>
                               </View>
                             ))
@@ -1194,6 +1304,18 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontWeight: '700',
   },
+  listingCandidateTag: {
+    color: '#93a982',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  noteInput: {
+    minHeight: 90,
+    textAlignVertical: 'top',
+  },
   coverageList: {
     gap: 10,
   },
@@ -1254,6 +1376,12 @@ const styles = StyleSheet.create({
     color: '#dbcbb7',
     fontSize: 14,
     lineHeight: 20,
+  },
+  candidateSelectedTag: {
+    color: '#93a982',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
   },
   taskList: {
     gap: 10,

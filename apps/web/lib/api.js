@@ -90,6 +90,13 @@ export function listMediaAssets(propertyId) {
   return request(`/api/v1/properties/${propertyId}/media`);
 }
 
+export function updateMediaAsset(assetId, payload) {
+  return request(`/api/v1/media/assets/${assetId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function analyzePricing(propertyId) {
   return request(`/api/v1/properties/${propertyId}/pricing/analyze`, {
     method: 'POST',
@@ -132,4 +139,18 @@ export function getLatestFlyer(propertyId) {
 export function getFlyerExportUrl(propertyId, flyerType = 'sale') {
   const search = new URLSearchParams({ flyerType });
   return `${API_BASE_URL}/api/v1/properties/${propertyId}/flyer/export.pdf?${search.toString()}`;
+}
+
+export function generateReport(propertyId) {
+  return request(`/api/v1/properties/${propertyId}/report/generate`, {
+    method: 'POST',
+  });
+}
+
+export function getLatestReport(propertyId) {
+  return request(`/api/v1/properties/${propertyId}/report/latest`);
+}
+
+export function getReportExportUrl(propertyId) {
+  return `${API_BASE_URL}/api/v1/properties/${propertyId}/report/export.pdf`;
 }

@@ -13,7 +13,7 @@ const PLAN_CATALOG = {
     displayName: 'Seller Unlock',
     description: 'Unlock flyer generation, exports, and richer seller-ready outputs.',
     priceEnvKey: 'STRIPE_PRICE_ID_SELLER_UNLOCK',
-    features: ['pricing.full', 'flyer.generate', 'flyer.export', 'marketing.export'],
+    features: ['pricing.full', 'flyer.generate', 'flyer.export', 'marketing.export', 'reports.client_ready'],
   },
   seller_pro: {
     productKey: 'seller',
@@ -23,7 +23,7 @@ const PLAN_CATALOG = {
     displayName: 'Seller Pro',
     description: 'Ongoing seller access for deeper pricing, exports, and AI guidance.',
     priceEnvKey: 'STRIPE_PRICE_ID_SELLER_PRO',
-    features: ['pricing.full', 'flyer.generate', 'flyer.export', 'marketing.export'],
+    features: ['pricing.full', 'flyer.generate', 'flyer.export', 'marketing.export', 'reports.client_ready'],
   },
   agent_starter: {
     productKey: 'agent',
@@ -38,6 +38,7 @@ const PLAN_CATALOG = {
       'flyer.generate',
       'flyer.export',
       'marketing.export',
+      'reports.client_ready',
       'presentation.mode',
     ],
   },
@@ -101,6 +102,7 @@ const PLAN_CATALOG = {
       'flyer.generate',
       'flyer.export',
       'marketing.export',
+      'reports.client_ready',
       'presentation.mode',
     ],
   },

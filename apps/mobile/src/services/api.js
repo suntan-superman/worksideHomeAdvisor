@@ -66,4 +66,11 @@ export function savePhoto(propertyId, payload) {
   });
 }
 
+export function updateMediaAsset(assetId, payload) {
+  return request(`/api/v1/media/assets/${assetId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
 export { API_URL };
