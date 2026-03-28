@@ -77,6 +77,7 @@ function TabButton({ label, active, onPress }) {
 export function RootScreen() {
   const [authMode, setAuthMode] = useState('login');
   const [activeTab, setActiveTab] = useState('properties');
+  const [propertySection, setPropertySection] = useState('overview');
   const [propertyDetailsCollapsed, setPropertyDetailsCollapsed] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [session, setSession] = useState(null);
@@ -87,6 +88,7 @@ export function RootScreen() {
   const [analysis, setAnalysis] = useState(null);
   const [gallery, setGallery] = useState([]);
   const [selectedPhotoId, setSelectedPhotoId] = useState('');
+  const [galleryFilter, setGalleryFilter] = useState('All');
   const [status, setStatus] = useState('Sign in to load your properties and capture listing photos.');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -108,6 +110,80 @@ export function RootScreen() {
   );
 
   const selectedComps = dashboard?.pricing?.selectedComps?.slice(0, 4) || [];
+  const galleryFilters = useMemo(() => {
+    const labels = gallery
+      .map((asset) => asset.roomLabel)
+      .filter(Boolean)
+      .filter((value, index, values) => values.indexOf(value) === index);
+    return ['All', ...labels];
+  }, [gallery]);
+  const filteredGallery = useMemo(() => {
+    if (galleryFilter === 'All') {
+      return gallery;
+    }
+
+    return gallery.filter((asset) => asset.roomLabel === galleryFilter);
+  }, [gallery, galleryFilter]);
+  const bestPhotoCandidates = useMemo(
+    () =>
+      [...gallery]
+        .filter((asset) => asset.analysis)
+        .sort(
+          (left, right) =>
+            Number(right.analysis?.overallQualityScore || 0) -
+            Number(left.analysis?.overallQualityScore || 0),
+        )
+        .slice(0, 3),
+    [gallery],
+  );
+  const roomCoverage = useMemo(() => {
+    const capturedRooms = new Set(gallery.map((asset) => asset.roomLabel).filter(Boolean));
+    const recommendedRooms = ['Living room', 'Kitchen', 'Primary bedroom', 'Bathroom', 'Exterior'];
+    return recommendedRooms.map((room) => ({
+      room,
+      captured: capturedRooms.has(room),
+    }));
+  }, [gallery]);
+  const sellerTasks = useMemo(() => {
+    if (!selectedProperty) {
+      return [];
+    }
+
+    const retakeCount = gallery.filter((asset) => asset.analysis?.retakeRecommended).length;
+    return [
+      {
+        key: 'pricing',
+        title: dashboard?.pricing?.mid ? 'Refresh pricing before launch' : 'Run your first pricing analysis',
+        detail: dashboard?.pricing?.mid
+          ? `Current midpoint is ${formatCurrency(dashboard.pricing.mid)}. Refresh after major prep or staging updates.`
+          : 'Generate a live comp-backed price band for this property.',
+        done: Boolean(dashboard?.pricing?.mid),
+      },
+      {
+        key: 'photos',
+        title: gallery.length >= 5 ? 'Core photo coverage is in place' : 'Capture the key listing rooms',
+        detail:
+          gallery.length >= 5
+            ? `${gallery.length} saved photos are attached to this property.`
+            : 'Aim for living room, kitchen, primary bedroom, bathroom, and exterior shots.',
+        done: gallery.length >= 5,
+      },
+      {
+        key: 'retakes',
+        title: retakeCount ? 'Review AI retake recommendations' : 'No photo retakes currently flagged',
+        detail: retakeCount
+          ? `${retakeCount} saved photos were flagged for a better angle, lighting, or sharper retake.`
+          : 'Your current saved photo set has no active retake flags.',
+        done: retakeCount === 0,
+      },
+      {
+        key: 'marketing',
+        title: 'Refresh flyer and seller marketing copy',
+        detail: 'Once photos and pricing look strong, regenerate the flyer and listing copy from the web workspace.',
+        done: false,
+      },
+    ];
+  }, [dashboard, gallery, selectedProperty]);
   const accountDeletionBlocked = Boolean(
     session?.user?.isDemoAccount || session?.user?.role === 'admin' || session?.user?.role === 'super_admin',
   );
@@ -129,6 +205,7 @@ export function RootScreen() {
 
   function resetWorkspace() {
     setActiveTab('properties');
+    setPropertySection('overview');
     setPropertyDetailsCollapsed(false);
     setProperties([]);
     setPropertyId('');
@@ -137,6 +214,7 @@ export function RootScreen() {
     setAnalysis(null);
     setGallery([]);
     setSelectedPhotoId('');
+    setGalleryFilter('All');
   }
 
   function handleSignOut() {
@@ -202,6 +280,7 @@ export function RootScreen() {
     setDashboard(dashboardResponse);
     setGallery(nextGallery);
     setSelectedPhotoId(nextGallery[0]?.id || '');
+    setGalleryFilter('All');
   }
 
   async function loadPropertiesForUser(userId) {
@@ -211,6 +290,7 @@ export function RootScreen() {
 
     setProperties(nextProperties);
     setPropertyId(nextPropertyId);
+    setPropertySection('overview');
     await loadPropertyWorkspace(nextPropertyId);
   }
 
@@ -277,6 +357,7 @@ export function RootScreen() {
 
   async function handleRefreshProperty(property) {
     setPropertyId(property.id);
+    setPropertySection('overview');
     setBusy(true);
     setError('');
 
@@ -505,6 +586,91 @@ export function RootScreen() {
   }
 
   function renderPropertiesTab() {
+    function renderPropertyOverview() {
+      return (
+        <>
+          <View style={styles.readinessCard}>
+            <Text style={styles.readinessLabel}>Latest pricing</Text>
+            <Text style={styles.readinessScore}>
+              {dashboard?.pricing
+                ? `${formatCurrency(dashboard.pricing.low)} to ${formatCurrency(dashboard.pricing.high)}`
+                : 'Run pricing analysis'}
+            </Text>
+            <Text style={styles.readinessBody}>
+              {dashboard?.pricingSummary ||
+                'Once pricing runs, this section will show the latest RentCast + AI summary.'}
+            </Text>
+            <ActionButton label="Refresh pricing" onPress={handleRunPricing} disabled={busy} />
+          </View>
+        </>
+      );
+    }
+
+    function renderPropertyInsights() {
+      return selectedComps.length ? (
+        <View style={styles.compList}>
+          {selectedComps.map((comp) => (
+            <View key={comp.address || `${comp.price}-${comp.distanceMiles}`} style={styles.compCard}>
+              <Text style={styles.compTitle}>{comp.address}</Text>
+              <Text style={styles.compMeta}>
+                {formatCurrency(comp.price)} · {Number(comp.distanceMiles || 0).toFixed(2)} mi
+              </Text>
+              <Text style={styles.compMeta}>
+                {comp.beds || '--'} bd · {comp.baths || '--'} ba · {comp.squareFeet || '--'} sqft
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : (
+        <Text style={styles.cardBody}>
+          Run pricing to load nearby comparables and more detailed market context.
+        </Text>
+      );
+    }
+
+    function renderPropertyPhotos() {
+      return gallery.length ? (
+        <View style={styles.inlinePhotoStack}>
+          {bestPhotoCandidates.length ? (
+            <View style={styles.inlinePhotoSummary}>
+              <Text style={styles.inlinePhotoHeadline}>Best current listing candidates</Text>
+              <Text style={styles.cardBody}>
+                {bestPhotoCandidates.map((asset) => asset.roomLabel).join(', ')}
+              </Text>
+            </View>
+          ) : null}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.galleryRail}
+          >
+            {gallery.slice(0, 6).map((asset) => (
+              <TouchableOpacity
+                key={asset.id}
+                onPress={() => {
+                  setSelectedPhotoId(asset.id);
+                  setActiveTab('gallery');
+                }}
+                style={styles.galleryThumbCard}
+              >
+                <Image
+                  source={{ uri: asset.imageUrl || asset.imageDataUrl }}
+                  style={styles.galleryThumbImage}
+                />
+                <Text style={styles.galleryThumbLabel} numberOfLines={1}>
+                  {asset.roomLabel}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      ) : (
+        <Text style={styles.cardBody}>
+          No saved photos yet. Capture a few rooms to start building the property story.
+        </Text>
+      );
+    }
+
     return (
       <View style={styles.tabContent}>
         <View style={styles.card}>
@@ -561,35 +727,27 @@ export function RootScreen() {
 
             {!propertyDetailsCollapsed ? (
               <>
-                <View style={styles.readinessCard}>
-                  <Text style={styles.readinessLabel}>Latest pricing</Text>
-                  <Text style={styles.readinessScore}>
-                    {dashboard?.pricing
-                      ? `${formatCurrency(dashboard.pricing.low)} to ${formatCurrency(dashboard.pricing.high)}`
-                      : 'Run pricing analysis'}
-                  </Text>
-                  <Text style={styles.readinessBody}>
-                    {dashboard?.pricingSummary ||
-                      'Once pricing runs, this section will show the latest RentCast + AI summary.'}
-                  </Text>
-                  <ActionButton label="Refresh pricing" onPress={handleRunPricing} disabled={busy} />
+                <View style={styles.subsectionTabs}>
+                  <TabButton
+                    label="Overview"
+                    active={propertySection === 'overview'}
+                    onPress={() => setPropertySection('overview')}
+                  />
+                  <TabButton
+                    label="Insights"
+                    active={propertySection === 'insights'}
+                    onPress={() => setPropertySection('insights')}
+                  />
+                  <TabButton
+                    label="Photos"
+                    active={propertySection === 'photos'}
+                    onPress={() => setPropertySection('photos')}
+                  />
                 </View>
 
-                {selectedComps.length ? (
-                  <View style={styles.compList}>
-                    {selectedComps.map((comp) => (
-                      <View key={comp.address || `${comp.price}-${comp.distanceMiles}`} style={styles.compCard}>
-                        <Text style={styles.compTitle}>{comp.address}</Text>
-                        <Text style={styles.compMeta}>
-                          {formatCurrency(comp.price)} · {Number(comp.distanceMiles || 0).toFixed(2)} mi
-                        </Text>
-                        <Text style={styles.compMeta}>
-                          {comp.beds || '--'} bd · {comp.baths || '--'} ba · {comp.squareFeet || '--'} sqft
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                ) : null}
+                {propertySection === 'overview' ? renderPropertyOverview() : null}
+                {propertySection === 'insights' ? renderPropertyInsights() : null}
+                {propertySection === 'photos' ? renderPropertyPhotos() : null}
               </>
             ) : (
               <Text style={styles.cardBody}>
@@ -683,12 +841,29 @@ export function RootScreen() {
             <Text style={styles.cardBody}>No saved photos yet for this property.</Text>
           ) : (
             <>
+              <View style={styles.filterRow}>
+                {galleryFilters.map((filter) => (
+                  <TouchableOpacity
+                    key={filter}
+                    onPress={() => setGalleryFilter(filter)}
+                    style={[styles.filterChip, galleryFilter === filter ? styles.filterChipActive : null]}
+                  >
+                    <Text
+                      style={
+                        galleryFilter === filter ? styles.filterChipLabelActive : styles.filterChipLabel
+                      }
+                    >
+                      {filter}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.galleryRail}
               >
-                {gallery.map((asset) => (
+                {filteredGallery.map((asset) => (
                   <TouchableOpacity
                     key={asset.id}
                     onPress={() => setSelectedPhotoId(asset.id)}
@@ -726,6 +901,96 @@ export function RootScreen() {
               ) : null}
             </>
           )}
+        </View>
+      </View>
+    );
+  }
+
+  function renderVisionTab() {
+    return (
+      <View style={styles.tabContent}>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Listing vision</Text>
+          <Text style={styles.cardBody}>
+            Use the strongest saved photos to shape the property story before you build a flyer or listing.
+          </Text>
+          {bestPhotoCandidates.length ? (
+            <View style={styles.visionStack}>
+              {bestPhotoCandidates.map((asset, index) => (
+                <View key={asset.id} style={styles.visionRow}>
+                  <View style={styles.visionRank}>
+                    <Text style={styles.visionRankLabel}>#{index + 1}</Text>
+                  </View>
+                  <View style={styles.visionCopy}>
+                    <Text style={styles.visionTitle}>{asset.roomLabel}</Text>
+                    <Text style={styles.cardBody}>
+                      {(asset.analysis?.overallQualityScore || '--') + '/100'} ·{' '}
+                      {asset.analysis?.retakeRecommended ? 'Needs another pass' : 'Strong flyer candidate'}
+                    </Text>
+                    {asset.analysis?.summary ? (
+                      <Text style={styles.visionBody}>{asset.analysis.summary}</Text>
+                    ) : null}
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.cardBody}>
+              Save a few room photos first and this tab will highlight the best candidates for flyers and listing marketing.
+            </Text>
+          )}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Room coverage</Text>
+          <Text style={styles.cardBody}>
+            This quick checklist helps you see whether the property has enough room variety for a polished listing.
+          </Text>
+          <View style={styles.checklistStack}>
+            {roomCoverage.map((item) => (
+              <View key={item.room} style={styles.checklistRow}>
+                <Text style={item.captured ? styles.checkmarkDone : styles.checkmarkOpen}>
+                  {item.captured ? '✓' : '•'}
+                </Text>
+                <View style={styles.checklistCopy}>
+                  <Text style={styles.checklistTitle}>{item.room}</Text>
+                  <Text style={styles.cardBody}>
+                    {item.captured ? 'Captured in the current property gallery.' : 'Still recommended for a complete listing package.'}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  function renderTasksTab() {
+    return (
+      <View style={styles.tabContent}>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Seller tasks</Text>
+          <Text style={styles.cardBody}>
+            Use this list to keep pricing, photos, and marketing work moving in the right order.
+          </Text>
+          <View style={styles.taskStack}>
+            {sellerTasks.length ? (
+              sellerTasks.map((task) => (
+                <View key={task.key} style={[styles.taskCard, task.done ? styles.taskCardDone : null]}>
+                  <Text style={task.done ? styles.taskStatusDone : styles.taskStatusOpen}>
+                    {task.done ? 'Done' : 'Next up'}
+                  </Text>
+                  <Text style={styles.taskTitle}>{task.title}</Text>
+                  <Text style={styles.cardBody}>{task.detail}</Text>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.cardBody}>
+                Sign in and choose a property to generate a guided seller checklist.
+              </Text>
+            )}
+          </View>
         </View>
       </View>
     );
@@ -785,6 +1050,10 @@ export function RootScreen() {
 
     if (activeTab === 'capture') {
       content = renderCaptureTab();
+    } else if (activeTab === 'vision') {
+      content = renderVisionTab();
+    } else if (activeTab === 'tasks') {
+      content = renderTasksTab();
     } else if (activeTab === 'gallery') {
       content = renderGalleryTab();
     } else if (activeTab === 'settings') {
@@ -806,6 +1075,8 @@ export function RootScreen() {
           <View style={styles.tabsRow}>
             <TabButton label="Properties" active={activeTab === 'properties'} onPress={() => setActiveTab('properties')} />
             <TabButton label="Capture" active={activeTab === 'capture'} onPress={() => setActiveTab('capture')} />
+            <TabButton label="Vision" active={activeTab === 'vision'} onPress={() => setActiveTab('vision')} />
+            <TabButton label="Tasks" active={activeTab === 'tasks'} onPress={() => setActiveTab('tasks')} />
             <TabButton label="Gallery" active={activeTab === 'gallery'} onPress={() => setActiveTab('gallery')} />
             <TabButton label="Settings" active={activeTab === 'settings'} onPress={() => setActiveTab('settings')} />
           </View>
@@ -891,6 +1162,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
+  },
+  subsectionTabs: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
   tabButton: {
     paddingVertical: 10,
@@ -1124,6 +1400,22 @@ const styles = StyleSheet.create({
   compList: {
     gap: 10,
   },
+  inlinePhotoStack: {
+    gap: 12,
+  },
+  inlinePhotoSummary: {
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: colors.panelSoft,
+    borderWidth: 1,
+    borderColor: colors.line,
+    gap: 4,
+  },
+  inlinePhotoHeadline: {
+    color: colors.cream,
+    fontSize: 15,
+    fontWeight: '800',
+  },
   compCard: {
     padding: 14,
     borderRadius: 18,
@@ -1191,6 +1483,33 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 4,
   },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: colors.panelSoft,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  filterChipActive: {
+    backgroundColor: 'rgba(210, 136, 89, 0.18)',
+    borderColor: colors.clay,
+  },
+  filterChipLabel: {
+    color: colors.sand,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  filterChipLabelActive: {
+    color: colors.cream,
+    fontSize: 13,
+    fontWeight: '800',
+  },
   galleryThumbCard: {
     width: 128,
     gap: 8,
@@ -1234,5 +1553,107 @@ const styles = StyleSheet.create({
     color: colors.moss,
     fontSize: 15,
     fontWeight: '700',
+  },
+  visionStack: {
+    gap: 14,
+  },
+  visionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  visionRank: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(210, 136, 89, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(210, 136, 89, 0.36)',
+  },
+  visionRankLabel: {
+    color: colors.cream,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  visionCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  visionTitle: {
+    color: colors.cream,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  visionBody: {
+    color: colors.sand,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  checklistStack: {
+    gap: 12,
+  },
+  checklistRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  checklistCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  checklistTitle: {
+    color: colors.cream,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  checkmarkDone: {
+    color: colors.moss,
+    fontSize: 18,
+    fontWeight: '800',
+    minWidth: 16,
+  },
+  checkmarkOpen: {
+    color: colors.clay,
+    fontSize: 18,
+    fontWeight: '800',
+    minWidth: 16,
+  },
+  taskStack: {
+    gap: 12,
+  },
+  taskCard: {
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: colors.panelSoft,
+    borderWidth: 1,
+    borderColor: colors.line,
+    gap: 6,
+  },
+  taskCardDone: {
+    backgroundColor: 'rgba(124, 162, 127, 0.12)',
+  },
+  taskStatusDone: {
+    color: colors.moss,
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+    fontWeight: '800',
+  },
+  taskStatusOpen: {
+    color: colors.clay,
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+    fontWeight: '800',
+  },
+  taskTitle: {
+    color: colors.cream,
+    fontSize: 16,
+    fontWeight: '800',
   },
 });
