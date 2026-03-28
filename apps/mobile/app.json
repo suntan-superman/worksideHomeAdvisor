@@ -17,9 +17,7 @@
       "permissions": ["CAMERA", "READ_MEDIA_IMAGES"]
     },
     "extra": {
-      "apiUrl": "http://localhost:4000",
-      "webUrl": "https://worksidehomeadvisor.netlify.app",
-      "supportEmail": "support@worksidesoftware.com"
+      "apiUrl": "http://localhost:4000"
     }
   }
 }

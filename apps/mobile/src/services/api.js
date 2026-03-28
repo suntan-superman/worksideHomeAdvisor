@@ -1,9 +1,4 @@
-import Constants from 'expo-constants';
-
-const API_URL =
-  Constants.expoConfig?.extra?.apiUrl ||
-  process.env.EXPO_PUBLIC_API_URL ||
-  'http://localhost:4000';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
 async function request(path, options = {}) {
   const headers = {

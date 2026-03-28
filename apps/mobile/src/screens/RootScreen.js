@@ -1,8 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
-import * as LocalAuthentication from 'expo-local-authentication';
-import * as SecureStore from 'expo-secure-store';
-import Constants from 'expo-constants';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,7 +17,7 @@ import {
 
 import {
   analyzePricing,
-  deleteAccount as deleteAccountRequest,
+  deleteAccount,
   getDashboard,
   listMediaAssets,
   listProperties,
@@ -29,10 +26,11 @@ import {
   savePhoto,
   verifyEmailOtp,
 } from '../services/api';
-import { GlassButton } from '../components/GlassButton';
-import { GlassCard } from '../components/GlassCard';
-import { device, radius, spacing, typography } from '../theme/responsive';
 import { colors } from '../theme/tokens';
+
+const TERMS_URL = 'https://worksidehomeadvisor.netlify.app/terms';
+const PRIVACY_URL = 'https://worksidehomeadvisor.netlify.app/privacy';
+const SUPPORT_EMAIL = 'support@worksidesoftware.com';
 
 function formatCurrency(value) {
   return new Intl.NumberFormat('en-US', {
@@ -44,79 +42,43 @@ function formatCurrency(value) {
 
 function getDisplayName(user) {
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
-  return fullName || 'Signed-in user';
+  return fullName || user?.email || 'Signed-in user';
 }
 
-function ActionButton({ label, onPress, variant = 'primary', disabled = false, compact = false }) {
+function ActionButton({ label, onPress, variant = 'primary', disabled = false }) {
   return (
-    <GlassButton
-      label={label}
+    <TouchableOpacity
       onPress={onPress}
       disabled={disabled}
-      compact={compact}
-      variant={variant}
-    />
-  );
-}
-
-function TabChip({ label, active, onPress }) {
-  return (
-    <TouchableOpacity onPress={onPress} style={[styles.tabChip, active ? styles.tabChipActive : null]}>
-      <Text style={active ? styles.tabChipLabelActive : styles.tabChipLabel}>{label}</Text>
+      style={[
+        styles.button,
+        variant === 'secondary' ? styles.buttonSecondary : styles.buttonPrimary,
+        disabled ? styles.buttonDisabled : null,
+      ]}
+    >
+      <Text style={variant === 'secondary' ? styles.buttonSecondaryLabel : styles.buttonLabel}>
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
 
-function BottomTabButton({ label, active, onPress, accent }) {
+function TabButton({ label, active, onPress }) {
   return (
-    <TouchableOpacity onPress={onPress} style={styles.bottomTabButton}>
-      <View
-        style={[
-          styles.bottomTabIconWrap,
-          active ? styles.bottomTabIconWrapActive : null,
-          active && accent ? { borderColor: accent, backgroundColor: `${accent}22` } : null,
-        ]}
-      >
-        <View
-          style={[
-            styles.bottomTabDot,
-            active ? styles.bottomTabDotActive : null,
-            active && accent ? { backgroundColor: accent } : null,
-          ]}
-        />
-      </View>
-      <Text style={active ? styles.bottomTabLabelActive : styles.bottomTabLabel}>{label}</Text>
+    <TouchableOpacity
+      onPress={onPress}
+      style={[styles.tabButton, active ? styles.tabButtonActive : null]}
+    >
+      <Text style={active ? styles.tabButtonLabelActive : styles.tabButtonLabel}>{label}</Text>
     </TouchableOpacity>
   );
 }
-
-function ScoreBadge({ label, value }) {
-  return (
-    <View style={styles.scorePill}>
-      <Text style={styles.scorePillLabel}>{label}</Text>
-      <Text style={styles.scorePillValue}>{value}</Text>
-    </View>
-  );
-}
-
-const LAST_LOGIN_EMAIL_KEY = 'workside.lastLoginEmail';
-const BIOMETRIC_ENABLED_KEY = 'workside.biometricEnabled';
-const BIOMETRIC_CREDENTIALS_KEY = 'workside.biometricCredentials';
-const APP_WEB_URL = Constants.expoConfig?.extra?.webUrl || 'https://worksidehomeadvisor.netlify.app';
-const TERMS_URL = `${APP_WEB_URL}/terms`;
-const PRIVACY_URL = `${APP_WEB_URL}/privacy`;
-const SUPPORT_EMAIL =
-  Constants.expoConfig?.extra?.supportEmail || 'support@worksidesoftware.com';
 
 export function RootScreen() {
   const [authMode, setAuthMode] = useState('login');
   const [activeTab, setActiveTab] = useState('properties');
-  const [propertySection, setPropertySection] = useState('overview');
   const [propertyDetailsCollapsed, setPropertyDetailsCollapsed] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [biometricAvailable, setBiometricAvailable] = useState(false);
-  const [biometricEnabled, setBiometricEnabled] = useState(false);
-  const [hasBiometricCredentials, setHasBiometricCredentials] = useState(false);
   const [session, setSession] = useState(null);
   const [properties, setProperties] = useState([]);
   const [propertyId, setPropertyId] = useState('');
@@ -125,7 +87,6 @@ export function RootScreen() {
   const [analysis, setAnalysis] = useState(null);
   const [gallery, setGallery] = useState([]);
   const [selectedPhotoId, setSelectedPhotoId] = useState('');
-  const [galleryFilter, setGalleryFilter] = useState('All');
   const [status, setStatus] = useState('Sign in to load your properties and capture listing photos.');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -146,142 +107,10 @@ export function RootScreen() {
     [gallery, selectedPhotoId],
   );
 
-  const galleryFilters = useMemo(() => {
-    const roomLabels = gallery
-      .map((asset) => asset.roomLabel)
-      .filter(Boolean)
-      .filter((value, index, values) => values.indexOf(value) === index);
-
-    return ['All', ...roomLabels];
-  }, [gallery]);
-
-  const filteredGallery = useMemo(() => {
-    if (galleryFilter === 'All') {
-      return gallery;
-    }
-
-    return gallery.filter((asset) => asset.roomLabel === galleryFilter);
-  }, [gallery, galleryFilter]);
-
-  const featuredPhotoCount = useMemo(
-    () => gallery.filter((asset) => !asset.analysis?.retakeRecommended).length,
-    [gallery],
-  );
-
-  const bestPhotoCandidates = useMemo(
-    () =>
-      [...gallery]
-        .filter((asset) => asset.analysis)
-        .sort(
-          (left, right) =>
-            Number(right.analysis?.overallQualityScore || 0) -
-            Number(left.analysis?.overallQualityScore || 0),
-        )
-        .slice(0, 3),
-    [gallery],
-  );
-
-  const roomCoverage = useMemo(() => {
-    const capturedRooms = new Set(gallery.map((asset) => asset.roomLabel).filter(Boolean));
-    const recommendedRooms = ['Living room', 'Kitchen', 'Primary bedroom', 'Bathroom', 'Exterior'];
-    return recommendedRooms.map((room) => ({
-      room,
-      captured: capturedRooms.has(room),
-    }));
-  }, [gallery]);
-
-  const sellerTasks = useMemo(() => {
-    const tasks = [];
-
-    if (!selectedProperty) {
-      return tasks;
-    }
-
-    tasks.push({
-      key: 'pricing',
-      title: dashboard?.pricing?.mid ? 'Refresh pricing before launch' : 'Run your first pricing analysis',
-      detail: dashboard?.pricing?.mid
-        ? `Current midpoint is ${formatCurrency(dashboard.pricing.mid)}. Refresh after major prep or staging updates.`
-        : 'Use the live comps workflow to generate a fresh list-price band for this property.',
-      done: Boolean(dashboard?.pricing?.mid),
-      tone: dashboard?.pricing?.mid ? 'done' : 'open',
-    });
-
-    tasks.push({
-      key: 'photos',
-      title: gallery.length >= 5 ? 'Review best listing photos' : 'Capture the core listing rooms',
-      detail:
-        gallery.length >= 5
-          ? `${featuredPhotoCount} photos currently look like good flyer candidates. Review the weakest rooms for retakes.`
-          : 'Aim for at least living room, kitchen, primary bedroom, bathroom, and exterior coverage.',
-      done: gallery.length >= 5,
-      tone: gallery.length >= 5 ? 'done' : 'open',
-    });
-
-    const retakeCount = gallery.filter((asset) => asset.analysis?.retakeRecommended).length;
-    tasks.push({
-      key: 'retakes',
-      title: retakeCount ? 'Address photo retake recommendations' : 'No retakes currently flagged',
-      detail: retakeCount
-        ? `${retakeCount} saved photos were flagged by AI for lighting, clarity, or composition improvements.`
-        : 'Your saved photo set is currently in good shape for marketing review.',
-      done: retakeCount === 0,
-      tone: retakeCount === 0 ? 'done' : 'warning',
-    });
-
-    tasks.push({
-      key: 'flyer',
-      title: 'Generate or refresh the flyer draft',
-      detail:
-        'Once pricing and core photos look strong, regenerate the flyer so the property story reflects the latest market position.',
-      done: false,
-      tone: 'open',
-    });
-
-    return tasks;
-  }, [dashboard, featuredPhotoCount, gallery, selectedProperty]);
-
-  const topComps = dashboard?.pricing?.selectedComps?.slice(0, 4) || [];
+  const selectedComps = dashboard?.pricing?.selectedComps?.slice(0, 4) || [];
   const accountDeletionBlocked = Boolean(
     session?.user?.isDemoAccount || session?.user?.role === 'admin' || session?.user?.role === 'super_admin',
   );
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function loadLocalAuthState() {
-      try {
-        const [savedEmail, biometricPreference, biometricCreds, hardwareAvailable, enrolled] = await Promise.all([
-          SecureStore.getItemAsync(LAST_LOGIN_EMAIL_KEY),
-          SecureStore.getItemAsync(BIOMETRIC_ENABLED_KEY),
-          SecureStore.getItemAsync(BIOMETRIC_CREDENTIALS_KEY),
-          LocalAuthentication.hasHardwareAsync(),
-          LocalAuthentication.isEnrolledAsync(),
-        ]);
-
-        if (savedEmail && isMounted) {
-          setForm((current) => ({
-            ...current,
-            email: current.email || savedEmail,
-          }));
-        }
-
-        if (isMounted) {
-          setBiometricAvailable(Boolean(hardwareAvailable && enrolled));
-          setBiometricEnabled(biometricPreference === 'true');
-          setHasBiometricCredentials(Boolean(biometricCreds));
-        }
-      } catch (storageError) {
-        // Keep auth usable even if secure storage is unavailable.
-      }
-    }
-
-    loadLocalAuthState();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   function updateField(field, value) {
     setForm((current) => ({
@@ -290,53 +119,17 @@ export function RootScreen() {
     }));
   }
 
-  async function persistLastLoginEmail(email) {
+  async function openExternalUrl(url) {
     try {
-      await SecureStore.setItemAsync(LAST_LOGIN_EMAIL_KEY, email);
-    } catch (storageError) {
-      // Login should still succeed even if persistence is unavailable.
+      await Linking.openURL(url);
+    } catch (linkError) {
+      setError('Unable to open that link on this device right now.');
     }
   }
 
-  async function persistBiometricCredentials(email, password) {
-    try {
-      await SecureStore.setItemAsync(
-        BIOMETRIC_CREDENTIALS_KEY,
-        JSON.stringify({
-          email,
-          password,
-        }),
-      );
-      setHasBiometricCredentials(true);
-    } catch (storageError) {
-      setHasBiometricCredentials(false);
-    }
-  }
-
-  async function clearBiometricCredentials() {
-    try {
-      await SecureStore.deleteItemAsync(BIOMETRIC_CREDENTIALS_KEY);
-    } catch (storageError) {
-      // Ignore cleanup failures.
-    } finally {
-      setHasBiometricCredentials(false);
-    }
-  }
-
-  async function setBiometricPreference(nextValue) {
-    try {
-      if (nextValue) {
-        await SecureStore.setItemAsync(BIOMETRIC_ENABLED_KEY, 'true');
-      } else {
-        await SecureStore.deleteItemAsync(BIOMETRIC_ENABLED_KEY);
-      }
-      setBiometricEnabled(nextValue);
-    } catch (storageError) {
-      setError('Unable to update biometric preference on this device.');
-    }
-  }
-
-  function resetWorkspaceState() {
+  function resetWorkspace() {
+    setActiveTab('properties');
+    setPropertyDetailsCollapsed(false);
     setProperties([]);
     setPropertyId('');
     setDashboard(null);
@@ -344,97 +137,14 @@ export function RootScreen() {
     setAnalysis(null);
     setGallery([]);
     setSelectedPhotoId('');
-    setGalleryFilter('All');
-    setActiveTab('properties');
-    setPropertySection('overview');
-    setPropertyDetailsCollapsed(false);
   }
 
   function handleSignOut() {
     setSession(null);
-    resetWorkspaceState();
+    resetWorkspace();
     setShowPassword(false);
     setError('');
     setStatus('Signed out. Sign in to load your properties and capture listing photos.');
-  }
-
-  async function handleBiometricLogin() {
-    if (!biometricAvailable || !biometricEnabled || !hasBiometricCredentials) {
-      setError('Biometric login is not ready on this device yet.');
-      return;
-    }
-
-    setBusy(true);
-    setError('');
-
-    try {
-      const biometricResult = await LocalAuthentication.authenticateAsync({
-        promptMessage: Platform.OS === 'ios' ? 'Unlock Workside Home Advisor' : 'Confirm your identity',
-        cancelLabel: 'Cancel',
-        disableDeviceFallback: false,
-      });
-
-      if (!biometricResult.success) {
-        throw new Error('Biometric authentication was cancelled or failed.');
-      }
-
-      const credentialsRaw = await SecureStore.getItemAsync(BIOMETRIC_CREDENTIALS_KEY);
-      if (!credentialsRaw) {
-        throw new Error('No saved biometric login credentials were found.');
-      }
-
-      const credentials = JSON.parse(credentialsRaw);
-      const result = await login({
-        email: credentials.email,
-        password: credentials.password,
-      });
-
-      if (result.requiresOtpVerification) {
-        setAuthMode('verify');
-        updateField('email', credentials.email);
-        setStatus('This account still needs OTP verification before biometric login can finish.');
-        return;
-      }
-
-      setSession(result);
-      await persistLastLoginEmail(credentials.email);
-      setActiveTab('properties');
-      await loadPropertiesForUser(result.user.id);
-      setStatus('Unlocked with biometrics.');
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleToggleBiometric() {
-    if (!biometricAvailable) {
-      setError('Biometric authentication is not available on this device.');
-      return;
-    }
-
-    if (!biometricEnabled) {
-      if (!hasBiometricCredentials) {
-        setError('Complete a successful password login first so we can securely save credentials for biometric unlock.');
-        return;
-      }
-
-      await setBiometricPreference(true);
-      setStatus('Biometric login is enabled.');
-      return;
-    }
-
-    await setBiometricPreference(false);
-    setStatus('Biometric login is disabled.');
-  }
-
-  async function openExternalUrl(url) {
-    try {
-      await Linking.openURL(url);
-    } catch (linkError) {
-      setError('Unable to open that link on this device right now.');
-    }
   }
 
   function confirmDeleteAccount() {
@@ -449,12 +159,9 @@ export function RootScreen() {
 
     Alert.alert(
       'Delete account?',
-      'This permanently removes your account, owned properties, saved pricing, generated flyers, and associated media. This action cannot be undone.',
+      'This permanently removes your account and associated property workspace data. This action cannot be undone.',
       [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
+        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete account',
           style: 'destructive',
@@ -463,20 +170,10 @@ export function RootScreen() {
             setError('');
 
             try {
-              await deleteAccountRequest(session.token);
-              await SecureStore.deleteItemAsync(LAST_LOGIN_EMAIL_KEY);
-              await SecureStore.deleteItemAsync(BIOMETRIC_ENABLED_KEY);
-              await SecureStore.deleteItemAsync(BIOMETRIC_CREDENTIALS_KEY);
+              await deleteAccount(session.token);
               setSession(null);
-              resetWorkspaceState();
-              setBiometricEnabled(false);
-              setHasBiometricCredentials(false);
-              setForm((current) => ({
-                ...current,
-                email: '',
-                password: '',
-                otpCode: '',
-              }));
+              resetWorkspace();
+              setShowPassword(false);
               setStatus('Your account has been deleted.');
             } catch (requestError) {
               setError(requestError.message);
@@ -489,8 +186,8 @@ export function RootScreen() {
     );
   }
 
-  async function loadPropertyWorkspace(targetPropertyId) {
-    if (!targetPropertyId) {
+  async function loadPropertyWorkspace(nextPropertyId) {
+    if (!nextPropertyId) {
       setDashboard(null);
       setGallery([]);
       setSelectedPhotoId('');
@@ -498,14 +195,13 @@ export function RootScreen() {
     }
 
     const [dashboardResponse, mediaResponse] = await Promise.all([
-      getDashboard(targetPropertyId),
-      listMediaAssets(targetPropertyId),
+      getDashboard(nextPropertyId),
+      listMediaAssets(nextPropertyId),
     ]);
     const nextGallery = mediaResponse.assets || [];
     setDashboard(dashboardResponse);
     setGallery(nextGallery);
     setSelectedPhotoId(nextGallery[0]?.id || '');
-    setGalleryFilter('All');
   }
 
   async function loadPropertiesForUser(userId) {
@@ -515,8 +211,6 @@ export function RootScreen() {
 
     setProperties(nextProperties);
     setPropertyId(nextPropertyId);
-    setPropertySection('overview');
-
     await loadPropertyWorkspace(nextPropertyId);
   }
 
@@ -537,8 +231,6 @@ export function RootScreen() {
       }
 
       setSession(result);
-      await persistLastLoginEmail(form.email);
-      await persistBiometricCredentials(form.email, form.password);
       setActiveTab('properties');
       await loadPropertiesForUser(result.user.id);
       setStatus('Mobile workspace loaded.');
@@ -559,7 +251,6 @@ export function RootScreen() {
         otpCode: form.otpCode,
       });
       setSession(result);
-      await persistLastLoginEmail(form.email);
       setActiveTab('properties');
       await loadPropertiesForUser(result.user.id);
       setStatus('Email verified. Mobile workspace loaded.');
@@ -586,7 +277,6 @@ export function RootScreen() {
 
   async function handleRefreshProperty(property) {
     setPropertyId(property.id);
-    setPropertySection('overview');
     setBusy(true);
     setError('');
 
@@ -613,8 +303,7 @@ export function RootScreen() {
 
     try {
       await analyzePricing(propertyId);
-      const dashboardResponse = await getDashboard(propertyId);
-      setDashboard(dashboardResponse);
+      await loadPropertyWorkspace(propertyId);
       setStatus('Pricing analysis refreshed.');
     } catch (requestError) {
       setError(requestError.message);
@@ -655,14 +344,13 @@ export function RootScreen() {
             });
 
       if (pickerResult.canceled || !pickerResult.assets?.[0]) {
-        setBusy(false);
         return;
       }
 
       setPhotoAsset(pickerResult.assets[0]);
       setAnalysis(null);
       setActiveTab('capture');
-      setStatus('Photo ready. Add a room label and save it to the property.');
+      setStatus('Photo ready. Save it when you are ready for AI review.');
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -689,10 +377,9 @@ export function RootScreen() {
       });
       const mediaResponse = await listMediaAssets(propertyId);
       const nextGallery = mediaResponse.assets || [];
-
       setAnalysis(response.analysis);
       setGallery(nextGallery);
-      setSelectedPhotoId(response.asset?.id || nextGallery[0]?.id || '');
+      setSelectedPhotoId(nextGallery[0]?.id || '');
       setActiveTab('gallery');
       setStatus('Photo saved to the property gallery and analyzed.');
     } catch (requestError) {
@@ -702,42 +389,47 @@ export function RootScreen() {
     }
   }
 
+  function renderFeedback() {
+    return (
+      <>
+        {status ? <Text style={styles.status}>{status}</Text> : null}
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {busy ? <ActivityIndicator color={colors.clay} style={styles.spinner} /> : null}
+      </>
+    );
+  }
+
   function renderAuth() {
     return (
       <View style={styles.authShell}>
-        <View style={styles.authHero}>
-          <Text
-            style={styles.titleSingleLine}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.72}
-          >
+        <View style={styles.hero}>
+          <Text style={styles.kicker}>Powered by Workside Software</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} style={styles.title}>
             Workside Home Advisor
-          </Text>
-          <Text style={styles.authIntro}>
-            Sign in to access your properties, capture listing photos, and review AI guidance in the field.
           </Text>
         </View>
 
-        <GlassCard style={styles.card}>
+        <View style={styles.card}>
           <Text style={styles.cardTitle}>Mobile sign-in</Text>
           <Text style={styles.cardBody}>
             Use the same verified seller account you created on the web portal.
           </Text>
+
           <View style={styles.segmentRow}>
             <ActionButton
               label="Password login"
               onPress={() => setAuthMode('login')}
               variant={authMode === 'login' ? 'primary' : 'secondary'}
-              compact
             />
-            <ActionButton
-              label="Enter OTP"
-              onPress={() => setAuthMode('verify')}
-              variant={authMode === 'verify' ? 'primary' : 'secondary'}
-              compact
-            />
+            {authMode === 'verify' ? (
+              <ActionButton
+                label="Enter OTP"
+                onPress={() => setAuthMode('verify')}
+                variant="primary"
+              />
+            ) : null}
           </View>
+
           <TextInput
             style={styles.input}
             placeholder="seller@example.com"
@@ -747,6 +439,7 @@ export function RootScreen() {
             value={form.email}
             onChangeText={(value) => updateField('email', value)}
           />
+
           {authMode === 'login' ? (
             <View style={styles.passwordField}>
               <TextInput
@@ -761,7 +454,7 @@ export function RootScreen() {
                 onPress={() => setShowPassword((current) => !current)}
                 style={styles.passwordToggle}
               >
-                <Text style={styles.passwordToggleIcon}>{showPassword ? 'Hide' : 'Show'}</Text>
+                <Text style={styles.passwordToggleLabel}>{showPassword ? 'Hide' : 'Show'}</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -773,20 +466,13 @@ export function RootScreen() {
               onChangeText={(value) => updateField('otpCode', value)}
             />
           )}
+
           <View style={styles.segmentRow}>
             <ActionButton
               label={busy ? 'Working...' : authMode === 'login' ? 'Continue' : 'Verify email'}
               onPress={authMode === 'login' ? handleLogin : handleVerifyOtp}
               disabled={busy}
             />
-            {authMode === 'login' && biometricAvailable && biometricEnabled && hasBiometricCredentials ? (
-              <ActionButton
-                label={Platform.OS === 'ios' ? 'Face ID' : 'Biometric'}
-                onPress={handleBiometricLogin}
-                variant="secondary"
-                disabled={busy}
-              />
-            ) : null}
             {authMode === 'verify' ? (
               <ActionButton
                 label="Resend OTP"
@@ -796,19 +482,21 @@ export function RootScreen() {
               />
             ) : null}
           </View>
-        </GlassCard>
+        </View>
+
+        {renderFeedback()}
 
         <View style={styles.authFooter}>
-          <Text style={styles.authFooterCopy}>Copyright 2026 Workside Software LLC.</Text>
-          <View style={styles.authFooterLinks}>
+          <Text style={styles.footerCopy}>Copyright 2026 Workside Software LLC.</Text>
+          <View style={styles.footerLinks}>
             <TouchableOpacity onPress={() => openExternalUrl(TERMS_URL)}>
-              <Text style={styles.authFooterLink}>Terms of Service</Text>
+              <Text style={styles.footerLink}>Terms of Service</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => openExternalUrl(PRIVACY_URL)}>
-              <Text style={styles.authFooterLink}>Privacy Notice</Text>
+              <Text style={styles.footerLink}>Privacy Notice</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => openExternalUrl(`mailto:${SUPPORT_EMAIL}`)}>
-              <Text style={styles.authFooterLink}>Support</Text>
+              <Text style={styles.footerLink}>{SUPPORT_EMAIL}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -816,368 +504,111 @@ export function RootScreen() {
     );
   }
 
-  function renderPhotoDetail(asset) {
-    if (!asset) {
-      return (
-        <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateTitle}>No photo selected</Text>
-          <Text style={styles.emptyStateBody}>
-            Tap a saved property photo to inspect room details, AI notes, and flyer potential.
-          </Text>
-        </View>
-      );
-    }
-
+  function renderPropertiesTab() {
     return (
-      <View style={styles.photoDetailCard}>
-        <Image source={{ uri: asset.imageUrl || asset.imageDataUrl }} style={styles.photoDetailImage} />
-        <View style={styles.photoDetailCopy}>
-          <View style={styles.photoDetailHeader}>
-            <View style={styles.photoDetailTitleWrap}>
-              <Text style={styles.photoDetailTitle}>{asset.roomLabel || 'Room photo'}</Text>
-              <Text style={styles.photoDetailMeta}>
-                {asset.analysis?.roomGuess || 'Room pending'} · {asset.analysis?.overallQualityScore || '--'}/100
-              </Text>
-            </View>
-            <Text
-              style={[
-                styles.photoStatusChip,
-                asset.analysis?.retakeRecommended ? styles.photoStatusChipWarning : null,
-              ]}
-            >
-              {asset.analysis?.retakeRecommended ? 'Retake recommended' : 'Good listing candidate'}
-            </Text>
-          </View>
+      <View style={styles.tabContent}>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Signed in as</Text>
+          <Text style={styles.identityName}>{getDisplayName(session.user)}</Text>
+          <Text style={styles.identityEmail}>{session.user.email}</Text>
+        </View>
 
-          <View style={styles.scoreRow}>
-            <ScoreBadge label="Lighting" value={String(asset.analysis?.lightingScore || '--')} />
-            <ScoreBadge label="Composition" value={String(asset.analysis?.compositionScore || '--')} />
-            <ScoreBadge label="Clarity" value={String(asset.analysis?.clarityScore || '--')} />
-          </View>
-
-          <Text style={styles.analysisSubhead}>AI summary</Text>
-          <Text style={styles.cardBody}>
-            {asset.analysis?.summary ||
-              'AI review will appear here after the image is analyzed and attached to this property.'}
-          </Text>
-
-          {(asset.analysis?.suggestions || []).length ? (
-            <>
-              <Text style={styles.analysisSubhead}>Suggestions</Text>
-              {asset.analysis.suggestions.map((item) => (
-                <Text key={item} style={styles.listItem}>
-                  • {item}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Property workspace</Text>
+          <Text style={styles.cardBody}>Choose a property to inspect and photograph.</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.propertyRow}
+          >
+            {properties.map((property) => (
+              <TouchableOpacity
+                key={property.id}
+                onPress={() => handleRefreshProperty(property)}
+                style={[
+                  styles.propertyChip,
+                  property.id === propertyId ? styles.propertyChipActive : null,
+                ]}
+              >
+                <Text style={styles.propertyChipTitle}>{property.title}</Text>
+                <Text style={styles.propertyChipMeta}>
+                  {property.city}, {property.state}
                 </Text>
-              ))}
-            </>
-          ) : null}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         </View>
-      </View>
-    );
-  }
-
-  function renderPropertyOverview() {
-    return (
-      <>
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionEyebrow}>Properties</Text>
-            <Text style={styles.sectionTitle}>Your available properties</Text>
-          </View>
-          <Text style={styles.sectionMeta}>{properties.length} available</Text>
-        </View>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.propertyRow}
-        >
-          {properties.map((property) => (
-            <TouchableOpacity
-              key={property.id}
-              onPress={() => handleRefreshProperty(property)}
-              style={[styles.propertyCard, property.id === propertyId ? styles.propertyCardActive : null]}
-            >
-              <Text style={styles.propertyChipTitle}>{property.title}</Text>
-              <Text style={styles.propertyChipMeta}>
-                {property.city}, {property.state}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
 
         {selectedProperty ? (
-          <View style={styles.sectionStack}>
-            <View style={styles.propertySummaryCard}>
-              <View style={styles.propertySummaryHeader}>
-                <View style={styles.propertySummaryText}>
-                  <Text style={styles.propertySummaryTitle}>{selectedProperty.title}</Text>
-                  <Text style={styles.propertySummaryMeta}>
-                    {selectedProperty.addressLine1}, {selectedProperty.city}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  onPress={() => setPropertyDetailsCollapsed((current) => !current)}
-                  style={styles.propertyCollapseButton}
-                >
-                  <Text style={styles.propertyCollapseButtonLabel}>
-                    {propertyDetailsCollapsed ? 'Expand' : 'Collapse'}
-                  </Text>
-                </TouchableOpacity>
+          <View style={styles.card}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionHeaderCopy}>
+                <Text style={styles.cardTitle}>{selectedProperty.title}</Text>
+                <Text style={styles.cardBody}>
+                  {selectedProperty.addressLine1}, {selectedProperty.city}, {selectedProperty.state}{' '}
+                  {selectedProperty.zip}
+                </Text>
               </View>
-              <View style={styles.propertySummaryBadges}>
-                <ScoreBadge
-                  label="Price"
-                  value={
-                    dashboard?.pricing
-                      ? `${formatCurrency(dashboard.pricing.low)} – ${formatCurrency(dashboard.pricing.high)}`
-                      : 'Pending'
-                  }
-                />
-                <ScoreBadge label="Photos" value={String(gallery.length)} />
-              </View>
+              <TouchableOpacity
+                onPress={() => setPropertyDetailsCollapsed((current) => !current)}
+                style={styles.collapseButton}
+              >
+                <Text style={styles.collapseButtonLabel}>
+                  {propertyDetailsCollapsed ? 'Expand' : 'Collapse'}
+                </Text>
+              </TouchableOpacity>
             </View>
 
             {!propertyDetailsCollapsed ? (
               <>
-                <View style={styles.propertyHero}>
-                  <View style={styles.propertyHeroHeader}>
-                    <View style={styles.propertyHeroTitleWrap}>
-                      <Text style={styles.propertyHeroTitle}>{selectedProperty.title}</Text>
-                      <Text style={styles.propertyHeroAddress}>
-                        {selectedProperty.addressLine1}, {selectedProperty.city}, {selectedProperty.state}{' '}
-                        {selectedProperty.zip}
-                      </Text>
-                    </View>
-                    <Text style={styles.propertyHeroBadge}>{selectedProperty.propertyType}</Text>
-                  </View>
-
-                  <View style={styles.propertyFactRow}>
-                    <ScoreBadge
-                      label="Price band"
-                      value={
-                        dashboard?.pricing
-                          ? `${formatCurrency(dashboard.pricing.low)} – ${formatCurrency(dashboard.pricing.high)}`
-                          : 'Pending'
-                      }
-                    />
-                    <ScoreBadge label="Photos" value={String(gallery.length)} />
-                    <ScoreBadge label="Best shots" value={String(featuredPhotoCount)} />
-                  </View>
-
-                  <View style={styles.propertyFactRow}>
-                    <ScoreBadge label="Beds" value={String(selectedProperty.bedrooms || '--')} />
-                    <ScoreBadge label="Baths" value={String(selectedProperty.bathrooms || '--')} />
-                    <ScoreBadge label="Sqft" value={String(selectedProperty.squareFeet || '--')} />
-                  </View>
-
-                  <Text style={styles.propertyHeroSummary}>
+                <View style={styles.readinessCard}>
+                  <Text style={styles.readinessLabel}>Latest pricing</Text>
+                  <Text style={styles.readinessScore}>
+                    {dashboard?.pricing
+                      ? `${formatCurrency(dashboard.pricing.low)} to ${formatCurrency(dashboard.pricing.high)}`
+                      : 'Run pricing analysis'}
+                  </Text>
+                  <Text style={styles.readinessBody}>
                     {dashboard?.pricingSummary ||
-                      'Pricing and AI summary appear here once a fresh analysis is available.'}
+                      'Once pricing runs, this section will show the latest RentCast + AI summary.'}
                   </Text>
-
-                  <View style={styles.segmentRow}>
-                    <ActionButton label="Refresh pricing" onPress={handleRunPricing} disabled={busy} compact />
-                    <ActionButton
-                      label="Capture photos"
-                      onPress={() => setActiveTab('capture')}
-                      variant="secondary"
-                      compact
-                    />
-                    <ActionButton
-                      label="View gallery"
-                      onPress={() => setActiveTab('gallery')}
-                      variant="secondary"
-                      compact
-                    />
-                  </View>
+                  <ActionButton label="Refresh pricing" onPress={handleRunPricing} disabled={busy} />
                 </View>
 
-                <View style={styles.subsectionTabs}>
-                  <TabChip
-                    label="Overview"
-                    active={propertySection === 'overview'}
-                    onPress={() => setPropertySection('overview')}
-                  />
-                  <TabChip
-                    label="Insights"
-                    active={propertySection === 'insights'}
-                    onPress={() => setPropertySection('insights')}
-                  />
-                  <TabChip
-                    label="Photos"
-                    active={propertySection === 'photos'}
-                    onPress={() => setPropertySection('photos')}
-                  />
-                </View>
-              </>
-            ) : null}
-
-            {!propertyDetailsCollapsed && propertySection === 'overview' ? (
-              <View style={styles.sectionStack}>
-                <View style={styles.card}>
-                  <Text style={styles.cardTitle}>Field-ready summary</Text>
-                  <Text style={styles.cardBody}>
-                    Use this property as the main mobile workspace for photo capture, quick pricing checks, and on-site seller prep.
-                  </Text>
-                  <View style={styles.scoreRow}>
-                    <ScoreBadge
-                      label="Midpoint"
-                      value={
-                        dashboard?.pricing?.mid
-                          ? formatCurrency(dashboard.pricing.mid)
-                          : 'Pending'
-                      }
-                    />
-                    <ScoreBadge
-                      label="Confidence"
-                      value={
-                        dashboard?.pricing?.confidence
-                          ? `${Math.round(dashboard.pricing.confidence * 100)}%`
-                          : '--'
-                      }
-                    />
-                    <ScoreBadge
-                      label="Comps"
-                      value={String(dashboard?.pricing?.selectedComps?.length || 0)}
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.card}>
-                  <Text style={styles.cardTitle}>Next best actions</Text>
-                  <Text style={styles.listItem}>• Capture strong living room, kitchen, and primary bedroom angles.</Text>
-                  <Text style={styles.listItem}>• Review AI retake notes before generating a seller flyer.</Text>
-                  <Text style={styles.listItem}>• Refresh pricing again after major prep or staging changes.</Text>
-                </View>
-              </View>
-            ) : null}
-
-            {!propertyDetailsCollapsed && propertySection === 'insights' ? (
-              <View style={styles.sectionStack}>
-                <View style={styles.card}>
-                  <Text style={styles.cardTitle}>Pricing insight</Text>
-                  <Text style={styles.cardBody}>
-                    {dashboard?.pricingSummary ||
-                      'Run a fresh pricing analysis to load the latest market narrative and comp-backed recommendation.'}
-                  </Text>
-                </View>
-
-                <View style={styles.card}>
-                  <Text style={styles.cardTitle}>Top comps</Text>
-                  {topComps.length ? (
-                    topComps.map((comp) => (
-                      <View key={`${comp.addressLine1}-${comp.salePrice}`} style={styles.compMiniCard}>
-                        <Text style={styles.compMiniTitle}>{comp.addressLine1}</Text>
-                        <Text style={styles.compMiniMeta}>
-                          {formatCurrency(comp.salePrice)} · {comp.distanceMiles?.toFixed?.(2) || '--'} mi · {comp.bedrooms || '--'} bd / {comp.bathrooms || '--'} ba
+                {selectedComps.length ? (
+                  <View style={styles.compList}>
+                    {selectedComps.map((comp) => (
+                      <View key={comp.address || `${comp.price}-${comp.distanceMiles}`} style={styles.compCard}>
+                        <Text style={styles.compTitle}>{comp.address}</Text>
+                        <Text style={styles.compMeta}>
+                          {formatCurrency(comp.price)} · {Number(comp.distanceMiles || 0).toFixed(2)} mi
+                        </Text>
+                        <Text style={styles.compMeta}>
+                          {comp.beds || '--'} bd · {comp.baths || '--'} ba · {comp.squareFeet || '--'} sqft
                         </Text>
                       </View>
-                    ))
-                  ) : (
-                    <Text style={styles.cardBody}>
-                      No top comps are stored yet for this property.
-                    </Text>
-                  )}
-                </View>
-              </View>
-            ) : null}
-
-            {!propertyDetailsCollapsed && propertySection === 'photos' ? (
-              <View style={styles.sectionStack}>
-                <View style={styles.card}>
-                  <Text style={styles.cardTitle}>Photo library snapshot</Text>
-                  <Text style={styles.cardBody}>
-                    Review the latest property shots here, then switch to Gallery for a deeper photo-by-photo inspection.
-                  </Text>
-                  <View style={styles.scoreRow}>
-                    <ScoreBadge label="Saved" value={String(gallery.length)} />
-                    <ScoreBadge label="Strong" value={String(featuredPhotoCount)} />
-                    <ScoreBadge
-                      label="Retakes"
-                      value={String(gallery.filter((asset) => asset.analysis?.retakeRecommended).length)}
-                    />
+                    ))}
                   </View>
-                </View>
-
-                {gallery.length ? (
-                  <>
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={styles.photoRail}
-                    >
-                      {gallery.map((asset) => (
-                        <TouchableOpacity
-                          key={asset.id}
-                          onPress={() => {
-                            setSelectedPhotoId(asset.id);
-                            setActiveTab('gallery');
-                          }}
-                          style={[
-                            styles.photoRailCard,
-                            asset.id === selectedPhoto?.id ? styles.photoRailCardActive : null,
-                          ]}
-                        >
-                          <Image source={{ uri: asset.imageUrl || asset.imageDataUrl }} style={styles.photoRailImage} />
-                          <Text style={styles.photoRailLabel} numberOfLines={1}>
-                            {asset.roomLabel || 'Room photo'}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                    {renderPhotoDetail(selectedPhoto)}
-                  </>
-                ) : (
-                  <View style={styles.emptyStateCard}>
-                    <Text style={styles.emptyStateTitle}>No property photos yet</Text>
-                    <Text style={styles.emptyStateBody}>
-                      Capture your first room shot to start building the mobile-ready property gallery.
-                    </Text>
-                  </View>
-                )}
-              </View>
-            ) : null}
+                ) : null}
+              </>
+            ) : (
+              <Text style={styles.cardBody}>
+                Pricing, comps, and photo workflow are ready below when you want them.
+              </Text>
+            )}
           </View>
-        ) : (
-          <View style={styles.emptyStateCard}>
-            <Text style={styles.emptyStateTitle}>No property selected</Text>
-            <Text style={styles.emptyStateBody}>
-              Choose a property to review pricing, capture photos, and inspect the existing gallery.
-            </Text>
-          </View>
-        )}
-      </>
+        ) : null}
+      </View>
     );
   }
 
-  function renderCapture() {
+  function renderCaptureTab() {
     return (
-      <>
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionEyebrow}>Capture</Text>
-            <Text style={styles.sectionTitle}>Room-by-room photo intake</Text>
-          </View>
-          <Text style={styles.sectionMeta}>{selectedProperty?.title || 'No property'}</Text>
-        </View>
-
-        {selectedProperty ? (
-          <View style={styles.capturePropertyBanner}>
-            <View>
-              <Text style={styles.capturePropertyTitle}>{selectedProperty.title}</Text>
-              <Text style={styles.capturePropertyMeta}>
-                {selectedProperty.addressLine1}, {selectedProperty.city}, {selectedProperty.state}
-              </Text>
-            </View>
-            <Text style={styles.capturePropertyBadge}>{gallery.length} photos</Text>
-          </View>
-        ) : null}
-
+      <View style={styles.tabContent}>
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Capture for {selectedProperty?.title || 'your property'}</Text>
+          <Text style={styles.cardTitle}>Photo capture + AI review</Text>
           <Text style={styles.cardBody}>
-            Tag each image by room, then save it to the property so it becomes available for AI review and flyer selection.
+            Capture the room, then let AI score lighting, composition, clarity, and retake value.
           </Text>
           <TextInput
             style={styles.input}
@@ -1186,24 +617,6 @@ export function RootScreen() {
             value={form.roomLabel}
             onChangeText={(value) => updateField('roomLabel', value)}
           />
-          <View style={styles.quickTagRow}>
-            {['Living room', 'Kitchen', 'Primary bedroom', 'Bathroom', 'Exterior'].map((tag) => (
-              <TouchableOpacity
-                key={tag}
-                onPress={() => updateField('roomLabel', tag)}
-                style={[
-                  styles.quickTagChip,
-                  form.roomLabel === tag ? styles.quickTagChipActive : null,
-                ]}
-              >
-                <Text
-                  style={form.roomLabel === tag ? styles.quickTagChipLabelActive : styles.quickTagChipLabel}
-                >
-                  {tag}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
           <View style={styles.segmentRow}>
             <ActionButton
               label="Use camera"
@@ -1217,16 +630,7 @@ export function RootScreen() {
               disabled={busy || !propertyId}
             />
           </View>
-          {photoAsset?.uri ? (
-            <Image source={{ uri: photoAsset.uri }} style={styles.photoPreview} />
-          ) : (
-            <View style={styles.photoPlaceholder}>
-              <Text style={styles.photoPlaceholderTitle}>No pending capture yet</Text>
-              <Text style={styles.photoPlaceholderBody}>
-                Choose the camera or library to add a room photo for this property.
-              </Text>
-            </View>
-          )}
+          {photoAsset?.uri ? <Image source={{ uri: photoAsset.uri }} style={styles.photoPreview} /> : null}
           <ActionButton
             label="Save + analyze photo"
             onPress={handleSavePhoto}
@@ -1236,321 +640,156 @@ export function RootScreen() {
 
         {analysis ? (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Latest AI analysis</Text>
+            <Text style={styles.cardTitle}>AI photo analysis</Text>
             <Text style={styles.analysisHeadline}>
               {analysis.roomGuess} · {analysis.overallQualityScore}/100
             </Text>
             <Text style={styles.cardBody}>{analysis.summary}</Text>
             <View style={styles.scoreRow}>
-              <ScoreBadge label="Lighting" value={String(analysis.lightingScore)} />
-              <ScoreBadge label="Composition" value={String(analysis.compositionScore)} />
-              <ScoreBadge label="Clarity" value={String(analysis.clarityScore)} />
+              <View style={styles.scorePill}>
+                <Text style={styles.scorePillLabel}>Lighting</Text>
+                <Text style={styles.scorePillValue}>{analysis.lightingScore}</Text>
+              </View>
+              <View style={styles.scorePill}>
+                <Text style={styles.scorePillLabel}>Composition</Text>
+                <Text style={styles.scorePillValue}>{analysis.compositionScore}</Text>
+              </View>
+              <View style={styles.scorePill}>
+                <Text style={styles.scorePillLabel}>Clarity</Text>
+                <Text style={styles.scorePillValue}>{analysis.clarityScore}</Text>
+              </View>
             </View>
             <Text style={styles.analysisSubhead}>Suggestions</Text>
-            {(analysis.suggestions || []).map((item) => (
+            {analysis.suggestions.map((item) => (
               <Text key={item} style={styles.listItem}>
                 • {item}
               </Text>
             ))}
           </View>
         ) : null}
-      </>
+      </View>
     );
   }
 
-  function renderGallery() {
+  function renderGalleryTab() {
     return (
-      <>
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionEyebrow}>Gallery</Text>
-            <Text style={styles.sectionTitle}>Property photo library</Text>
-          </View>
-          <Text style={styles.sectionMeta}>{gallery.length} saved</Text>
-        </View>
-
-        {gallery.length === 0 ? (
-          <View style={styles.emptyStateCard}>
-            <Text style={styles.emptyStateTitle}>No saved photos yet</Text>
-            <Text style={styles.emptyStateBody}>
-              Capture a room photo and save it to start building the property gallery.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.sectionStack}>
-            <View style={styles.filterRow}>
-              {galleryFilters.map((filter) => (
-                <TouchableOpacity
-                  key={filter}
-                  onPress={() => setGalleryFilter(filter)}
-                  style={[styles.filterChip, galleryFilter === filter ? styles.filterChipActive : null]}
-                >
-                  <Text style={galleryFilter === filter ? styles.filterChipLabelActive : styles.filterChipLabel}>
-                    {filter}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {renderPhotoDetail(selectedPhoto)}
-
-            <View style={styles.galleryGrid}>
-              {filteredGallery.map((asset) => (
-                <TouchableOpacity
-                  key={asset.id}
-                  onPress={() => setSelectedPhotoId(asset.id)}
-                  style={[
-                    styles.galleryCard,
-                    asset.id === selectedPhoto?.id ? styles.galleryCardActive : null,
-                  ]}
-                >
-                  <Image source={{ uri: asset.imageUrl || asset.imageDataUrl }} style={styles.galleryImage} />
-                  <View style={styles.galleryCopy}>
-                    <Text style={styles.galleryTitle}>{asset.roomLabel || 'Room photo'}</Text>
-                    <Text style={styles.galleryMeta}>
-                      {asset.analysis?.roomGuess || 'Room pending'} · {asset.analysis?.overallQualityScore || '--'}/100
-                    </Text>
-                    <Text style={styles.galleryMeta}>
-                      {asset.analysis?.retakeRecommended ? 'Retake recommended' : 'Usable for flyer review'}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        )}
-      </>
-    );
-  }
-
-  function renderVision() {
-    return (
-      <View style={styles.sectionStack}>
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionEyebrow}>Vision</Text>
-            <Text style={styles.sectionTitle}>Listing vision mode</Text>
-          </View>
-          <Text style={styles.sectionMeta}>{selectedProperty?.title || 'No property'}</Text>
-        </View>
-
-        <GlassCard style={styles.card}>
-          <Text style={styles.cardTitle}>Best current listing candidates</Text>
+      <View style={styles.tabContent}>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Saved photo gallery</Text>
           <Text style={styles.cardBody}>
-            Use this view to decide which rooms deserve retakes, which images belong on the flyer, and what story the property should tell visually.
+            Each saved photo is tied to the selected property with room context and AI review.
           </Text>
-          {bestPhotoCandidates.length ? (
-            bestPhotoCandidates.map((asset, index) => (
-              <View key={asset.id} style={styles.visionRow}>
-                <View style={styles.visionRank}>
-                  <Text style={styles.visionRankLabel}>{index + 1}</Text>
-                </View>
-                <View style={styles.visionCopy}>
-                  <Text style={styles.visionTitle}>{asset.roomLabel || 'Room photo'}</Text>
-                  <Text style={styles.galleryMeta}>
-                    Score {asset.analysis?.overallQualityScore || '--'} · {asset.analysis?.bestUse || 'General marketing'}
-                  </Text>
-                  <Text style={styles.cardBody}>
-                    {asset.analysis?.summary || 'AI summary will appear here after the image is analyzed.'}
-                  </Text>
-                </View>
-              </View>
-            ))
+          {gallery.length === 0 ? (
+            <Text style={styles.cardBody}>No saved photos yet for this property.</Text>
           ) : (
-            <Text style={styles.cardBody}>
-              Save a few property photos first and Vision mode will rank the strongest listing candidates for you.
-            </Text>
-          )}
-        </GlassCard>
+            <>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.galleryRail}
+              >
+                {gallery.map((asset) => (
+                  <TouchableOpacity
+                    key={asset.id}
+                    onPress={() => setSelectedPhotoId(asset.id)}
+                    style={[
+                      styles.galleryThumbCard,
+                      asset.id === selectedPhoto?.id ? styles.galleryThumbCardActive : null,
+                    ]}
+                  >
+                    <Image
+                      source={{ uri: asset.imageUrl || asset.imageDataUrl }}
+                      style={styles.galleryThumbImage}
+                    />
+                    <Text style={styles.galleryThumbLabel} numberOfLines={1}>
+                      {asset.roomLabel}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
 
-        <GlassCard style={styles.card}>
-          <Text style={styles.cardTitle}>Room coverage map</Text>
-          <Text style={styles.cardBody}>
-            These are the core rooms the app wants before you market or generate polished flyer drafts.
-          </Text>
-          <View style={styles.checklistStack}>
-            {roomCoverage.map((item) => (
-              <View key={item.room} style={styles.checklistRow}>
-                <Text style={item.captured ? styles.checklistBulletDone : styles.checklistBulletPending}>
-                  {item.captured ? '✓' : '•'}
-                </Text>
-                <View style={styles.checklistCopy}>
-                  <Text style={styles.checklistTitle}>{item.room}</Text>
-                  <Text style={styles.galleryMeta}>
-                    {item.captured ? 'Captured and available for review.' : 'Still needs a usable photo.'}
+              {selectedPhoto ? (
+                <View style={styles.galleryDetailCard}>
+                  <Image
+                    source={{ uri: selectedPhoto.imageUrl || selectedPhoto.imageDataUrl }}
+                    style={styles.galleryDetailImage}
+                  />
+                  <Text style={styles.galleryDetailTitle}>{selectedPhoto.roomLabel}</Text>
+                  <Text style={styles.galleryDetailMeta}>
+                    {(selectedPhoto.analysis?.overallQualityScore || '--') + '/100'} ·{' '}
+                    {selectedPhoto.analysis?.retakeRecommended ? 'Retake recommended' : 'Good listing candidate'}
                   </Text>
+                  {selectedPhoto.analysis?.summary ? (
+                    <Text style={styles.cardBody}>{selectedPhoto.analysis.summary}</Text>
+                  ) : null}
                 </View>
-              </View>
-            ))}
-          </View>
-        </GlassCard>
-
-        <GlassCard style={styles.card}>
-          <Text style={styles.cardTitle}>Presentation direction</Text>
-          <Text style={styles.cardBody}>
-            {dashboard?.pricingSummary
-              ? `Lead with the strongest visual moments, then support the current ${formatCurrency(
-                  dashboard.pricing?.mid || 0,
-                )} midpoint with bright, clean rooms and a calm, move-in-ready feel.`
-              : 'Run pricing and save a few photos to unlock a stronger listing direction for this property.'}
-          </Text>
-          <Text style={styles.listItem}>• Prioritize natural light, clutter-free framing, and level horizons.</Text>
-          <Text style={styles.listItem}>• Use exterior and kitchen photos to anchor the opening visual sequence.</Text>
-          <Text style={styles.listItem}>• Retake rooms with weak lighting before pushing them into flyers or marketing.</Text>
-        </GlassCard>
+              ) : null}
+            </>
+          )}
+        </View>
       </View>
     );
   }
 
-  function renderTasks() {
+  function renderSettingsTab() {
     return (
-      <View style={styles.sectionStack}>
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionEyebrow}>Tasks</Text>
-            <Text style={styles.sectionTitle}>Seller action checklist</Text>
-          </View>
-          <Text style={styles.sectionMeta}>{sellerTasks.length} active items</Text>
+      <View style={styles.tabContent}>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Profile</Text>
+          <Text style={styles.identityName}>{getDisplayName(session.user)}</Text>
+          <Text style={styles.identityEmail}>{session.user.email}</Text>
         </View>
 
-        <GlassCard style={styles.card}>
-          <Text style={styles.cardTitle}>Next best moves</Text>
-          <Text style={styles.cardBody}>
-            This checklist keeps the seller workflow moving from pricing to prep, then into media and flyer readiness.
-          </Text>
-          <View style={styles.checklistStack}>
-            {sellerTasks.map((task) => (
-              <View
-                key={task.key}
-                style={[
-                  styles.taskCard,
-                  task.tone === 'done' ? styles.taskCardDone : null,
-                  task.tone === 'warning' ? styles.taskCardWarning : null,
-                ]}
-              >
-                <View style={styles.taskHeader}>
-                  <Text style={task.done ? styles.taskStatusDone : styles.taskStatusPending}>
-                    {task.done ? 'Done' : task.tone === 'warning' ? 'Needs review' : 'Open'}
-                  </Text>
-                  <Text style={styles.taskTitle}>{task.title}</Text>
-                </View>
-                <Text style={styles.cardBody}>{task.detail}</Text>
-              </View>
-            ))}
-          </View>
-        </GlassCard>
-
-        <GlassCard style={styles.card}>
-          <Text style={styles.cardTitle}>What this app will do next</Text>
-          <Text style={styles.listItem}>• Vision mode will keep improving photo ranking and staging direction.</Text>
-          <Text style={styles.listItem}>• Flyer generation will get stronger as you refresh pricing and photo coverage.</Text>
-          <Text style={styles.listItem}>• Upcoming prep tasks will expand into room-by-room seller guidance.</Text>
-        </GlassCard>
-      </View>
-    );
-  }
-
-  function renderSettings() {
-    return (
-      <View style={styles.sectionStack}>
-        <GlassCard style={styles.card}>
-          <Text style={styles.cardTitle}>Settings</Text>
-          <Text style={styles.profileName}>{getDisplayName(session.user)}</Text>
-          <Text style={styles.profileEmail}>{session.user.email}</Text>
-          <Text style={styles.cardBody}>
-            Manage account access, legal links, and mobile field preferences from one place.
-          </Text>
-          <View style={styles.profileMetaRow}>
-            <ScoreBadge label="Selected property" value={selectedProperty?.title || 'None'} />
-            <ScoreBadge label="Gallery count" value={String(gallery.length)} />
-          </View>
-        </GlassCard>
-
-        <GlassCard style={styles.card}>
-          <Text style={styles.cardTitle}>Legal and support</Text>
-          <Text style={styles.cardBody}>
-            Review your customer-facing policies or reach Workside support from the app.
-          </Text>
-          <View style={styles.sectionStack}>
-            <ActionButton label="Terms of Service" onPress={() => openExternalUrl(TERMS_URL)} variant="secondary" />
-            <ActionButton label="Privacy Notice" onPress={() => openExternalUrl(PRIVACY_URL)} variant="secondary" />
-            <ActionButton
-              label={SUPPORT_EMAIL}
-              onPress={() => openExternalUrl(`mailto:${SUPPORT_EMAIL}`)}
-              variant="secondary"
-            />
-          </View>
-        </GlassCard>
-
-        <GlassCard style={styles.card}>
-          <Text style={styles.cardTitle}>Biometric login</Text>
-          <Text style={styles.cardBody}>
-            Use {Platform.OS === 'ios' ? 'Face ID or Touch ID' : 'fingerprint or device biometrics'} to unlock the last successful password account faster.
-          </Text>
-          <View style={styles.settingRow}>
-            <View style={styles.settingCopy}>
-              <Text style={styles.settingTitle}>Biometric unlock</Text>
-              <Text style={styles.settingSubtitle}>
-                {biometricAvailable
-                  ? hasBiometricCredentials
-                    ? biometricEnabled
-                      ? 'Enabled for future sign-ins.'
-                      : 'Available. Turn it on when you want faster sign-in.'
-                    : 'Complete a password login first so credentials can be stored securely.'
-                  : 'No enrolled biometrics were detected on this device.'}
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={handleToggleBiometric}
-              style={[
-                styles.togglePill,
-                biometricEnabled ? styles.togglePillActive : null,
-                !biometricAvailable ? styles.togglePillDisabled : null,
-              ]}
-            >
-              <View
-                style={[
-                  styles.toggleThumb,
-                  biometricEnabled ? styles.toggleThumbActive : null,
-                ]}
-              />
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Help + legal</Text>
+          <View style={styles.settingsLinkStack}>
+            <TouchableOpacity onPress={() => openExternalUrl(TERMS_URL)}>
+              <Text style={styles.settingsLink}>Terms of Service</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => openExternalUrl(PRIVACY_URL)}>
+              <Text style={styles.settingsLink}>Privacy Notice</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => openExternalUrl(`mailto:${SUPPORT_EMAIL}`)}>
+              <Text style={styles.settingsLink}>Email support</Text>
             </TouchableOpacity>
           </View>
-        </GlassCard>
+        </View>
 
-        <GlassCard style={styles.card}>
-          <Text style={styles.cardTitle}>Account actions</Text>
-          <Text style={styles.cardBody}>
-            You can sign out any time. Standard user accounts can also be permanently deleted here to comply with App Store account management requirements.
-          </Text>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Session</Text>
+          <ActionButton label="Sign out" onPress={handleSignOut} variant="secondary" />
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Account</Text>
           {accountDeletionBlocked ? (
-            <Text style={styles.protectedAccountNotice}>
-              This is a protected internal {session.user.isDemoAccount ? 'demo' : 'admin'} account, so account deletion is disabled.
+            <Text style={styles.cardBody}>
+              Demo and admin accounts are protected and cannot be deleted from the mobile app.
             </Text>
-          ) : null}
-          <View style={styles.sectionStack}>
-            <ActionButton label="Sign out" onPress={handleSignOut} variant="secondary" />
-            <ActionButton
-              label="Delete account"
-              onPress={confirmDeleteAccount}
-              variant="destructive"
-              disabled={busy || accountDeletionBlocked}
-            />
-          </View>
-        </GlassCard>
+          ) : (
+            <>
+              <Text style={styles.cardBody}>
+                App Store rules require an in-app account deletion path. This permanently removes
+                your account and associated workspace data.
+              </Text>
+              <ActionButton label="Delete account" onPress={confirmDeleteAccount} variant="secondary" />
+            </>
+          )}
+        </View>
       </View>
     );
   }
 
-  function renderAuthenticatedWorkspace() {
-    const tabAccent = {
-      properties: colors.moss,
-      vision: '#97c6bf',
-      capture: colors.clay,
-      tasks: '#e0c27a',
-      gallery: '#9cc7d8',
-      profile: colors.sand,
-    };
+  function renderWorkspace() {
+    let content = renderPropertiesTab();
+
+    if (activeTab === 'capture') {
+      content = renderCaptureTab();
+    } else if (activeTab === 'gallery') {
+      content = renderGalleryTab();
+    } else if (activeTab === 'settings') {
+      content = renderSettingsTab();
+    }
 
     return (
       <View style={styles.workspaceShell}>
@@ -1558,64 +797,22 @@ export function RootScreen() {
           style={styles.workspaceScroll}
           contentContainerStyle={styles.workspaceContent}
           keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
         >
-          <View style={styles.identityCard}>
-            <Text style={styles.identityLabel}>Signed in as</Text>
-            <Text style={styles.identityName}>{getDisplayName(session.user)}</Text>
-            <Text style={styles.identityEmail}>{session.user.email}</Text>
+          <View style={styles.workspaceHeader}>
+            <Text style={styles.kicker}>Workside Home Advisor</Text>
+            <Text style={styles.workspaceTitle}>Field workspace</Text>
           </View>
 
-          {status ? <Text style={styles.status}>{status}</Text> : null}
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          {busy ? <ActivityIndicator color={colors.clay} style={styles.spinner} /> : null}
+          <View style={styles.tabsRow}>
+            <TabButton label="Properties" active={activeTab === 'properties'} onPress={() => setActiveTab('properties')} />
+            <TabButton label="Capture" active={activeTab === 'capture'} onPress={() => setActiveTab('capture')} />
+            <TabButton label="Gallery" active={activeTab === 'gallery'} onPress={() => setActiveTab('gallery')} />
+            <TabButton label="Settings" active={activeTab === 'settings'} onPress={() => setActiveTab('settings')} />
+          </View>
 
-          {activeTab === 'properties' ? renderPropertyOverview() : null}
-          {activeTab === 'vision' ? renderVision() : null}
-          {activeTab === 'capture' ? renderCapture() : null}
-          {activeTab === 'tasks' ? renderTasks() : null}
-          {activeTab === 'gallery' ? renderGallery() : null}
-          {activeTab === 'profile' ? renderSettings() : null}
+          {renderFeedback()}
+          {content}
         </ScrollView>
-
-        <View style={styles.bottomTabBar}>
-          <BottomTabButton
-            label="Properties"
-            active={activeTab === 'properties'}
-            onPress={() => setActiveTab('properties')}
-            accent={tabAccent.properties}
-          />
-          <BottomTabButton
-            label="Vision"
-            active={activeTab === 'vision'}
-            onPress={() => setActiveTab('vision')}
-            accent={tabAccent.vision}
-          />
-          <BottomTabButton
-            label="Capture"
-            active={activeTab === 'capture'}
-            onPress={() => setActiveTab('capture')}
-            accent={tabAccent.capture}
-          />
-          <BottomTabButton
-            label="Tasks"
-            active={activeTab === 'tasks'}
-            onPress={() => setActiveTab('tasks')}
-            accent={tabAccent.tasks}
-          />
-          <BottomTabButton
-            label="Gallery"
-            active={activeTab === 'gallery'}
-            onPress={() => setActiveTab('gallery')}
-            accent={tabAccent.gallery}
-          />
-          <BottomTabButton
-            label="Settings"
-            active={activeTab === 'profile'}
-            onPress={() => setActiveTab('profile')}
-            accent={tabAccent.profile}
-          />
-        </View>
       </View>
     );
   }
@@ -1627,7 +824,7 @@ export function RootScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
     >
       {session?.user ? (
-        renderAuthenticatedWorkspace()
+        renderWorkspace()
       ) : (
         <ScrollView
           style={styles.screen}
@@ -1635,9 +832,6 @@ export function RootScreen() {
           keyboardShouldPersistTaps="handled"
         >
           {renderAuth()}
-          {status ? <Text style={styles.status}>{status}</Text> : null}
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          {busy ? <ActivityIndicator color={colors.clay} style={styles.spinner} /> : null}
         </ScrollView>
       )}
     </KeyboardAvoidingView>
@@ -1650,10 +844,28 @@ const styles = StyleSheet.create({
     backgroundColor: colors.ink,
   },
   content: {
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xl,
+    padding: 20,
     gap: 16,
+  },
+  authShell: {
+    gap: 16,
+    paddingTop: 8,
+  },
+  hero: {
+    gap: 10,
+    paddingTop: 20,
+  },
+  kicker: {
+    color: colors.moss,
+    fontSize: 12,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  title: {
+    color: colors.cream,
+    fontSize: 34,
+    fontWeight: '800',
+    lineHeight: 40,
   },
   workspaceShell: {
     flex: 1,
@@ -1662,147 +874,106 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   workspaceContent: {
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.md,
-    paddingBottom: 120,
+    padding: 20,
     gap: 16,
+    paddingBottom: 28,
   },
-  authShell: {
-    gap: 16,
+  workspaceHeader: {
+    gap: 6,
+    paddingTop: 12,
   },
-  authHero: {
-    gap: 10,
-    paddingTop: 8,
-  },
-  titleSingleLine: {
+  workspaceTitle: {
     color: colors.cream,
-    fontSize: device.isSmallWidth ? typography.title : typography.headline,
+    fontSize: 30,
     fontWeight: '800',
-    lineHeight: device.isSmallWidth ? typography.title + 4 : typography.headline + 4,
-    textAlign: 'center',
-    width: '100%',
   },
-  authIntro: {
+  tabsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  tabButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: colors.panelSoft,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  tabButtonActive: {
+    borderColor: colors.clay,
+    backgroundColor: 'rgba(210, 136, 89, 0.18)',
+  },
+  tabButtonLabel: {
     color: colors.sand,
-    fontSize: typography.body,
-    lineHeight: typography.body + 7,
-    textAlign: 'center',
+    fontWeight: '700',
+  },
+  tabButtonLabelActive: {
+    color: colors.cream,
+    fontWeight: '800',
   },
   card: {
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: 'rgba(36, 48, 57, 0.58)',
+    padding: 18,
+    borderRadius: 22,
+    backgroundColor: colors.panel,
     borderWidth: 1,
     borderColor: colors.line,
     gap: 12,
   },
   cardTitle: {
     color: colors.cream,
-    fontSize: typography.title,
-    fontWeight: '800',
+    fontSize: 20,
+    fontWeight: '700',
   },
   cardBody: {
     color: colors.sand,
-    fontSize: typography.body,
-    lineHeight: typography.body + 8,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  sectionEyebrow: {
-    color: colors.moss,
-    fontSize: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 1.5,
-    marginBottom: 4,
-  },
-  sectionTitle: {
-    color: colors.cream,
-    fontSize: typography.title,
-    fontWeight: '800',
-  },
-  sectionMeta: {
-    color: colors.sand,
-    fontSize: 13,
-    marginTop: 18,
-  },
-  sectionStack: {
-    gap: 14,
+    fontSize: 15,
+    lineHeight: 22,
   },
   input: {
-    minHeight: device.isCompactHeight ? 48 : 52,
-    borderRadius: radius.md,
+    minHeight: 50,
+    borderRadius: 14,
     paddingHorizontal: 14,
     backgroundColor: colors.panelSoft,
     color: colors.cream,
     borderWidth: 1,
     borderColor: colors.line,
-    fontSize: typography.bodyLarge,
+    fontSize: 18,
   },
   passwordField: {
-    minHeight: device.isCompactHeight ? 48 : 52,
-    borderRadius: radius.md,
-    paddingLeft: 14,
-    paddingRight: 8,
+    minHeight: 50,
+    borderRadius: 14,
     backgroundColor: colors.panelSoft,
     borderWidth: 1,
     borderColor: colors.line,
     flexDirection: 'row',
     alignItems: 'center',
+    paddingLeft: 14,
+    paddingRight: 8,
   },
   passwordInput: {
     flex: 1,
-    minHeight: 50,
     color: colors.cream,
-    fontSize: typography.bodyLarge,
+    fontSize: 18,
+    minHeight: 48,
   },
   passwordToggle: {
-    minWidth: 60,
-    minHeight: 40,
+    minWidth: 58,
+    minHeight: 38,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
-  passwordToggleIcon: {
+  passwordToggleLabel: {
     color: colors.sand,
-    fontSize: 13,
     fontWeight: '700',
+    fontSize: 12,
   },
   segmentRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
-  },
-  quickTagRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  quickTagChip: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    backgroundColor: colors.panelSoft,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  quickTagChipActive: {
-    borderColor: colors.clay,
-    backgroundColor: 'rgba(210,136,89,0.16)',
-  },
-  quickTagChipLabel: {
-    color: colors.sand,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  quickTagChipLabelActive: {
-    color: colors.cream,
-    fontSize: 13,
-    fontWeight: '700',
   },
   button: {
     minHeight: 46,
@@ -1810,10 +981,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  buttonCompact: {
-    minHeight: 40,
-    paddingHorizontal: 14,
   },
   buttonPrimary: {
     backgroundColor: colors.clay,
@@ -1839,242 +1006,59 @@ const styles = StyleSheet.create({
   status: {
     color: colors.moss,
     backgroundColor: 'rgba(124, 162, 127, 0.1)',
-    borderRadius: radius.md,
+    borderRadius: 16,
     padding: 12,
     lineHeight: 20,
   },
   error: {
     color: '#f0a08e',
     backgroundColor: 'rgba(174, 67, 53, 0.12)',
-    borderRadius: radius.md,
+    borderRadius: 16,
     padding: 12,
     lineHeight: 20,
   },
   spinner: {
-    marginVertical: 8,
+    marginVertical: 4,
   },
-  identityCard: {
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: 'rgba(124, 162, 127, 0.12)',
-    borderWidth: 1,
-    borderColor: colors.line,
-    gap: 4,
+  authFooter: {
+    gap: 10,
+    alignItems: 'center',
+    paddingBottom: 12,
   },
-  identityLabel: {
+  footerCopy: {
+    color: colors.sand,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  footerLinks: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 14,
+  },
+  footerLink: {
     color: colors.moss,
     fontSize: 12,
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
+    fontWeight: '700',
+  },
+  tabContent: {
+    gap: 16,
   },
   identityName: {
     color: colors.cream,
-    fontSize: typography.title,
+    fontSize: 24,
     fontWeight: '800',
   },
   identityEmail: {
     color: colors.sand,
     fontSize: 14,
   },
-  bottomTabBar: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 10,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: 'rgba(18, 27, 33, 0.96)',
-  },
-  bottomTabButton: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 6,
-  },
-  bottomTabIconWrap: {
-    width: 42,
-    height: 30,
-    borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.panel,
-  },
-  bottomTabIconWrapActive: {
-    borderColor: colors.clay,
-  },
-  bottomTabDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 999,
-    backgroundColor: colors.sand,
-    opacity: 0.75,
-  },
-  bottomTabDotActive: {
-    opacity: 1,
-  },
-  bottomTabLabel: {
-    color: colors.sand,
-    fontSize: 10,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  bottomTabLabelActive: {
-    color: colors.cream,
-    fontSize: 10,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  tabChip: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    backgroundColor: colors.panel,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  tabChipActive: {
-    borderColor: colors.clay,
-    backgroundColor: 'rgba(210,136,89,0.16)',
-  },
-  tabChipLabel: {
-    color: colors.sand,
-    fontWeight: '600',
-  },
-  tabChipLabelActive: {
-    color: colors.cream,
-    fontWeight: '800',
-  },
   propertyRow: {
     gap: 10,
     paddingVertical: 4,
   },
-  propertySummaryCard: {
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: colors.line,
-    gap: 12,
-  },
-  propertySummaryHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  propertySummaryText: {
-    flex: 1,
-    gap: 4,
-  },
-  propertySummaryTitle: {
-    color: colors.cream,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  propertySummaryMeta: {
-    color: colors.sand,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  propertySummaryBadges: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  propertyCollapseButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    backgroundColor: colors.panel,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  propertyCollapseButtonLabel: {
-    color: colors.cream,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  propertyCard: {
-    width: 204,
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: 'rgba(36, 48, 57, 0.7)',
-    borderWidth: 1,
-    borderColor: colors.line,
-    gap: 6,
-  },
-  propertyCardActive: {
-    borderColor: colors.clay,
-    shadowColor: colors.clay,
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-  },
-  propertyChipTitle: {
-    color: colors.cream,
-    fontWeight: '800',
-    fontSize: 16,
-  },
-  propertyChipMeta: {
-    color: colors.sand,
-    fontSize: 13,
-  },
-  propertyHero: {
-    padding: spacing.lg,
-    borderRadius: radius.xl,
-    backgroundColor: colors.clay,
-    gap: 14,
-  },
-  propertyHeroHeader: {
-    gap: 10,
-  },
-  propertyHeroTitleWrap: {
-    gap: 6,
-  },
-  propertyHeroTitle: {
-    color: '#fff8f2',
-    fontSize: 24,
-    fontWeight: '800',
-  },
-  propertyHeroAddress: {
-    color: '#fff1e6',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  propertyHeroBadge: {
-    alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    color: '#fff8f2',
-    backgroundColor: 'rgba(22,32,39,0.18)',
-    overflow: 'hidden',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  propertyFactRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  propertyHeroSummary: {
-    color: '#fff4ea',
-    fontSize: 15,
-    lineHeight: 23,
-  },
-  subsectionTabs: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  compMiniCard: {
+  propertyChip: {
+    width: 200,
     padding: 14,
     borderRadius: 18,
     backgroundColor: colors.panelSoft,
@@ -2082,15 +1066,99 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     gap: 4,
   },
-  compMiniTitle: {
+  propertyChipActive: {
+    borderColor: colors.clay,
+  },
+  propertyChipTitle: {
+    color: colors.cream,
+    fontWeight: '700',
+  },
+  propertyChipMeta: {
+    color: colors.sand,
+    fontSize: 13,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  sectionHeaderCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  collapseButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: colors.panelSoft,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  collapseButtonLabel: {
+    color: colors.cream,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  readinessCard: {
+    padding: 20,
+    borderRadius: 24,
+    backgroundColor: colors.clay,
+    gap: 8,
+  },
+  readinessLabel: {
+    color: '#fff6ef',
+    fontSize: 14,
+    opacity: 0.9,
+  },
+  readinessScore: {
+    color: '#ffffff',
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  readinessBody: {
+    color: '#fff6ef',
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  compList: {
+    gap: 10,
+  },
+  compCard: {
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: colors.panelSoft,
+    borderWidth: 1,
+    borderColor: colors.line,
+    gap: 4,
+  },
+  compTitle: {
     color: colors.cream,
     fontSize: 15,
     fontWeight: '700',
   },
-  compMiniMeta: {
+  compMeta: {
     color: colors.sand,
     fontSize: 13,
     lineHeight: 18,
+  },
+  photoPreview: {
+    width: '100%',
+    aspectRatio: 4 / 3,
+    borderRadius: 18,
+    backgroundColor: colors.panelSoft,
+  },
+  analysisHeadline: {
+    color: colors.cream,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  analysisSubhead: {
+    color: colors.moss,
+    fontSize: 13,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginTop: 4,
   },
   scoreRow: {
     flexDirection: 'row',
@@ -2105,7 +1173,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     minWidth: 92,
-    gap: 2,
   },
   scorePillLabel: {
     color: colors.sand,
@@ -2113,414 +1180,59 @@ const styles = StyleSheet.create({
   },
   scorePillValue: {
     color: colors.cream,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  photoPreview: {
-    width: '100%',
-    aspectRatio: 4 / 3,
-    borderRadius: 18,
-    backgroundColor: colors.panelSoft,
-  },
-  photoRail: {
-    gap: 12,
-    paddingVertical: 2,
-  },
-  photoRailCard: {
-    width: 128,
-    borderRadius: 18,
-    overflow: 'hidden',
-    backgroundColor: colors.panel,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  photoRailCardActive: {
-    borderColor: colors.clay,
-  },
-  photoRailImage: {
-    width: '100%',
-    aspectRatio: 1,
-    backgroundColor: colors.panelSoft,
-  },
-  photoRailLabel: {
-    color: colors.cream,
-    fontSize: 13,
-    fontWeight: '700',
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-  },
-  photoDetailCard: {
-    borderRadius: radius.lg,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(36, 48, 57, 0.76)',
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  photoDetailImage: {
-    width: '100%',
-    aspectRatio: 4 / 3,
-    backgroundColor: colors.panelSoft,
-  },
-  photoDetailCopy: {
-    padding: 16,
-    gap: 10,
-  },
-  photoDetailHeader: {
-    gap: 8,
-  },
-  photoDetailTitleWrap: {
-    gap: 4,
-  },
-  photoDetailTitle: {
-    color: colors.cream,
     fontSize: 20,
-    fontWeight: '800',
-  },
-  photoDetailMeta: {
-    color: colors.sand,
-    fontSize: 14,
-  },
-  photoStatusChip: {
-    alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(124,162,127,0.14)',
-    color: colors.moss,
-    fontSize: 12,
     fontWeight: '700',
-  },
-  photoStatusChipWarning: {
-    backgroundColor: 'rgba(210,136,89,0.18)',
-    color: '#f2be95',
-  },
-  photoPlaceholder: {
-    padding: 18,
-    borderRadius: 18,
-    backgroundColor: colors.panelSoft,
-    borderWidth: 1,
-    borderColor: colors.line,
-    gap: 6,
-  },
-  photoPlaceholderTitle: {
-    color: colors.cream,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  photoPlaceholderBody: {
-    color: colors.sand,
-    lineHeight: 20,
-  },
-  galleryGrid: {
-    gap: 12,
-  },
-  galleryCard: {
-    borderRadius: radius.lg,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(36, 48, 57, 0.72)',
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  galleryCardActive: {
-    borderColor: colors.clay,
-  },
-  galleryImage: {
-    width: '100%',
-    aspectRatio: 4 / 3,
-    backgroundColor: colors.panelSoft,
-  },
-  galleryCopy: {
-    padding: 14,
-    gap: 6,
-  },
-  galleryTitle: {
-    color: colors.cream,
-    fontWeight: '800',
-    fontSize: 16,
-  },
-  galleryMeta: {
-    color: colors.sand,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  analysisHeadline: {
-    color: colors.cream,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  analysisSubhead: {
-    color: colors.moss,
-    fontSize: 13,
-    textTransform: 'uppercase',
-    letterSpacing: 1.5,
-    marginTop: 4,
   },
   listItem: {
     color: colors.sand,
     lineHeight: 22,
   },
-  profileName: {
+  galleryRail: {
+    gap: 12,
+    paddingVertical: 4,
+  },
+  galleryThumbCard: {
+    width: 128,
+    gap: 8,
+  },
+  galleryThumbCardActive: {
+    opacity: 1,
+  },
+  galleryThumbImage: {
+    width: 128,
+    height: 96,
+    borderRadius: 16,
+    backgroundColor: colors.panelSoft,
+  },
+  galleryThumbLabel: {
     color: colors.cream,
-    fontSize: 22,
-    fontWeight: '800',
+    fontWeight: '700',
+    fontSize: 13,
   },
-  profileEmail: {
-    color: colors.sand,
-    fontSize: 14,
-  },
-  profileMetaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  galleryDetailCard: {
     gap: 10,
   },
-  filterRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  filterChip: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    backgroundColor: colors.panel,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  filterChipActive: {
-    backgroundColor: 'rgba(210,136,89,0.16)',
-    borderColor: colors.clay,
-  },
-  filterChipLabel: {
-    color: colors.sand,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  filterChipLabelActive: {
-    color: colors.cream,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  capturePropertyBanner: {
-    padding: 16,
+  galleryDetailImage: {
+    width: '100%',
+    aspectRatio: 4 / 3,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 1,
-    borderColor: colors.line,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  capturePropertyTitle: {
-    color: colors.cream,
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  capturePropertyMeta: {
-    color: colors.sand,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  capturePropertyBadge: {
-    alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    overflow: 'hidden',
     backgroundColor: colors.panelSoft,
-    color: colors.cream,
-    fontSize: 12,
-    fontWeight: '700',
   },
-  emptyStateCard: {
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: 'rgba(36, 48, 57, 0.74)',
-    borderWidth: 1,
-    borderColor: colors.line,
-    gap: 8,
-  },
-  emptyStateTitle: {
+  galleryDetailTitle: {
     color: colors.cream,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '700',
   },
-  emptyStateBody: {
+  galleryDetailMeta: {
     color: colors.sand,
-    fontSize: 14,
-    lineHeight: 22,
+    fontSize: 13,
   },
-  authFooter: {
+  settingsLinkStack: {
     gap: 10,
-    alignItems: 'center',
-    paddingBottom: spacing.sm,
   },
-  authFooterCopy: {
-    color: colors.sand,
-    fontSize: typography.caption,
-    textAlign: 'center',
-  },
-  authFooterLinks: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 14,
-  },
-  authFooterLink: {
+  settingsLink: {
     color: colors.moss,
-    fontSize: typography.caption,
+    fontSize: 15,
     fontWeight: '700',
-  },
-  protectedAccountNotice: {
-    color: '#f2be95',
-    backgroundColor: 'rgba(210,136,89,0.12)',
-    borderRadius: radius.md,
-    padding: spacing.sm,
-    lineHeight: typography.body + 6,
-  },
-  settingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-  },
-  settingCopy: {
-    flex: 1,
-    gap: 4,
-  },
-  settingTitle: {
-    color: colors.cream,
-    fontSize: typography.body,
-    fontWeight: '700',
-  },
-  settingSubtitle: {
-    color: colors.sand,
-    fontSize: typography.caption,
-    lineHeight: typography.caption + 6,
-  },
-  togglePill: {
-    width: 58,
-    height: 34,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.09)',
-    borderWidth: 1,
-    borderColor: colors.line,
-    paddingHorizontal: 4,
-    justifyContent: 'center',
-  },
-  togglePillActive: {
-    backgroundColor: 'rgba(124, 162, 127, 0.26)',
-    borderColor: 'rgba(124, 162, 127, 0.42)',
-  },
-  togglePillDisabled: {
-    opacity: 0.45,
-  },
-  toggleThumb: {
-    width: 24,
-    height: 24,
-    borderRadius: 999,
-    backgroundColor: colors.sand,
-  },
-  toggleThumbActive: {
-    alignSelf: 'flex-end',
-    backgroundColor: colors.moss,
-  },
-  visionRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    paddingVertical: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-  },
-  visionRank: {
-    width: 34,
-    height: 34,
-    borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(210,136,89,0.18)',
-    borderWidth: 1,
-    borderColor: 'rgba(210,136,89,0.34)',
-  },
-  visionRankLabel: {
-    color: colors.cream,
-    fontSize: typography.caption,
-    fontWeight: '800',
-  },
-  visionCopy: {
-    flex: 1,
-    gap: 4,
-  },
-  visionTitle: {
-    color: colors.cream,
-    fontSize: typography.body,
-    fontWeight: '800',
-  },
-  checklistStack: {
-    gap: spacing.sm,
-  },
-  checklistRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  checklistBulletPending: {
-    color: colors.clay,
-    fontSize: typography.bodyLarge,
-    fontWeight: '800',
-    minWidth: 16,
-  },
-  checklistBulletDone: {
-    color: colors.moss,
-    fontSize: typography.bodyLarge,
-    fontWeight: '800',
-    minWidth: 16,
-  },
-  checklistCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  checklistTitle: {
-    color: colors.cream,
-    fontSize: typography.body,
-    fontWeight: '700',
-  },
-  taskCard: {
-    gap: spacing.xs,
-    padding: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  taskCardDone: {
-    backgroundColor: 'rgba(124, 162, 127, 0.1)',
-  },
-  taskCardWarning: {
-    backgroundColor: 'rgba(210,136,89,0.11)',
-  },
-  taskHeader: {
-    gap: 6,
-  },
-  taskStatusDone: {
-    color: colors.moss,
-    fontSize: typography.caption,
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
-    fontWeight: '800',
-  },
-  taskStatusPending: {
-    color: colors.clay,
-    fontSize: typography.caption,
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
-    fontWeight: '800',
-  },
-  taskTitle: {
-    color: colors.cream,
-    fontSize: typography.bodyLarge,
-    fontWeight: '800',
   },
 });

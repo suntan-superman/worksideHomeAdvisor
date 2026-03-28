@@ -25,3 +25,5 @@ apps/mobile/DerivedData
 legacy-merxus-ai-backend/node_modules
 legacy-merxus-ai-backend/.env.local
 legacy-merxus-ai-backend
+legacy-merxus-mobile
+latest-mobile-app
