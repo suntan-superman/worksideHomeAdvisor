@@ -1,4 +1,4 @@
-package com.worksidehomeseller
+package com.sjroy5.worksidehomeseller
 
 import android.os.Build
 import android.os.Bundle

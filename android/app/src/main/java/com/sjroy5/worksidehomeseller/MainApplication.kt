@@ -1,4 +1,4 @@
-package com.worksidehomeseller
+package com.sjroy5.worksidehomeseller
 
 import android.app.Application
 import android.content.res.Configuration
