@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,7 +12,11 @@ import {
   View,
 } from 'react-native';
 
-import { API_URL, getDashboard, listProperties, login, requestOtp, verifyEmailOtp } from '../services/api';
+import * as ImagePicker from 'expo-image-picker';
+
+import { API_URL, getDashboard, listProperties, login, requestOtp, savePhoto, verifyEmailOtp } from '../services/api';
+
+const ROOM_LABEL_OPTIONS = ['Living room', 'Kitchen', 'Primary bedroom', 'Bathroom', 'Exterior'];
 
 function getDisplayName(user) {
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
@@ -29,6 +34,7 @@ function formatCurrency(value) {
 export function RootScreen() {
   const [authMode, setAuthMode] = useState('login');
   const [showPassword, setShowPassword] = useState(false);
+  const [propertyDetailsCollapsed, setPropertyDetailsCollapsed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Sign in with the same verified seller account you use on the web.');
   const [error, setError] = useState('');
@@ -36,10 +42,12 @@ export function RootScreen() {
   const [properties, setProperties] = useState([]);
   const [propertyId, setPropertyId] = useState('');
   const [dashboard, setDashboard] = useState(null);
+  const [photoAsset, setPhotoAsset] = useState(null);
   const [form, setForm] = useState({
     email: '',
     password: '',
     otpCode: '',
+    roomLabel: ROOM_LABEL_OPTIONS[0],
   });
 
   const selectedProperty = properties.find((property) => property.id === propertyId) || null;
@@ -143,10 +151,85 @@ export function RootScreen() {
 
     try {
       setPropertyId(nextPropertyId);
+      setPropertyDetailsCollapsed(false);
       const dashboardResponse = await getDashboard(nextPropertyId);
       setDashboard(dashboardResponse);
       const nextProperty = properties.find((property) => property.id === nextPropertyId);
       setStatus(nextProperty ? `Loaded ${nextProperty.title}.` : 'Property loaded.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handlePickImage(mode) {
+    if (!propertyId) {
+      setError('Select a property before capturing photos.');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+
+    try {
+      const permission =
+        mode === 'camera'
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        throw new Error(
+          `Permission required to ${mode === 'camera' ? 'use the camera' : 'open the photo library'}.`,
+        );
+      }
+
+      const result =
+        mode === 'camera'
+          ? await ImagePicker.launchCameraAsync({
+              mediaTypes: ['images'],
+              allowsEditing: false,
+              quality: 0.6,
+              base64: true,
+            })
+          : await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ['images'],
+              allowsEditing: false,
+              quality: 0.6,
+              base64: true,
+            });
+
+      if (result.canceled || !result.assets?.[0]) {
+        return;
+      }
+
+      setPhotoAsset(result.assets[0]);
+      setStatus('Photo ready. Save it to the property when you are ready.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSavePhoto() {
+    if (!propertyId || !photoAsset?.base64) {
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+
+    try {
+      await savePhoto(propertyId, {
+        roomLabel: form.roomLabel,
+        mimeType: photoAsset.mimeType || 'image/jpeg',
+        imageBase64: photoAsset.base64,
+        width: photoAsset.width,
+        height: photoAsset.height,
+      });
+      setPhotoAsset(null);
+      setStatus('Photo saved to the selected property.');
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -196,36 +279,109 @@ export function RootScreen() {
 
             {selectedProperty ? (
               <View style={styles.workspaceCard}>
-                <Text style={styles.label}>Selected property</Text>
-                <Text style={styles.userName}>{selectedProperty.title}</Text>
-                <Text style={styles.userEmail}>
-                  {[
-                    selectedProperty.addressLine1,
-                    [selectedProperty.city, selectedProperty.state, selectedProperty.zip].filter(Boolean).join(' '),
-                  ]
-                    .filter(Boolean)
-                    .join(', ')}
-                </Text>
-
-                {dashboard?.pricing ? (
-                  <View style={styles.pricingCard}>
-                    <Text style={styles.label}>Recommended price band</Text>
-                    <Text style={styles.priceBand}>
-                      {formatCurrency(dashboard.pricing.low)} to {formatCurrency(dashboard.pricing.high)}
-                    </Text>
-                    <Text style={styles.body}>
-                      Midpoint {formatCurrency(dashboard.pricing.mid)} with{' '}
-                      {Math.round((dashboard.pricing.confidence || 0) * 100)}% confidence.
+                <View style={styles.workspaceHeaderRow}>
+                  <View style={styles.workspaceHeaderCopy}>
+                    <Text style={styles.label}>Selected property</Text>
+                    <Text style={styles.userName}>{selectedProperty.title}</Text>
+                    <Text style={styles.userEmail}>
+                      {[
+                        selectedProperty.addressLine1,
+                        [selectedProperty.city, selectedProperty.state, selectedProperty.zip].filter(Boolean).join(' '),
+                      ]
+                        .filter(Boolean)
+                        .join(', ')}
                     </Text>
                   </View>
-                ) : null}
+                  <Pressable
+                    onPress={() => setPropertyDetailsCollapsed((current) => !current)}
+                    style={styles.collapseButton}
+                  >
+                    <Text style={styles.collapseButtonText}>
+                      {propertyDetailsCollapsed ? 'Expand' : 'Collapse'}
+                    </Text>
+                  </Pressable>
+                </View>
 
-                {dashboard?.pricingSummary ? (
+                {!propertyDetailsCollapsed ? (
                   <>
-                    <Text style={styles.label}>Latest analysis</Text>
-                    <Text style={styles.body}>{dashboard.pricingSummary}</Text>
+                    {dashboard?.pricing ? (
+                      <View style={styles.pricingCard}>
+                        <Text style={styles.label}>Recommended price band</Text>
+                        <Text style={styles.priceBand}>
+                          {formatCurrency(dashboard.pricing.low)} to {formatCurrency(dashboard.pricing.high)}
+                        </Text>
+                        <Text style={styles.body}>
+                          Midpoint {formatCurrency(dashboard.pricing.mid)} with{' '}
+                          {Math.round((dashboard.pricing.confidence || 0) * 100)}% confidence.
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    {dashboard?.pricingSummary ? (
+                      <>
+                        <Text style={styles.label}>Latest analysis</Text>
+                        <Text style={styles.body}>{dashboard.pricingSummary}</Text>
+                      </>
+                    ) : null}
+
+                    <View style={styles.captureCard}>
+                      <Text style={styles.label}>Photo capture</Text>
+                      <Text style={styles.body}>
+                        Capture or select the next room photo and save it to this property.
+                      </Text>
+
+                      <View style={styles.roomChipRow}>
+                        {ROOM_LABEL_OPTIONS.map((room) => (
+                          <Pressable
+                            key={room}
+                            onPress={() => updateField('roomLabel', room)}
+                            style={[
+                              styles.roomChip,
+                              form.roomLabel === room ? styles.roomChipActive : null,
+                            ]}
+                          >
+                            <Text style={form.roomLabel === room ? styles.roomChipLabelActive : styles.roomChipLabel}>
+                              {room}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+
+                      <View style={styles.actionRow}>
+                        <Pressable
+                          onPress={() => handlePickImage('camera')}
+                          style={[styles.button, styles.buttonSecondary, styles.flexButton]}
+                        >
+                          <Text style={styles.buttonSecondaryText}>Use camera</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => handlePickImage('library')}
+                          style={[styles.button, styles.buttonSecondary, styles.flexButton]}
+                        >
+                          <Text style={styles.buttonSecondaryText}>Photo library</Text>
+                        </Pressable>
+                      </View>
+
+                      {photoAsset ? (
+                        <View style={styles.photoPreviewCard}>
+                          <Image source={{ uri: photoAsset.uri }} style={styles.photoPreview} />
+                          <Text style={styles.body}>
+                            Ready to save as {form.roomLabel.toLowerCase()} for this property.
+                          </Text>
+                          <Pressable
+                            onPress={handleSavePhoto}
+                            style={[styles.button, busy ? styles.buttonDisabled : styles.buttonPrimary]}
+                            disabled={busy}
+                          >
+                            <Text style={styles.buttonText}>Save photo</Text>
+                          </Pressable>
+                        </View>
+                      ) : null}
+                    </View>
                   </>
-                ) : null}
+                ) : (
+                  <Text style={styles.body}>Property details are collapsed. Expand when you want pricing and capture tools.</Text>
+                )}
               </View>
             ) : null}
 
@@ -385,6 +541,10 @@ const styles = StyleSheet.create({
     gap: 10,
     marginTop: 8,
   },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
   segmentButton: {
     flex: 1,
     borderRadius: 999,
@@ -517,6 +677,9 @@ const styles = StyleSheet.create({
   propertyList: {
     gap: 10,
   },
+  flexButton: {
+    flex: 1,
+  },
   propertyCard: {
     borderRadius: 18,
     padding: 16,
@@ -547,6 +710,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#425563',
   },
+  workspaceHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  workspaceHeaderCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  collapseButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  collapseButtonText: {
+    color: '#f8f1e6',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   pricingCard: {
     gap: 6,
     marginTop: 2,
@@ -561,5 +747,54 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: '800',
     lineHeight: 34,
+  },
+  captureCard: {
+    gap: 12,
+    marginTop: 8,
+    paddingTop: 4,
+  },
+  roomChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  roomChip: {
+    minWidth: 92,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    backgroundColor: '#31404d',
+    borderWidth: 1,
+    borderColor: '#425563',
+  },
+  roomChipActive: {
+    backgroundColor: '#d28859',
+    borderColor: '#d28859',
+  },
+  roomChipLabel: {
+    color: '#dbcbb7',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  roomChipLabelActive: {
+    color: '#fff7ee',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  photoPreviewCard: {
+    gap: 12,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  photoPreview: {
+    width: '100%',
+    height: 220,
+    borderRadius: 14,
+    backgroundColor: '#1b252d',
   },
 });

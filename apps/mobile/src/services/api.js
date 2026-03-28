@@ -55,4 +55,11 @@ export function getDashboard(propertyId) {
   return request(`/api/v1/properties/${propertyId}/dashboard`);
 }
 
+export function savePhoto(propertyId, payload) {
+  return request(`/api/v1/properties/${propertyId}/media`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export { API_URL };
