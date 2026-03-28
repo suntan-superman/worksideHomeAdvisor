@@ -2,6 +2,22 @@ const API_URL =
   process.env.EXPO_PUBLIC_API_URL ||
   'https://workside-api-166927680198.us-central1.run.app';
 
+function formatApiErrorMessage(message, status) {
+  const raw = typeof message === 'string' ? message.trim() : '';
+
+  if (!raw) {
+    return status >= 500
+      ? 'The Workside service is temporarily unavailable. Please try again in a moment.'
+      : 'Something went wrong. Please try again.';
+  }
+
+  if (/route\s+(get|post|patch|put|delete)/i.test(raw) || /cannot\s+(get|post|patch|put|delete)/i.test(raw)) {
+    return 'This feature is temporarily unavailable. Please try again in a moment.';
+  }
+
+  return raw;
+}
+
 async function request(path, options = {}) {
   const headers = {
     ...(options.headers || {}),
@@ -11,15 +27,23 @@ async function request(path, options = {}) {
     headers['Content-Type'] = 'application/json';
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  let response;
+
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers,
+    });
+  } catch {
+    throw new Error('Unable to reach the Workside service right now. Please try again in a moment.');
+  }
 
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.message || 'Request failed.');
+    throw new Error(
+      formatApiErrorMessage(data.message || data.error || 'Request failed.', response.status),
+    );
   }
 
   return data;

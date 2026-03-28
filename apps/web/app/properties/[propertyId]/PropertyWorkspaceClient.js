@@ -67,6 +67,14 @@ function getPreferredVariantLabel(item) {
   return item?.variantLabel || 'Preferred vision variant';
 }
 
+function getVariantSummary(variant) {
+  return (
+    variant?.metadata?.summary ||
+    variant?.metadata?.warning ||
+    'This prototype variant is available for flyer and report selection once marked preferred.'
+  );
+}
+
 export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const flyerPreviewRef = useRef(null);
   const [property, setProperty] = useState(null);
@@ -1353,6 +1361,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         <div className="property-media-variant-compare">
                           <div>
                             <span className="label">Original</span>
+                            <p className="property-media-variant-caption">
+                              Untouched mobile capture.
+                            </p>
                             <img
                               src={selectedMediaAsset.imageUrl}
                               alt={selectedMediaAsset.roomLabel || 'Original property photo'}
@@ -1361,6 +1372,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                           </div>
                           <div>
                             <span className="label">Vision output</span>
+                            <p className="property-media-variant-caption">
+                              {getVariantSummary(selectedVariant)}
+                            </p>
                             <img
                               src={selectedVariant.imageUrl}
                               alt={selectedVariant.label || 'Generated image variant'}
@@ -1368,6 +1382,18 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                             />
                           </div>
                         </div>
+                        {selectedVariant.metadata?.effects?.length ? (
+                          <div className="property-media-variant-effects">
+                            {selectedVariant.metadata.effects.map((effect) => (
+                              <span key={effect}>{effect}</span>
+                            ))}
+                          </div>
+                        ) : null}
+                        {selectedVariant.metadata?.differenceHint ? (
+                          <p className="property-media-variant-hint">
+                            {selectedVariant.metadata.differenceHint}
+                          </p>
+                        ) : null}
                         <div className="property-media-variant-list">
                           {mediaVariants.map((variant) => (
                             <button
@@ -1385,10 +1411,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                             </button>
                           ))}
                         </div>
-                        <p>
-                          {selectedVariant.metadata?.warning ||
-                            'This prototype variant is available for flyer and report selection once marked preferred.'}
-                        </p>
+                        {selectedVariant.metadata?.warning ? (
+                          <p>{selectedVariant.metadata.warning}</p>
+                        ) : null}
                         <div className="button-stack">
                           <button
                             type="button"

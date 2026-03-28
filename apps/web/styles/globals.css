@@ -1131,6 +1131,34 @@ select {
   margin-top: 8px;
 }
 
+.property-media-variant-caption {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.property-media-variant-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.property-media-variant-effects span {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(200, 116, 71, 0.12);
+  color: var(--clay);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.property-media-variant-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
 .property-media-variant-list {
   display: flex;
   flex-wrap: wrap;

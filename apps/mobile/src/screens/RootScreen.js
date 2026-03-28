@@ -80,6 +80,14 @@ function formatChecklistStatus(status) {
   return 'Open';
 }
 
+function getVariantSummary(variant) {
+  return (
+    variant?.metadata?.summary ||
+    variant?.metadata?.warning ||
+    'This variant can be marked preferred for flyer and report selection.'
+  );
+}
+
 export function RootScreen() {
   const [authMode, setAuthMode] = useState('login');
   const [showPassword, setShowPassword] = useState(false);
@@ -592,10 +600,10 @@ export function RootScreen() {
       <View style={styles.screen}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.card}>
-            <Text style={styles.kicker}>Property Baseline</Text>
+            <Text style={styles.kicker}>Mobile Workspace</Text>
             <Text style={styles.title}>Workside Home Advisor</Text>
             <Text style={styles.body}>
-              The app is authenticated and loading live property data again. Next we can layer in capture and gallery safely.
+              Pricing, photos, checklist progress, and seller guidance stay connected here across every property.
             </Text>
 
             <View style={styles.userCard}>
@@ -916,11 +924,23 @@ export function RootScreen() {
                             {selectedVariant ? (
                               <>
                                 <Text style={styles.label}>Vision output</Text>
+                                <Text style={styles.variantSummary}>{getVariantSummary(selectedVariant)}</Text>
                                 <Image source={{ uri: selectedVariant.imageUrl }} style={styles.visionImage} />
-                                <Text style={styles.body}>
-                                  {selectedVariant.metadata?.warning ||
-                                    'This variant can be marked preferred for flyer and report selection.'}
-                                </Text>
+                                {selectedVariant.metadata?.effects?.length ? (
+                                  <View style={styles.effectList}>
+                                    {selectedVariant.metadata.effects.map((effect) => (
+                                      <View key={effect} style={styles.effectChip}>
+                                        <Text style={styles.effectChipText}>{effect}</Text>
+                                      </View>
+                                    ))}
+                                  </View>
+                                ) : null}
+                                {selectedVariant.metadata?.differenceHint ? (
+                                  <Text style={styles.variantHint}>{selectedVariant.metadata.differenceHint}</Text>
+                                ) : null}
+                                {selectedVariant.metadata?.warning ? (
+                                  <Text style={styles.body}>{selectedVariant.metadata.warning}</Text>
+                                ) : null}
                                 <View style={styles.variantList}>
                                   {mediaVariants.map((variant) => (
                                     <Pressable
@@ -1109,11 +1129,10 @@ export function RootScreen() {
     >
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.card}>
-          <Text style={styles.kicker}>Fresh Mobile Baseline</Text>
+          <Text style={styles.kicker}>Seller Access</Text>
           <Text style={styles.title}>Workside Home Advisor</Text>
           <Text style={styles.body}>
-            Clean auth-only rebuild. Once this signs in reliably on Android and iOS, we can layer
-            the property workflow back on safely.
+            Sign in with your verified Workside account to manage pricing, prep, photos, and listing readiness on the go.
           </Text>
 
           <View style={styles.segmentRow}>
@@ -1630,6 +1649,17 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '700',
   },
+  variantSummary: {
+    color: '#f8f1e6',
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '700',
+  },
+  variantHint: {
+    color: '#dbcbb7',
+    fontSize: 13,
+    lineHeight: 20,
+  },
   noteInput: {
     minHeight: 90,
     textAlignVertical: 'top',
@@ -1714,6 +1744,24 @@ const styles = StyleSheet.create({
     height: 220,
     borderRadius: 14,
     backgroundColor: '#1b252d',
+  },
+  effectList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  effectChip: {
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#22303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  effectChipText: {
+    color: '#d28859',
+    fontSize: 12,
+    fontWeight: '700',
   },
   variantList: {
     flexDirection: 'row',
