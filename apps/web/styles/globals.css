@@ -766,6 +766,82 @@ select {
   color: var(--muted);
 }
 
+.property-media-layout {
+  display: grid;
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.property-media-rail {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.property-media-thumb {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.62);
+  text-align: left;
+  cursor: pointer;
+}
+
+.property-media-thumb.active {
+  border-color: var(--clay);
+  box-shadow: 0 10px 22px rgba(200, 116, 71, 0.14);
+}
+
+.property-media-thumb img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 14px;
+}
+
+.property-media-thumb span {
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.property-media-detail {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.95fr) minmax(0, 1.05fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.property-media-hero {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+}
+
+.property-media-copy {
+  display: grid;
+  gap: 10px;
+}
+
+.property-media-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.property-media-badges span {
+  padding: 10px 12px;
+  border-radius: 999px;
+  background: rgba(70, 99, 79, 0.12);
+  color: var(--moss);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
 @media (max-width: 900px) {
   .hero-grid,
   .content-grid,
@@ -824,6 +900,10 @@ select {
   }
 
   .flyer-photo-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .property-media-detail {
     grid-template-columns: 1fr;
   }
 }

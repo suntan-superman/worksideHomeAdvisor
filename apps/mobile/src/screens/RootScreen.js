@@ -65,6 +65,7 @@ export function RootScreen() {
   const [authMode, setAuthMode] = useState('login');
   const [showPassword, setShowPassword] = useState(false);
   const [propertyDetailsCollapsed, setPropertyDetailsCollapsed] = useState(false);
+  const [propertySection, setPropertySection] = useState('overview');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Sign in with the same verified seller account you use on the web.');
   const [error, setError] = useState('');
@@ -84,6 +85,47 @@ export function RootScreen() {
 
   const selectedProperty = properties.find((property) => property.id === propertyId) || null;
   const selectedAsset = gallery.find((asset) => asset.id === selectedAssetId) || gallery[0] || null;
+  const roomCoverage = ROOM_LABEL_OPTIONS.map((roomLabel) => ({
+    roomLabel,
+    captured: gallery.some((asset) => asset.roomLabel === roomLabel),
+  }));
+  const bestCandidates = [...gallery]
+    .filter((asset) => typeof asset.analysis?.overallQualityScore === 'number')
+    .sort(
+      (left, right) =>
+        Number(right.analysis?.overallQualityScore || 0) -
+        Number(left.analysis?.overallQualityScore || 0),
+    )
+    .slice(0, 3);
+  const retakeCount = gallery.filter((asset) => asset.analysis?.retakeRecommended).length;
+  const actionTasks = selectedProperty
+    ? [
+        {
+          title: dashboard?.pricing?.mid
+            ? 'Review pricing before publishing'
+            : 'Run pricing from the web dashboard',
+          detail: dashboard?.pricing?.mid
+            ? `Current midpoint is ${formatCurrency(dashboard.pricing.mid)}. Refresh after any major prep updates.`
+            : 'Create a fresh recommended list-price band before going live.',
+          done: Boolean(dashboard?.pricing?.mid),
+        },
+        {
+          title: gallery.length >= 5 ? 'Photo coverage looks solid' : 'Capture the main listing rooms',
+          detail:
+            gallery.length >= 5
+              ? `${gallery.length} photos are saved for this property.`
+              : 'Aim for living room, kitchen, primary bedroom, bathroom, and exterior coverage.',
+          done: gallery.length >= 5,
+        },
+        {
+          title: retakeCount ? 'Address retake recommendations' : 'No retakes currently flagged',
+          detail: retakeCount
+            ? `${retakeCount} photos were flagged by AI for improvement.`
+            : 'Your saved photos are currently in decent shape for marketing review.',
+          done: retakeCount === 0,
+        },
+      ]
+    : [];
 
   useEffect(() => {
     let active = true;
@@ -151,6 +193,7 @@ export function RootScreen() {
     setDashboard(dashboardResponse);
     setGallery(mediaResponse.assets || []);
     setSelectedAssetId(mediaResponse.assets?.[0]?.id || '');
+    setPropertySection('overview');
   }
 
   async function handleLogin() {
@@ -223,6 +266,7 @@ export function RootScreen() {
     setSelectedAssetId('');
     setAuthMode('login');
     setShowPassword(false);
+    setPropertySection('overview');
     setError('');
     setStatus('Signed out. Sign in again to continue.');
   }
@@ -234,6 +278,7 @@ export function RootScreen() {
     try {
       setPropertyId(nextPropertyId);
       setPropertyDetailsCollapsed(false);
+      setPropertySection('overview');
       const [dashboardResponse, mediaResponse] = await Promise.all([
         getDashboard(nextPropertyId),
         listMediaAssets(nextPropertyId),
@@ -319,6 +364,7 @@ export function RootScreen() {
       setGallery(mediaResponse.assets || []);
       setSelectedAssetId(mediaResponse.assets?.[0]?.id || '');
       setPhotoAsset(null);
+      setPropertySection('gallery');
       setStatus('Photo saved to the selected property.');
     } catch (requestError) {
       setError(requestError.message);
@@ -394,137 +440,233 @@ export function RootScreen() {
 
                 {!propertyDetailsCollapsed ? (
                   <>
-                    {dashboard?.pricing ? (
-                      <View style={styles.pricingCard}>
-                        <Text style={styles.label}>Recommended price band</Text>
-                        <Text style={styles.priceBand}>
-                          {formatCurrency(dashboard.pricing.low)} to {formatCurrency(dashboard.pricing.high)}
-                        </Text>
-                        <Text style={styles.body}>
-                          Midpoint {formatCurrency(dashboard.pricing.mid)} with{' '}
-                          {Math.round((dashboard.pricing.confidence || 0) * 100)}% confidence.
-                        </Text>
-                      </View>
-                    ) : null}
+                    <View style={styles.sectionChipRow}>
+                      {[
+                        ['overview', 'Overview'],
+                        ['capture', 'Capture'],
+                        ['gallery', 'Gallery'],
+                        ['vision', 'Vision'],
+                        ['tasks', 'Tasks'],
+                      ].map(([value, label]) => (
+                        <Pressable
+                          key={value}
+                          onPress={() => setPropertySection(value)}
+                          style={[
+                            styles.sectionChip,
+                            propertySection === value ? styles.sectionChipActive : null,
+                          ]}
+                        >
+                          <Text
+                            style={
+                              propertySection === value
+                                ? styles.sectionChipLabelActive
+                                : styles.sectionChipLabel
+                            }
+                          >
+                            {label}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
 
-                    {dashboard?.pricingSummary ? (
+                    {propertySection === 'overview' ? (
                       <>
-                        <Text style={styles.label}>Latest analysis</Text>
-                        <Text style={styles.body}>{dashboard.pricingSummary}</Text>
+                        {dashboard?.pricing ? (
+                          <View style={styles.pricingCard}>
+                            <Text style={styles.label}>Recommended price band</Text>
+                            <Text style={styles.priceBand}>
+                              {formatCurrency(dashboard.pricing.low)} to {formatCurrency(dashboard.pricing.high)}
+                            </Text>
+                            <Text style={styles.body}>
+                              Midpoint {formatCurrency(dashboard.pricing.mid)} with{' '}
+                              {Math.round((dashboard.pricing.confidence || 0) * 100)}% confidence.
+                            </Text>
+                          </View>
+                        ) : null}
+
+                        {dashboard?.pricingSummary ? (
+                          <>
+                            <Text style={styles.label}>Latest analysis</Text>
+                            <Text style={styles.body}>{dashboard.pricingSummary}</Text>
+                          </>
+                        ) : null}
                       </>
                     ) : null}
 
-                    <View style={styles.captureCard}>
-                      <Text style={styles.label}>Photo capture</Text>
-                      <Text style={styles.body}>
-                        Capture or select the next room photo and save it to this property.
-                      </Text>
+                    {propertySection === 'capture' ? (
+                      <View style={styles.captureCard}>
+                        <Text style={styles.label}>Photo capture</Text>
+                        <Text style={styles.body}>
+                          Capture or select the next room photo and save it to this property.
+                        </Text>
 
-                      <View style={styles.roomChipRow}>
-                        {ROOM_LABEL_OPTIONS.map((room) => (
+                        <View style={styles.roomChipRow}>
+                          {ROOM_LABEL_OPTIONS.map((room) => (
+                            <Pressable
+                              key={room}
+                              onPress={() => updateField('roomLabel', room)}
+                              style={[
+                                styles.roomChip,
+                                form.roomLabel === room ? styles.roomChipActive : null,
+                              ]}
+                            >
+                              <Text style={form.roomLabel === room ? styles.roomChipLabelActive : styles.roomChipLabel}>
+                                {room}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+
+                        <View style={styles.actionRow}>
                           <Pressable
-                            key={room}
-                            onPress={() => updateField('roomLabel', room)}
-                            style={[
-                              styles.roomChip,
-                              form.roomLabel === room ? styles.roomChipActive : null,
-                            ]}
+                            onPress={() => handlePickImage('camera')}
+                            style={[styles.button, styles.buttonSecondary, styles.flexButton]}
                           >
-                            <Text style={form.roomLabel === room ? styles.roomChipLabelActive : styles.roomChipLabel}>
-                              {room}
-                            </Text>
+                            <Text style={styles.buttonSecondaryText}>Use camera</Text>
                           </Pressable>
-                        ))}
-                      </View>
-
-                      <View style={styles.actionRow}>
-                        <Pressable
-                          onPress={() => handlePickImage('camera')}
-                          style={[styles.button, styles.buttonSecondary, styles.flexButton]}
-                        >
-                          <Text style={styles.buttonSecondaryText}>Use camera</Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => handlePickImage('library')}
-                          style={[styles.button, styles.buttonSecondary, styles.flexButton]}
-                        >
-                          <Text style={styles.buttonSecondaryText}>Photo library</Text>
-                        </Pressable>
-                      </View>
-
-                    {photoAsset ? (
-                      <View style={styles.photoPreviewCard}>
-                          <Image source={{ uri: photoAsset.uri }} style={styles.photoPreview} />
-                          <Text style={styles.body}>
-                            Ready to save as {form.roomLabel.toLowerCase()} for this property.
-                          </Text>
                           <Pressable
-                            onPress={handleSavePhoto}
-                            style={[styles.button, busy ? styles.buttonDisabled : styles.buttonPrimary]}
-                            disabled={busy}
+                            onPress={() => handlePickImage('library')}
+                            style={[styles.button, styles.buttonSecondary, styles.flexButton]}
                           >
-                            <Text style={styles.buttonText}>Save photo</Text>
+                            <Text style={styles.buttonSecondaryText}>Photo library</Text>
                           </Pressable>
                         </View>
-                      ) : null}
-                    </View>
 
-                    <View style={styles.galleryCard}>
-                      <Text style={styles.label}>Saved photo gallery</Text>
-                      <Text style={styles.body}>
-                        Saved photos stay attached to this property and can feed later flyer and vision workflows.
-                      </Text>
+                        {photoAsset ? (
+                          <View style={styles.photoPreviewCard}>
+                            <Image source={{ uri: photoAsset.uri }} style={styles.photoPreview} />
+                            <Text style={styles.body}>
+                              Ready to save as {form.roomLabel.toLowerCase()} for this property.
+                            </Text>
+                            <Pressable
+                              onPress={handleSavePhoto}
+                              style={[styles.button, busy ? styles.buttonDisabled : styles.buttonPrimary]}
+                              disabled={busy}
+                            >
+                              <Text style={styles.buttonText}>Save photo</Text>
+                            </Pressable>
+                          </View>
+                        ) : null}
+                      </View>
+                    ) : null}
 
-                      {gallery.length ? (
-                        <>
-                          <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.galleryRail}
-                          >
-                            {gallery.map((asset) => (
-                              <Pressable
-                                key={asset.id}
-                                onPress={() => setSelectedAssetId(asset.id)}
-                                style={[
-                                  styles.galleryTile,
-                                  asset.id === selectedAsset?.id ? styles.galleryTileActive : null,
-                                ]}
-                              >
-                                <Image source={{ uri: asset.imageUrl }} style={styles.galleryTileImage} />
-                                <Text style={styles.galleryTileLabel} numberOfLines={1}>
-                                  {asset.roomLabel}
+                    {propertySection === 'gallery' ? (
+                      <View style={styles.galleryCard}>
+                        <Text style={styles.label}>Saved photo gallery</Text>
+                        <Text style={styles.body}>
+                          Saved photos stay attached to this property and can feed later flyer and vision workflows.
+                        </Text>
+
+                        {gallery.length ? (
+                          <>
+                            <ScrollView
+                              horizontal
+                              showsHorizontalScrollIndicator={false}
+                              contentContainerStyle={styles.galleryRail}
+                            >
+                              {gallery.map((asset) => (
+                                <Pressable
+                                  key={asset.id}
+                                  onPress={() => setSelectedAssetId(asset.id)}
+                                  style={[
+                                    styles.galleryTile,
+                                    asset.id === selectedAsset?.id ? styles.galleryTileActive : null,
+                                  ]}
+                                >
+                                  <Image source={{ uri: asset.imageUrl }} style={styles.galleryTileImage} />
+                                  <Text style={styles.galleryTileLabel} numberOfLines={1}>
+                                    {asset.roomLabel}
+                                  </Text>
+                                </Pressable>
+                              ))}
+                            </ScrollView>
+
+                            {selectedAsset ? (
+                              <View style={styles.selectedAssetCard}>
+                                <Image source={{ uri: selectedAsset.imageUrl }} style={styles.selectedAssetImage} />
+                                <Text style={styles.selectedAssetTitle}>{selectedAsset.roomLabel}</Text>
+                                <Text style={styles.selectedAssetMeta}>
+                                  Saved {formatCreatedAt(selectedAsset.createdAt) || 'recently'}
+                                  {selectedAsset.analysis?.roomGuess
+                                    ? ` · AI sees ${selectedAsset.analysis.roomGuess.toLowerCase()}`
+                                    : ''}
                                 </Text>
-                              </Pressable>
-                            ))}
-                          </ScrollView>
+                                {selectedAsset.analysis?.summary ? (
+                                  <Text style={styles.body}>{selectedAsset.analysis.summary}</Text>
+                                ) : null}
+                                {typeof selectedAsset.analysis?.overallQualityScore === 'number' ? (
+                                  <Text style={styles.assetScore}>
+                                    Quality score {selectedAsset.analysis.overallQualityScore}/100
+                                    {selectedAsset.analysis?.retakeRecommended ? ' · Retake suggested' : ''}
+                                  </Text>
+                                ) : null}
+                              </View>
+                            ) : null}
+                          </>
+                        ) : (
+                          <Text style={styles.body}>No saved photos yet for this property.</Text>
+                        )}
+                      </View>
+                    ) : null}
 
-                          {selectedAsset ? (
-                            <View style={styles.selectedAssetCard}>
-                              <Image source={{ uri: selectedAsset.imageUrl }} style={styles.selectedAssetImage} />
-                              <Text style={styles.selectedAssetTitle}>{selectedAsset.roomLabel}</Text>
-                              <Text style={styles.selectedAssetMeta}>
-                                Saved {formatCreatedAt(selectedAsset.createdAt) || 'recently'}
-                                {selectedAsset.analysis?.roomGuess
-                                  ? ` · AI sees ${selectedAsset.analysis.roomGuess.toLowerCase()}`
-                                  : ''}
+                    {propertySection === 'vision' ? (
+                      <View style={styles.sectionPanel}>
+                        <Text style={styles.label}>Vision</Text>
+                        <Text style={styles.body}>
+                          Use the strongest saved photos as your early flyer and listing candidates.
+                        </Text>
+                        <View style={styles.coverageList}>
+                          {roomCoverage.map((item) => (
+                            <View key={item.roomLabel} style={styles.coverageRow}>
+                              <Text style={styles.coverageRoom}>{item.roomLabel}</Text>
+                              <Text style={item.captured ? styles.coverageDone : styles.coverageMissing}>
+                                {item.captured ? 'Captured' : 'Missing'}
                               </Text>
-                              {selectedAsset.analysis?.summary ? (
-                                <Text style={styles.body}>{selectedAsset.analysis.summary}</Text>
-                              ) : null}
-                              {typeof selectedAsset.analysis?.overallQualityScore === 'number' ? (
-                                <Text style={styles.assetScore}>
-                                  Quality score {selectedAsset.analysis.overallQualityScore}/100
-                                  {selectedAsset.analysis?.retakeRecommended ? ' · Retake suggested' : ''}
-                                </Text>
-                              ) : null}
                             </View>
-                          ) : null}
-                        </>
-                      ) : (
-                        <Text style={styles.body}>No saved photos yet for this property.</Text>
-                      )}
-                    </View>
+                          ))}
+                        </View>
+                        <View style={styles.candidateList}>
+                          {bestCandidates.length ? (
+                            bestCandidates.map((asset, index) => (
+                              <View key={asset.id} style={styles.candidateCard}>
+                                <Text style={styles.candidateRank}>#{index + 1}</Text>
+                                <View style={styles.candidateCopy}>
+                                  <Text style={styles.candidateTitle}>{asset.roomLabel}</Text>
+                                  <Text style={styles.candidateMeta}>
+                                    Quality {asset.analysis?.overallQualityScore || 0}/100
+                                    {asset.analysis?.bestUse ? ` · ${asset.analysis.bestUse}` : ''}
+                                  </Text>
+                                </View>
+                              </View>
+                            ))
+                          ) : (
+                            <Text style={styles.body}>
+                              Save a few reviewed photos and the strongest listing candidates will show here.
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    ) : null}
+
+                    {propertySection === 'tasks' ? (
+                      <View style={styles.sectionPanel}>
+                        <Text style={styles.label}>Tasks</Text>
+                        <Text style={styles.body}>
+                          A simple property checklist based on pricing and photo readiness.
+                        </Text>
+                        <View style={styles.taskList}>
+                          {actionTasks.map((task) => (
+                            <View key={task.title} style={styles.taskCard}>
+                              <Text style={task.done ? styles.taskDone : styles.taskOpen}>
+                                {task.done ? 'Done' : 'Open'}
+                              </Text>
+                              <Text style={styles.taskTitle}>{task.title}</Text>
+                              <Text style={styles.taskDetail}>{task.detail}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    ) : null}
                   </>
                 ) : (
                   <Text style={styles.body}>Property details are collapsed. Expand when you want pricing and capture tools.</Text>
@@ -871,6 +1013,38 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#425563',
   },
+  sectionChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 4,
+  },
+  sectionChip: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  sectionChipActive: {
+    backgroundColor: '#d28859',
+    borderColor: '#d28859',
+  },
+  sectionChipLabel: {
+    color: '#dbcbb7',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  sectionChipLabelActive: {
+    color: '#fff7ee',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  sectionPanel: {
+    gap: 12,
+    marginTop: 8,
+  },
   workspaceHeaderRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1019,6 +1193,102 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     fontWeight: '700',
+  },
+  coverageList: {
+    gap: 10,
+  },
+  coverageRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  coverageRoom: {
+    color: '#f8f1e6',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  coverageDone: {
+    color: '#93a982',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  coverageMissing: {
+    color: '#f0a08e',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  candidateList: {
+    gap: 10,
+  },
+  candidateCard: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  candidateRank: {
+    color: '#d28859',
+    fontSize: 18,
+    fontWeight: '800',
+    minWidth: 28,
+  },
+  candidateCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  candidateTitle: {
+    color: '#f8f1e6',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  candidateMeta: {
+    color: '#dbcbb7',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  taskList: {
+    gap: 10,
+  },
+  taskCard: {
+    gap: 6,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  taskDone: {
+    color: '#93a982',
+    fontSize: 12,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    fontWeight: '800',
+  },
+  taskOpen: {
+    color: '#d28859',
+    fontSize: 12,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    fontWeight: '800',
+  },
+  taskTitle: {
+    color: '#f8f1e6',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  taskDetail: {
+    color: '#dbcbb7',
+    fontSize: 14,
+    lineHeight: 20,
   },
   authFooter: {
     gap: 10,

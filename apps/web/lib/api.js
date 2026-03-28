@@ -86,6 +86,10 @@ export function getDashboard(propertyId) {
   return request(`/api/v1/properties/${propertyId}/dashboard`);
 }
 
+export function listMediaAssets(propertyId) {
+  return request(`/api/v1/properties/${propertyId}/media`);
+}
+
 export function analyzePricing(propertyId) {
   return request(`/api/v1/properties/${propertyId}/pricing/analyze`, {
     method: 'POST',

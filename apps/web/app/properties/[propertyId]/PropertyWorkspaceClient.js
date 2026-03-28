@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { formatCurrency } from '@workside/utils';
 
@@ -13,6 +13,7 @@ import {
   generateFlyer,
   getFlyerExportUrl,
   getDashboard,
+  listMediaAssets,
   getLatestFlyer,
   getLatestPricing,
   getProperty,
@@ -36,9 +37,15 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [dashboard, setDashboard] = useState(null);
   const [latestPricing, setLatestPricing] = useState(null);
   const [latestFlyer, setLatestFlyer] = useState(null);
+  const [mediaAssets, setMediaAssets] = useState([]);
+  const [selectedMediaAssetId, setSelectedMediaAssetId] = useState('');
   const [flyerType, setFlyerType] = useState('sale');
   const [status, setStatus] = useState('Loading property workspace...');
   const [toast, setToast] = useState(null);
+  const selectedMediaAsset = useMemo(
+    () => mediaAssets.find((asset) => asset.id === selectedMediaAssetId) || mediaAssets[0] || null,
+    [mediaAssets, selectedMediaAssetId],
+  );
 
   useEffect(() => {
     const nextSession = {
@@ -74,6 +81,15 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           setLatestFlyer(flyerResponse.flyer);
         } catch {
           setLatestFlyer(null);
+        }
+
+        try {
+          const mediaResponse = await listMediaAssets(propertyId);
+          setMediaAssets(mediaResponse.assets || []);
+          setSelectedMediaAssetId(mediaResponse.assets?.[0]?.id || '');
+        } catch {
+          setMediaAssets([]);
+          setSelectedMediaAssetId('');
         }
       } catch (requestError) {
         setToast({
@@ -453,6 +469,95 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           ) : (
             <p>No flyer draft yet. Generate one to preview sale or rental marketing output.</p>
           )}
+        </div>
+      </section>
+
+      <section className="content-grid dashboard-content-grid">
+        <div className="content-card">
+          <div className="section-header-tight">
+            <div>
+              <span className="label">Property media</span>
+              <h2>Photos captured in mobile</h2>
+            </div>
+            <span className="section-header-meta">
+              {mediaAssets.length} saved photo{mediaAssets.length === 1 ? '' : 's'}
+            </span>
+          </div>
+
+          {mediaAssets.length ? (
+            <div className="property-media-layout">
+              <div className="property-media-rail">
+                {mediaAssets.map((asset) => (
+                  <button
+                    key={asset.id}
+                    type="button"
+                    className={asset.id === selectedMediaAsset?.id ? 'property-media-thumb active' : 'property-media-thumb'}
+                    onClick={() => setSelectedMediaAssetId(asset.id)}
+                  >
+                    <img src={asset.imageUrl} alt={asset.roomLabel || 'Property photo'} />
+                    <span>{asset.roomLabel}</span>
+                  </button>
+                ))}
+              </div>
+
+              {selectedMediaAsset ? (
+                <div className="property-media-detail">
+                  <img
+                    src={selectedMediaAsset.imageUrl}
+                    alt={selectedMediaAsset.roomLabel || 'Selected property photo'}
+                    className="property-media-hero"
+                  />
+                  <div className="property-media-copy">
+                    <h3>{selectedMediaAsset.roomLabel}</h3>
+                    <p>
+                      Saved {new Date(selectedMediaAsset.createdAt).toLocaleDateString()}
+                      {selectedMediaAsset.analysis?.roomGuess
+                        ? ` · AI sees ${selectedMediaAsset.analysis.roomGuess.toLowerCase()}`
+                        : ''}
+                    </p>
+                    {selectedMediaAsset.analysis?.summary ? (
+                      <p>{selectedMediaAsset.analysis.summary}</p>
+                    ) : (
+                      <p>No AI photo summary is stored for this image yet.</p>
+                    )}
+                    {typeof selectedMediaAsset.analysis?.overallQualityScore === 'number' ? (
+                      <div className="property-media-badges">
+                        <span>Quality {selectedMediaAsset.analysis.overallQualityScore}/100</span>
+                        {typeof selectedMediaAsset.analysis?.lightingScore === 'number' ? (
+                          <span>Light {selectedMediaAsset.analysis.lightingScore}/100</span>
+                        ) : null}
+                        {typeof selectedMediaAsset.analysis?.compositionScore === 'number' ? (
+                          <span>Composition {selectedMediaAsset.analysis.compositionScore}/100</span>
+                        ) : null}
+                        {selectedMediaAsset.analysis?.retakeRecommended ? (
+                          <span>Retake suggested</span>
+                        ) : (
+                          <span>Ready for listing review</span>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p>No photos have been saved for this property yet. Capture one from the mobile app to see it here.</p>
+          )}
+        </div>
+
+        <div className="content-card">
+          <span className="label">Media notes</span>
+          <h2>How this fits the workflow</h2>
+          <p>
+            The property photo set is now shared across mobile and web. As you capture rooms in the
+            mobile app, those images become available here for review, flyer generation, and future
+            listing-vision improvements.
+          </p>
+          <ul className="plain-list">
+            <li>Use mobile for fast room-by-room capture.</li>
+            <li>Use web for desktop review, flyer prep, and marketing output.</li>
+            <li>Stronger photos will naturally feed later AI listing and flyer experiences.</li>
+          </ul>
         </div>
       </section>
 
