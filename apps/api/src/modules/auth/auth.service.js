@@ -1,9 +1,37 @@
 import bcrypt from 'bcryptjs';
+import mongoose from 'mongoose';
 
 import { env } from '../../config/env.js';
 import { sendOtpEmail, sendWelcomeEmail } from '../../services/emailService.js';
+import { deleteStoredAsset } from '../../services/storageService.js';
 import { signSessionToken } from '../../services/sessionService.js';
+import { BillingSubscriptionModel } from '../billing/billing.model.js';
+import { FlyerModel } from '../documents/flyer.model.js';
+import { MediaAssetModel } from '../media/media.model.js';
+import { PricingAnalysisModel } from '../pricing/pricing.model.js';
+import { PropertyModel } from '../properties/property.model.js';
+import { AnalysisLockModel } from '../usage/analysis-lock.model.js';
+import { RateLimitEventModel } from '../usage/rate-limit.model.js';
+import { UsageTrackingModel } from '../usage/usage-tracking.model.js';
 import { UserModel } from './auth.model.js';
+
+function serializeUser(user) {
+  return {
+    id: user._id.toString(),
+    email: user.email,
+    role: user.role,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    isDemoAccount: Boolean(user.isDemoAccount),
+    isBillingBypass: Boolean(user.isBillingBypass),
+  };
+}
+
+function createHttpError(statusCode, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
 
 function buildOtpCode() {
   const min = 10 ** (env.OTP_LENGTH - 1);
@@ -75,13 +103,7 @@ export async function login(payload) {
 
   return {
     token: signSessionToken(user),
-    user: {
-      id: user._id.toString(),
-      email: user.email,
-      role: user.role,
-      firstName: user.firstName,
-      lastName: user.lastName,
-    },
+    user: serializeUser(user),
   };
 }
 
@@ -122,12 +144,64 @@ export async function verifyEmailOtp(payload) {
 
   return {
     token: signSessionToken(user),
-    user: {
-      id: user._id.toString(),
-      email: user.email,
-      role: user.role,
-      firstName: user.firstName,
-      lastName: user.lastName,
-    },
+    user: serializeUser(user),
+  };
+}
+
+export async function deleteAccount(userId) {
+  if (mongoose.connection.readyState !== 1) {
+    throw createHttpError(503, 'Database connection is required to delete an account.');
+  }
+
+  const user = await UserModel.findById(userId);
+  if (!user) {
+    throw createHttpError(404, 'User account not found.');
+  }
+
+  if (user.isDemoAccount) {
+    throw createHttpError(403, 'Demo accounts cannot be deleted.');
+  }
+
+  if (user.role === 'admin' || user.role === 'super_admin') {
+    throw createHttpError(403, 'Admin accounts cannot be deleted.');
+  }
+
+  const ownedProperties = await PropertyModel.find({ ownerUserId: user._id }).select({ _id: 1 }).lean();
+  const propertyIds = ownedProperties.map((property) => property._id);
+
+  if (propertyIds.length) {
+    const mediaAssets = await MediaAssetModel.find({ propertyId: { $in: propertyIds } })
+      .select({ storageProvider: 1, storageKey: 1 })
+      .lean();
+
+    await Promise.all(
+      mediaAssets.map(async (asset) => {
+        try {
+          await deleteStoredAsset({
+            storageProvider: asset.storageProvider,
+            storageKey: asset.storageKey,
+          });
+        } catch (storageError) {
+          // Continue deleting account data even if a file/object is already gone.
+        }
+      }),
+    );
+
+    await MediaAssetModel.deleteMany({ propertyId: { $in: propertyIds } });
+    await PricingAnalysisModel.deleteMany({ propertyId: { $in: propertyIds } });
+    await FlyerModel.deleteMany({ propertyId: { $in: propertyIds } });
+    await PropertyModel.deleteMany({ _id: { $in: propertyIds } });
+  }
+
+  await BillingSubscriptionModel.deleteMany({ userId: user._id });
+  await UsageTrackingModel.deleteMany({ userId: user._id });
+  await AnalysisLockModel.deleteMany({ userId: String(user._id) });
+  await RateLimitEventModel.deleteMany({ userId: String(user._id) });
+  await UserModel.deleteOne({ _id: user._id });
+
+  return {
+    deleted: true,
+    deletedUserId: user._id.toString(),
+    deletedPropertyCount: propertyIds.length,
   };
 }

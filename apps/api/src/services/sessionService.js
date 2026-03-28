@@ -13,3 +13,7 @@ export function signSessionToken(user) {
     { expiresIn: env.JWT_EXPIRES_IN },
   );
 }
+
+export function verifySessionToken(token) {
+  return jwt.verify(token, env.JWT_SECRET);
+}

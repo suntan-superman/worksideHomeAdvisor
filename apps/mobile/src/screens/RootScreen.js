@@ -1,9 +1,14 @@
 import * as ImagePicker from 'expo-image-picker';
-import React, { useMemo, useState } from 'react';
+import * as LocalAuthentication from 'expo-local-authentication';
+import * as SecureStore from 'expo-secure-store';
+import Constants from 'expo-constants';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -15,6 +20,7 @@ import {
 
 import {
   analyzePricing,
+  deleteAccount as deleteAccountRequest,
   getDashboard,
   listMediaAssets,
   listProperties,
@@ -23,6 +29,9 @@ import {
   savePhoto,
   verifyEmailOtp,
 } from '../services/api';
+import { GlassButton } from '../components/GlassButton';
+import { GlassCard } from '../components/GlassCard';
+import { device, radius, spacing, typography } from '../theme/responsive';
 import { colors } from '../theme/tokens';
 
 function formatCurrency(value) {
@@ -40,20 +49,13 @@ function getDisplayName(user) {
 
 function ActionButton({ label, onPress, variant = 'primary', disabled = false, compact = false }) {
   return (
-    <TouchableOpacity
+    <GlassButton
+      label={label}
       onPress={onPress}
       disabled={disabled}
-      style={[
-        styles.button,
-        compact ? styles.buttonCompact : null,
-        variant === 'secondary' ? styles.buttonSecondary : styles.buttonPrimary,
-        disabled ? styles.buttonDisabled : null,
-      ]}
-    >
-      <Text style={variant === 'secondary' ? styles.buttonSecondaryLabel : styles.buttonLabel}>
-        {label}
-      </Text>
-    </TouchableOpacity>
+      compact={compact}
+      variant={variant}
+    />
   );
 }
 
@@ -97,11 +99,24 @@ function ScoreBadge({ label, value }) {
   );
 }
 
+const LAST_LOGIN_EMAIL_KEY = 'workside.lastLoginEmail';
+const BIOMETRIC_ENABLED_KEY = 'workside.biometricEnabled';
+const BIOMETRIC_CREDENTIALS_KEY = 'workside.biometricCredentials';
+const APP_WEB_URL = Constants.expoConfig?.extra?.webUrl || 'https://worksidehomeadvisor.netlify.app';
+const TERMS_URL = `${APP_WEB_URL}/terms`;
+const PRIVACY_URL = `${APP_WEB_URL}/privacy`;
+const SUPPORT_EMAIL =
+  Constants.expoConfig?.extra?.supportEmail || 'support@worksidesoftware.com';
+
 export function RootScreen() {
   const [authMode, setAuthMode] = useState('login');
   const [activeTab, setActiveTab] = useState('properties');
   const [propertySection, setPropertySection] = useState('overview');
+  const [propertyDetailsCollapsed, setPropertyDetailsCollapsed] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [hasBiometricCredentials, setHasBiometricCredentials] = useState(false);
   const [session, setSession] = useState(null);
   const [properties, setProperties] = useState([]);
   const [propertyId, setPropertyId] = useState('');
@@ -153,13 +168,325 @@ export function RootScreen() {
     [gallery],
   );
 
+  const bestPhotoCandidates = useMemo(
+    () =>
+      [...gallery]
+        .filter((asset) => asset.analysis)
+        .sort(
+          (left, right) =>
+            Number(right.analysis?.overallQualityScore || 0) -
+            Number(left.analysis?.overallQualityScore || 0),
+        )
+        .slice(0, 3),
+    [gallery],
+  );
+
+  const roomCoverage = useMemo(() => {
+    const capturedRooms = new Set(gallery.map((asset) => asset.roomLabel).filter(Boolean));
+    const recommendedRooms = ['Living room', 'Kitchen', 'Primary bedroom', 'Bathroom', 'Exterior'];
+    return recommendedRooms.map((room) => ({
+      room,
+      captured: capturedRooms.has(room),
+    }));
+  }, [gallery]);
+
+  const sellerTasks = useMemo(() => {
+    const tasks = [];
+
+    if (!selectedProperty) {
+      return tasks;
+    }
+
+    tasks.push({
+      key: 'pricing',
+      title: dashboard?.pricing?.mid ? 'Refresh pricing before launch' : 'Run your first pricing analysis',
+      detail: dashboard?.pricing?.mid
+        ? `Current midpoint is ${formatCurrency(dashboard.pricing.mid)}. Refresh after major prep or staging updates.`
+        : 'Use the live comps workflow to generate a fresh list-price band for this property.',
+      done: Boolean(dashboard?.pricing?.mid),
+      tone: dashboard?.pricing?.mid ? 'done' : 'open',
+    });
+
+    tasks.push({
+      key: 'photos',
+      title: gallery.length >= 5 ? 'Review best listing photos' : 'Capture the core listing rooms',
+      detail:
+        gallery.length >= 5
+          ? `${featuredPhotoCount} photos currently look like good flyer candidates. Review the weakest rooms for retakes.`
+          : 'Aim for at least living room, kitchen, primary bedroom, bathroom, and exterior coverage.',
+      done: gallery.length >= 5,
+      tone: gallery.length >= 5 ? 'done' : 'open',
+    });
+
+    const retakeCount = gallery.filter((asset) => asset.analysis?.retakeRecommended).length;
+    tasks.push({
+      key: 'retakes',
+      title: retakeCount ? 'Address photo retake recommendations' : 'No retakes currently flagged',
+      detail: retakeCount
+        ? `${retakeCount} saved photos were flagged by AI for lighting, clarity, or composition improvements.`
+        : 'Your saved photo set is currently in good shape for marketing review.',
+      done: retakeCount === 0,
+      tone: retakeCount === 0 ? 'done' : 'warning',
+    });
+
+    tasks.push({
+      key: 'flyer',
+      title: 'Generate or refresh the flyer draft',
+      detail:
+        'Once pricing and core photos look strong, regenerate the flyer so the property story reflects the latest market position.',
+      done: false,
+      tone: 'open',
+    });
+
+    return tasks;
+  }, [dashboard, featuredPhotoCount, gallery, selectedProperty]);
+
   const topComps = dashboard?.pricing?.selectedComps?.slice(0, 4) || [];
+  const accountDeletionBlocked = Boolean(
+    session?.user?.isDemoAccount || session?.user?.role === 'admin' || session?.user?.role === 'super_admin',
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadLocalAuthState() {
+      try {
+        const [savedEmail, biometricPreference, biometricCreds, hardwareAvailable, enrolled] = await Promise.all([
+          SecureStore.getItemAsync(LAST_LOGIN_EMAIL_KEY),
+          SecureStore.getItemAsync(BIOMETRIC_ENABLED_KEY),
+          SecureStore.getItemAsync(BIOMETRIC_CREDENTIALS_KEY),
+          LocalAuthentication.hasHardwareAsync(),
+          LocalAuthentication.isEnrolledAsync(),
+        ]);
+
+        if (savedEmail && isMounted) {
+          setForm((current) => ({
+            ...current,
+            email: current.email || savedEmail,
+          }));
+        }
+
+        if (isMounted) {
+          setBiometricAvailable(Boolean(hardwareAvailable && enrolled));
+          setBiometricEnabled(biometricPreference === 'true');
+          setHasBiometricCredentials(Boolean(biometricCreds));
+        }
+      } catch (storageError) {
+        // Keep auth usable even if secure storage is unavailable.
+      }
+    }
+
+    loadLocalAuthState();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   function updateField(field, value) {
     setForm((current) => ({
       ...current,
       [field]: value,
     }));
+  }
+
+  async function persistLastLoginEmail(email) {
+    try {
+      await SecureStore.setItemAsync(LAST_LOGIN_EMAIL_KEY, email);
+    } catch (storageError) {
+      // Login should still succeed even if persistence is unavailable.
+    }
+  }
+
+  async function persistBiometricCredentials(email, password) {
+    try {
+      await SecureStore.setItemAsync(
+        BIOMETRIC_CREDENTIALS_KEY,
+        JSON.stringify({
+          email,
+          password,
+        }),
+      );
+      setHasBiometricCredentials(true);
+    } catch (storageError) {
+      setHasBiometricCredentials(false);
+    }
+  }
+
+  async function clearBiometricCredentials() {
+    try {
+      await SecureStore.deleteItemAsync(BIOMETRIC_CREDENTIALS_KEY);
+    } catch (storageError) {
+      // Ignore cleanup failures.
+    } finally {
+      setHasBiometricCredentials(false);
+    }
+  }
+
+  async function setBiometricPreference(nextValue) {
+    try {
+      if (nextValue) {
+        await SecureStore.setItemAsync(BIOMETRIC_ENABLED_KEY, 'true');
+      } else {
+        await SecureStore.deleteItemAsync(BIOMETRIC_ENABLED_KEY);
+      }
+      setBiometricEnabled(nextValue);
+    } catch (storageError) {
+      setError('Unable to update biometric preference on this device.');
+    }
+  }
+
+  function resetWorkspaceState() {
+    setProperties([]);
+    setPropertyId('');
+    setDashboard(null);
+    setPhotoAsset(null);
+    setAnalysis(null);
+    setGallery([]);
+    setSelectedPhotoId('');
+    setGalleryFilter('All');
+    setActiveTab('properties');
+    setPropertySection('overview');
+    setPropertyDetailsCollapsed(false);
+  }
+
+  function handleSignOut() {
+    setSession(null);
+    resetWorkspaceState();
+    setShowPassword(false);
+    setError('');
+    setStatus('Signed out. Sign in to load your properties and capture listing photos.');
+  }
+
+  async function handleBiometricLogin() {
+    if (!biometricAvailable || !biometricEnabled || !hasBiometricCredentials) {
+      setError('Biometric login is not ready on this device yet.');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+
+    try {
+      const biometricResult = await LocalAuthentication.authenticateAsync({
+        promptMessage: Platform.OS === 'ios' ? 'Unlock Workside Home Advisor' : 'Confirm your identity',
+        cancelLabel: 'Cancel',
+        disableDeviceFallback: false,
+      });
+
+      if (!biometricResult.success) {
+        throw new Error('Biometric authentication was cancelled or failed.');
+      }
+
+      const credentialsRaw = await SecureStore.getItemAsync(BIOMETRIC_CREDENTIALS_KEY);
+      if (!credentialsRaw) {
+        throw new Error('No saved biometric login credentials were found.');
+      }
+
+      const credentials = JSON.parse(credentialsRaw);
+      const result = await login({
+        email: credentials.email,
+        password: credentials.password,
+      });
+
+      if (result.requiresOtpVerification) {
+        setAuthMode('verify');
+        updateField('email', credentials.email);
+        setStatus('This account still needs OTP verification before biometric login can finish.');
+        return;
+      }
+
+      setSession(result);
+      await persistLastLoginEmail(credentials.email);
+      setActiveTab('properties');
+      await loadPropertiesForUser(result.user.id);
+      setStatus('Unlocked with biometrics.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleToggleBiometric() {
+    if (!biometricAvailable) {
+      setError('Biometric authentication is not available on this device.');
+      return;
+    }
+
+    if (!biometricEnabled) {
+      if (!hasBiometricCredentials) {
+        setError('Complete a successful password login first so we can securely save credentials for biometric unlock.');
+        return;
+      }
+
+      await setBiometricPreference(true);
+      setStatus('Biometric login is enabled.');
+      return;
+    }
+
+    await setBiometricPreference(false);
+    setStatus('Biometric login is disabled.');
+  }
+
+  async function openExternalUrl(url) {
+    try {
+      await Linking.openURL(url);
+    } catch (linkError) {
+      setError('Unable to open that link on this device right now.');
+    }
+  }
+
+  function confirmDeleteAccount() {
+    if (!session?.token) {
+      return;
+    }
+
+    if (accountDeletionBlocked) {
+      setError('Demo and admin accounts are protected and cannot be deleted.');
+      return;
+    }
+
+    Alert.alert(
+      'Delete account?',
+      'This permanently removes your account, owned properties, saved pricing, generated flyers, and associated media. This action cannot be undone.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete account',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            setError('');
+
+            try {
+              await deleteAccountRequest(session.token);
+              await SecureStore.deleteItemAsync(LAST_LOGIN_EMAIL_KEY);
+              await SecureStore.deleteItemAsync(BIOMETRIC_ENABLED_KEY);
+              await SecureStore.deleteItemAsync(BIOMETRIC_CREDENTIALS_KEY);
+              setSession(null);
+              resetWorkspaceState();
+              setBiometricEnabled(false);
+              setHasBiometricCredentials(false);
+              setForm((current) => ({
+                ...current,
+                email: '',
+                password: '',
+                otpCode: '',
+              }));
+              setStatus('Your account has been deleted.');
+            } catch (requestError) {
+              setError(requestError.message);
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
   }
 
   async function loadPropertyWorkspace(targetPropertyId) {
@@ -210,6 +537,8 @@ export function RootScreen() {
       }
 
       setSession(result);
+      await persistLastLoginEmail(form.email);
+      await persistBiometricCredentials(form.email, form.password);
       setActiveTab('properties');
       await loadPropertiesForUser(result.user.id);
       setStatus('Mobile workspace loaded.');
@@ -230,6 +559,7 @@ export function RootScreen() {
         otpCode: form.otpCode,
       });
       setSession(result);
+      await persistLastLoginEmail(form.email);
       setActiveTab('properties');
       await loadPropertiesForUser(result.user.id);
       setStatus('Email verified. Mobile workspace loaded.');
@@ -389,7 +719,7 @@ export function RootScreen() {
           </Text>
         </View>
 
-        <View style={styles.card}>
+        <GlassCard style={styles.card}>
           <Text style={styles.cardTitle}>Mobile sign-in</Text>
           <Text style={styles.cardBody}>
             Use the same verified seller account you created on the web portal.
@@ -449,6 +779,14 @@ export function RootScreen() {
               onPress={authMode === 'login' ? handleLogin : handleVerifyOtp}
               disabled={busy}
             />
+            {authMode === 'login' && biometricAvailable && biometricEnabled && hasBiometricCredentials ? (
+              <ActionButton
+                label={Platform.OS === 'ios' ? 'Face ID' : 'Biometric'}
+                onPress={handleBiometricLogin}
+                variant="secondary"
+                disabled={busy}
+              />
+            ) : null}
             {authMode === 'verify' ? (
               <ActionButton
                 label="Resend OTP"
@@ -457,6 +795,21 @@ export function RootScreen() {
                 disabled={busy || !form.email}
               />
             ) : null}
+          </View>
+        </GlassCard>
+
+        <View style={styles.authFooter}>
+          <Text style={styles.authFooterCopy}>Copyright 2026 Workside Software LLC.</Text>
+          <View style={styles.authFooterLinks}>
+            <TouchableOpacity onPress={() => openExternalUrl(TERMS_URL)}>
+              <Text style={styles.authFooterLink}>Terms of Service</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => openExternalUrl(PRIVACY_URL)}>
+              <Text style={styles.authFooterLink}>Privacy Notice</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => openExternalUrl(`mailto:${SUPPORT_EMAIL}`)}>
+              <Text style={styles.authFooterLink}>Support</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -555,21 +908,26 @@ export function RootScreen() {
 
         {selectedProperty ? (
           <View style={styles.sectionStack}>
-            <View style={styles.propertyHero}>
-              <View style={styles.propertyHeroHeader}>
-                <View style={styles.propertyHeroTitleWrap}>
-                  <Text style={styles.propertyHeroTitle}>{selectedProperty.title}</Text>
-                  <Text style={styles.propertyHeroAddress}>
-                    {selectedProperty.addressLine1}, {selectedProperty.city}, {selectedProperty.state}{' '}
-                    {selectedProperty.zip}
+            <View style={styles.propertySummaryCard}>
+              <View style={styles.propertySummaryHeader}>
+                <View style={styles.propertySummaryText}>
+                  <Text style={styles.propertySummaryTitle}>{selectedProperty.title}</Text>
+                  <Text style={styles.propertySummaryMeta}>
+                    {selectedProperty.addressLine1}, {selectedProperty.city}
                   </Text>
                 </View>
-                <Text style={styles.propertyHeroBadge}>{selectedProperty.propertyType}</Text>
+                <TouchableOpacity
+                  onPress={() => setPropertyDetailsCollapsed((current) => !current)}
+                  style={styles.propertyCollapseButton}
+                >
+                  <Text style={styles.propertyCollapseButtonLabel}>
+                    {propertyDetailsCollapsed ? 'Expand' : 'Collapse'}
+                  </Text>
+                </TouchableOpacity>
               </View>
-
-              <View style={styles.propertyFactRow}>
+              <View style={styles.propertySummaryBadges}>
                 <ScoreBadge
-                  label="Price band"
+                  label="Price"
                   value={
                     dashboard?.pricing
                       ? `${formatCurrency(dashboard.pricing.low)} – ${formatCurrency(dashboard.pricing.high)}`
@@ -577,56 +935,85 @@ export function RootScreen() {
                   }
                 />
                 <ScoreBadge label="Photos" value={String(gallery.length)} />
-                <ScoreBadge label="Best shots" value={String(featuredPhotoCount)} />
-              </View>
-
-              <View style={styles.propertyFactRow}>
-                <ScoreBadge label="Beds" value={String(selectedProperty.bedrooms || '--')} />
-                <ScoreBadge label="Baths" value={String(selectedProperty.bathrooms || '--')} />
-                <ScoreBadge label="Sqft" value={String(selectedProperty.squareFeet || '--')} />
-              </View>
-
-              <Text style={styles.propertyHeroSummary}>
-                {dashboard?.pricingSummary ||
-                  'Pricing and AI summary appear here once a fresh analysis is available.'}
-              </Text>
-
-              <View style={styles.segmentRow}>
-                <ActionButton label="Refresh pricing" onPress={handleRunPricing} disabled={busy} compact />
-                <ActionButton
-                  label="Capture photos"
-                  onPress={() => setActiveTab('capture')}
-                  variant="secondary"
-                  compact
-                />
-                <ActionButton
-                  label="View gallery"
-                  onPress={() => setActiveTab('gallery')}
-                  variant="secondary"
-                  compact
-                />
               </View>
             </View>
 
-            <View style={styles.subsectionTabs}>
-              <TabChip
-                label="Overview"
-                active={propertySection === 'overview'}
-                onPress={() => setPropertySection('overview')}
-              />
-              <TabChip
-                label="Insights"
-                active={propertySection === 'insights'}
-                onPress={() => setPropertySection('insights')}
-              />
-              <TabChip
-                label="Photos"
-                active={propertySection === 'photos'}
-                onPress={() => setPropertySection('photos')}
-              />
-            </View>
+            {!propertyDetailsCollapsed ? (
+              <>
+                <View style={styles.propertyHero}>
+                  <View style={styles.propertyHeroHeader}>
+                    <View style={styles.propertyHeroTitleWrap}>
+                      <Text style={styles.propertyHeroTitle}>{selectedProperty.title}</Text>
+                      <Text style={styles.propertyHeroAddress}>
+                        {selectedProperty.addressLine1}, {selectedProperty.city}, {selectedProperty.state}{' '}
+                        {selectedProperty.zip}
+                      </Text>
+                    </View>
+                    <Text style={styles.propertyHeroBadge}>{selectedProperty.propertyType}</Text>
+                  </View>
 
-            {propertySection === 'overview' ? (
+                  <View style={styles.propertyFactRow}>
+                    <ScoreBadge
+                      label="Price band"
+                      value={
+                        dashboard?.pricing
+                          ? `${formatCurrency(dashboard.pricing.low)} – ${formatCurrency(dashboard.pricing.high)}`
+                          : 'Pending'
+                      }
+                    />
+                    <ScoreBadge label="Photos" value={String(gallery.length)} />
+                    <ScoreBadge label="Best shots" value={String(featuredPhotoCount)} />
+                  </View>
+
+                  <View style={styles.propertyFactRow}>
+                    <ScoreBadge label="Beds" value={String(selectedProperty.bedrooms || '--')} />
+                    <ScoreBadge label="Baths" value={String(selectedProperty.bathrooms || '--')} />
+                    <ScoreBadge label="Sqft" value={String(selectedProperty.squareFeet || '--')} />
+                  </View>
+
+                  <Text style={styles.propertyHeroSummary}>
+                    {dashboard?.pricingSummary ||
+                      'Pricing and AI summary appear here once a fresh analysis is available.'}
+                  </Text>
+
+                  <View style={styles.segmentRow}>
+                    <ActionButton label="Refresh pricing" onPress={handleRunPricing} disabled={busy} compact />
+                    <ActionButton
+                      label="Capture photos"
+                      onPress={() => setActiveTab('capture')}
+                      variant="secondary"
+                      compact
+                    />
+                    <ActionButton
+                      label="View gallery"
+                      onPress={() => setActiveTab('gallery')}
+                      variant="secondary"
+                      compact
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.subsectionTabs}>
+                  <TabChip
+                    label="Overview"
+                    active={propertySection === 'overview'}
+                    onPress={() => setPropertySection('overview')}
+                  />
+                  <TabChip
+                    label="Insights"
+                    active={propertySection === 'insights'}
+                    onPress={() => setPropertySection('insights')}
+                  />
+                  <TabChip
+                    label="Photos"
+                    active={propertySection === 'photos'}
+                    onPress={() => setPropertySection('photos')}
+                  />
+                </View>
+              </>
+            ) : null}
+
+            {!propertyDetailsCollapsed && propertySection === 'overview' ? (
               <View style={styles.sectionStack}>
                 <View style={styles.card}>
                   <Text style={styles.cardTitle}>Field-ready summary</Text>
@@ -666,7 +1053,7 @@ export function RootScreen() {
               </View>
             ) : null}
 
-            {propertySection === 'insights' ? (
+            {!propertyDetailsCollapsed && propertySection === 'insights' ? (
               <View style={styles.sectionStack}>
                 <View style={styles.card}>
                   <Text style={styles.cardTitle}>Pricing insight</Text>
@@ -696,7 +1083,7 @@ export function RootScreen() {
               </View>
             ) : null}
 
-            {propertySection === 'photos' ? (
+            {!propertyDetailsCollapsed && propertySection === 'photos' ? (
               <View style={styles.sectionStack}>
                 <View style={styles.card}>
                   <Text style={styles.cardTitle}>Photo library snapshot</Text>
@@ -936,19 +1323,221 @@ export function RootScreen() {
     );
   }
 
-  function renderProfile() {
+  function renderVision() {
     return (
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Profile</Text>
-        <Text style={styles.profileName}>{getDisplayName(session.user)}</Text>
-        <Text style={styles.profileEmail}>{session.user.email}</Text>
-        <Text style={styles.cardBody}>
-          Current mobile mode is optimized for field capture, quick pricing review, and property media organization.
-        </Text>
-        <View style={styles.profileMetaRow}>
-          <ScoreBadge label="Selected property" value={selectedProperty?.title || 'None'} />
-          <ScoreBadge label="Gallery count" value={String(gallery.length)} />
+      <View style={styles.sectionStack}>
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.sectionEyebrow}>Vision</Text>
+            <Text style={styles.sectionTitle}>Listing vision mode</Text>
+          </View>
+          <Text style={styles.sectionMeta}>{selectedProperty?.title || 'No property'}</Text>
         </View>
+
+        <GlassCard style={styles.card}>
+          <Text style={styles.cardTitle}>Best current listing candidates</Text>
+          <Text style={styles.cardBody}>
+            Use this view to decide which rooms deserve retakes, which images belong on the flyer, and what story the property should tell visually.
+          </Text>
+          {bestPhotoCandidates.length ? (
+            bestPhotoCandidates.map((asset, index) => (
+              <View key={asset.id} style={styles.visionRow}>
+                <View style={styles.visionRank}>
+                  <Text style={styles.visionRankLabel}>{index + 1}</Text>
+                </View>
+                <View style={styles.visionCopy}>
+                  <Text style={styles.visionTitle}>{asset.roomLabel || 'Room photo'}</Text>
+                  <Text style={styles.galleryMeta}>
+                    Score {asset.analysis?.overallQualityScore || '--'} · {asset.analysis?.bestUse || 'General marketing'}
+                  </Text>
+                  <Text style={styles.cardBody}>
+                    {asset.analysis?.summary || 'AI summary will appear here after the image is analyzed.'}
+                  </Text>
+                </View>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.cardBody}>
+              Save a few property photos first and Vision mode will rank the strongest listing candidates for you.
+            </Text>
+          )}
+        </GlassCard>
+
+        <GlassCard style={styles.card}>
+          <Text style={styles.cardTitle}>Room coverage map</Text>
+          <Text style={styles.cardBody}>
+            These are the core rooms the app wants before you market or generate polished flyer drafts.
+          </Text>
+          <View style={styles.checklistStack}>
+            {roomCoverage.map((item) => (
+              <View key={item.room} style={styles.checklistRow}>
+                <Text style={item.captured ? styles.checklistBulletDone : styles.checklistBulletPending}>
+                  {item.captured ? '✓' : '•'}
+                </Text>
+                <View style={styles.checklistCopy}>
+                  <Text style={styles.checklistTitle}>{item.room}</Text>
+                  <Text style={styles.galleryMeta}>
+                    {item.captured ? 'Captured and available for review.' : 'Still needs a usable photo.'}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </GlassCard>
+
+        <GlassCard style={styles.card}>
+          <Text style={styles.cardTitle}>Presentation direction</Text>
+          <Text style={styles.cardBody}>
+            {dashboard?.pricingSummary
+              ? `Lead with the strongest visual moments, then support the current ${formatCurrency(
+                  dashboard.pricing?.mid || 0,
+                )} midpoint with bright, clean rooms and a calm, move-in-ready feel.`
+              : 'Run pricing and save a few photos to unlock a stronger listing direction for this property.'}
+          </Text>
+          <Text style={styles.listItem}>• Prioritize natural light, clutter-free framing, and level horizons.</Text>
+          <Text style={styles.listItem}>• Use exterior and kitchen photos to anchor the opening visual sequence.</Text>
+          <Text style={styles.listItem}>• Retake rooms with weak lighting before pushing them into flyers or marketing.</Text>
+        </GlassCard>
+      </View>
+    );
+  }
+
+  function renderTasks() {
+    return (
+      <View style={styles.sectionStack}>
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.sectionEyebrow}>Tasks</Text>
+            <Text style={styles.sectionTitle}>Seller action checklist</Text>
+          </View>
+          <Text style={styles.sectionMeta}>{sellerTasks.length} active items</Text>
+        </View>
+
+        <GlassCard style={styles.card}>
+          <Text style={styles.cardTitle}>Next best moves</Text>
+          <Text style={styles.cardBody}>
+            This checklist keeps the seller workflow moving from pricing to prep, then into media and flyer readiness.
+          </Text>
+          <View style={styles.checklistStack}>
+            {sellerTasks.map((task) => (
+              <View
+                key={task.key}
+                style={[
+                  styles.taskCard,
+                  task.tone === 'done' ? styles.taskCardDone : null,
+                  task.tone === 'warning' ? styles.taskCardWarning : null,
+                ]}
+              >
+                <View style={styles.taskHeader}>
+                  <Text style={task.done ? styles.taskStatusDone : styles.taskStatusPending}>
+                    {task.done ? 'Done' : task.tone === 'warning' ? 'Needs review' : 'Open'}
+                  </Text>
+                  <Text style={styles.taskTitle}>{task.title}</Text>
+                </View>
+                <Text style={styles.cardBody}>{task.detail}</Text>
+              </View>
+            ))}
+          </View>
+        </GlassCard>
+
+        <GlassCard style={styles.card}>
+          <Text style={styles.cardTitle}>What this app will do next</Text>
+          <Text style={styles.listItem}>• Vision mode will keep improving photo ranking and staging direction.</Text>
+          <Text style={styles.listItem}>• Flyer generation will get stronger as you refresh pricing and photo coverage.</Text>
+          <Text style={styles.listItem}>• Upcoming prep tasks will expand into room-by-room seller guidance.</Text>
+        </GlassCard>
+      </View>
+    );
+  }
+
+  function renderSettings() {
+    return (
+      <View style={styles.sectionStack}>
+        <GlassCard style={styles.card}>
+          <Text style={styles.cardTitle}>Settings</Text>
+          <Text style={styles.profileName}>{getDisplayName(session.user)}</Text>
+          <Text style={styles.profileEmail}>{session.user.email}</Text>
+          <Text style={styles.cardBody}>
+            Manage account access, legal links, and mobile field preferences from one place.
+          </Text>
+          <View style={styles.profileMetaRow}>
+            <ScoreBadge label="Selected property" value={selectedProperty?.title || 'None'} />
+            <ScoreBadge label="Gallery count" value={String(gallery.length)} />
+          </View>
+        </GlassCard>
+
+        <GlassCard style={styles.card}>
+          <Text style={styles.cardTitle}>Legal and support</Text>
+          <Text style={styles.cardBody}>
+            Review your customer-facing policies or reach Workside support from the app.
+          </Text>
+          <View style={styles.sectionStack}>
+            <ActionButton label="Terms of Service" onPress={() => openExternalUrl(TERMS_URL)} variant="secondary" />
+            <ActionButton label="Privacy Notice" onPress={() => openExternalUrl(PRIVACY_URL)} variant="secondary" />
+            <ActionButton
+              label={SUPPORT_EMAIL}
+              onPress={() => openExternalUrl(`mailto:${SUPPORT_EMAIL}`)}
+              variant="secondary"
+            />
+          </View>
+        </GlassCard>
+
+        <GlassCard style={styles.card}>
+          <Text style={styles.cardTitle}>Biometric login</Text>
+          <Text style={styles.cardBody}>
+            Use {Platform.OS === 'ios' ? 'Face ID or Touch ID' : 'fingerprint or device biometrics'} to unlock the last successful password account faster.
+          </Text>
+          <View style={styles.settingRow}>
+            <View style={styles.settingCopy}>
+              <Text style={styles.settingTitle}>Biometric unlock</Text>
+              <Text style={styles.settingSubtitle}>
+                {biometricAvailable
+                  ? hasBiometricCredentials
+                    ? biometricEnabled
+                      ? 'Enabled for future sign-ins.'
+                      : 'Available. Turn it on when you want faster sign-in.'
+                    : 'Complete a password login first so credentials can be stored securely.'
+                  : 'No enrolled biometrics were detected on this device.'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={handleToggleBiometric}
+              style={[
+                styles.togglePill,
+                biometricEnabled ? styles.togglePillActive : null,
+                !biometricAvailable ? styles.togglePillDisabled : null,
+              ]}
+            >
+              <View
+                style={[
+                  styles.toggleThumb,
+                  biometricEnabled ? styles.toggleThumbActive : null,
+                ]}
+              />
+            </TouchableOpacity>
+          </View>
+        </GlassCard>
+
+        <GlassCard style={styles.card}>
+          <Text style={styles.cardTitle}>Account actions</Text>
+          <Text style={styles.cardBody}>
+            You can sign out any time. Standard user accounts can also be permanently deleted here to comply with App Store account management requirements.
+          </Text>
+          {accountDeletionBlocked ? (
+            <Text style={styles.protectedAccountNotice}>
+              This is a protected internal {session.user.isDemoAccount ? 'demo' : 'admin'} account, so account deletion is disabled.
+            </Text>
+          ) : null}
+          <View style={styles.sectionStack}>
+            <ActionButton label="Sign out" onPress={handleSignOut} variant="secondary" />
+            <ActionButton
+              label="Delete account"
+              onPress={confirmDeleteAccount}
+              variant="destructive"
+              disabled={busy || accountDeletionBlocked}
+            />
+          </View>
+        </GlassCard>
       </View>
     );
   }
@@ -956,7 +1545,9 @@ export function RootScreen() {
   function renderAuthenticatedWorkspace() {
     const tabAccent = {
       properties: colors.moss,
+      vision: '#97c6bf',
       capture: colors.clay,
+      tasks: '#e0c27a',
       gallery: '#9cc7d8',
       profile: colors.sand,
     };
@@ -980,9 +1571,11 @@ export function RootScreen() {
           {busy ? <ActivityIndicator color={colors.clay} style={styles.spinner} /> : null}
 
           {activeTab === 'properties' ? renderPropertyOverview() : null}
+          {activeTab === 'vision' ? renderVision() : null}
           {activeTab === 'capture' ? renderCapture() : null}
+          {activeTab === 'tasks' ? renderTasks() : null}
           {activeTab === 'gallery' ? renderGallery() : null}
-          {activeTab === 'profile' ? renderProfile() : null}
+          {activeTab === 'profile' ? renderSettings() : null}
         </ScrollView>
 
         <View style={styles.bottomTabBar}>
@@ -993,10 +1586,22 @@ export function RootScreen() {
             accent={tabAccent.properties}
           />
           <BottomTabButton
+            label="Vision"
+            active={activeTab === 'vision'}
+            onPress={() => setActiveTab('vision')}
+            accent={tabAccent.vision}
+          />
+          <BottomTabButton
             label="Capture"
             active={activeTab === 'capture'}
             onPress={() => setActiveTab('capture')}
             accent={tabAccent.capture}
+          />
+          <BottomTabButton
+            label="Tasks"
+            active={activeTab === 'tasks'}
+            onPress={() => setActiveTab('tasks')}
+            accent={tabAccent.tasks}
           />
           <BottomTabButton
             label="Gallery"
@@ -1005,7 +1610,7 @@ export function RootScreen() {
             accent={tabAccent.gallery}
           />
           <BottomTabButton
-            label="Profile"
+            label="Settings"
             active={activeTab === 'profile'}
             onPress={() => setActiveTab('profile')}
             accent={tabAccent.profile}
@@ -1045,9 +1650,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.ink,
   },
   content: {
-    paddingHorizontal: 18,
-    paddingTop: 22,
-    paddingBottom: 36,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xl,
     gap: 16,
   },
   workspaceShell: {
@@ -1057,8 +1662,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   workspaceContent: {
-    paddingHorizontal: 18,
-    paddingTop: 18,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
     paddingBottom: 120,
     gap: 16,
   },
@@ -1071,34 +1676,35 @@ const styles = StyleSheet.create({
   },
   titleSingleLine: {
     color: colors.cream,
-    fontSize: 23,
+    fontSize: device.isSmallWidth ? typography.title : typography.headline,
     fontWeight: '800',
-    lineHeight: 28,
+    lineHeight: device.isSmallWidth ? typography.title + 4 : typography.headline + 4,
     textAlign: 'center',
+    width: '100%',
   },
   authIntro: {
     color: colors.sand,
-    fontSize: 15,
-    lineHeight: 22,
+    fontSize: typography.body,
+    lineHeight: typography.body + 7,
     textAlign: 'center',
   },
   card: {
-    padding: 18,
-    borderRadius: 22,
-    backgroundColor: colors.panel,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: 'rgba(36, 48, 57, 0.58)',
     borderWidth: 1,
     borderColor: colors.line,
     gap: 12,
   },
   cardTitle: {
     color: colors.cream,
-    fontSize: 24,
+    fontSize: typography.title,
     fontWeight: '800',
   },
   cardBody: {
     color: colors.sand,
-    fontSize: 15,
-    lineHeight: 23,
+    fontSize: typography.body,
+    lineHeight: typography.body + 8,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -1115,7 +1721,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: colors.cream,
-    fontSize: 22,
+    fontSize: typography.title,
     fontWeight: '800',
   },
   sectionMeta: {
@@ -1127,18 +1733,18 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   input: {
-    minHeight: 50,
-    borderRadius: 16,
+    minHeight: device.isCompactHeight ? 48 : 52,
+    borderRadius: radius.md,
     paddingHorizontal: 14,
     backgroundColor: colors.panelSoft,
     color: colors.cream,
     borderWidth: 1,
     borderColor: colors.line,
-    fontSize: 16,
+    fontSize: typography.bodyLarge,
   },
   passwordField: {
-    minHeight: 50,
-    borderRadius: 16,
+    minHeight: device.isCompactHeight ? 48 : 52,
+    borderRadius: radius.md,
     paddingLeft: 14,
     paddingRight: 8,
     backgroundColor: colors.panelSoft,
@@ -1151,7 +1757,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 50,
     color: colors.cream,
-    fontSize: 16,
+    fontSize: typography.bodyLarge,
   },
   passwordToggle: {
     minWidth: 60,
@@ -1233,14 +1839,14 @@ const styles = StyleSheet.create({
   status: {
     color: colors.moss,
     backgroundColor: 'rgba(124, 162, 127, 0.1)',
-    borderRadius: 16,
+    borderRadius: radius.md,
     padding: 12,
     lineHeight: 20,
   },
   error: {
     color: '#f0a08e',
     backgroundColor: 'rgba(174, 67, 53, 0.12)',
-    borderRadius: 16,
+    borderRadius: radius.md,
     padding: 12,
     lineHeight: 20,
   },
@@ -1248,8 +1854,8 @@ const styles = StyleSheet.create({
     marginVertical: 8,
   },
   identityCard: {
-    padding: 18,
-    borderRadius: 22,
+    padding: spacing.md,
+    borderRadius: radius.lg,
     backgroundColor: 'rgba(124, 162, 127, 0.12)',
     borderWidth: 1,
     borderColor: colors.line,
@@ -1263,7 +1869,7 @@ const styles = StyleSheet.create({
   },
   identityName: {
     color: colors.cream,
-    fontSize: 22,
+    fontSize: typography.title,
     fontWeight: '800',
   },
   identityEmail: {
@@ -1277,10 +1883,10 @@ const styles = StyleSheet.create({
     bottom: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 8,
-    paddingHorizontal: 10,
+    gap: 4,
+    paddingHorizontal: 8,
     paddingVertical: 10,
-    borderRadius: 24,
+    borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.line,
     backgroundColor: 'rgba(18, 27, 33, 0.96)',
@@ -1315,13 +1921,15 @@ const styles = StyleSheet.create({
   },
   bottomTabLabel: {
     color: colors.sand,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
+    textAlign: 'center',
   },
   bottomTabLabelActive: {
     color: colors.cream,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
+    textAlign: 'center',
   },
   tabChip: {
     paddingVertical: 10,
@@ -1347,11 +1955,57 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 4,
   },
+  propertySummaryCard: {
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: colors.line,
+    gap: 12,
+  },
+  propertySummaryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  propertySummaryText: {
+    flex: 1,
+    gap: 4,
+  },
+  propertySummaryTitle: {
+    color: colors.cream,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  propertySummaryMeta: {
+    color: colors.sand,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  propertySummaryBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  propertyCollapseButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: colors.panel,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  propertyCollapseButtonLabel: {
+    color: colors.cream,
+    fontSize: 12,
+    fontWeight: '700',
+  },
   propertyCard: {
     width: 204,
-    padding: 16,
-    borderRadius: 20,
-    backgroundColor: colors.panel,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: 'rgba(36, 48, 57, 0.7)',
     borderWidth: 1,
     borderColor: colors.line,
     gap: 6,
@@ -1373,8 +2027,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   propertyHero: {
-    padding: 20,
-    borderRadius: 26,
+    padding: spacing.lg,
+    borderRadius: radius.xl,
     backgroundColor: colors.clay,
     gap: 14,
   },
@@ -1496,9 +2150,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   photoDetailCard: {
-    borderRadius: 22,
+    borderRadius: radius.lg,
     overflow: 'hidden',
-    backgroundColor: colors.panel,
+    backgroundColor: 'rgba(36, 48, 57, 0.76)',
     borderWidth: 1,
     borderColor: colors.line,
   },
@@ -1562,9 +2216,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   galleryCard: {
-    borderRadius: 20,
+    borderRadius: radius.lg,
     overflow: 'hidden',
-    backgroundColor: colors.panel,
+    backgroundColor: 'rgba(36, 48, 57, 0.72)',
     borderWidth: 1,
     borderColor: colors.line,
   },
@@ -1679,9 +2333,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   emptyStateCard: {
-    padding: 18,
-    borderRadius: 22,
-    backgroundColor: colors.panel,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: 'rgba(36, 48, 57, 0.74)',
     borderWidth: 1,
     borderColor: colors.line,
     gap: 8,
@@ -1695,5 +2349,178 @@ const styles = StyleSheet.create({
     color: colors.sand,
     fontSize: 14,
     lineHeight: 22,
+  },
+  authFooter: {
+    gap: 10,
+    alignItems: 'center',
+    paddingBottom: spacing.sm,
+  },
+  authFooterCopy: {
+    color: colors.sand,
+    fontSize: typography.caption,
+    textAlign: 'center',
+  },
+  authFooterLinks: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 14,
+  },
+  authFooterLink: {
+    color: colors.moss,
+    fontSize: typography.caption,
+    fontWeight: '700',
+  },
+  protectedAccountNotice: {
+    color: '#f2be95',
+    backgroundColor: 'rgba(210,136,89,0.12)',
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    lineHeight: typography.body + 6,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  settingCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  settingTitle: {
+    color: colors.cream,
+    fontSize: typography.body,
+    fontWeight: '700',
+  },
+  settingSubtitle: {
+    color: colors.sand,
+    fontSize: typography.caption,
+    lineHeight: typography.caption + 6,
+  },
+  togglePill: {
+    width: 58,
+    height: 34,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: 4,
+    justifyContent: 'center',
+  },
+  togglePillActive: {
+    backgroundColor: 'rgba(124, 162, 127, 0.26)',
+    borderColor: 'rgba(124, 162, 127, 0.42)',
+  },
+  togglePillDisabled: {
+    opacity: 0.45,
+  },
+  toggleThumb: {
+    width: 24,
+    height: 24,
+    borderRadius: 999,
+    backgroundColor: colors.sand,
+  },
+  toggleThumbActive: {
+    alignSelf: 'flex-end',
+    backgroundColor: colors.moss,
+  },
+  visionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  visionRank: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(210,136,89,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(210,136,89,0.34)',
+  },
+  visionRankLabel: {
+    color: colors.cream,
+    fontSize: typography.caption,
+    fontWeight: '800',
+  },
+  visionCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  visionTitle: {
+    color: colors.cream,
+    fontSize: typography.body,
+    fontWeight: '800',
+  },
+  checklistStack: {
+    gap: spacing.sm,
+  },
+  checklistRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  checklistBulletPending: {
+    color: colors.clay,
+    fontSize: typography.bodyLarge,
+    fontWeight: '800',
+    minWidth: 16,
+  },
+  checklistBulletDone: {
+    color: colors.moss,
+    fontSize: typography.bodyLarge,
+    fontWeight: '800',
+    minWidth: 16,
+  },
+  checklistCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  checklistTitle: {
+    color: colors.cream,
+    fontSize: typography.body,
+    fontWeight: '700',
+  },
+  taskCard: {
+    gap: spacing.xs,
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  taskCardDone: {
+    backgroundColor: 'rgba(124, 162, 127, 0.1)',
+  },
+  taskCardWarning: {
+    backgroundColor: 'rgba(210,136,89,0.11)',
+  },
+  taskHeader: {
+    gap: 6,
+  },
+  taskStatusDone: {
+    color: colors.moss,
+    fontSize: typography.caption,
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+    fontWeight: '800',
+  },
+  taskStatusPending: {
+    color: colors.clay,
+    fontSize: typography.caption,
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+    fontWeight: '800',
+  },
+  taskTitle: {
+    color: colors.cream,
+    fontSize: typography.bodyLarge,
+    fontWeight: '800',
   },
 });

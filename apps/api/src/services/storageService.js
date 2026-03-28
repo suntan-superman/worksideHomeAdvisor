@@ -156,3 +156,25 @@ export async function readStoredAsset({ storageProvider = 'local', storageKey })
 
   return readStoredAssetFromLocal(storageKey);
 }
+
+async function deleteStoredAssetFromLocal(storageKey) {
+  const absolutePath = path.join(getStorageDir(), storageKey);
+  await fs.rm(absolutePath, { force: true });
+}
+
+async function deleteStoredAssetFromGcs(storageKey) {
+  await getBucket().file(storageKey).delete({ ignoreNotFound: true });
+}
+
+export async function deleteStoredAsset({ storageProvider = 'local', storageKey }) {
+  if (!storageKey) {
+    return;
+  }
+
+  if (storageProvider === 'gcs') {
+    await deleteStoredAssetFromGcs(storageKey);
+    return;
+  }
+
+  await deleteStoredAssetFromLocal(storageKey);
+}

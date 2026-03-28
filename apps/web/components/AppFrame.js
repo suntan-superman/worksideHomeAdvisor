@@ -45,6 +45,8 @@ export function AppFrame({ children, busy = false }) {
               </Link>
             </>
           ) : null}
+          <Link href="/terms">Terms</Link>
+          <Link href="/privacy">Privacy</Link>
           {session?.user?.email ? (
             <button
               type="button"
@@ -68,6 +70,8 @@ export function AppFrame({ children, busy = false }) {
       <main>{children}</main>
       <footer className="site-footer">
         <span>Copyright 2026 Workside Software LLC.</span>
+        <Link href="/terms">Terms of Service</Link>
+        <Link href="/privacy">Privacy Notice</Link>
         <a href="mailto:support@worksidesoftware.com">support@worksidesoftware.com</a>
         <a href="mailto:sales@worksidesoftware.com">sales@worksidesoftware.com</a>
         <a href="mailto:feedback@worksidesoftware.com">feedback@worksidesoftware.com</a>

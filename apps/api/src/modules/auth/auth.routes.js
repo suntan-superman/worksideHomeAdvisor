@@ -2,7 +2,8 @@ import { signupSchema, verifyOtpSchema } from '@workside/validation';
 import { z } from 'zod';
 
 import { enforceAuthAction } from '../usage/usage-enforcement.service.js';
-import { login, requestOtp, signup, verifyEmailOtp } from './auth.service.js';
+import { verifySessionToken } from '../../services/sessionService.js';
+import { deleteAccount, login, requestOtp, signup, verifyEmailOtp } from './auth.service.js';
 
 const loginSchema = signupSchema.pick({
   email: true,
@@ -27,7 +28,7 @@ export async function authRoutes(fastify) {
       const result = await signup(payload);
       return reply.code(201).send(result);
     } catch (error) {
-      return reply.code(400).send({ message: error.message });
+      return reply.code(error.statusCode || 400).send({ message: error.message });
     }
   });
 
@@ -44,7 +45,7 @@ export async function authRoutes(fastify) {
       const result = await login(payload);
       return reply.send(result);
     } catch (error) {
-      return reply.code(400).send({ message: error.message });
+      return reply.code(error.statusCode || 400).send({ message: error.message });
     }
   });
 
@@ -61,7 +62,7 @@ export async function authRoutes(fastify) {
       const result = await requestOtp(payload.email);
       return reply.send(result);
     } catch (error) {
-      return reply.code(400).send({ message: error.message });
+      return reply.code(error.statusCode || 400).send({ message: error.message });
     }
   });
 
@@ -78,7 +79,24 @@ export async function authRoutes(fastify) {
       const result = await verifyEmailOtp(payload);
       return reply.send(result);
     } catch (error) {
-      return reply.code(400).send({ message: error.message });
+      return reply.code(error.statusCode || 400).send({ message: error.message });
+    }
+  });
+
+  fastify.delete('/account', async (request, reply) => {
+    try {
+      const authorization = request.headers.authorization || '';
+      const [scheme, token] = authorization.split(' ');
+
+      if (scheme !== 'Bearer' || !token) {
+        return reply.code(401).send({ message: 'Authentication is required.' });
+      }
+
+      const session = verifySessionToken(token);
+      const result = await deleteAccount(session.sub);
+      return reply.send(result);
+    } catch (error) {
+      return reply.code(error.statusCode || 401).send({ message: error.message });
     }
   });
 }
