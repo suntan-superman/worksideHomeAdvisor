@@ -11,11 +11,19 @@ import {
   View,
 } from 'react-native';
 
-import { API_URL, login, requestOtp, verifyEmailOtp } from '../services/api';
+import { API_URL, getDashboard, listProperties, login, requestOtp, verifyEmailOtp } from '../services/api';
 
 function getDisplayName(user) {
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
   return fullName || user?.email || 'Signed-in user';
+}
+
+function formatCurrency(value) {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0));
 }
 
 export function RootScreen() {
@@ -25,17 +33,38 @@ export function RootScreen() {
   const [status, setStatus] = useState('Sign in with the same verified seller account you use on the web.');
   const [error, setError] = useState('');
   const [session, setSession] = useState(null);
+  const [properties, setProperties] = useState([]);
+  const [propertyId, setPropertyId] = useState('');
+  const [dashboard, setDashboard] = useState(null);
   const [form, setForm] = useState({
     email: '',
     password: '',
     otpCode: '',
   });
 
+  const selectedProperty = properties.find((property) => property.id === propertyId) || null;
+
   function updateField(field, value) {
     setForm((current) => ({
       ...current,
       [field]: value,
     }));
+  }
+
+  async function loadPropertyWorkspace(userId) {
+    const propertiesResponse = await listProperties(userId);
+    const nextProperties = propertiesResponse.properties || [];
+    const nextPropertyId = nextProperties[0]?.id || '';
+    setProperties(nextProperties);
+    setPropertyId(nextPropertyId);
+
+    if (!nextPropertyId) {
+      setDashboard(null);
+      return;
+    }
+
+    const dashboardResponse = await getDashboard(nextPropertyId);
+    setDashboard(dashboardResponse);
   }
 
   async function handleLogin() {
@@ -55,6 +84,7 @@ export function RootScreen() {
       }
 
       setSession(result);
+      await loadPropertyWorkspace(result.user.id);
       setStatus('Signed in successfully.');
     } catch (requestError) {
       setError(requestError.message);
@@ -73,6 +103,7 @@ export function RootScreen() {
         otpCode: form.otpCode,
       });
       setSession(result);
+      await loadPropertyWorkspace(result.user.id);
       setStatus('Email verified. Signed in successfully.');
     } catch (requestError) {
       setError(requestError.message);
@@ -97,35 +128,119 @@ export function RootScreen() {
 
   function handleSignOut() {
     setSession(null);
+    setProperties([]);
+    setPropertyId('');
+    setDashboard(null);
     setAuthMode('login');
     setShowPassword(false);
     setError('');
     setStatus('Signed out. Sign in again to continue.');
   }
 
+  async function handleSelectProperty(nextPropertyId) {
+    setBusy(true);
+    setError('');
+
+    try {
+      setPropertyId(nextPropertyId);
+      const dashboardResponse = await getDashboard(nextPropertyId);
+      setDashboard(dashboardResponse);
+      const nextProperty = properties.find((property) => property.id === nextPropertyId);
+      setStatus(nextProperty ? `Loaded ${nextProperty.title}.` : 'Property loaded.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (session?.user) {
     return (
       <View style={styles.screen}>
-        <View style={styles.card}>
-          <Text style={styles.kicker}>Authenticated Baseline</Text>
-          <Text style={styles.title}>Workside Home Advisor</Text>
-          <Text style={styles.body}>
-            The live auth flow is connected. Next we can bring back the property workspace safely.
-          </Text>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          <View style={styles.card}>
+            <Text style={styles.kicker}>Property Baseline</Text>
+            <Text style={styles.title}>Workside Home Advisor</Text>
+            <Text style={styles.body}>
+              The app is authenticated and loading live property data again. Next we can layer in capture and gallery safely.
+            </Text>
 
-          <View style={styles.userCard}>
-            <Text style={styles.label}>Signed in as</Text>
-            <Text style={styles.userName}>{getDisplayName(session.user)}</Text>
-            <Text style={styles.userEmail}>{session.user.email}</Text>
+            <View style={styles.userCard}>
+              <Text style={styles.label}>Signed in as</Text>
+              <Text style={styles.userName}>{getDisplayName(session.user)}</Text>
+              <Text style={styles.userEmail}>{session.user.email}</Text>
+            </View>
+
+            <Text style={styles.label}>Properties</Text>
+            <View style={styles.propertyList}>
+              {properties.length ? (
+                properties.map((property) => (
+                  <Pressable
+                    key={property.id}
+                    onPress={() => handleSelectProperty(property.id)}
+                    style={[
+                      styles.propertyCard,
+                      property.id === propertyId ? styles.propertyCardActive : null,
+                    ]}
+                  >
+                    <Text style={styles.propertyTitle}>{property.title}</Text>
+                    <Text style={styles.propertyMeta}>
+                      {[property.city, property.state].filter(Boolean).join(', ')}
+                    </Text>
+                  </Pressable>
+                ))
+              ) : (
+                <Text style={styles.body}>No properties were found for this account yet.</Text>
+              )}
+            </View>
+
+            {selectedProperty ? (
+              <View style={styles.workspaceCard}>
+                <Text style={styles.label}>Selected property</Text>
+                <Text style={styles.userName}>{selectedProperty.title}</Text>
+                <Text style={styles.userEmail}>
+                  {[
+                    selectedProperty.addressLine1,
+                    [selectedProperty.city, selectedProperty.state, selectedProperty.zip].filter(Boolean).join(' '),
+                  ]
+                    .filter(Boolean)
+                    .join(', ')}
+                </Text>
+
+                {dashboard?.pricing ? (
+                  <View style={styles.pricingCard}>
+                    <Text style={styles.label}>Recommended price band</Text>
+                    <Text style={styles.priceBand}>
+                      {formatCurrency(dashboard.pricing.low)} to {formatCurrency(dashboard.pricing.high)}
+                    </Text>
+                    <Text style={styles.body}>
+                      Midpoint {formatCurrency(dashboard.pricing.mid)} with{' '}
+                      {Math.round((dashboard.pricing.confidence || 0) * 100)}% confidence.
+                    </Text>
+                  </View>
+                ) : null}
+
+                {dashboard?.pricingSummary ? (
+                  <>
+                    <Text style={styles.label}>Latest analysis</Text>
+                    <Text style={styles.body}>{dashboard.pricingSummary}</Text>
+                  </>
+                ) : null}
+              </View>
+            ) : null}
+
+            {status ? <Text style={styles.status}>{status}</Text> : null}
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+            {busy ? <ActivityIndicator color="#d28859" style={styles.spinner} /> : null}
+
+            <Text style={styles.label}>API endpoint</Text>
+            <Text style={styles.value}>{API_URL}</Text>
+
+            <Pressable onPress={handleSignOut} style={[styles.button, styles.buttonSecondary]}>
+              <Text style={styles.buttonSecondaryText}>Sign out</Text>
+            </Pressable>
           </View>
-
-          <Text style={styles.label}>API endpoint</Text>
-          <Text style={styles.value}>{API_URL}</Text>
-
-          <Pressable onPress={handleSignOut} style={[styles.button, styles.buttonSecondary]}>
-            <Text style={styles.buttonSecondaryText}>Sign out</Text>
-          </Pressable>
-        </View>
+        </ScrollView>
       </View>
     );
   }
@@ -398,5 +513,53 @@ const styles = StyleSheet.create({
   userEmail: {
     color: '#dbcbb7',
     fontSize: 15,
+  },
+  propertyList: {
+    gap: 10,
+  },
+  propertyCard: {
+    borderRadius: 18,
+    padding: 16,
+    backgroundColor: '#31404d',
+    borderWidth: 1,
+    borderColor: '#425563',
+    gap: 4,
+  },
+  propertyCardActive: {
+    borderColor: '#d28859',
+    backgroundColor: '#3a4752',
+  },
+  propertyTitle: {
+    color: '#f8f1e6',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  propertyMeta: {
+    color: '#dbcbb7',
+    fontSize: 14,
+  },
+  workspaceCard: {
+    gap: 10,
+    marginTop: 4,
+    padding: 18,
+    borderRadius: 18,
+    backgroundColor: '#31404d',
+    borderWidth: 1,
+    borderColor: '#425563',
+  },
+  pricingCard: {
+    gap: 6,
+    marginTop: 2,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  priceBand: {
+    color: '#fff7ee',
+    fontSize: 26,
+    fontWeight: '800',
+    lineHeight: 34,
   },
 });

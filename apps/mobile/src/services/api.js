@@ -46,4 +46,13 @@ export function requestOtp(payload) {
   });
 }
 
+export function listProperties(ownerUserId) {
+  const search = ownerUserId ? `?ownerUserId=${encodeURIComponent(ownerUserId)}` : '';
+  return request(`/api/v1/properties${search}`);
+}
+
+export function getDashboard(propertyId) {
+  return request(`/api/v1/properties/${propertyId}/dashboard`);
+}
+
 export { API_URL };
