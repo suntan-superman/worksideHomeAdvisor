@@ -50,14 +50,21 @@ function chooseFlyerPhotos(assets) {
 
   return rankedAssets
     .slice(0, 4)
-    .map((asset) => ({
-      assetId: asset.id,
-      roomLabel: asset.roomLabel,
-      imageUrl: asset.imageUrl || asset.imageDataUrl || null,
-      score: asset.analysis?.overallQualityScore || null,
-      listingCandidate: Boolean(asset.listingCandidate),
-      listingNote: asset.listingNote || '',
-    }));
+    .map((asset) => {
+      const selectedVariant = asset.selectedVariant || null;
+
+      return {
+        assetId: asset.id,
+        roomLabel: asset.roomLabel,
+        imageUrl: selectedVariant?.imageUrl || asset.imageUrl || asset.imageDataUrl || null,
+        score: asset.analysis?.overallQualityScore || null,
+        listingCandidate: Boolean(asset.listingCandidate),
+        listingNote: asset.listingNote || '',
+        usesPreferredVariant: Boolean(selectedVariant),
+        variantLabel: selectedVariant?.label || '',
+        variantType: selectedVariant?.variantType || '',
+      };
+    });
 }
 
 function buildPriceText(pricing, flyerType) {

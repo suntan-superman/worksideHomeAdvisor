@@ -9,17 +9,23 @@ import { PropertyLocationMap } from '../../../components/PropertyLocationMap';
 import { Toast } from '../../../components/Toast';
 import {
   analyzePricing,
+  createChecklistItem,
   createBillingCheckoutSession,
+  createImageEnhancementJob,
   generateFlyer,
   generateReport,
   getFlyerExportUrl,
+  getChecklist,
   getDashboard,
   getLatestReport,
   listMediaAssets,
+  listMediaVariants,
   getLatestFlyer,
   getLatestPricing,
   getProperty,
   getReportExportUrl,
+  selectMediaVariant,
+  updateChecklistItem,
   updateMediaAsset,
 } from '../../../lib/api';
 import { getStoredSession, setStoredSession } from '../../../lib/session';
@@ -35,17 +41,48 @@ function buildAddressQuery(property) {
     .join(', ');
 }
 
+function formatChecklistStatus(status) {
+  if (status === 'in_progress') {
+    return 'In progress';
+  }
+
+  if (status === 'done') {
+    return 'Done';
+  }
+
+  return 'To do';
+}
+
+function formatChecklistCategory(category) {
+  return String(category || 'custom')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function formatChecklistPriority(priority) {
+  return `${String(priority || 'medium').replace(/\b\w/g, (character) => character.toUpperCase())} priority`;
+}
+
+function getPreferredVariantLabel(item) {
+  return item?.variantLabel || 'Preferred vision variant';
+}
+
 export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const flyerPreviewRef = useRef(null);
   const [property, setProperty] = useState(null);
   const [dashboard, setDashboard] = useState(null);
+  const [checklist, setChecklist] = useState(null);
   const [latestPricing, setLatestPricing] = useState(null);
   const [latestFlyer, setLatestFlyer] = useState(null);
   const [latestReport, setLatestReport] = useState(null);
   const [mediaAssets, setMediaAssets] = useState([]);
+  const [mediaVariants, setMediaVariants] = useState([]);
+  const [selectedVariantId, setSelectedVariantId] = useState('');
   const [selectedMediaAssetId, setSelectedMediaAssetId] = useState('');
   const [flyerType, setFlyerType] = useState('sale');
   const [listingNoteDraft, setListingNoteDraft] = useState('');
+  const [customChecklistTitle, setCustomChecklistTitle] = useState('');
+  const [customChecklistDetail, setCustomChecklistDetail] = useState('');
   const [status, setStatus] = useState('Loading property workspace...');
   const [toast, setToast] = useState(null);
   const selectedMediaAsset = useMemo(
@@ -55,6 +92,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const listingCandidateAssets = useMemo(
     () => mediaAssets.filter((asset) => asset.listingCandidate),
     [mediaAssets],
+  );
+  const selectedVariant = useMemo(
+    () =>
+      mediaVariants.find((variant) => variant.id === selectedVariantId) ||
+      mediaVariants.find((variant) => variant.isSelected) ||
+      mediaVariants[0] ||
+      null,
+    [mediaVariants, selectedVariantId],
   );
 
   useEffect(() => {
@@ -69,6 +114,39 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     return nextAssets;
   }
 
+  async function refreshMediaVariants(assetId = selectedMediaAssetId) {
+    if (!assetId) {
+      setMediaVariants([]);
+      setSelectedVariantId('');
+      return [];
+    }
+
+    const variantsResponse = await listMediaVariants(assetId);
+    const nextVariants = variantsResponse.variants || [];
+    setMediaVariants(nextVariants);
+    setSelectedVariantId(
+      nextVariants.find((variant) => variant.isSelected)?.id || nextVariants[0]?.id || '',
+    );
+    return nextVariants;
+  }
+
+  async function refreshDashboardSnapshot() {
+    const dashboardResponse = await getDashboard(propertyId);
+    setDashboard(dashboardResponse);
+
+    if (dashboardResponse?.property) {
+      setProperty(dashboardResponse.property);
+    }
+
+    return dashboardResponse;
+  }
+
+  async function refreshChecklist() {
+    const checklistResponse = await getChecklist(propertyId);
+    setChecklist(checklistResponse.checklist);
+    return checklistResponse.checklist;
+  }
+
   useEffect(() => {
     const nextSession = {
       ...(getStoredSession() || {}),
@@ -78,18 +156,27 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }, [propertyId]);
 
   useEffect(() => {
+    refreshMediaVariants(selectedMediaAsset?.id).catch(() => {
+      setMediaVariants([]);
+      setSelectedVariantId('');
+    });
+  }, [selectedMediaAsset?.id]);
+
+  useEffect(() => {
     async function loadWorkspace() {
       setStatus('Loading property workspace...');
       setToast(null);
 
       try {
-        const [propertyResponse, dashboardResponse] = await Promise.all([
+        const [propertyResponse, dashboardResponse, checklistResponse] = await Promise.all([
           getProperty(propertyId),
           getDashboard(propertyId),
+          getChecklist(propertyId),
         ]);
 
         setProperty(propertyResponse.property);
         setDashboard(dashboardResponse);
+        setChecklist(checklistResponse.checklist);
 
         try {
           const pricingResponse = await getLatestPricing(propertyId);
@@ -138,9 +225,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     try {
       const analysisResponse = await analyzePricing(propertyId);
-      const dashboardResponse = await getDashboard(propertyId);
+      const [dashboardResponse, checklistResponse] = await Promise.all([
+        refreshDashboardSnapshot(),
+        refreshChecklist(),
+      ]);
       setLatestPricing(analysisResponse.analysis);
       setDashboard(dashboardResponse);
+      setChecklist(checklistResponse);
       setToast({
         tone: 'success',
         title: 'Pricing refreshed',
@@ -164,6 +255,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     try {
       const response = await generateFlyer(propertyId, flyerType);
       setLatestFlyer(response.flyer);
+      await Promise.all([refreshDashboardSnapshot(), refreshChecklist()]);
       setToast({
         tone: 'success',
         title: 'Flyer generated',
@@ -226,6 +318,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     try {
       const response = await generateReport(propertyId);
       setLatestReport(response.report);
+      await Promise.all([refreshDashboardSnapshot(), refreshChecklist()]);
       setToast({
         tone: 'success',
         title: 'Report generated',
@@ -288,7 +381,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       await updateMediaAsset(selectedMediaAsset.id, {
         listingCandidate: nextValue,
       });
-      await refreshMediaAssets(selectedMediaAsset.id);
+      await Promise.all([
+        refreshMediaAssets(selectedMediaAsset.id),
+        refreshDashboardSnapshot(),
+        refreshChecklist(),
+      ]);
       setToast({
         tone: 'success',
         title: nextValue ? 'Listing candidate selected' : 'Listing candidate removed',
@@ -336,6 +433,79 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
   }
 
+  async function handleGenerateVariant(jobType) {
+    if (!selectedMediaAsset) {
+      return;
+    }
+
+    setStatus(
+      jobType === 'declutter_preview'
+        ? 'Generating declutter preview...'
+        : 'Generating enhanced listing version...',
+    );
+    setToast(null);
+
+    try {
+      const response = await createImageEnhancementJob(selectedMediaAsset.id, {
+        jobType,
+      });
+      await Promise.all([
+        refreshMediaAssets(selectedMediaAsset.id),
+        refreshMediaVariants(selectedMediaAsset.id),
+      ]);
+      setSelectedVariantId(response.variant?.id || '');
+      setToast({
+        tone: 'success',
+        title:
+          jobType === 'declutter_preview'
+            ? 'Declutter preview ready'
+            : 'Enhanced photo ready',
+        message:
+          response.job?.warning ||
+          'A new image variant is available below for review and selection.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Variant generation failed',
+        message: requestError.message,
+      });
+    } finally {
+      setStatus('');
+    }
+  }
+
+  async function handleSelectVariant(variantId) {
+    if (!selectedMediaAsset) {
+      return;
+    }
+
+    setStatus('Selecting preferred variant...');
+    setToast(null);
+
+    try {
+      await selectMediaVariant(selectedMediaAsset.id, variantId);
+      await Promise.all([
+        refreshMediaAssets(selectedMediaAsset.id),
+        refreshMediaVariants(selectedMediaAsset.id),
+      ]);
+      setSelectedVariantId(variantId);
+      setToast({
+        tone: 'success',
+        title: 'Preferred variant selected',
+        message: 'Flyer and report generation will now prefer this image variant.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not select variant',
+        message: requestError.message,
+      });
+    } finally {
+      setStatus('');
+    }
+  }
+
   function handleDownloadFlyerPdf() {
     const exportUrl = getFlyerExportUrl(propertyId, flyerType);
     window.open(exportUrl, '_blank', 'noopener,noreferrer');
@@ -344,6 +514,74 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   function handleDownloadReportPdf() {
     const exportUrl = getReportExportUrl(propertyId);
     window.open(exportUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  async function handleSetChecklistItemStatus(itemId, nextStatus) {
+    setStatus(nextStatus === 'done' ? 'Marking checklist item done...' : 'Updating checklist item...');
+    setToast(null);
+
+    try {
+      const response = await updateChecklistItem(itemId, {
+        status: nextStatus,
+      });
+      setChecklist(response.checklist);
+      await refreshDashboardSnapshot();
+      setToast({
+        tone: 'success',
+        title: 'Checklist updated',
+        message: 'Seller prep progress has been saved.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Checklist update failed',
+        message: requestError.message,
+      });
+    } finally {
+      setStatus('');
+    }
+  }
+
+  async function handleCreateChecklistTask(event) {
+    event.preventDefault();
+
+    if (!customChecklistTitle.trim()) {
+      setToast({
+        tone: 'error',
+        title: 'Task title required',
+        message: 'Add a short title before creating a custom checklist task.',
+      });
+      return;
+    }
+
+    setStatus('Saving custom checklist task...');
+    setToast(null);
+
+    try {
+      const response = await createChecklistItem(propertyId, {
+        title: customChecklistTitle,
+        detail: customChecklistDetail,
+        category: 'custom',
+        priority: 'medium',
+      });
+      setChecklist(response.checklist);
+      await refreshDashboardSnapshot();
+      setCustomChecklistTitle('');
+      setCustomChecklistDetail('');
+      setToast({
+        tone: 'success',
+        title: 'Task added',
+        message: 'The custom checklist task now appears in the shared property workflow.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not add task',
+        message: requestError.message,
+      });
+    } finally {
+      setStatus('');
+    }
   }
 
   const addressQuery = buildAddressQuery(property);
@@ -609,9 +847,16 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         <img src={photo.imageUrl} alt={photo.roomLabel || 'Property photo'} />
                       ) : null}
                       <span>{photo.roomLabel || 'Selected photo'}</span>
-                      {photo.listingCandidate ? (
-                        <strong className="flyer-photo-badge">Seller selected</strong>
-                      ) : null}
+                      <div className="flyer-photo-badges">
+                        {photo.listingCandidate ? (
+                          <strong className="flyer-photo-badge">Seller selected</strong>
+                        ) : null}
+                        {photo.usesPreferredVariant ? (
+                          <strong className="flyer-photo-badge flyer-photo-badge-vision">
+                            {getPreferredVariantLabel(photo)}
+                          </strong>
+                        ) : null}
+                      </div>
                       {photo.listingNote ? (
                         <em className="flyer-photo-note">{photo.listingNote}</em>
                       ) : null}
@@ -632,6 +877,105 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           ) : (
             <p>No flyer draft yet. Generate one to preview sale or rental marketing output.</p>
           )}
+        </div>
+      </section>
+
+      <section className="content-grid dashboard-content-grid">
+        <div className="content-card checklist-card">
+          <div className="section-header-tight">
+            <div>
+              <span className="label">Seller checklist</span>
+              <h2>Listing-prep progress</h2>
+              <p>
+                Work through the shared checklist here or in mobile. Status changes update
+                readiness and feed the seller report.
+              </p>
+            </div>
+            <span className="section-header-meta">
+              {checklist?.summary?.progressPercent ?? 0}% ready
+            </span>
+          </div>
+
+          <div className="mini-stats">
+            <div className="stat-card">
+              <strong>Completed</strong>
+              <span>{checklist?.summary?.completedCount ?? 0}</span>
+            </div>
+            <div className="stat-card">
+              <strong>Open</strong>
+              <span>{checklist?.summary?.openCount ?? 0}</span>
+            </div>
+            <div className="stat-card">
+              <strong>Next task</strong>
+              <span>{checklist?.nextTask?.title || 'No open tasks right now'}</span>
+            </div>
+          </div>
+
+          {checklist?.items?.length ? (
+            <div className="checklist-list">
+              {checklist.items.map((item) => (
+                <article key={item.id} className="checklist-item-card">
+                  <div className="checklist-item-meta">
+                    <span className={`checklist-status checklist-status-${item.status}`}>
+                      {formatChecklistStatus(item.status)}
+                    </span>
+                    <span className="checklist-chip">{formatChecklistCategory(item.category)}</span>
+                    <span className={`checklist-chip checklist-chip-${item.priority}`}>
+                      {formatChecklistPriority(item.priority)}
+                    </span>
+                  </div>
+                  <h3>{item.title}</h3>
+                  <p>{item.detail || 'No additional guidance is attached to this task yet.'}</p>
+                  <div className="checklist-action-row">
+                    {['todo', 'in_progress', 'done'].map((nextStatus) => (
+                      <button
+                        key={`${item.id}-${nextStatus}`}
+                        type="button"
+                        className={
+                          item.status === nextStatus
+                            ? 'checklist-action-chip active'
+                            : 'checklist-action-chip'
+                        }
+                        onClick={() => handleSetChecklistItemStatus(item.id, nextStatus)}
+                        disabled={Boolean(status)}
+                      >
+                        {formatChecklistStatus(nextStatus)}
+                      </button>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p>No checklist items have been created yet for this property.</p>
+          )}
+
+          <form className="checklist-form" onSubmit={handleCreateChecklistTask}>
+            <label>
+              Add a custom task
+              <input
+                type="text"
+                value={customChecklistTitle}
+                onChange={(event) => setCustomChecklistTitle(event.target.value)}
+                placeholder="Schedule deep clean, confirm paint quote, prep disclosures..."
+                maxLength={140}
+              />
+            </label>
+            <label>
+              Details
+              <textarea
+                value={customChecklistDetail}
+                onChange={(event) => setCustomChecklistDetail(event.target.value)}
+                placeholder="Optional notes about the task, vendor, or next action."
+                maxLength={280}
+              />
+            </label>
+            <div className="button-stack">
+              <button type="submit" className="button-secondary" disabled={Boolean(status)}>
+                Add checklist task
+              </button>
+            </div>
+          </form>
         </div>
       </section>
 
@@ -667,7 +1011,21 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 </div>
                 <div className="stat-card">
                   <strong>Checklist + prep</strong>
-                  <span>Includes current prep tasks, top improvements, and marketing highlights</span>
+                  <span>
+                    {checklist?.summary?.totalCount
+                      ? `${checklist.summary.completedCount}/${checklist.summary.totalCount} checklist items completed`
+                      : 'Includes current prep tasks, top improvements, and marketing highlights'}
+                  </span>
+                </div>
+                <div className="stat-card">
+                  <strong>Status</strong>
+                  <span>
+                    {latestReport
+                      ? latestReport.freshness?.isStale
+                        ? 'Stale until refreshed'
+                        : 'Current with latest workspace data'
+                      : 'No report generated yet'}
+                  </span>
                 </div>
               </div>
               <div className="button-stack flyer-generator-actions">
@@ -700,6 +1058,16 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 <span className="label">{latestReport.reportType}</span>
                 <h2>{latestReport.title}</h2>
                 <p>{latestReport.executiveSummary}</p>
+                <div className="tag-row">
+                  <span>
+                    {latestReport.freshness?.isStale ? 'Stale report' : 'Current report'}
+                  </span>
+                  <span>Version {latestReport.reportVersion || 1}</span>
+                  <span>
+                    {latestReport.payload?.readinessSummary?.label ||
+                      'Readiness summary pending'}
+                  </span>
+                </div>
               </div>
               <div className="mini-stats">
                 <div className="stat-card">
@@ -718,7 +1086,87 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       : 'Pending'}
                   </span>
                 </div>
+                <div className="stat-card">
+                  <strong>Readiness</strong>
+                  <span>
+                    {latestReport.payload?.readinessSummary?.overallScore
+                      ? `${latestReport.payload.readinessSummary.overallScore}/100`
+                      : 'Pending'}
+                  </span>
+                </div>
+                <div className="stat-card">
+                  <strong>Photos</strong>
+                  <span>
+                    {latestReport.payload?.photoSummary?.totalPhotos ?? 0} uploaded ·{' '}
+                    {latestReport.payload?.photoSummary?.listingCandidateCount ?? 0} selected ·{' '}
+                    {latestReport.payload?.photoSummary?.selectedPreferredVariantCount ??
+                      latestReport.selectedPhotos?.filter((photo) => photo.usesPreferredVariant)
+                        .length ??
+                      0}{' '}
+                    vision-ready
+                  </span>
+                </div>
               </div>
+              {latestReport.freshness?.isStale ? (
+                <div className="report-preview-section">
+                  <strong>Refresh recommended</strong>
+                  <ul className="plain-list">
+                    {(latestReport.freshness.staleReasons || []).map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              <div className="report-preview-section">
+                <strong>Included sections</strong>
+                <ul className="plain-list">
+                  {(latestReport.payload?.sectionOutline || []).slice(0, 8).map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="report-preview-section">
+                <strong>Photo review summary</strong>
+                <p>
+                  {latestReport.payload?.photoSummary?.summary ||
+                    'No photo-review summary is available yet.'}
+                </p>
+                {latestReport.payload?.photoSummary?.missingRooms?.length ? (
+                  <div className="tag-row">
+                    {latestReport.payload.photoSummary.missingRooms.map((item) => (
+                      <span key={item}>{item}</span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              {latestReport.selectedPhotos?.length ? (
+                <div className="report-preview-section">
+                  <strong>Selected photo set</strong>
+                  <div className="flyer-photo-grid">
+                    {latestReport.selectedPhotos.slice(0, 4).map((photo) => (
+                      <div key={`report-photo-${photo.assetId || photo.imageUrl}`} className="flyer-photo-card">
+                        {photo.imageUrl ? (
+                          <img src={photo.imageUrl} alt={photo.roomLabel || 'Report photo'} />
+                        ) : null}
+                        <span>{photo.roomLabel || 'Selected report photo'}</span>
+                        <div className="flyer-photo-badges">
+                          {photo.listingCandidate ? (
+                            <strong className="flyer-photo-badge">Seller selected</strong>
+                          ) : null}
+                          {photo.usesPreferredVariant ? (
+                            <strong className="flyer-photo-badge flyer-photo-badge-vision">
+                              {getPreferredVariantLabel(photo)}
+                            </strong>
+                          ) : null}
+                        </div>
+                        {photo.listingNote ? (
+                          <em className="flyer-photo-note">{photo.listingNote}</em>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <div className="report-preview-section">
                 <strong>Top checklist items</strong>
                 <ul className="plain-list">
@@ -742,6 +1190,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     <span key={item}>{item}</span>
                   ))}
                 </div>
+              </div>
+              <div className="report-preview-section">
+                <strong>Draft listing description</strong>
+                <p>
+                  {latestReport.payload?.listingDescriptions?.shortDescription ||
+                    latestReport.payload?.marketingGuidance?.shortDescription ||
+                    'Listing-description guidance is not available yet.'}
+                </p>
               </div>
             </div>
           ) : (
@@ -786,9 +1242,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         onClick={() => setSelectedMediaAssetId(asset.id)}
                       >
                         <img src={asset.imageUrl} alt={asset.roomLabel || 'Listing candidate'} />
-                        <div>
+                        <div className="property-media-candidate-meta">
                           <strong>{asset.roomLabel}</strong>
                           <span>{asset.listingNote || 'Ready for flyer and listing materials'}</span>
+                          {asset.selectedVariant ? (
+                            <em className="property-media-candidate-tag">
+                              {asset.selectedVariant.label || 'Preferred vision variant ready'}
+                            </em>
+                          ) : null}
                         </div>
                       </button>
                     ))}
@@ -805,7 +1266,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     onClick={() => setSelectedMediaAssetId(asset.id)}
                   >
                     <img src={asset.imageUrl} alt={asset.roomLabel || 'Property photo'} />
-                    <span>{asset.roomLabel}</span>
+                    <div>
+                      <strong>{asset.roomLabel}</strong>
+                      {asset.selectedVariant ? (
+                        <small>{asset.selectedVariant.label || 'Vision preferred'}</small>
+                      ) : asset.listingCandidate ? (
+                        <small>Seller pick</small>
+                      ) : null}
+                    </div>
                   </button>
                 ))}
               </div>
@@ -830,6 +1298,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     ) : (
                       <p>No AI photo summary is stored for this image yet.</p>
                     )}
+                    {selectedMediaAsset.selectedVariant ? (
+                      <p>
+                        Preferred vision variant: {selectedMediaAsset.selectedVariant.label || 'Vision-ready version'}.
+                        Flyer and report generation will now use that version first.
+                      </p>
+                    ) : null}
                     {typeof selectedMediaAsset.analysis?.overallQualityScore === 'number' ? (
                       <div className="property-media-badges">
                         <span>Quality {selectedMediaAsset.analysis.overallQualityScore}/100</span>
@@ -845,6 +1319,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                           <span>Ready for listing review</span>
                         )}
                         {selectedMediaAsset.listingCandidate ? <span>Listing candidate</span> : null}
+                        {selectedMediaAsset.selectedVariant ? <span>Preferred variant selected</span> : null}
                       </div>
                     ) : null}
                     <div className="property-media-actions">
@@ -856,7 +1331,82 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       >
                         {selectedMediaAsset.listingCandidate ? 'Remove from listing picks' : 'Mark as listing candidate'}
                       </button>
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => handleGenerateVariant('enhance_listing_quality')}
+                        disabled={Boolean(status)}
+                      >
+                        Generate enhanced version
+                      </button>
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => handleGenerateVariant('declutter_preview')}
+                        disabled={Boolean(status)}
+                      >
+                        Create declutter preview
+                      </button>
                     </div>
+                    {selectedVariant ? (
+                      <div className="property-media-variant-panel">
+                        <div className="property-media-variant-compare">
+                          <div>
+                            <span className="label">Original</span>
+                            <img
+                              src={selectedMediaAsset.imageUrl}
+                              alt={selectedMediaAsset.roomLabel || 'Original property photo'}
+                              className="property-media-variant-image"
+                            />
+                          </div>
+                          <div>
+                            <span className="label">Vision output</span>
+                            <img
+                              src={selectedVariant.imageUrl}
+                              alt={selectedVariant.label || 'Generated image variant'}
+                              className="property-media-variant-image"
+                            />
+                          </div>
+                        </div>
+                        <div className="property-media-variant-list">
+                          {mediaVariants.map((variant) => (
+                            <button
+                              key={variant.id}
+                              type="button"
+                              className={
+                                variant.id === selectedVariant?.id
+                                  ? 'property-media-variant-chip active'
+                                  : 'property-media-variant-chip'
+                              }
+                              onClick={() => setSelectedVariantId(variant.id)}
+                            >
+                              {variant.label}
+                              {variant.isSelected ? ' · Preferred' : ''}
+                            </button>
+                          ))}
+                        </div>
+                        <p>
+                          {selectedVariant.metadata?.warning ||
+                            'This prototype variant is available for flyer and report selection once marked preferred.'}
+                        </p>
+                        <div className="button-stack">
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            onClick={() => handleSelectVariant(selectedVariant.id)}
+                            disabled={Boolean(status) || selectedVariant.isSelected}
+                          >
+                            {selectedVariant.isSelected ? 'Preferred variant selected' : 'Use this variant in materials'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="property-media-variant-panel">
+                        <p>
+                          Generate an enhanced version or declutter preview to begin the Vision workflow for this photo.
+                        </p>
+                      </div>
+                    )}
                     <label className="property-media-note-field">
                       Listing note
                       <textarea

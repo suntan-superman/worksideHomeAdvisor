@@ -8,6 +8,9 @@ const flyerPhotoSchema = new mongoose.Schema(
     score: { type: Number },
     listingCandidate: { type: Boolean, default: false },
     listingNote: { type: String, default: '' },
+    usesPreferredVariant: { type: Boolean, default: false },
+    variantLabel: { type: String, default: '' },
+    variantType: { type: String, default: '' },
   },
   { _id: false },
 );

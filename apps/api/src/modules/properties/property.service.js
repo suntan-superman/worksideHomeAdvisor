@@ -61,3 +61,21 @@ export async function getPropertyById(propertyId) {
   const property = await PropertyModel.findById(propertyId).lean();
   return serializeProperty(property);
 }
+
+export async function setPropertyReadinessScore(propertyId, readinessScore) {
+  if (mongoose.connection.readyState !== 1) {
+    return null;
+  }
+
+  const property = await PropertyModel.findByIdAndUpdate(
+    propertyId,
+    {
+      $set: {
+        readinessScore: Math.max(0, Math.min(100, Math.round(Number(readinessScore || 0)))),
+      },
+    },
+    { new: true },
+  ).lean();
+
+  return serializeProperty(property);
+}

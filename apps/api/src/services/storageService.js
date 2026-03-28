@@ -66,13 +66,13 @@ function getBucket() {
 async function saveImageBufferToLocal({
   propertyId,
   mimeType,
-  imageBase64,
+  imageBuffer,
 }) {
   const storageDir = getStorageDir();
   const assetId = randomUUID();
   const relativePath = getObjectKey({ propertyId, assetId, mimeType });
   const absolutePath = path.join(storageDir, relativePath);
-  const buffer = Buffer.from(imageBase64, 'base64');
+  const buffer = imageBuffer;
 
   await fs.mkdir(path.dirname(absolutePath), { recursive: true });
   await fs.writeFile(absolutePath, buffer);
@@ -88,11 +88,11 @@ async function saveImageBufferToLocal({
 async function saveImageBufferToGcs({
   propertyId,
   mimeType,
-  imageBase64,
+  imageBuffer,
 }) {
   const assetId = randomUUID();
   const objectKey = getObjectKey({ propertyId, assetId, mimeType });
-  const buffer = Buffer.from(imageBase64, 'base64');
+  const buffer = imageBuffer;
   const file = getBucket().file(objectKey);
 
   await file.save(buffer, {
@@ -115,23 +115,49 @@ export async function saveImageBuffer({
   mimeType,
   imageBase64,
 }) {
+  const imageBuffer = Buffer.from(imageBase64, 'base64');
+
   if (env.STORAGE_PROVIDER === 'gcs') {
     return saveImageBufferToGcs({
       propertyId,
       mimeType,
-      imageBase64,
+      imageBuffer,
     });
   }
 
   return saveImageBufferToLocal({
     propertyId,
     mimeType,
-    imageBase64,
+    imageBuffer,
+  });
+}
+
+export async function saveBinaryBuffer({
+  propertyId,
+  mimeType,
+  buffer,
+}) {
+  if (env.STORAGE_PROVIDER === 'gcs') {
+    return saveImageBufferToGcs({
+      propertyId,
+      mimeType,
+      imageBuffer: buffer,
+    });
+  }
+
+  return saveImageBufferToLocal({
+    propertyId,
+    mimeType,
+    imageBuffer: buffer,
   });
 }
 
 export function buildMediaAssetUrl(assetId) {
   return `${env.PUBLIC_API_URL}/api/v1/media/assets/${assetId}/file`;
+}
+
+export function buildMediaVariantUrl(variantId) {
+  return `${env.PUBLIC_API_URL}/api/v1/media/variants/${variantId}/file`;
 }
 
 async function readStoredAssetFromLocal(storageKey) {

@@ -1,0 +1,46 @@
+import mongoose from 'mongoose';
+
+const imageJobSchema = new mongoose.Schema(
+  {
+    mediaId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'MediaAsset',
+      required: true,
+      index: true,
+    },
+    propertyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Property',
+      required: true,
+      index: true,
+    },
+    jobType: {
+      type: String,
+      enum: ['enhance_listing_quality', 'declutter_preview'],
+      required: true,
+    },
+    status: {
+      type: String,
+      enum: ['processing', 'completed', 'failed'],
+      default: 'processing',
+    },
+    provider: { type: String, default: 'local_sharp' },
+    input: { type: mongoose.Schema.Types.Mixed, default: {} },
+    outputVariantIds: {
+      type: [mongoose.Schema.Types.ObjectId],
+      ref: 'MediaVariant',
+      default: [],
+    },
+    message: { type: String, default: '' },
+    warning: { type: String, default: '' },
+  },
+  {
+    timestamps: true,
+    collection: 'imageJobs',
+  },
+);
+
+imageJobSchema.index({ mediaId: 1, createdAt: -1 });
+
+export const ImageJobModel =
+  mongoose.models.ImageJob || mongoose.model('ImageJob', imageJobSchema);

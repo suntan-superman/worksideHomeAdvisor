@@ -86,8 +86,43 @@ export function getDashboard(propertyId) {
   return request(`/api/v1/properties/${propertyId}/dashboard`);
 }
 
+export function getChecklist(propertyId) {
+  return request(`/api/v1/properties/${propertyId}/checklist`);
+}
+
+export function createChecklistItem(propertyId, payload) {
+  return request(`/api/v1/properties/${propertyId}/checklist/items`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateChecklistItem(itemId, payload) {
+  return request(`/api/v1/checklist-items/${itemId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function listMediaAssets(propertyId) {
   return request(`/api/v1/properties/${propertyId}/media`);
+}
+
+export function listMediaVariants(assetId) {
+  return request(`/api/v1/media/assets/${assetId}/variants`);
+}
+
+export function createImageEnhancementJob(assetId, payload) {
+  return request(`/api/v1/media/assets/${assetId}/enhance`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function selectMediaVariant(assetId, variantId) {
+  return request(`/api/v1/media/assets/${assetId}/variants/${variantId}/select`, {
+    method: 'PATCH',
+  });
 }
 
 export function updateMediaAsset(assetId, payload) {

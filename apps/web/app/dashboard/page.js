@@ -575,7 +575,18 @@ export default function DashboardPage() {
                       <strong>Comp count</strong>
                       <span>{dashboard.comps?.length || 0} selected comps</span>
                     </div>
+                    <div className="stat-card">
+                      <strong>Checklist</strong>
+                      <span>
+                        {dashboard.checklist?.summary?.progressPercent ?? 0}% ready
+                      </span>
+                    </div>
                   </div>
+                  <p>
+                    {dashboard.checklist?.nextTask?.title
+                      ? `Next recommended task: ${dashboard.checklist.nextTask.title}`
+                      : 'No open checklist tasks right now.'}
+                  </p>
                   <ul className="plain-list">
                     {(dashboard.improvements || []).map((item) => (
                       <li key={item.title || item}>{item.title || item}</li>

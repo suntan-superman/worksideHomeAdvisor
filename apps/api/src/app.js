@@ -10,6 +10,7 @@ import { aiRoutes } from './modules/ai/ai.routes.js';
 import { mediaRoutes } from './modules/media/media.routes.js';
 import { propertyRoutes } from './modules/properties/property.routes.js';
 import { pricingRoutes } from './modules/pricing/pricing.routes.js';
+import { tasksRoutes } from './modules/tasks/tasks.routes.js';
 
 export function buildApp() {
   const app = Fastify({
@@ -34,6 +35,7 @@ export function buildApp() {
   app.register(propertyRoutes, { prefix: '/api/v1/properties' });
   app.register(mediaRoutes, { prefix: '/api/v1' });
   app.register(pricingRoutes, { prefix: '/api/v1/properties' });
+  app.register(tasksRoutes, { prefix: '/api/v1' });
   app.register(dashboardRoutes, { prefix: '/api/v1/properties' });
   app.register(documentsRoutes, { prefix: '/api/v1/properties' });
   app.register(aiRoutes, { prefix: '/api/v1/ai' });

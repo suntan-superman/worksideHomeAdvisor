@@ -17,12 +17,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 
 import {
+  createChecklistItem,
+  createImageEnhancementJob,
+  getChecklist,
   getDashboard,
   listMediaAssets,
+  listMediaVariants,
   listProperties,
   login,
   requestOtp,
   savePhoto,
+  selectMediaVariant,
+  updateChecklistItem,
   updateMediaAsset,
   verifyEmailOtp,
 } from '../services/api';
@@ -62,6 +68,18 @@ function formatCreatedAt(value) {
   }
 }
 
+function formatChecklistStatus(status) {
+  if (status === 'done') {
+    return 'Done';
+  }
+
+  if (status === 'in_progress') {
+    return 'In progress';
+  }
+
+  return 'Open';
+}
+
 export function RootScreen() {
   const [authMode, setAuthMode] = useState('login');
   const [showPassword, setShowPassword] = useState(false);
@@ -74,9 +92,13 @@ export function RootScreen() {
   const [properties, setProperties] = useState([]);
   const [propertyId, setPropertyId] = useState('');
   const [dashboard, setDashboard] = useState(null);
+  const [checklist, setChecklist] = useState(null);
   const [gallery, setGallery] = useState([]);
+  const [mediaVariants, setMediaVariants] = useState([]);
+  const [selectedVariantId, setSelectedVariantId] = useState('');
   const [selectedAssetId, setSelectedAssetId] = useState('');
   const [listingNoteDraft, setListingNoteDraft] = useState('');
+  const [customTaskTitle, setCustomTaskTitle] = useState('');
   const [photoAsset, setPhotoAsset] = useState(null);
   const [form, setForm] = useState({
     email: '',
@@ -87,6 +109,11 @@ export function RootScreen() {
 
   const selectedProperty = properties.find((property) => property.id === propertyId) || null;
   const selectedAsset = gallery.find((asset) => asset.id === selectedAssetId) || gallery[0] || null;
+  const selectedVariant =
+    mediaVariants.find((variant) => variant.id === selectedVariantId) ||
+    mediaVariants.find((variant) => variant.isSelected) ||
+    mediaVariants[0] ||
+    null;
   const roomCoverage = ROOM_LABEL_OPTIONS.map((roomLabel) => ({
     roomLabel,
     captured: gallery.some((asset) => asset.roomLabel === roomLabel),
@@ -106,39 +133,35 @@ export function RootScreen() {
       },
     )
     .slice(0, 3);
-  const retakeCount = gallery.filter((asset) => asset.analysis?.retakeRecommended).length;
-  const actionTasks = selectedProperty
-    ? [
-        {
-          title: dashboard?.pricing?.mid
-            ? 'Review pricing before publishing'
-            : 'Run pricing from the web dashboard',
-          detail: dashboard?.pricing?.mid
-            ? `Current midpoint is ${formatCurrency(dashboard.pricing.mid)}. Refresh after any major prep updates.`
-            : 'Create a fresh recommended list-price band before going live.',
-          done: Boolean(dashboard?.pricing?.mid),
-        },
-        {
-          title: gallery.length >= 5 ? 'Photo coverage looks solid' : 'Capture the main listing rooms',
-          detail:
-            gallery.length >= 5
-              ? `${gallery.length} photos are saved for this property.`
-              : 'Aim for living room, kitchen, primary bedroom, bathroom, and exterior coverage.',
-          done: gallery.length >= 5,
-        },
-        {
-          title: retakeCount ? 'Address retake recommendations' : 'No retakes currently flagged',
-          detail: retakeCount
-            ? `${retakeCount} photos were flagged by AI for improvement.`
-            : 'Your saved photos are currently in decent shape for marketing review.',
-          done: retakeCount === 0,
-        },
-      ]
-    : [];
+  const checklistItems = checklist?.items || [];
 
   useEffect(() => {
     setListingNoteDraft(selectedAsset?.listingNote || '');
   }, [selectedAsset?.id, selectedAsset?.listingNote]);
+
+  useEffect(() => {
+    async function loadVariants() {
+      if (!selectedAsset?.id) {
+        setMediaVariants([]);
+        setSelectedVariantId('');
+        return;
+      }
+
+      try {
+        const variantsResponse = await listMediaVariants(selectedAsset.id);
+        const nextVariants = variantsResponse.variants || [];
+        setMediaVariants(nextVariants);
+        setSelectedVariantId(
+          nextVariants.find((variant) => variant.isSelected)?.id || nextVariants[0]?.id || '',
+        );
+      } catch {
+        setMediaVariants([]);
+        setSelectedVariantId('');
+      }
+    }
+
+    loadVariants();
+  }, [selectedAsset?.id]);
 
   useEffect(() => {
     let active = true;
@@ -196,14 +219,17 @@ export function RootScreen() {
 
     if (!nextPropertyId) {
       setDashboard(null);
+      setChecklist(null);
       return;
     }
 
-    const [dashboardResponse, mediaResponse] = await Promise.all([
+    const [dashboardResponse, mediaResponse, checklistResponse] = await Promise.all([
       getDashboard(nextPropertyId),
       listMediaAssets(nextPropertyId),
+      getChecklist(nextPropertyId),
     ]);
     setDashboard(dashboardResponse);
+    setChecklist(checklistResponse.checklist);
     setGallery(mediaResponse.assets || []);
     setSelectedAssetId(mediaResponse.assets?.[0]?.id || '');
     setPropertySection('overview');
@@ -215,6 +241,33 @@ export function RootScreen() {
     setGallery(nextAssets);
     setSelectedAssetId(preferredAssetId || nextAssets?.[0]?.id || '');
     return nextAssets;
+  }
+
+  async function refreshVariants(assetId = selectedAsset?.id) {
+    if (!assetId) {
+      setMediaVariants([]);
+      setSelectedVariantId('');
+      return [];
+    }
+
+    const variantsResponse = await listMediaVariants(assetId);
+    const nextVariants = variantsResponse.variants || [];
+    setMediaVariants(nextVariants);
+    setSelectedVariantId(
+      nextVariants.find((variant) => variant.isSelected)?.id || nextVariants[0]?.id || '',
+    );
+    return nextVariants;
+  }
+
+  async function refreshChecklist(nextPropertyId = propertyId) {
+    if (!nextPropertyId) {
+      setChecklist(null);
+      return null;
+    }
+
+    const checklistResponse = await getChecklist(nextPropertyId);
+    setChecklist(checklistResponse.checklist);
+    return checklistResponse.checklist;
   }
 
   async function handleLogin() {
@@ -300,11 +353,13 @@ export function RootScreen() {
       setPropertyId(nextPropertyId);
       setPropertyDetailsCollapsed(false);
       setPropertySection('overview');
-      const [dashboardResponse, mediaResponse] = await Promise.all([
+      const [dashboardResponse, mediaResponse, checklistResponse] = await Promise.all([
         getDashboard(nextPropertyId),
         listMediaAssets(nextPropertyId),
+        getChecklist(nextPropertyId),
       ]);
       setDashboard(dashboardResponse);
+      setChecklist(checklistResponse.checklist);
       setGallery(mediaResponse.assets || []);
       setSelectedAssetId(mediaResponse.assets?.[0]?.id || '');
       const nextProperty = properties.find((property) => property.id === nextPropertyId);
@@ -381,7 +436,7 @@ export function RootScreen() {
         width: photoAsset.width,
         height: photoAsset.height,
       });
-      await refreshGallery();
+      await Promise.all([refreshGallery(), refreshChecklist()]);
       setPhotoAsset(null);
       setPropertySection('gallery');
       setStatus('Photo saved to the selected property.');
@@ -405,7 +460,7 @@ export function RootScreen() {
       await updateMediaAsset(selectedAsset.id, {
         listingCandidate: nextValue,
       });
-      await refreshGallery(selectedAsset.id);
+      await Promise.all([refreshGallery(selectedAsset.id), refreshChecklist()]);
       setStatus(
         nextValue
           ? 'Photo marked as a listing candidate.'
@@ -432,6 +487,99 @@ export function RootScreen() {
       });
       await refreshGallery(selectedAsset.id);
       setStatus('Listing note saved to this photo.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleUpdateChecklistStatus(itemId, nextStatus) {
+    setBusy(true);
+    setError('');
+
+    try {
+      const response = await updateChecklistItem(itemId, {
+        status: nextStatus,
+      });
+      const dashboardResponse = await getDashboard(propertyId);
+      setDashboard(dashboardResponse);
+      setChecklist(response.checklist);
+      setStatus('Checklist progress saved.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCreateCustomTask() {
+    if (!propertyId || !customTaskTitle.trim()) {
+      setError('Add a task title before saving a custom checklist item.');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+
+    try {
+      const response = await createChecklistItem(propertyId, {
+        title: customTaskTitle,
+        category: 'custom',
+        priority: 'medium',
+      });
+      const dashboardResponse = await getDashboard(propertyId);
+      setDashboard(dashboardResponse);
+      setChecklist(response.checklist);
+      setCustomTaskTitle('');
+      setStatus('Custom checklist task added.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleGenerateVariant(jobType) {
+    if (!selectedAsset) {
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+
+    try {
+      const response = await createImageEnhancementJob(selectedAsset.id, {
+        jobType,
+      });
+      await Promise.all([refreshGallery(selectedAsset.id), refreshVariants(selectedAsset.id)]);
+      setSelectedVariantId(response.variant?.id || '');
+      setStatus(
+        response.job?.warning ||
+          (jobType === 'declutter_preview'
+            ? 'Declutter preview generated.'
+            : 'Enhanced listing version generated.'),
+      );
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSelectVariant(variantId) {
+    if (!selectedAsset) {
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+
+    try {
+      await selectMediaVariant(selectedAsset.id, variantId);
+      await Promise.all([refreshGallery(selectedAsset.id), refreshVariants(selectedAsset.id)]);
+      setSelectedVariantId(variantId);
+      setStatus('Preferred variant selected for future flyer and report output.');
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -643,6 +791,11 @@ export function RootScreen() {
                                   <Text style={styles.galleryTileLabel} numberOfLines={1}>
                                     {asset.roomLabel}
                                   </Text>
+                                  {asset.selectedVariant ? (
+                                    <Text style={styles.galleryTileTag} numberOfLines={1}>
+                                      {asset.selectedVariant.label || 'Vision preferred'}
+                                    </Text>
+                                  ) : null}
                                 </Pressable>
                               ))}
                             </ScrollView>
@@ -668,6 +821,11 @@ export function RootScreen() {
                                 ) : null}
                                 {selectedAsset.listingCandidate ? (
                                   <Text style={styles.listingCandidateTag}>Listing candidate selected</Text>
+                                ) : null}
+                                {selectedAsset.selectedVariant ? (
+                                  <Text style={styles.preferredVariantTag}>
+                                    Preferred vision variant: {selectedAsset.selectedVariant.label || 'Vision-ready version'}
+                                  </Text>
                                 ) : null}
                                 <View style={styles.actionRow}>
                                   <Pressable
@@ -718,7 +876,7 @@ export function RootScreen() {
                       <View style={styles.sectionPanel}>
                         <Text style={styles.label}>Vision</Text>
                         <Text style={styles.body}>
-                          Use the strongest saved photos as your early flyer and listing candidates.
+                          Generate first-pass image variants and choose which version should feed materials.
                         </Text>
                         <View style={styles.coverageList}>
                           {roomCoverage.map((item) => (
@@ -730,6 +888,77 @@ export function RootScreen() {
                             </View>
                           ))}
                         </View>
+                        {selectedAsset ? (
+                          <View style={styles.visionPanel}>
+                            <Text style={styles.label}>Selected photo</Text>
+                            <Image source={{ uri: selectedAsset.imageUrl }} style={styles.visionImage} />
+                            {selectedAsset.selectedVariant ? (
+                              <Text style={styles.preferredVariantTag}>
+                                Materials currently prefer {selectedAsset.selectedVariant.label || 'the saved vision variant'} for this photo.
+                              </Text>
+                            ) : null}
+                            <View style={styles.actionRow}>
+                              <Pressable
+                                onPress={() => handleGenerateVariant('enhance_listing_quality')}
+                                style={[styles.button, styles.buttonSecondary, styles.flexButton]}
+                                disabled={busy}
+                              >
+                                <Text style={styles.buttonSecondaryText}>Enhance</Text>
+                              </Pressable>
+                              <Pressable
+                                onPress={() => handleGenerateVariant('declutter_preview')}
+                                style={[styles.button, styles.buttonSecondary, styles.flexButton]}
+                                disabled={busy}
+                              >
+                                <Text style={styles.buttonSecondaryText}>Declutter</Text>
+                              </Pressable>
+                            </View>
+                            {selectedVariant ? (
+                              <>
+                                <Text style={styles.label}>Vision output</Text>
+                                <Image source={{ uri: selectedVariant.imageUrl }} style={styles.visionImage} />
+                                <Text style={styles.body}>
+                                  {selectedVariant.metadata?.warning ||
+                                    'This variant can be marked preferred for flyer and report selection.'}
+                                </Text>
+                                <View style={styles.variantList}>
+                                  {mediaVariants.map((variant) => (
+                                    <Pressable
+                                      key={variant.id}
+                                      onPress={() => setSelectedVariantId(variant.id)}
+                                      style={[
+                                        styles.taskActionChip,
+                                        variant.id === selectedVariant?.id ? styles.taskActionChipActive : null,
+                                      ]}
+                                    >
+                                      <Text
+                                        style={
+                                          variant.id === selectedVariant?.id
+                                            ? styles.taskActionChipTextActive
+                                            : styles.taskActionChipText
+                                        }
+                                      >
+                                        {variant.label}
+                                        {variant.isSelected ? ' · Preferred' : ''}
+                                      </Text>
+                                    </Pressable>
+                                  ))}
+                                </View>
+                                <Pressable
+                                  onPress={() => handleSelectVariant(selectedVariant.id)}
+                                  style={[styles.button, styles.buttonSecondary]}
+                                  disabled={busy || selectedVariant.isSelected}
+                                >
+                                  <Text style={styles.buttonSecondaryText}>
+                                    {selectedVariant.isSelected
+                                      ? 'Preferred variant selected'
+                                      : 'Use this variant in materials'}
+                                  </Text>
+                                </Pressable>
+                              </>
+                            ) : null}
+                          </View>
+                        ) : null}
                         <View style={styles.candidateList}>
                           {bestCandidates.length ? (
                             bestCandidates.map((asset, index) => (
@@ -744,6 +973,11 @@ export function RootScreen() {
                                   {asset.listingCandidate ? (
                                     <Text style={styles.candidateSelectedTag}>
                                       Seller selected{asset.listingNote ? ` · ${asset.listingNote}` : ''}
+                                    </Text>
+                                  ) : null}
+                                  {asset.selectedVariant ? (
+                                    <Text style={styles.preferredVariantTag}>
+                                      {asset.selectedVariant.label || 'Vision preferred for materials'}
                                     </Text>
                                   ) : null}
                                 </View>
@@ -762,19 +996,90 @@ export function RootScreen() {
                       <View style={styles.sectionPanel}>
                         <Text style={styles.label}>Tasks</Text>
                         <Text style={styles.body}>
-                          A simple property checklist based on pricing and photo readiness.
+                          Shared seller checklist progress now syncs with the web workspace and report.
                         </Text>
-                        <View style={styles.taskList}>
-                          {actionTasks.map((task) => (
-                            <View key={task.title} style={styles.taskCard}>
-                              <Text style={task.done ? styles.taskDone : styles.taskOpen}>
-                                {task.done ? 'Done' : 'Open'}
-                              </Text>
-                              <Text style={styles.taskTitle}>{task.title}</Text>
-                              <Text style={styles.taskDetail}>{task.detail}</Text>
-                            </View>
-                          ))}
+                        <View style={styles.taskSummaryCard}>
+                          <Text style={styles.taskSummaryValue}>
+                            {checklist?.summary?.progressPercent ?? 0}% ready
+                          </Text>
+                          <Text style={styles.taskSummaryText}>
+                            {checklist?.summary?.completedCount ?? 0} completed · {checklist?.summary?.openCount ?? 0} open
+                          </Text>
+                          <Text style={styles.taskSummaryText}>
+                            Next: {checklist?.nextTask?.title || 'No open tasks right now'}
+                          </Text>
                         </View>
+                        <View style={styles.taskList}>
+                          {checklistItems.length ? (
+                            checklistItems.map((task) => (
+                              <View key={task.id} style={styles.taskCard}>
+                                <View style={styles.taskMetaRow}>
+                                  <Text
+                                    style={
+                                      task.status === 'done'
+                                        ? styles.taskDone
+                                        : task.status === 'in_progress'
+                                          ? styles.taskWorking
+                                          : styles.taskOpen
+                                    }
+                                  >
+                                    {formatChecklistStatus(task.status)}
+                                  </Text>
+                                  <Text style={styles.taskCategory}>
+                                    {String(task.category || 'custom').replace(/_/g, ' ')}
+                                  </Text>
+                                </View>
+                                <Text style={styles.taskTitle}>{task.title}</Text>
+                                <Text style={styles.taskDetail}>{task.detail}</Text>
+                                <View style={styles.taskActionRow}>
+                                  {[
+                                    ['todo', 'To do'],
+                                    ['in_progress', 'Working'],
+                                    ['done', 'Done'],
+                                  ].map(([nextStatus, label]) => (
+                                    <Pressable
+                                      key={`${task.id}-${nextStatus}`}
+                                      onPress={() => handleUpdateChecklistStatus(task.id, nextStatus)}
+                                      style={[
+                                        styles.taskActionChip,
+                                        task.status === nextStatus ? styles.taskActionChipActive : null,
+                                      ]}
+                                      disabled={busy}
+                                    >
+                                      <Text
+                                        style={
+                                          task.status === nextStatus
+                                            ? styles.taskActionChipTextActive
+                                            : styles.taskActionChipText
+                                        }
+                                      >
+                                        {label}
+                                      </Text>
+                                    </Pressable>
+                                  ))}
+                                </View>
+                              </View>
+                            ))
+                          ) : (
+                            <Text style={styles.body}>
+                              No checklist items yet for this property.
+                            </Text>
+                          )}
+                        </View>
+                        <TextInput
+                          placeholder="Add a custom seller task"
+                          placeholderTextColor="#7d8a8f"
+                          style={styles.input}
+                          value={customTaskTitle}
+                          onChangeText={setCustomTaskTitle}
+                        />
+                        <Pressable
+                          onPress={handleCreateCustomTask}
+                          style={[styles.button, styles.buttonSecondary]}
+                          disabled={busy}
+                        >
+                          <Text style={styles.buttonSecondaryText}>Add task</Text>
+                        </Pressable>
                       </View>
                     ) : null}
                   </>
@@ -1272,7 +1577,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     paddingHorizontal: 10,
-    paddingVertical: 10,
+    paddingTop: 10,
+  },
+  galleryTileTag: {
+    color: '#d28859',
+    fontSize: 11,
+    fontWeight: '700',
+    paddingHorizontal: 10,
+    paddingBottom: 10,
   },
   selectedAssetCard: {
     gap: 10,
@@ -1311,6 +1623,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
+  },
+  preferredVariantTag: {
+    color: '#d28859',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
   },
   noteInput: {
     minHeight: 90,
@@ -1383,8 +1701,45 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '700',
   },
+  visionPanel: {
+    gap: 12,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  visionImage: {
+    width: '100%',
+    height: 220,
+    borderRadius: 14,
+    backgroundColor: '#1b252d',
+  },
+  variantList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
   taskList: {
     gap: 10,
+  },
+  taskSummaryCard: {
+    gap: 6,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  taskSummaryValue: {
+    color: '#fff7ee',
+    fontSize: 26,
+    fontWeight: '800',
+  },
+  taskSummaryText: {
+    color: '#dbcbb7',
+    fontSize: 14,
+    lineHeight: 20,
   },
   taskCard: {
     gap: 6,
@@ -1393,6 +1748,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#24303a',
     borderWidth: 1,
     borderColor: '#3d4e5b',
+  },
+  taskMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
   },
   taskDone: {
     color: '#93a982',
@@ -1408,6 +1769,18 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     fontWeight: '800',
   },
+  taskWorking: {
+    color: '#e3b453',
+    fontSize: 12,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    fontWeight: '800',
+  },
+  taskCategory: {
+    color: '#b9af9f',
+    fontSize: 12,
+    textTransform: 'capitalize',
+  },
   taskTitle: {
     color: '#f8f1e6',
     fontSize: 16,
@@ -1417,6 +1790,34 @@ const styles = StyleSheet.create({
     color: '#dbcbb7',
     fontSize: 14,
     lineHeight: 20,
+  },
+  taskActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  taskActionChip: {
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#425563',
+    backgroundColor: '#31404d',
+  },
+  taskActionChipActive: {
+    backgroundColor: '#d28859',
+    borderColor: '#d28859',
+  },
+  taskActionChipText: {
+    color: '#dbcbb7',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  taskActionChipTextActive: {
+    color: '#fff7ee',
+    fontSize: 13,
+    fontWeight: '800',
   },
   authFooter: {
     gap: 10,

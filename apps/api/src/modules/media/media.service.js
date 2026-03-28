@@ -1,11 +1,12 @@
 import mongoose from 'mongoose';
 
 import { analyzePropertyPhoto } from '../../services/photoAnalysisService.js';
-import { buildMediaAssetUrl, saveImageBuffer } from '../../services/storageService.js';
+import { buildMediaAssetUrl, buildMediaVariantUrl, saveImageBuffer } from '../../services/storageService.js';
 import { getPropertyById } from '../properties/property.service.js';
 import { MediaAssetModel } from './media.model.js';
+import { MediaVariantModel } from './media-variant.model.js';
 
-function serializeMediaAsset(document) {
+function serializeMediaAsset(document, selectedVariant = null) {
   if (!document) {
     return null;
   }
@@ -31,6 +32,19 @@ function serializeMediaAsset(document) {
     listingCandidate: Boolean(document.listingCandidate),
     listingNote: document.listingNote || '',
     analysis: document.analysis || null,
+    selectedVariant: selectedVariant
+      ? {
+          id: selectedVariant._id?.toString?.() || selectedVariant.id,
+          variantType: selectedVariant.variantType,
+          label: selectedVariant.label,
+          imageUrl:
+            selectedVariant.imageUrl ||
+            buildMediaVariantUrl(selectedVariant._id?.toString?.() || selectedVariant.id),
+          metadata: selectedVariant.metadata || {},
+          createdAt: selectedVariant.createdAt,
+          updatedAt: selectedVariant.updatedAt,
+        }
+      : null,
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
   };
@@ -42,7 +56,20 @@ export async function listMediaAssets(propertyId) {
   }
 
   const assets = await MediaAssetModel.find({ propertyId }).sort({ createdAt: -1 }).lean();
-  return assets.map(serializeMediaAsset);
+  const assetIds = assets.map((asset) => asset._id);
+  const selectedVariants = assetIds.length
+    ? await MediaVariantModel.find({ mediaId: { $in: assetIds }, isSelected: true }).lean()
+    : [];
+  const selectedByAssetId = new Map(
+    selectedVariants.map((variant) => [variant.mediaId?.toString?.() || String(variant.mediaId), variant]),
+  );
+
+  return assets.map((asset) =>
+    serializeMediaAsset(
+      asset,
+      selectedByAssetId.get(asset._id?.toString?.() || String(asset._id)) || null,
+    ),
+  );
 }
 
 export async function createMediaAssetAndAnalysis({
@@ -130,5 +157,8 @@ export async function getMediaAssetById(assetId) {
   }
 
   const asset = await MediaAssetModel.findById(assetId).lean();
-  return serializeMediaAsset(asset);
+  const selectedVariant = asset
+    ? await MediaVariantModel.findOne({ mediaId: asset._id, isSelected: true }).lean()
+    : null;
+  return serializeMediaAsset(asset, selectedVariant);
 }

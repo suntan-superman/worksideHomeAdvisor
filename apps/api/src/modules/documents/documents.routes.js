@@ -15,6 +15,7 @@ import {
 import {
   exportPropertyReportPdf,
   generatePropertyReport,
+  getPropertyReportInputSignature,
   getLatestPropertyReport,
 } from './report.service.js';
 
@@ -155,6 +156,7 @@ export async function documentsRoutes(fastify) {
       }
 
       const latestReport = await getLatestPropertyReport(request.params.propertyId);
+      const reportInputSignature = await getPropertyReportInputSignature(request.params.propertyId);
       const decision = await enforceAnalysisRequest({
         userId: property.ownerUserId,
         propertyId: request.params.propertyId,
@@ -163,10 +165,7 @@ export async function documentsRoutes(fastify) {
         latestResult: latestReport,
         resultTimestamp: latestReport?.createdAt,
         cooldownHours: 6,
-        inputSignature: {
-          propertyId: request.params.propertyId,
-          updatedAt: property.updatedAt,
-        },
+        inputSignature: reportInputSignature,
       });
 
       if (decision.action === 'RETURN_CACHED_RESULT') {

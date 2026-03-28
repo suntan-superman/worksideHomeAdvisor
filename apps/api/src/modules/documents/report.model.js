@@ -5,8 +5,12 @@ const reportPhotoSchema = new mongoose.Schema(
     assetId: { type: mongoose.Schema.Types.ObjectId, ref: 'MediaAsset' },
     roomLabel: { type: String },
     imageUrl: { type: String },
+    score: { type: Number },
     listingCandidate: { type: Boolean, default: false },
     listingNote: { type: String, default: '' },
+    usesPreferredVariant: { type: Boolean, default: false },
+    variantLabel: { type: String, default: '' },
+    variantType: { type: String, default: '' },
   },
   { _id: false },
 );
@@ -36,6 +40,15 @@ const reportSchema = new mongoose.Schema(
       type: String,
       enum: ['seller_intelligence_report'],
       default: 'seller_intelligence_report',
+    },
+    status: {
+      type: String,
+      enum: ['completed'],
+      default: 'completed',
+    },
+    reportVersion: {
+      type: Number,
+      default: 2,
     },
     title: { type: String, required: true },
     executiveSummary: { type: String, required: true },
