@@ -12,6 +12,7 @@
     "test": "node -e \"console.log('mobile test placeholder')\""
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.1.2",
     "@react-native/js-polyfills": "^0.79.6",
     "expo": "~53.0.27",
     "expo-image-picker": "~16.1.4",

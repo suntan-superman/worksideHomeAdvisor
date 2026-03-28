@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -11,11 +12,11 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import * as ImagePicker from 'expo-image-picker';
 
 import {
-  API_URL,
   getDashboard,
   listMediaAssets,
   listProperties,
@@ -26,6 +27,11 @@ import {
 } from '../services/api';
 
 const ROOM_LABEL_OPTIONS = ['Living room', 'Kitchen', 'Primary bedroom', 'Bathroom', 'Exterior'];
+const LAST_LOGIN_EMAIL_KEY = 'workside.lastLoginEmail';
+const WEB_BASE_URL = 'https://worksidehomeadvisor.netlify.app';
+const TERMS_URL = `${WEB_BASE_URL}/terms`;
+const PRIVACY_URL = `${WEB_BASE_URL}/privacy`;
+const SUPPORT_URL = 'mailto:support@worksidesoftware.com';
 
 function getDisplayName(user) {
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
@@ -79,11 +85,51 @@ export function RootScreen() {
   const selectedProperty = properties.find((property) => property.id === propertyId) || null;
   const selectedAsset = gallery.find((asset) => asset.id === selectedAssetId) || gallery[0] || null;
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadRememberedEmail() {
+      try {
+        const rememberedEmail = await AsyncStorage.getItem(LAST_LOGIN_EMAIL_KEY);
+        if (active && rememberedEmail) {
+          setForm((current) => ({
+            ...current,
+            email: current.email || rememberedEmail,
+          }));
+        }
+      } catch (storageError) {
+        // Keep auth usable even if local storage is unavailable.
+      }
+    }
+
+    loadRememberedEmail();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   function updateField(field, value) {
     setForm((current) => ({
       ...current,
       [field]: value,
     }));
+  }
+
+  async function rememberEmail(email) {
+    try {
+      await AsyncStorage.setItem(LAST_LOGIN_EMAIL_KEY, email.trim());
+    } catch (storageError) {
+      // Login should still succeed even if local persistence is unavailable.
+    }
+  }
+
+  async function openExternalLink(url) {
+    try {
+      await Linking.openURL(url);
+    } catch (linkError) {
+      setError('Unable to open that link on this device right now.');
+    }
   }
 
   async function loadPropertyWorkspace(userId) {
@@ -124,6 +170,7 @@ export function RootScreen() {
       }
 
       setSession(result);
+      await rememberEmail(form.email);
       await loadPropertyWorkspace(result.user.id);
       setStatus('Signed in successfully.');
     } catch (requestError) {
@@ -143,6 +190,7 @@ export function RootScreen() {
         otpCode: form.otpCode,
       });
       setSession(result);
+      await rememberEmail(form.email);
       await loadPropertyWorkspace(result.user.id);
       setStatus('Email verified. Signed in successfully.');
     } catch (requestError) {
@@ -487,10 +535,6 @@ export function RootScreen() {
             {status ? <Text style={styles.status}>{status}</Text> : null}
             {error ? <Text style={styles.error}>{error}</Text> : null}
             {busy ? <ActivityIndicator color="#d28859" style={styles.spinner} /> : null}
-
-            <Text style={styles.label}>API endpoint</Text>
-            <Text style={styles.value}>{API_URL}</Text>
-
             <Pressable onPress={handleSignOut} style={[styles.button, styles.buttonSecondary]}>
               <Text style={styles.buttonSecondaryText}>Sign out</Text>
             </Pressable>
@@ -592,9 +636,21 @@ export function RootScreen() {
           {status ? <Text style={styles.status}>{status}</Text> : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
           {busy ? <ActivityIndicator color="#d28859" style={styles.spinner} /> : null}
+        </View>
 
-          <Text style={styles.label}>API endpoint</Text>
-          <Text style={styles.value}>{API_URL}</Text>
+        <View style={styles.authFooter}>
+          <Text style={styles.authFooterCopy}>Copyright 2026 Workside Software LLC.</Text>
+          <View style={styles.authFooterLinks}>
+            <Pressable onPress={() => openExternalLink(TERMS_URL)}>
+              <Text style={styles.authFooterLink}>Terms of Service</Text>
+            </Pressable>
+            <Pressable onPress={() => openExternalLink(PRIVACY_URL)}>
+              <Text style={styles.authFooterLink}>Privacy Notice</Text>
+            </Pressable>
+            <Pressable onPress={() => openExternalLink(SUPPORT_URL)}>
+              <Text style={styles.authFooterLink}>Support</Text>
+            </Pressable>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -610,14 +666,19 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 24,
     justifyContent: 'center',
+    gap: 18,
   },
   card: {
-    backgroundColor: '#26323d',
+    backgroundColor: 'rgba(38, 50, 61, 0.78)',
     borderRadius: 24,
     padding: 24,
     gap: 12,
     borderWidth: 1,
-    borderColor: '#384855',
+    borderColor: 'rgba(126, 145, 160, 0.28)',
+    shadowColor: '#000000',
+    shadowOpacity: 0.2,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
   },
   kicker: {
     color: '#93a982',
@@ -734,11 +795,17 @@ const styles = StyleSheet.create({
     color: '#93a982',
     fontSize: 15,
     lineHeight: 22,
+    backgroundColor: 'rgba(124, 162, 127, 0.08)',
+    borderRadius: 14,
+    padding: 12,
   },
   error: {
     color: '#f0a08e',
     fontSize: 15,
     lineHeight: 22,
+    backgroundColor: 'rgba(174, 67, 53, 0.12)',
+    borderRadius: 14,
+    padding: 12,
   },
   spinner: {
     marginTop: 4,
@@ -749,11 +816,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textTransform: 'uppercase',
     marginTop: 8,
-  },
-  value: {
-    color: '#f3a56a',
-    fontSize: 15,
-    lineHeight: 22,
   },
   userCard: {
     gap: 4,
@@ -956,6 +1018,27 @@ const styles = StyleSheet.create({
     color: '#93a982',
     fontSize: 14,
     lineHeight: 20,
+    fontWeight: '700',
+  },
+  authFooter: {
+    gap: 10,
+    alignItems: 'center',
+    paddingBottom: 12,
+  },
+  authFooterCopy: {
+    color: '#b9af9f',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  authFooterLinks: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 16,
+  },
+  authFooterLink: {
+    color: '#93a982',
+    fontSize: 12,
     fontWeight: '700',
   },
 });
