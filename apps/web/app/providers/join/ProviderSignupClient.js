@@ -51,8 +51,30 @@ const INITIAL_FORM = {
   notifyEmail: '',
   preferredContactMethod: 'sms',
   smsOptIn: false,
-  planCode: 'provider_standard',
+  planCode: '',
 };
+
+function formatPhoneInput(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 10);
+
+  if (digits.length <= 3) {
+    return digits;
+  }
+
+  if (digits.length <= 6) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  }
+
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+function countPhoneDigits(value) {
+  return String(value || '').replace(/\D/g, '').length;
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
 
 export function ProviderSignupClient({ billingState = '', providerId = '' }) {
   const router = useRouter();
@@ -81,6 +103,11 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
   }, [billingState, providerId]);
 
   function updateField(field, value) {
+    if (field === 'phone' || field === 'notifyPhone') {
+      setForm((current) => ({ ...current, [field]: formatPhoneInput(value) }));
+      return;
+    }
+
     setForm((current) => ({ ...current, [field]: value }));
   }
 
@@ -88,6 +115,12 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
     if (stepIndex === 0) {
       if (!form.businessName || !form.phone || !form.email) {
         throw new Error('Business name, phone, and email are required.');
+      }
+      if (countPhoneDigits(form.phone) < 10) {
+        throw new Error('Enter a valid business phone number before continuing.');
+      }
+      if (!isValidEmail(form.email)) {
+        throw new Error('Enter a valid email address before continuing.');
       }
     }
 
@@ -99,12 +132,23 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
 
     if (stepIndex === 3) {
       const wantsSms = ['sms', 'sms_and_email'].includes(form.deliveryMode);
+      const wantsEmail = ['email', 'sms_and_email'].includes(form.deliveryMode);
       if (wantsSms && !form.notifyPhone) {
         throw new Error('Add an SMS phone number to receive marketplace leads by text.');
+      }
+      if (wantsSms && countPhoneDigits(form.notifyPhone) < 10) {
+        throw new Error('Enter a valid SMS phone number before continuing.');
+      }
+      if (wantsEmail && form.notifyEmail && !isValidEmail(form.notifyEmail)) {
+        throw new Error('Enter a valid lead email address before continuing.');
       }
       if (wantsSms && !form.smsOptIn) {
         throw new Error('You must explicitly opt in to transactional SMS before continuing.');
       }
+    }
+
+    if (stepIndex === 4 && !form.planCode) {
+      throw new Error('Select a provider plan before continuing to billing.');
     }
   }
 
@@ -310,11 +354,21 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
               </label>
               <label>
                 Phone
-                <input value={form.phone} onChange={(event) => updateField('phone', event.target.value)} />
+                <input
+                  value={form.phone}
+                  onChange={(event) => updateField('phone', event.target.value)}
+                  placeholder="(555) 123-4567"
+                  inputMode="tel"
+                />
               </label>
               <label>
                 Email
-                <input type="email" value={form.email} onChange={(event) => updateField('email', event.target.value)} />
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(event) => updateField('email', event.target.value)}
+                  placeholder="name@business.com"
+                />
               </label>
             </>
           ) : null}
@@ -420,11 +474,21 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
               <div className="split-fields">
                 <label>
                   SMS phone
-                  <input value={form.notifyPhone} onChange={(event) => updateField('notifyPhone', event.target.value)} />
+                  <input
+                    value={form.notifyPhone}
+                    onChange={(event) => updateField('notifyPhone', event.target.value)}
+                    placeholder="(555) 123-4567"
+                    inputMode="tel"
+                  />
                 </label>
                 <label>
                   Lead email
-                  <input type="email" value={form.notifyEmail} onChange={(event) => updateField('notifyEmail', event.target.value)} />
+                  <input
+                    type="email"
+                    value={form.notifyEmail}
+                    onChange={(event) => updateField('notifyEmail', event.target.value)}
+                    placeholder="leads@business.com"
+                  />
                 </label>
               </div>
               <label>
@@ -470,6 +534,14 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
                   </label>
                 ))}
               </div>
+              <div className="status-copy">
+                Selected plan:{' '}
+                <strong>
+                  {form.planCode
+                    ? PLAN_OPTIONS.find((plan) => plan.value === form.planCode)?.label || form.planCode
+                    : 'Choose a plan to continue'}
+                </strong>
+              </div>
               <div className="legal-notice">
                 Billing checkout is the next step after profile submission. For now, your business
                 will be created in a pending billing state so the Workside team can finish setup.
@@ -496,7 +568,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
               </button>
             ) : (
               <button type="submit" className={loading ? 'button-primary button-busy' : 'button-primary'} disabled={loading}>
-                {loading ? 'Submitting...' : 'Submit provider profile'}
+                {loading ? 'Submitting...' : 'Submit and continue to billing'}
               </button>
             )}
           </div>

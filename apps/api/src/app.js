@@ -36,6 +36,7 @@ export function buildApp() {
   app.register(authRoutes, { prefix: '/api/v1/auth' });
   app.register(adminRoutes, { prefix: '/api/v1/admin' });
   app.register(billingRoutes, { prefix: '/api/v1/billing' });
+  app.register(billingRoutes, { prefix: '/api/billing' });
   app.register(propertyRoutes, { prefix: '/api/v1/properties' });
   app.register(mediaRoutes, { prefix: '/api/v1' });
   app.register(marketplaceSmsRoutes, { prefix: '/api/v1' });
