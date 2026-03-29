@@ -1,4 +1,5 @@
 import cors from '@fastify/cors';
+import formbody from '@fastify/formbody';
 import Fastify from 'fastify';
 
 import { adminRoutes } from './modules/admin/admin.routes.js';
@@ -8,6 +9,7 @@ import { dashboardRoutes } from './modules/dashboard/dashboard.routes.js';
 import { documentsRoutes } from './modules/documents/documents.routes.js';
 import { aiRoutes } from './modules/ai/ai.routes.js';
 import { mediaRoutes } from './modules/media/media.routes.js';
+import { marketplaceSmsRoutes } from './modules/marketplace-sms/marketplace-sms.routes.js';
 import { providersRoutes } from './modules/providers/providers.routes.js';
 import { propertyRoutes } from './modules/properties/property.routes.js';
 import { pricingRoutes } from './modules/pricing/pricing.routes.js';
@@ -23,6 +25,7 @@ export function buildApp() {
     origin: true,
     credentials: true,
   });
+  app.register(formbody);
 
   app.get('/health', async () => ({
     ok: true,
@@ -35,6 +38,7 @@ export function buildApp() {
   app.register(billingRoutes, { prefix: '/api/v1/billing' });
   app.register(propertyRoutes, { prefix: '/api/v1/properties' });
   app.register(mediaRoutes, { prefix: '/api/v1' });
+  app.register(marketplaceSmsRoutes, { prefix: '/api/v1' });
   app.register(providersRoutes, { prefix: '/api/v1' });
   app.register(pricingRoutes, { prefix: '/api/v1/properties' });
   app.register(tasksRoutes, { prefix: '/api/v1' });

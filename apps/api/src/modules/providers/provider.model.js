@@ -18,12 +18,15 @@ const leadRoutingSchema = new mongoose.Schema(
       default: 'sms_and_email',
     },
     notifyPhone: { type: String, default: '' },
+    notifyPhoneNormalized: { type: String, default: '', index: true },
     notifyEmail: { type: String, default: '' },
     preferredContactMethod: {
       type: String,
       enum: ['sms', 'email', 'phone'],
       default: 'sms',
     },
+    smsOptOut: { type: Boolean, default: false, index: true },
+    smsConsentAt: { type: Date, default: null },
   },
   { _id: false },
 );
@@ -63,6 +66,10 @@ const providerSchema = new mongoose.Schema(
     leadRouting: { type: leadRoutingSchema, default: {} },
     subscription: { type: providerSubscriptionSchema, default: {} },
     onboardingSource: { type: String, default: 'admin' },
+    outreachSource: { type: String, default: 'manual' },
+    invitedAt: { type: Date, default: null },
+    activatedAt: { type: Date, default: null },
+    firstLeadSentAt: { type: Date, default: null },
     internalNotes: { type: String, default: '' },
   },
   {

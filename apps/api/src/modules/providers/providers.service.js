@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 
+import { normalizePhoneNumber, notifyQueuedLeadDispatches } from '../marketplace-sms/marketplace-sms.service.js';
 import { ChecklistModel } from '../tasks/checklist.model.js';
 import { getPropertyById } from '../properties/property.service.js';
 import {
@@ -293,8 +294,8 @@ function filterProvidersForProperty(providers, property) {
 
     if (propertyZip && providerZips.includes(propertyZip)) return true;
     if (providerState && providerState === propertyState && providerCity && providerCity === propertyCity) return true;
-    if (providerState && providerState === propertyState && Number(provider.serviceArea?.radiusMiles || 0) >= 25) return true;
-    return false;
+  if (providerState && providerState === propertyState && Number(provider.serviceArea?.radiusMiles || 0) >= 25) return true;
+  return false;
   });
 }
 
@@ -441,6 +442,8 @@ export async function createProviderLeadRequest(propertyId, payload = {}) {
         leadFeeCents: 0,
       })),
     );
+
+    await notifyQueuedLeadDispatches(leadRequest._id);
   }
 
   return {
@@ -521,6 +524,9 @@ export async function createProviderProfile(payload = {}, { createdFrom = 'admin
   if (!businessName) throw new Error('Business name is required.');
 
   const slug = await generateUniqueProviderSlug(businessName);
+  const notifyPhone = normalizeString(payload.notifyPhone || payload.leadRouting?.notifyPhone || payload.phone).slice(0, 40);
+  const notifyPhoneNormalized = normalizePhoneNumber(notifyPhone);
+  const activatedAt = status === 'active' ? new Date() : null;
   const document = await ProviderModel.create({
     businessName,
     slug,
@@ -546,9 +552,14 @@ export async function createProviderProfile(payload = {}, { createdFrom = 'admin
     },
     leadRouting: {
       deliveryMode: payload.deliveryMode || payload.leadRouting?.deliveryMode || 'sms_and_email',
-      notifyPhone: normalizeString(payload.notifyPhone || payload.leadRouting?.notifyPhone || payload.phone).slice(0, 40),
+      notifyPhone,
+      notifyPhoneNormalized,
       notifyEmail: normalizeString(payload.notifyEmail || payload.leadRouting?.notifyEmail || payload.email).slice(0, 120),
       preferredContactMethod: payload.preferredContactMethod || payload.leadRouting?.preferredContactMethod || 'sms',
+      smsOptOut: Boolean(payload.smsOptOut),
+      smsConsentAt:
+        payload.smsConsentAt ||
+        (createdFrom === 'provider_portal' || notifyPhoneNormalized ? new Date() : null),
     },
     subscription: {
       planCode: payload.planCode || payload.subscription?.planCode || 'provider_basic',
@@ -558,6 +569,10 @@ export async function createProviderProfile(payload = {}, { createdFrom = 'admin
       stripePriceId: '',
     },
     onboardingSource: createdFrom,
+    outreachSource: normalizeString(payload.outreachSource).slice(0, 80) || 'manual',
+    invitedAt: payload.invitedAt || null,
+    activatedAt,
+    firstLeadSentAt: null,
     internalNotes: normalizeString(payload.internalNotes).slice(0, 600),
   });
 

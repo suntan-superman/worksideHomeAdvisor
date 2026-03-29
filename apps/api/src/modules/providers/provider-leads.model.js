@@ -66,16 +66,19 @@ const leadDispatchSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['queued', 'sent', 'accepted', 'declined', 'expired'],
+      enum: ['queued', 'sent', 'delivered', 'accepted', 'declined', 'expired', 'failed'],
       default: 'queued',
       index: true,
     },
     deliveryChannels: { type: [String], default: ['dashboard'] },
     sentAt: { type: Date, default: null },
+    smsSentAt: { type: Date, default: null },
+    smsMessageSid: { type: String, default: '' },
+    smsError: { type: String, default: '' },
     respondedAt: { type: Date, default: null },
     responseStatus: {
       type: String,
-      enum: ['accepted', 'declined', 'no_response', null],
+      enum: ['accepted', 'declined', 'help', 'opted_out', 'custom_reply', 'no_response', null],
       default: null,
     },
     leadFeeCents: { type: Number, default: 0 },
@@ -104,10 +107,11 @@ const providerResponseSchema = new mongoose.Schema(
     },
     responseStatus: {
       type: String,
-      enum: ['accepted', 'declined', 'no_response'],
+      enum: ['accepted', 'declined', 'help', 'opted_out', 'custom_reply', 'no_response'],
       required: true,
     },
     note: { type: String, default: '' },
+    rawBody: { type: String, default: '' },
   },
   {
     timestamps: true,
@@ -172,6 +176,46 @@ const providerAnalyticsSchema = new mongoose.Schema(
 
 providerAnalyticsSchema.index({ providerId: 1, monthKey: 1 }, { unique: true });
 
+const providerSmsLogSchema = new mongoose.Schema(
+  {
+    providerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Provider',
+      default: null,
+      index: true,
+    },
+    leadRequestId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'LeadRequest',
+      default: null,
+      index: true,
+    },
+    leadDispatchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'LeadDispatch',
+      default: null,
+      index: true,
+    },
+    direction: {
+      type: String,
+      enum: ['outbound', 'inbound'],
+      required: true,
+    },
+    messageType: { type: String, default: 'lead' },
+    fromPhone: { type: String, default: '' },
+    toPhone: { type: String, default: '' },
+    body: { type: String, default: '' },
+    twilioMessageSid: { type: String, default: '' },
+    deliveryStatus: { type: String, default: '' },
+    parseStatus: { type: String, default: '' },
+    metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+  },
+  {
+    timestamps: true,
+    collection: 'providerSmsLogs',
+  },
+);
+
 export const LeadRequestModel =
   mongoose.models.LeadRequest || mongoose.model('LeadRequest', leadRequestSchema);
 
@@ -188,3 +232,7 @@ export const SavedProviderModel =
 export const ProviderAnalyticsModel =
   mongoose.models.ProviderAnalytics ||
   mongoose.model('ProviderAnalytics', providerAnalyticsSchema);
+
+export const ProviderSmsLogModel =
+  mongoose.models.ProviderSmsLog ||
+  mongoose.model('ProviderSmsLog', providerSmsLogSchema);
