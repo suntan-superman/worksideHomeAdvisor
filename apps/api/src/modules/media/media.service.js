@@ -46,6 +46,11 @@ function serializeMediaAsset(document, selectedVariant = null) {
           imageUrl:
             selectedVariant.imageUrl ||
             buildMediaVariantUrl(selectedVariant._id?.toString?.() || selectedVariant.id),
+          lifecycleState:
+            selectedVariant.lifecycleState ||
+            (selectedVariant.isSelected ? 'selected' : 'temporary'),
+          expiresAt: selectedVariant.expiresAt || null,
+          selectedAt: selectedVariant.selectedAt || null,
           useInBrochure: Boolean(selectedVariant.useInBrochure),
           useInReport: Boolean(selectedVariant.useInReport),
           metadata: selectedVariant.metadata || {},

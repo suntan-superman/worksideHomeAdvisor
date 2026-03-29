@@ -45,6 +45,21 @@ const mediaVariantSchema = new mongoose.Schema(
     storageKey: { type: String, required: true },
     byteSize: { type: Number },
     isSelected: { type: Boolean, default: false },
+    lifecycleState: {
+      type: String,
+      enum: ['temporary', 'selected'],
+      default: 'temporary',
+      index: true,
+    },
+    expiresAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    selectedAt: {
+      type: Date,
+      default: null,
+    },
     useInBrochure: { type: Boolean, default: false },
     useInReport: { type: Boolean, default: false },
     metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
@@ -56,6 +71,7 @@ const mediaVariantSchema = new mongoose.Schema(
 );
 
 mediaVariantSchema.index({ mediaId: 1, createdAt: -1 });
+mediaVariantSchema.index({ isSelected: 1, expiresAt: 1, createdAt: 1 });
 
 export const MediaVariantModel =
   mongoose.models.MediaVariant || mongoose.model('MediaVariant', mediaVariantSchema);

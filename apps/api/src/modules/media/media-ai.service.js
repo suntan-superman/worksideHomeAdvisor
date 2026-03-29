@@ -9,6 +9,10 @@ import { ImageJobModel } from './image-job.model.js';
 import { MediaAssetModel } from './media.model.js';
 import { MediaVariantModel } from './media-variant.model.js';
 import { runReplicateInpainting } from './replicate-provider.service.js';
+import {
+  buildActiveVariantQuery,
+  buildVariantLifecycleFields,
+} from './variant-lifecycle.service.js';
 import { listVisionPresets, resolveVisionPreset } from './vision-presets.js';
 
 const CACHE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -80,6 +84,9 @@ export function serializeMediaVariant(document) {
     storageKey: document.storageKey || null,
     byteSize: document.byteSize || null,
     isSelected: Boolean(document.isSelected),
+    lifecycleState: document.lifecycleState || (document.isSelected ? 'selected' : 'temporary'),
+    expiresAt: document.expiresAt || null,
+    selectedAt: document.selectedAt || null,
     useInBrochure: Boolean(document.useInBrochure),
     useInReport: Boolean(document.useInReport),
     metadata: document.metadata || {},
@@ -570,7 +577,12 @@ async function loadJobVariants(jobId) {
     return [];
   }
 
-  const variants = await MediaVariantModel.find({ visionJobId: jobId }).sort({ createdAt: -1 }).lean();
+  const variants = await MediaVariantModel.find({
+    visionJobId: jobId,
+    ...buildActiveVariantQuery(),
+  })
+    .sort({ createdAt: -1 })
+    .lean();
   return sortVisionVariants(variants.map(serializeMediaVariant));
 }
 
@@ -584,6 +596,7 @@ export async function listMediaVariants(assetId) {
   }
 
   const variants = await MediaVariantModel.find({ mediaId: assetId })
+    .find(buildActiveVariantQuery())
     .sort({ createdAt: -1 })
     .lean();
   return sortVisionVariants(variants.map(serializeMediaVariant));
@@ -638,16 +651,18 @@ export async function createImageEnhancementJob({
 
   if (cachedJob) {
     const cachedVariants = await loadJobVariants(cachedJob._id);
-    return {
-      cached: true,
-      preset,
-      job: {
-        ...serializeImageJob(cachedJob, cachedVariants),
-        message: cachedJob.message || 'Returning cached vision output.',
-      },
-      variants: cachedVariants,
-      variant: cachedVariants[0] || null,
-    };
+    if (cachedVariants.length) {
+      return {
+        cached: true,
+        preset,
+        job: {
+          ...serializeImageJob(cachedJob, cachedVariants),
+          message: cachedJob.message || 'Returning cached vision output.',
+        },
+        variants: cachedVariants,
+        variant: cachedVariants[0] || null,
+      };
+    }
   }
 
   const job = await ImageJobModel.create({
@@ -742,6 +757,7 @@ export async function createImageEnhancementJob({
             storageKey: saved.storageKey,
             byteSize: saved.byteSize,
             isSelected: false,
+            ...buildVariantLifecycleFields({ isSelected: false }),
             useInBrochure: false,
             useInReport: false,
             metadata: {
@@ -802,6 +818,7 @@ export async function createImageEnhancementJob({
         storageKey: saved.storageKey,
         byteSize: saved.byteSize,
         isSelected: false,
+        ...buildVariantLifecycleFields({ isSelected: false }),
         useInBrochure: false,
         useInReport: false,
         metadata: {
@@ -865,8 +882,19 @@ export async function selectMediaVariant(assetId, variantId) {
     throw new Error('Media variant not found.');
   }
 
-  await MediaVariantModel.updateMany({ mediaId: assetId }, { $set: { isSelected: false } });
+  await MediaVariantModel.updateMany(
+    { mediaId: assetId },
+    {
+      $set: {
+        isSelected: false,
+        ...buildVariantLifecycleFields({ isSelected: false }),
+      },
+    },
+  );
   variant.isSelected = true;
+  variant.lifecycleState = 'selected';
+  variant.expiresAt = null;
+  variant.selectedAt = new Date();
   await variant.save();
 
   if (variant.visionJobId) {
@@ -905,6 +933,9 @@ export async function getMediaVariantById(variantId) {
     return null;
   }
 
-  const variant = await MediaVariantModel.findById(variantId).lean();
+  const variant = await MediaVariantModel.findOne({
+    _id: variantId,
+    ...buildActiveVariantQuery(),
+  }).lean();
   return serializeMediaVariant(variant);
 }

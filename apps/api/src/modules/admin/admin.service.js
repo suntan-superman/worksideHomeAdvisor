@@ -5,6 +5,12 @@ import { BillingSubscriptionModel } from '../billing/billing.model.js';
 import { UserModel } from '../auth/auth.model.js';
 import { FlyerModel } from '../documents/flyer.model.js';
 import { MediaAssetModel } from '../media/media.model.js';
+import { MediaVariantModel } from '../media/media-variant.model.js';
+import {
+  buildExpiredVariantQuery,
+  cleanupExpiredMediaVariants,
+  getTemporaryVariantTtlMs,
+} from '../media/variant-lifecycle.service.js';
 import { PricingAnalysisModel } from '../pricing/pricing.model.js';
 import { PropertyModel } from '../properties/property.model.js';
 import { AnalysisLockModel } from '../usage/analysis-lock.model.js';
@@ -343,6 +349,89 @@ export async function getAdminUsageSnapshot() {
   };
 }
 
+export async function getAdminMediaVariantSnapshot() {
+  if (mongoose.connection.readyState !== 1) {
+    return {
+      dataSource: 'demo',
+      summary: {
+        totalVariants: 0,
+        selectedPersistent: 0,
+        temporaryVariants: 0,
+        expiringSoon: 0,
+        cleanupEligible: 0,
+        ttlHours: Math.round(getTemporaryVariantTtlMs() / (60 * 60 * 1000)),
+      },
+      recentVariants: [],
+    };
+  }
+
+  const now = new Date();
+  const expiringSoonCutoff = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const [
+    totalVariants,
+    selectedPersistent,
+    temporaryVariants,
+    expiringSoon,
+    cleanupEligible,
+    recentVariants,
+  ] = await Promise.all([
+    MediaVariantModel.countDocuments({}),
+    MediaVariantModel.countDocuments({ isSelected: true }),
+    MediaVariantModel.countDocuments({ isSelected: false }),
+    MediaVariantModel.countDocuments({
+      isSelected: false,
+      expiresAt: { $ne: null, $lte: expiringSoonCutoff, $gt: now },
+    }),
+    MediaVariantModel.countDocuments(buildExpiredVariantQuery(now)),
+    MediaVariantModel.find({})
+      .sort({ createdAt: -1 })
+      .limit(12)
+      .lean(),
+  ]);
+
+  const mediaIds = [
+    ...new Set(recentVariants.map((variant) => variant.mediaId?.toString?.() || String(variant.mediaId))),
+  ];
+  const mediaAssets = mediaIds.length
+    ? await MediaAssetModel.find({ _id: { $in: mediaIds } }).lean()
+    : [];
+  const mediaById = new Map(
+    mediaAssets.map((asset) => [asset._id?.toString?.() || String(asset._id), asset]),
+  );
+
+  return {
+    dataSource: 'mongodb',
+    summary: {
+      totalVariants,
+      selectedPersistent,
+      temporaryVariants,
+      expiringSoon,
+      cleanupEligible,
+      ttlHours: Math.round(getTemporaryVariantTtlMs() / (60 * 60 * 1000)),
+    },
+    recentVariants: recentVariants.map((variant) => {
+      const mediaId = variant.mediaId?.toString?.() || String(variant.mediaId);
+      const mediaAsset = mediaById.get(mediaId);
+
+      return {
+        id: variant._id?.toString?.() || String(variant._id),
+        mediaId,
+        propertyId: variant.propertyId?.toString?.() || String(variant.propertyId),
+        roomLabel: mediaAsset?.roomLabel || 'Unknown room',
+        label: variant.label,
+        variantType: variant.variantType,
+        variantCategory: variant.variantCategory || 'enhancement',
+        isSelected: Boolean(variant.isSelected),
+        lifecycleState: variant.lifecycleState || (variant.isSelected ? 'selected' : 'temporary'),
+        expiresAt: variant.expiresAt || null,
+        selectedAt: variant.selectedAt || null,
+        createdAt: variant.createdAt || null,
+        overallScore: Number(variant.metadata?.review?.overallScore || 0),
+      };
+    }),
+  };
+}
+
 export async function getAdminWorkerSnapshot() {
   const workers = await Promise.all(DEFAULT_WORKER_ENDPOINTS.map((worker) => probeWorker(worker)));
 
@@ -350,4 +439,8 @@ export async function getAdminWorkerSnapshot() {
     generatedAt: new Date().toISOString(),
     workers,
   };
+}
+
+export async function runAdminMediaVariantCleanup() {
+  return cleanupExpiredMediaVariants();
 }

@@ -3,20 +3,27 @@ import { BRANDING } from '@workside/branding';
 import { AdminSection } from './_components/AdminSection';
 import { MetricCard } from './_components/MetricCard';
 import { StatusBadge } from './_components/StatusBadge';
-import { getAdminBilling, getAdminOverview, getAdminWorkers } from '../lib/admin-api';
+import {
+  getAdminBilling,
+  getAdminMediaVariants,
+  getAdminOverview,
+  getAdminWorkers,
+} from '../lib/admin-api';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminHomePage() {
-  const [overview, billing, workersPayload] = await Promise.all([
+  const [overview, billing, workersPayload, mediaPayload] = await Promise.all([
     getAdminOverview(),
     getAdminBilling(),
     getAdminWorkers(),
+    getAdminMediaVariants(),
   ]);
 
   const metrics = overview.metrics || {};
   const workers = workersPayload.workers || [];
   const onlineWorkers = workers.filter((worker) => worker.status === 'online').length;
+  const mediaSummary = mediaPayload.summary || {};
 
   return (
     <AdminSection
@@ -34,6 +41,7 @@ export default async function AdminHomePage() {
         <MetricCard label="Active Subscriptions" value={metrics.activeSubscriptions || 0} note={`${billing.plans?.filter((plan) => plan.configured).length || 0} configured plans`} />
         <MetricCard label="Usage Records" value={metrics.usageRecords || 0} note={`${metrics.recentRateLimitEvents || 0} recent rate-limit events`} />
         <MetricCard label="Workers Online" value={`${onlineWorkers}/${workers.length || 0}`} note="Health probes from the admin API" />
+        <MetricCard label="Vision Variants" value={mediaSummary.totalVariants || 0} note={`${mediaSummary.selectedPersistent || 0} persistent • ${mediaSummary.cleanupEligible || 0} cleanup eligible`} />
       </div>
 
       <div className="split-layout">
@@ -44,6 +52,7 @@ export default async function AdminHomePage() {
             <li>Users and property inventory inspection.</li>
             <li>Billing plan catalog and recent subscription sync.</li>
             <li>Usage safeguards and worker health visibility.</li>
+            <li>Vision variant lifecycle monitoring and cleanup controls.</li>
           </ul>
         </div>
 

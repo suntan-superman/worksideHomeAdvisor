@@ -1,5 +1,6 @@
 import './globals.css';
 import Link from 'next/link';
+import { LogoutButton } from './_components/LogoutButton';
 
 export const metadata = {
   title: 'Workside Admin',
@@ -35,6 +36,7 @@ export default function RootLayout({ children }) {
                 </Link>
               ))}
             </nav>
+            <LogoutButton />
           </aside>
           <main className="admin-main">{children}</main>
         </div>

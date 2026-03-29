@@ -2,18 +2,30 @@ import { z } from 'zod';
 
 import {
   getAdminBillingSnapshot,
+  getAdminMediaVariantSnapshot,
   getAdminOverview,
   getAdminUsageSnapshot,
   getAdminWorkerSnapshot,
   listAdminProperties,
   listAdminUsers,
+  runAdminMediaVariantCleanup,
 } from './admin.service.js';
+import { requireAdminSession } from './admin-session.service.js';
 
 const listQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).optional(),
 });
 
 export async function adminRoutes(fastify) {
+  fastify.addHook('preHandler', async (request, reply) => {
+    try {
+      const adminContext = await requireAdminSession(request);
+      request.adminContext = adminContext;
+    } catch (error) {
+      return reply.code(error.statusCode || 401).send({ message: error.message });
+    }
+  });
+
   fastify.get('/overview', async (_request, reply) => {
     try {
       return reply.send(await getAdminOverview());
@@ -59,6 +71,22 @@ export async function adminRoutes(fastify) {
   fastify.get('/workers', async (_request, reply) => {
     try {
       return reply.send(await getAdminWorkerSnapshot());
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/media/variants', async (_request, reply) => {
+    try {
+      return reply.send(await getAdminMediaVariantSnapshot());
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/media/cleanup-variants', async (_request, reply) => {
+    try {
+      return reply.send(await runAdminMediaVariantCleanup());
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }

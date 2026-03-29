@@ -57,6 +57,9 @@ const envSchema = z.object({
   GCS_PROJECT_ID: z.string().optional(),
   GCS_BUCKET_NAME: z.string().optional(),
   GCS_UPLOAD_PREFIX: z.string().default('media-assets'),
+  MEDIA_VARIANT_TTL_HOURS: z.coerce.number().default(72),
+  MEDIA_VARIANT_CLEANUP_INTERVAL_MINUTES: z.coerce.number().default(60),
+  MEDIA_VARIANT_CLEANUP_BATCH_SIZE: z.coerce.number().default(50),
 });
 
 export const env = envSchema.parse({
