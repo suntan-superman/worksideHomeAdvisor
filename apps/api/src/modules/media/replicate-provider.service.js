@@ -19,23 +19,29 @@ function getReplicateClient() {
 }
 
 export async function runReplicateInpainting({
-  imageUrl,
+  image,
+  mask,
   model = 'lucataco/sdxl-inpainting:latest',
   prompt,
   strength = 0.75,
   outputCount = 2,
   guidanceScale = 7.5,
   numInferenceSteps = 35,
+  scheduler = 'K_EULER',
+  negativePrompt = 'monochrome, lowres, bad anatomy, worst quality, low quality',
 }) {
   const replicate = getReplicateClient();
   const output = await replicate.run(model, {
     input: {
-      image: imageUrl,
+      image,
+      mask,
       prompt,
       num_outputs: outputCount,
       guidance_scale: guidanceScale,
-      num_inference_steps: numInferenceSteps,
+      steps: numInferenceSteps,
       strength,
+      scheduler,
+      negative_prompt: negativePrompt,
     },
   });
 

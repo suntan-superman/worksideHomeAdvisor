@@ -1,3 +1,5 @@
+import sharp from 'sharp';
+
 import { generateStructuredJson, isOpenAiConfigured } from './openaiClient.js';
 
 const photoAnalysisResponseSchema = {
@@ -29,6 +31,31 @@ const photoAnalysisResponseSchema = {
     'retakeRecommended',
     'summary',
     'disclaimer',
+  ],
+  additionalProperties: false,
+};
+
+const visionVariantReviewSchema = {
+  type: 'object',
+  properties: {
+    structuralIntegrityScore: { type: 'number' },
+    artifactScore: { type: 'number' },
+    listingAppealScore: { type: 'number' },
+    issues: { type: 'array', items: { type: 'string' } },
+    strengths: { type: 'array', items: { type: 'string' } },
+    summary: { type: 'string' },
+    suggestedAction: { type: 'string' },
+    shouldHideByDefault: { type: 'boolean' },
+  },
+  required: [
+    'structuralIntegrityScore',
+    'artifactScore',
+    'listingAppealScore',
+    'issues',
+    'strengths',
+    'summary',
+    'suggestedAction',
+    'shouldHideByDefault',
   ],
   additionalProperties: false,
 };
@@ -142,6 +169,155 @@ export async function analyzePropertyPhoto({
       source: 'openai',
     };
   } catch (error) {
+    return {
+      ...fallback,
+      warning: error.message,
+    };
+  }
+}
+
+function clampScore(value) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+async function buildFallbackVisionVariantReview({
+  variantImageBase64,
+  sourceImageBase64,
+  presetKey,
+  variantCategory,
+}) {
+  const variantBuffer = Buffer.from(variantImageBase64, 'base64');
+  const sourceBuffer = sourceImageBase64 ? Buffer.from(sourceImageBase64, 'base64') : null;
+  const variantStats = await sharp(variantBuffer).rotate().stats();
+  const sourceStats = sourceBuffer ? await sharp(sourceBuffer).rotate().stats() : null;
+  const brightness =
+    variantStats.channels.slice(0, 3).reduce((sum, channel) => sum + Number(channel.mean || 0), 0) / 3;
+  const contrast =
+    variantStats.channels.slice(0, 3).reduce((sum, channel) => sum + Number(channel.stdev || 0), 0) / 3;
+  const sourceBrightness = sourceStats
+    ? sourceStats.channels.slice(0, 3).reduce((sum, channel) => sum + Number(channel.mean || 0), 0) / 3
+    : brightness;
+  const brightnessShift = Math.abs(brightness - sourceBrightness);
+
+  const structuralIntegrityScore = clampScore(
+    84 - brightnessShift * 0.32 - (presetKey === 'remove_furniture' ? 6 : 0),
+  );
+  const artifactScore = clampScore(
+    82 - brightnessShift * 0.28 - (contrast < 28 ? 12 : 0),
+  );
+  const listingAppealScore = clampScore(
+    62 + (brightness > 90 && brightness < 180 ? 10 : 0) + (contrast > 32 ? 8 : 0) + (presetKey === 'declutter_medium' ? 4 : 0),
+  );
+  const shouldHideByDefault =
+    structuralIntegrityScore < 62 || artifactScore < 58 || listingAppealScore < 60;
+
+  return {
+    structuralIntegrityScore,
+    artifactScore,
+    listingAppealScore,
+    issues: shouldHideByDefault
+      ? ['Potential realism or artifact risk detected in this generated variant.']
+      : ['Automated fallback review is limited without AI vision scoring.'],
+    strengths:
+      variantCategory === 'concept_preview'
+        ? ['Useful as a planning-oriented concept preview when paired with the original image.']
+        : ['Appears suitable for seller-facing review and possible material selection.'],
+    summary: shouldHideByDefault
+      ? 'Fallback review suggests this variant may have visible realism or artifact issues.'
+      : 'Fallback review suggests this variant is credible enough for seller-facing review.',
+    suggestedAction:
+      variantCategory === 'concept_preview'
+        ? 'Use this as a before/after planning aid rather than a direct replacement listing photo.'
+        : 'Review this against the original and use it only if it remains truthful to the room.',
+    shouldHideByDefault,
+  };
+}
+
+export async function reviewVisionVariant({
+  property,
+  roomLabel,
+  presetKey,
+  variantCategory,
+  mimeType,
+  sourceImageBase64,
+  variantImageBase64,
+}) {
+  if (!isOpenAiConfigured()) {
+    return buildFallbackVisionVariantReview({
+      variantImageBase64,
+      sourceImageBase64,
+      presetKey,
+      variantCategory,
+    });
+  }
+
+  try {
+    const result = await generateStructuredJson({
+      schemaName: 'vision_variant_review',
+      schema: visionVariantReviewSchema,
+      systemPrompt:
+        'You are Workside Home Seller Assistant reviewing an AI-generated real-estate image variant. Score the variant for structural realism, artifact severity, and listing appeal. Be strict about warped walls, distorted windows, broken edges, unrealistic shadows, smeared furniture remnants, or flooring distortions.',
+      userPrompt: JSON.stringify(
+        {
+          property: {
+            title: property?.title,
+            city: property?.city,
+            state: property?.state,
+          },
+          roomLabel,
+          presetKey,
+          variantCategory,
+          instructions:
+            'Compare the original photo and generated variant. Return strict JSON with quality scoring and whether the variant should be hidden by default.',
+        },
+        null,
+        2,
+      ),
+      inputContent: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: JSON.stringify(
+                {
+                  roomLabel,
+                  presetKey,
+                  variantCategory,
+                  task:
+                    'Review this generated real-estate image variant for structural realism, artifact severity, and seller-facing listing appeal.',
+                },
+                null,
+                2,
+              ),
+            },
+            {
+              type: 'input_image',
+              image_url: `data:${mimeType};base64,${sourceImageBase64}`,
+            },
+            {
+              type: 'input_image',
+              image_url: `data:${mimeType};base64,${variantImageBase64}`,
+            },
+          ],
+        },
+      ],
+    });
+
+    return {
+      ...result,
+      structuralIntegrityScore: clampScore(result.structuralIntegrityScore),
+      artifactScore: clampScore(result.artifactScore),
+      listingAppealScore: clampScore(result.listingAppealScore),
+      source: 'openai',
+    };
+  } catch (error) {
+    const fallback = await buildFallbackVisionVariantReview({
+      variantImageBase64,
+      sourceImageBase64,
+      presetKey,
+      variantCategory,
+    });
     return {
       ...fallback,
       warning: error.message,

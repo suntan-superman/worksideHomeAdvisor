@@ -48,6 +48,7 @@ const REPORT_SECTION_OPTIONS = [
   { id: 'pricing_analysis', label: 'Pricing Analysis' },
   { id: 'comparable_properties', label: 'Comparable Properties' },
   { id: 'photo_review', label: 'Photo Review Summary' },
+  { id: 'visual_improvement_previews', label: 'Visual Improvement Previews' },
   { id: 'readiness_score', label: 'Readiness Score' },
   { id: 'improvement_recommendations', label: 'Improvement Recommendations' },
   { id: 'seller_checklist', label: 'Seller Checklist' },
@@ -113,6 +114,18 @@ function getVariantSummary(variant) {
   );
 }
 
+function getVariantDisclaimer(variant) {
+  if (variant?.metadata?.disclaimerType === 'concept_preview') {
+    return 'AI visualizations are conceptual previews only. Actual condition, remodel results, and value impact may vary.';
+  }
+
+  return 'Enhanced images should stay truthful to the room and be reviewed before use in final marketing materials.';
+}
+
+function getVariantReviewScore(variant) {
+  return Number(variant?.metadata?.review?.overallScore || 0);
+}
+
 export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const flyerPreviewRef = useRef(null);
   const visionCompareRef = useRef(null);
@@ -146,6 +159,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [listingNoteDraft, setListingNoteDraft] = useState('');
   const [customChecklistTitle, setCustomChecklistTitle] = useState('');
   const [customChecklistDetail, setCustomChecklistDetail] = useState('');
+  const [showMoreVisionVariants, setShowMoreVisionVariants] = useState(false);
   const [status, setStatus] = useState('Loading property workspace...');
   const [toast, setToast] = useState(null);
 
@@ -169,6 +183,33 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       mediaVariants[0] ||
       null,
     [mediaVariants, selectedVariantId],
+  );
+  const topRankedVariant = useMemo(
+    () => mediaVariants.find((variant) => !variant?.metadata?.review?.shouldHideByDefault) || mediaVariants[0] || null,
+    [mediaVariants],
+  );
+  const visibleVisionVariants = useMemo(() => {
+    if (showMoreVisionVariants) {
+      return mediaVariants;
+    }
+
+    const preferredVariants = mediaVariants.filter(
+      (variant) => !variant?.metadata?.review?.shouldHideByDefault,
+    );
+    const defaultVariants = (preferredVariants.length ? preferredVariants : mediaVariants).slice(0, 2);
+    if (
+      selectedVariant &&
+      !defaultVariants.some((variant) => variant.id === selectedVariant.id)
+    ) {
+      return [...defaultVariants, selectedVariant];
+    }
+
+    return defaultVariants;
+  }, [mediaVariants, selectedVariant, showMoreVisionVariants]);
+  const hiddenVisionVariantCount = useMemo(
+    () =>
+      mediaVariants.filter((variant) => variant?.metadata?.review?.shouldHideByDefault).length,
+    [mediaVariants],
   );
   const groupedVisionPresets = useMemo(() => {
     const presetByKey = new Map(visionPresets.map((preset) => [preset.key, preset]));
@@ -264,6 +305,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   useEffect(() => {
     setActiveTab('overview');
   }, [propertyId]);
+
+  useEffect(() => {
+    setShowMoreVisionVariants(false);
+  }, [selectedMediaAsset?.id]);
 
   useEffect(() => {
     const fallbackPhotoIds = brochurePhotoPool.slice(0, 4).map((asset) => asset.id);
@@ -1002,6 +1047,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </div>
             ) : null}
             {selectedVariant?.metadata?.differenceHint ? <p className="property-media-variant-hint">{selectedVariant.metadata.differenceHint}</p> : null}
+            {selectedVariant?.metadata?.review?.shouldHideByDefault ? (
+              <div className="property-media-review-note">
+                <strong>Needs extra review</strong>
+                <p>{selectedVariant.metadata.review.summary || 'This output ranked lower due to realism or artifact risk.'}</p>
+              </div>
+            ) : null}
+            {selectedVariant ? <p className="workspace-control-note">{getVariantDisclaimer(selectedVariant)}</p> : null}
             {selectedVariant ? (
               <div className="mini-stats">
                 <div className="stat-card">
@@ -1011,6 +1063,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 <div className="stat-card">
                   <strong>Category</strong>
                   <span>{selectedVariant.variantCategory === 'concept_preview' ? 'Concept Preview' : 'Enhancement'}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Quality review</strong>
+                  <span>{getVariantReviewScore(selectedVariant) ? `${getVariantReviewScore(selectedVariant)}/100` : 'Pending'}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Structural realism</strong>
+                  <span>{selectedVariant.metadata?.review?.structuralIntegrityScore ? `${selectedVariant.metadata.review.structuralIntegrityScore}/100` : 'Pending'}</span>
                 </div>
                 <div className="stat-card">
                   <strong>Recommended use</strong>
@@ -1097,6 +1157,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   />
                   <div className="property-media-variant-selected-copy">
                     <strong>{selectedVariant.label}</strong>
+                    <div className="tag-row">
+                      {selectedVariant.id === topRankedVariant?.id ? <span>Best candidate</span> : null}
+                      {getVariantReviewScore(selectedVariant) ? <span>{getVariantReviewScore(selectedVariant)}/100 reviewed</span> : null}
+                      {selectedVariant.metadata?.review?.shouldHideByDefault ? <span>Lower confidence</span> : null}
+                    </div>
                     <span>
                       {selectedVariant.isSelected
                         ? 'Currently selected for flyer and report materials'
@@ -1107,18 +1172,40 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         ? 'Concept preview'
                         : 'Listing enhancement'}
                     </span>
+                    {selectedVariant.metadata?.review?.summary ? (
+                      <span>{selectedVariant.metadata.review.summary}</span>
+                    ) : null}
                   </div>
                 </div>
               ) : null}
               <div className="property-media-variant-list">
-                {mediaVariants.map((variant) => (
+                {visibleVisionVariants.map((variant) => (
                   <button key={variant.id} type="button" className={variant.id === selectedVariant?.id ? 'property-media-variant-chip active' : 'property-media-variant-chip'} onClick={() => setSelectedVariantId(variant.id)}>
                     {variant.label}
                     {variant.isSelected ? ' · Preferred' : ''}
+                    {getVariantReviewScore(variant) ? ` · ${getVariantReviewScore(variant)}/100` : ''}
                   </button>
                 ))}
               </div>
+              {mediaVariants.length > visibleVisionVariants.length ? (
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => setShowMoreVisionVariants((current) => !current)}
+                >
+                  {showMoreVisionVariants
+                    ? 'Show top-ranked variants only'
+                    : hiddenVisionVariantCount
+                      ? `Show more variants (${hiddenVisionVariantCount} lower-confidence hidden)`
+                      : 'Show more variants'}
+                </button>
+              ) : null}
               {selectedVariant?.metadata?.warning ? <p>{selectedVariant.metadata.warning}</p> : null}
+              {selectedVariant?.metadata?.review?.suggestedAction ? (
+                <p className="workspace-control-note">
+                  <strong>Suggested action:</strong> {selectedVariant.metadata.review.suggestedAction}
+                </p>
+              ) : null}
               {selectedVariant ? (
                 <div className="workspace-action-column">
                   <button type="button" className="button-secondary" onClick={() => handleSelectVariant(selectedVariant.id)} disabled={Boolean(status) || selectedVariant.isSelected}>
@@ -1470,6 +1557,38 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         {photo.usesPreferredVariant ? <strong className="flyer-photo-badge flyer-photo-badge-vision">{getPreferredVariantLabel(photo)}</strong> : null}
                       </div>
                     </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {(latestReport.payload?.visionStoryBlocks || []).length ? (
+              <div className="report-preview-section">
+                <strong>Visual improvement previews</strong>
+                <div className="vision-story-grid">
+                  {(latestReport.payload?.visionStoryBlocks || []).slice(0, 3).map((story) => (
+                    <article key={`vision-story-${story.variantId || story.title}`} className="vision-story-card">
+                      <div className="vision-story-images">
+                        {story.originalImageUrl ? (
+                          <div>
+                            <span className="label">Before</span>
+                            <img src={story.originalImageUrl} alt={`${story.title || 'Vision preview'} before`} />
+                          </div>
+                        ) : null}
+                        {story.variantImageUrl ? (
+                          <div>
+                            <span className="label">After</span>
+                            <img src={story.variantImageUrl} alt={story.title || 'Vision preview'} />
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="workspace-tab-stack">
+                        <strong>{story.title}</strong>
+                        <p><strong>What changed:</strong> {story.whatChanged}</p>
+                        <p><strong>Why it matters:</strong> {story.whyItMatters}</p>
+                        <p><strong>Suggested action:</strong> {story.suggestedAction}</p>
+                        <p className="workspace-control-note">{story.disclaimer}</p>
+                      </div>
+                    </article>
                   ))}
                 </div>
               </div>

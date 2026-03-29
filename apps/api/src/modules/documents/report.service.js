@@ -4,6 +4,7 @@ import { formatCurrency } from '@workside/utils';
 
 import { generateImprovementInsights, generateMarketingInsights } from '../../services/aiWorkflowService.js';
 import { buildMediaVariantUrl } from '../../services/storageService.js';
+import { buildVariantStoryBlock } from '../media/media-ai.service.js';
 import { listMediaAssets } from '../media/media.service.js';
 import { MediaVariantModel } from '../media/media-variant.model.js';
 import { getLatestPricingAnalysis } from '../pricing/pricing.service.js';
@@ -18,6 +19,7 @@ const REPORT_SECTION_LABELS = {
   pricing_analysis: 'Pricing Analysis',
   comparable_properties: 'Comparable Properties',
   photo_review: 'Photo Review Summary',
+  visual_improvement_previews: 'Visual Improvement Previews',
   readiness_score: 'Listing Readiness Score',
   improvement_recommendations: 'Improvement Recommendations',
   seller_checklist: 'Seller Checklist',
@@ -280,6 +282,57 @@ function buildExecutiveSummary({ property, pricing, photoSummary, checklist, rea
   ].join(' ');
 }
 
+function buildVisionStoryBlocks({
+  mediaAssets,
+  selectedPhotos,
+  reportVariantByAssetId,
+}) {
+  const assetById = new Map((mediaAssets || []).map((asset) => [asset.id, asset]));
+  const selectedPhotoIds = new Set((selectedPhotos || []).map((photo) => photo.assetId).filter(Boolean));
+  const variantPool = [];
+  const seenVariantIds = new Set();
+
+  for (const [assetId, variant] of reportVariantByAssetId.entries()) {
+    if (!variant?.id || seenVariantIds.has(variant.id)) {
+      continue;
+    }
+    seenVariantIds.add(variant.id);
+    variantPool.push({
+      asset: assetById.get(assetId) || null,
+      variant,
+      selected: selectedPhotoIds.has(assetId),
+    });
+  }
+
+  for (const asset of mediaAssets || []) {
+    if (!asset?.selectedVariant?.id || seenVariantIds.has(asset.selectedVariant.id)) {
+      continue;
+    }
+
+    seenVariantIds.add(asset.selectedVariant.id);
+    variantPool.push({
+      asset,
+      variant: asset.selectedVariant,
+      selected: selectedPhotoIds.has(asset.id),
+    });
+  }
+
+  return variantPool
+    .sort((left, right) => {
+      if (Boolean(left.selected) !== Boolean(right.selected)) {
+        return left.selected ? -1 : 1;
+      }
+      if (left.variant?.variantCategory !== right.variant?.variantCategory) {
+        return left.variant?.variantCategory === 'concept_preview' ? -1 : 1;
+      }
+      const leftScore = Number(left.variant?.metadata?.review?.overallScore || 0);
+      const rightScore = Number(right.variant?.metadata?.review?.overallScore || 0);
+      return rightScore - leftScore;
+    })
+    .slice(0, 3)
+    .map(({ asset, variant }) => buildVariantStoryBlock({ asset, variant }));
+}
+
 function buildReportPayload({
   property,
   pricing,
@@ -335,6 +388,13 @@ function buildReportPayload({
   const sectionOutline = customizations.includedSections.map(
     (sectionId) => REPORT_SECTION_LABELS[sectionId],
   );
+  const visionStoryBlocks = includedSectionSet.has('visual_improvement_previews')
+    ? buildVisionStoryBlocks({
+        mediaAssets,
+        selectedPhotos,
+        reportVariantByAssetId,
+      })
+    : [];
 
   return {
     reportType: 'seller_intelligence_report',
@@ -396,6 +456,7 @@ function buildReportPayload({
         : null,
       nextTask: includedSectionSet.has('seller_checklist') ? checklist?.nextTask || null : null,
       photoSummary: includedSectionSet.has('photo_review') ? photoSummary : null,
+      visionStoryBlocks,
       readinessSummary: includedSectionSet.has('readiness_score')
         ? readinessSummary
         : null,
@@ -698,6 +759,8 @@ export async function exportPropertyReportPdf({ propertyId }) {
   const pdfDoc = await PDFDocument.create();
   const coverPage = pdfDoc.addPage([612, 792]);
   const detailPage = pdfDoc.addPage([612, 792]);
+  const visionStoryBlocks = report.payload?.visionStoryBlocks || [];
+  const visionPage = visionStoryBlocks.length ? pdfDoc.addPage([612, 792]) : null;
   const headingFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const bodyFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const colors = {
@@ -715,7 +778,7 @@ export async function exportPropertyReportPdf({ propertyId }) {
   const readinessSummary = report.payload?.readinessSummary || {};
   const photoSummary = report.payload?.photoSummary || {};
 
-  for (const page of [coverPage, detailPage]) {
+  for (const page of [coverPage, detailPage, visionPage].filter(Boolean)) {
     page.drawRectangle({
       x: 30,
       y: 30,
@@ -938,6 +1001,110 @@ export async function exportPropertyReportPdf({ propertyId }) {
     maxChars: 94,
     lineHeight: 12,
   });
+
+  if (visionPage) {
+    visionPage.drawText('VISUAL IMPROVEMENT PREVIEWS', {
+      x: 54,
+      y: 732,
+      size: 12,
+      font: headingFont,
+      color: colors.moss,
+    });
+
+    let storyCursor = 696;
+    for (const storyBlock of visionStoryBlocks.slice(0, 2)) {
+      const embeddedOriginal = await fetchPdfImage(pdfDoc, storyBlock.originalImageUrl);
+      const embeddedVariant = await fetchPdfImage(pdfDoc, storyBlock.variantImageUrl);
+      visionPage.drawText(storyBlock.title || 'Visual Preview', {
+        x: 54,
+        y: storyCursor,
+        size: 14,
+        font: headingFont,
+        color: colors.ink,
+      });
+
+      const imageTop = storyCursor - 22;
+      const imageFrame = { width: 120, height: 92 };
+      const drawImageInFrame = (embeddedImage, x, y) => {
+        visionPage.drawRectangle({
+          x,
+          y,
+          width: imageFrame.width,
+          height: imageFrame.height,
+          color: rgb(1, 1, 1),
+          borderColor: colors.line,
+          borderWidth: 1,
+        });
+
+        if (!embeddedImage) {
+          return;
+        }
+
+        const dims = embeddedImage.scale(1);
+        const ratio = Math.min(imageFrame.width / dims.width, imageFrame.height / dims.height);
+        const width = dims.width * ratio;
+        const height = dims.height * ratio;
+        visionPage.drawImage(embeddedImage, {
+          x: x + (imageFrame.width - width) / 2,
+          y: y + (imageFrame.height - height) / 2,
+          width,
+          height,
+        });
+      };
+
+      drawImageInFrame(embeddedOriginal, 54, imageTop - imageFrame.height);
+      drawImageInFrame(embeddedVariant, 190, imageTop - imageFrame.height);
+      visionPage.drawText('Before', {
+        x: 54,
+        y: imageTop + 4,
+        size: 9,
+        font: headingFont,
+        color: colors.moss,
+      });
+      visionPage.drawText('After', {
+        x: 190,
+        y: imageTop + 4,
+        size: 9,
+        font: headingFont,
+        color: colors.clay,
+      });
+
+      let copyCursor = drawWrappedText(visionPage, bodyFont, `What changed: ${storyBlock.whatChanged}`, {
+        x: 334,
+        y: storyCursor - 2,
+        size: 10,
+        color: colors.ink,
+        maxChars: 34,
+        lineHeight: 14,
+      }) - 4;
+      copyCursor = drawWrappedText(visionPage, bodyFont, `Why it matters: ${storyBlock.whyItMatters}`, {
+        x: 334,
+        y: copyCursor,
+        size: 10,
+        color: colors.muted,
+        maxChars: 34,
+        lineHeight: 14,
+      }) - 4;
+      copyCursor = drawWrappedText(visionPage, bodyFont, `Suggested action: ${storyBlock.suggestedAction}`, {
+        x: 334,
+        y: copyCursor,
+        size: 10,
+        color: colors.ink,
+        maxChars: 34,
+        lineHeight: 14,
+      }) - 4;
+      drawWrappedText(visionPage, bodyFont, storyBlock.disclaimer, {
+        x: 334,
+        y: copyCursor,
+        size: 9,
+        color: colors.muted,
+        maxChars: 34,
+        lineHeight: 12,
+      });
+
+      storyCursor -= 280;
+    }
+  }
 
   const bytes = await pdfDoc.save();
   return {

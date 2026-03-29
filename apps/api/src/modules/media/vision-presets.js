@@ -29,13 +29,14 @@ export const VISION_PRESETS = [
     disclaimerType: 'truthful_enhancement',
     recommendedUse: ['brochure', 'report'],
     basePrompt:
-      'Clean up this residential interior photo for real estate listing use. Remove small clutter items, improve brightness and cleanliness. Keep all furniture and structure. Stay realistic.',
+      'Clean up this residential interior photo for real estate listing use. Remove small clutter items from tables, counters, shelves, and floor edges. Improve brightness, neatness, and visual cleanliness. Keep all major furniture, architecture, and layout intact. Stay realistic.',
     helperText:
       'Reduce small distractions and improve presentation while keeping the room believable.',
     strength: 0.6,
     guidanceScale: 7.5,
     numInferenceSteps: 35,
-    replicateModel: 'lucataco/sdxl-inpainting:latest',
+    replicateModel:
+      'lucataco/sdxl-inpainting:a5b13068cc81a89a4fbeefeccc774869fcb34df4dbc92c1555e0f2771d49dde7',
   },
   {
     key: 'declutter_medium',
@@ -50,13 +51,14 @@ export const VISION_PRESETS = [
     disclaimerType: 'truthful_enhancement',
     recommendedUse: ['report'],
     basePrompt:
-      'Clean and simplify this residential interior photo. Reduce clutter and visual noise but preserve layout and furniture. Make the space feel open and tidy.',
+      'Clean and simplify this residential interior photo. Reduce visible clutter and visual noise on surfaces, shelves, side tables, and open floor areas while preserving layout and major furniture. Make the space feel open, tidy, and realistically listing-ready.',
     helperText:
       'A stronger cleanup pass that pushes the room toward listing-readiness without restaging it.',
     strength: 0.75,
     guidanceScale: 7.5,
     numInferenceSteps: 35,
-    replicateModel: 'lucataco/sdxl-inpainting:latest',
+    replicateModel:
+      'lucataco/sdxl-inpainting:a5b13068cc81a89a4fbeefeccc774869fcb34df4dbc92c1555e0f2771d49dde7',
   },
   {
     key: 'remove_furniture',
@@ -71,13 +73,14 @@ export const VISION_PRESETS = [
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     basePrompt:
-      'Create a realistic version of this room with most movable furniture removed. Keep structure and layout intact. Make the room feel open and empty.',
+      'Create a realistic version of this room with most movable furniture removed, including seating, coffee tables, side tables, and portable shelving where possible. Keep walls, windows, doors, built-ins, and layout intact. Make the room feel open, empty, and believable as a concept preview.',
     helperText:
       'Create a conceptual empty-room version for planning and persuasion, not direct listing replacement.',
     strength: 0.85,
     guidanceScale: 7.5,
     numInferenceSteps: 35,
-    replicateModel: 'lucataco/sdxl-inpainting:latest',
+    replicateModel:
+      'lucataco/sdxl-inpainting:a5b13068cc81a89a4fbeefeccc774869fcb34df4dbc92c1555e0f2771d49dde7',
   },
   {
     key: 'combined_listing_refresh',
