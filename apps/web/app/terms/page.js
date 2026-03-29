@@ -37,54 +37,58 @@ const sections = [
     body: 'The service may display third-party providers such as title companies, inspectors, attorneys, photographers, contractors, or other service providers. Workside does not endorse, guarantee, or warrant any listed provider unless expressly stated otherwise. Sponsored placements may appear in the service and will be labeled as such where applicable.',
   },
   {
-    title: '7. Acceptable Use',
+    title: '7. SMS Communications',
+    body: 'By opting in where required, users and providers agree to receive transactional SMS messages related to account activity, account verification, service requests, provider marketplace interactions, and workflow updates. Message frequency varies. Reply STOP to opt out or HELP for assistance.',
+  },
+  {
+    title: '8. Acceptable Use',
     body: 'You agree not to use the service for unlawful, fraudulent, or misleading purposes, interfere with or disrupt the service, attempt to bypass usage limits or security controls, scrape or reverse engineer the service beyond allowed use, or generate discriminatory or unlawful real estate content.',
   },
   {
-    title: '8. Fees, Billing, and Subscriptions',
+    title: '9. Fees, Billing, and Subscriptions',
     body: 'Certain features may require payment. If you purchase a paid plan, you agree to pay all applicable charges, taxes, and fees. Subscription billing, renewals, trials, cancellations, and refunds are governed by the specific plan terms presented at purchase and by the billing platform used to process payments.',
   },
   {
-    title: '9. Usage Limits and Safeguards',
+    title: '10. Usage Limits and Safeguards',
     body: 'We may enforce usage limits, cooldown periods, caching behavior, plan-based quotas, and anti-abuse measures to protect the platform and control third-party costs. Repeated requests may return cached results instead of triggering new analyses.',
   },
   {
-    title: '10. Intellectual Property',
+    title: '11. Intellectual Property',
     body: 'The service, including its design, software, workflows, branding, and underlying technology, is owned by Workside or its licensors and is protected by applicable intellectual property laws. Except as expressly allowed, you may not copy, modify, distribute, sell, or exploit the service or its components.',
   },
   {
-    title: '11. Privacy',
+    title: '12. Privacy',
     body: 'Your use of the service is also subject to our Privacy Policy.',
   },
   {
-    title: '12. Availability and Changes',
+    title: '13. Availability and Changes',
     body: 'We may modify, suspend, or discontinue any part of the service at any time, with or without notice. We do not guarantee uninterrupted availability.',
   },
   {
-    title: '13. Disclaimers',
+    title: '14. Disclaimers',
     body: 'THE SERVICE IS PROVIDED “AS IS” AND “AS AVAILABLE” WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, ACCURACY, OR RELIABILITY.',
   },
   {
-    title: '14. Limitation of Liability',
+    title: '15. Limitation of Liability',
     paragraphs: [
       'To the maximum extent permitted by law, Workside and its affiliates, officers, employees, and contractors will not be liable for any indirect, incidental, special, consequential, exemplary, or punitive damages, or for any loss of profits, revenue, data, goodwill, or business opportunities arising out of or related to your use of the service.',
       'To the maximum extent permitted by law, our total liability for claims arising out of or related to the service will not exceed the amount you paid to us for the service in the twelve months before the event giving rise to the claim, or one hundred U.S. dollars (US $100), whichever is greater.',
     ],
   },
   {
-    title: '15. Indemnification',
+    title: '16. Indemnification',
     body: 'You agree to indemnify and hold harmless Workside from claims, damages, liabilities, costs, and expenses arising out of your use of the service, your content, your violation of these Terms, or your violation of any law or third-party rights.',
   },
   {
-    title: '16. Termination',
+    title: '17. Termination',
     body: 'We may suspend or terminate your access if you violate these Terms, create risk for the platform, fail to pay applicable fees, or misuse the service. You may stop using the service at any time.',
   },
   {
-    title: '17. Governing Law',
+    title: '18. Governing Law',
     body: 'These Terms are governed by the laws of the jurisdiction selected by Workside in its principal place of business, without regard to conflict-of-law principles, except where applicable law requires otherwise.',
   },
   {
-    title: '18. Changes to These Terms',
+    title: '19. Changes to These Terms',
     body: 'We may update these Terms from time to time. Continued use of the service after updated Terms become effective constitutes acceptance of the updated Terms.',
   },
 ];
@@ -95,7 +99,7 @@ export default function TermsPage() {
       <section className="panel-card legal-page">
         <div className="section-eyebrow">Legal</div>
         <h1>Terms of Service</h1>
-        <p className="legal-meta">Workside Home Advisor • Last updated: March 28, 2026</p>
+        <p className="legal-meta">Workside Software LLC • Effective Date: March 29, 2026</p>
         <p>
           These Terms of Service (&ldquo;Terms&rdquo;) govern your access to and use of Workside
           Home Advisor and related websites, applications, and services operated by Workside
@@ -104,7 +108,7 @@ export default function TermsPage() {
         </p>
 
         <div className="legal-notice">
-          Workside Home Advisor provides software tools, AI-assisted suggestions, property-preparation guidance, and related workflow features. It does not provide legal advice, brokerage services, appraisal services, title services, inspection services, or guaranteed real estate outcomes.
+          Workside Home Advisor provides software tools, AI-assisted suggestions, property-preparation guidance, and related workflow features. It does not provide legal advice, brokerage services, appraisal services, title services, inspection services, or guaranteed real estate outcomes. Workside is not a real estate brokerage.
         </div>
 
         {sections.map((section) => (
@@ -125,14 +129,20 @@ export default function TermsPage() {
         ))}
 
         <div className="legal-section">
-          <h2>19. Contact</h2>
+          <h2>20. Contact</h2>
           <p>
-            If you have questions about these Terms, contact Workside Software through the support
-            contact listed in the application or website.
+            If you have questions about these Terms, contact Workside Software LLC at{' '}
+            <a href="mailto:support@worksidesoftware.com">support@worksidesoftware.com</a>.
           </p>
         </div>
 
-        <p className="legal-footer">© 2026 Workside Software. All rights reserved.</p>
+        <p className="legal-footer">
+          © 2026 Workside Software LLC. All rights reserved.
+          <br />
+          8612 Mainsail Drive, Bakersfield, CA 93312
+          <br />
+          Email: support@worksidesoftware.com
+        </p>
       </section>
     </AppFrame>
   );

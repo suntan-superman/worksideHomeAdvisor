@@ -7,6 +7,7 @@ const sections = [
     title: '1. Transactional SMS Notifications',
     paragraphs: [
       'Workside Home Advisor may send transactional and service-related SMS messages to users and providers who give explicit consent where required. These messages may include account verification, lead routing responses, appointment coordination, checklist or workflow updates, and account-related notices.',
+      'Messages are strictly transactional and not promotional.',
       'Consent to receive SMS messages is not a condition of purchasing any goods or services.',
     ],
   },
@@ -37,7 +38,14 @@ const sections = [
     ],
   },
   {
-    title: '5. Privacy and Data Use',
+    title: '5. No Marketing Messages',
+    paragraphs: [
+      'Workside does not send promotional SMS messages.',
+      'Workside Home Advisor messaging is limited to transactional, operational, and service-related communications.',
+    ],
+  },
+  {
+    title: '6. Privacy and Data Use',
     paragraphs: [
       'Mobile phone numbers and consent records are used to operate the Workside service, support transactional communications, and maintain compliance records.',
       'Workside Software does not sell, rent, or share mobile phone numbers for third-party marketing purposes.',
@@ -56,7 +64,7 @@ export default function SmsConsentPage() {
       <section className="panel-card legal-page">
         <div className="section-eyebrow">Legal</div>
         <h1>SMS Consent &amp; Messaging Disclosure</h1>
-        <p className="legal-meta">Workside Home Advisor • Last updated: March 29, 2026</p>
+        <p className="legal-meta">Workside Software LLC • Effective Date: March 29, 2026</p>
         <p>
           This page explains how Workside Software collects consent for SMS messaging used in
           Workside Home Advisor and related provider-marketplace workflows.
@@ -85,7 +93,7 @@ export default function SmsConsentPage() {
         ))}
 
         <div className="legal-section">
-          <h2>6. Related Policies</h2>
+          <h2>7. Related Policies</h2>
           <p>
             For more information about how Workside handles personal information and the terms that
             govern use of the service, review the linked policies below.
@@ -101,14 +109,20 @@ export default function SmsConsentPage() {
         </div>
 
         <div className="legal-section">
-          <h2>7. Contact</h2>
+          <h2>8. Contact</h2>
           <p>
             Questions about SMS consent, opt-out requests, or messaging support can be sent to{' '}
             <a href="mailto:support@worksidesoftware.com">support@worksidesoftware.com</a>.
           </p>
         </div>
 
-        <p className="legal-footer">© 2026 Workside Software. All rights reserved.</p>
+        <p className="legal-footer">
+          © 2026 Workside Software LLC. All rights reserved.
+          <br />
+          8612 Mainsail Drive, Bakersfield, CA 93312
+          <br />
+          Email: support@worksidesoftware.com
+        </p>
       </section>
     </AppFrame>
   );
