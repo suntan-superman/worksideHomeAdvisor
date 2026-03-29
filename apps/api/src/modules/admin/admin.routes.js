@@ -119,6 +119,7 @@ export async function adminRoutes(fastify) {
       const query = listQuerySchema.parse(request.query || {});
       return reply.send(await getAdminProviderSnapshot(query));
     } catch (error) {
+      request.log.error({ err: error }, 'admin providers snapshot failed');
       return reply.code(400).send({ message: error.message });
     }
   });
@@ -128,6 +129,7 @@ export async function adminRoutes(fastify) {
       const payload = createProviderSchema.parse(request.body || {});
       return reply.code(201).send(await createAdminProvider(payload));
     } catch (error) {
+      request.log.error({ err: error }, 'admin provider creation failed');
       return reply.code(400).send({ message: error.message });
     }
   });
@@ -137,6 +139,7 @@ export async function adminRoutes(fastify) {
       const query = listQuerySchema.parse(request.query || {});
       return reply.send(await getAdminProviderLeadSnapshot(query));
     } catch (error) {
+      request.log.error({ err: error }, 'admin provider leads snapshot failed');
       return reply.code(400).send({ message: error.message });
     }
   });

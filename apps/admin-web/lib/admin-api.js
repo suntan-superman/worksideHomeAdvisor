@@ -15,11 +15,13 @@ async function request(path) {
         : {},
     });
 
+    const payload = await response.json().catch(() => ({}));
+
     if (!response.ok) {
-      throw new Error(`Request failed with ${response.status}`);
+      throw new Error(payload.message || `Request failed with ${response.status}`);
     }
 
-    return await response.json();
+    return payload;
   } catch (error) {
     return {
       error: error.message,
@@ -49,11 +51,13 @@ async function post(path, body) {
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
 
+    const payload = await response.json().catch(() => ({}));
+
     if (!response.ok) {
-      throw new Error(`Request failed with ${response.status}`);
+      throw new Error(payload.message || `Request failed with ${response.status}`);
     }
 
-    return await response.json();
+    return payload;
   } catch (error) {
     return {
       error: error.message,
