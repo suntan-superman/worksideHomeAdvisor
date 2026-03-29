@@ -109,19 +109,35 @@ export function listMediaAssets(propertyId) {
 }
 
 export function listMediaVariants(assetId) {
-  return request(`/api/v1/media/assets/${assetId}/variants`);
+  return request(`/api/v1/media/assets/${assetId}/vision/variants`);
 }
 
 export function createImageEnhancementJob(assetId, payload) {
-  return request(`/api/v1/media/assets/${assetId}/enhance`, {
+  return request(`/api/v1/media/assets/${assetId}/vision/enhance`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
 }
 
+export function listVisionPresets() {
+  return request('/api/v1/vision/presets');
+}
+
 export function selectMediaVariant(assetId, variantId) {
   return request(`/api/v1/media/assets/${assetId}/variants/${variantId}/select`, {
     method: 'PATCH',
+  });
+}
+
+export function setMediaVariantUsage(assetId, variantId, field, value) {
+  const endpoint =
+    field === 'brochure'
+      ? 'use-in-brochure'
+      : 'use-in-report';
+
+  return request(`/api/v1/media/assets/${assetId}/variants/${variantId}/${endpoint}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ value }),
   });
 }
 

@@ -3,7 +3,9 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { formatCurrency } from '@workside/utils';
 
 import { generateImprovementInsights, generateMarketingInsights } from '../../services/aiWorkflowService.js';
+import { buildMediaVariantUrl } from '../../services/storageService.js';
 import { listMediaAssets } from '../media/media.service.js';
+import { MediaVariantModel } from '../media/media-variant.model.js';
 import { getLatestPricingAnalysis } from '../pricing/pricing.service.js';
 import { getPropertyById } from '../properties/property.service.js';
 import { getOrCreatePropertyChecklist } from '../tasks/tasks.service.js';
@@ -89,7 +91,11 @@ function selectReportPhotos(assets) {
   });
 }
 
-function chooseReportPhotos(assets, selectedPhotoAssetIds = []) {
+function chooseReportPhotos(
+  assets,
+  selectedPhotoAssetIds = [],
+  reportVariantByAssetId = new Map(),
+) {
   const rankedAssets = sortPhotosForReport(assets);
   const requestedPhotoIds = (selectedPhotoAssetIds || []).filter(Boolean);
   const manualSelection = requestedPhotoIds.length
@@ -102,7 +108,8 @@ function chooseReportPhotos(assets, selectedPhotoAssetIds = []) {
   );
 
   return [...manualSelection, ...fallbackSelection].slice(0, 4).map((asset) => {
-    const selectedVariant = asset.selectedVariant || null;
+    const selectedVariant =
+      reportVariantByAssetId.get(asset.id) || asset.selectedVariant || null;
 
     return {
       assetId: asset.id,
@@ -283,10 +290,12 @@ function buildReportPayload({
   improvementGuidance,
   sourceSnapshot,
   customizations,
+  reportVariantByAssetId,
 }) {
   const selectedPhotos = chooseReportPhotos(
     mediaAssets,
     customizations.selectedPhotoAssetIds,
+    reportVariantByAssetId,
   );
   const photoSummary = buildPhotoSummary(mediaAssets, selectedPhotos);
   const readinessSummary = buildReadinessSummary({ pricing, checklist, photoSummary, flyer });
@@ -485,6 +494,28 @@ export async function generatePropertyReport({ propertyId, customizations = {} }
   }
 
   const normalizedCustomizations = normalizeReportCustomizations(customizations);
+  const assetIds = mediaAssets.map((asset) => asset.id).filter(Boolean);
+  const reportVariants = assetIds.length
+    ? await MediaVariantModel.find({
+        mediaId: { $in: assetIds },
+        useInReport: true,
+      })
+        .sort({ createdAt: -1 })
+        .lean()
+    : [];
+  const reportVariantByAssetId = new Map();
+  for (const variant of reportVariants) {
+    const mediaId = variant.mediaId?.toString?.() || String(variant.mediaId);
+    if (!reportVariantByAssetId.has(mediaId)) {
+      reportVariantByAssetId.set(mediaId, {
+        ...variant,
+        id: variant._id?.toString?.() || String(variant._id),
+        imageUrl:
+          variant.imageUrl ||
+          buildMediaVariantUrl(variant._id?.toString?.() || String(variant._id)),
+      });
+    }
+  }
 
   const simplifiedMedia = mediaAssets.map((asset) => ({
     roomLabel: asset.roomLabel,
@@ -536,6 +567,7 @@ export async function generatePropertyReport({ propertyId, customizations = {} }
     improvementGuidance,
     sourceSnapshot,
     customizations: normalizedCustomizations,
+    reportVariantByAssetId,
   });
 
   const document = await ReportModel.create({

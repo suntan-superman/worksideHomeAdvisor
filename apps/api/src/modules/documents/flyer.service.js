@@ -3,7 +3,9 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { formatCurrency } from '@workside/utils';
 
 import { generateMarketingInsights } from '../../services/aiWorkflowService.js';
+import { buildMediaVariantUrl } from '../../services/storageService.js';
 import { listMediaAssets } from '../media/media.service.js';
+import { MediaVariantModel } from '../media/media-variant.model.js';
 import { getLatestPricingAnalysis } from '../pricing/pricing.service.js';
 import { getPropertyById } from '../properties/property.service.js';
 import { FlyerModel } from './flyer.model.js';
@@ -50,7 +52,11 @@ function sortFlyerAssets(assets) {
   });
 }
 
-function chooseFlyerPhotos(assets, selectedPhotoAssetIds = []) {
+function chooseFlyerPhotos(
+  assets,
+  selectedPhotoAssetIds = [],
+  brochureVariantByAssetId = new Map(),
+) {
   const rankedAssets = sortFlyerAssets(assets);
   const requestedPhotoIds = (selectedPhotoAssetIds || []).filter(Boolean);
   const manualSelection = requestedPhotoIds.length
@@ -65,7 +71,8 @@ function chooseFlyerPhotos(assets, selectedPhotoAssetIds = []) {
   return [...manualSelection, ...fallbackSelection]
     .slice(0, 4)
     .map((asset) => {
-      const selectedVariant = asset.selectedVariant || null;
+      const selectedVariant =
+        brochureVariantByAssetId.get(asset.id) || asset.selectedVariant || null;
 
       return {
         assetId: asset.id,
@@ -154,9 +161,32 @@ export async function generatePropertyFlyer({
   ]);
 
   const normalizedCustomizations = normalizeFlyerCustomizations(customizations);
+  const assetIds = mediaAssets.map((asset) => asset.id).filter(Boolean);
+  const brochureVariants = assetIds.length
+    ? await MediaVariantModel.find({
+        mediaId: { $in: assetIds },
+        useInBrochure: true,
+      })
+        .sort({ createdAt: -1 })
+        .lean()
+    : [];
+  const brochureVariantByAssetId = new Map();
+  for (const variant of brochureVariants) {
+    const mediaId = variant.mediaId?.toString?.() || String(variant.mediaId);
+    if (!brochureVariantByAssetId.has(mediaId)) {
+      brochureVariantByAssetId.set(mediaId, {
+        ...variant,
+        id: variant._id?.toString?.() || String(variant._id),
+        imageUrl:
+          variant.imageUrl ||
+          buildMediaVariantUrl(variant._id?.toString?.() || String(variant._id)),
+      });
+    }
+  }
   const selectedPhotos = chooseFlyerPhotos(
     mediaAssets,
     normalizedCustomizations.selectedPhotoAssetIds,
+    brochureVariantByAssetId,
   );
   const fallbackFlyer = buildFallbackFlyer({
     property,

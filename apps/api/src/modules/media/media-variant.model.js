@@ -1,7 +1,21 @@
 import mongoose from 'mongoose';
 
+const visionVariantTypes = [
+  'enhance_listing_quality',
+  'declutter_preview',
+  'declutter_light',
+  'declutter_medium',
+  'combined_listing_refresh',
+];
+
 const mediaVariantSchema = new mongoose.Schema(
   {
+    visionJobId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ImageJob',
+      default: null,
+      index: true,
+    },
     mediaId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'MediaAsset',
@@ -16,8 +30,13 @@ const mediaVariantSchema = new mongoose.Schema(
     },
     variantType: {
       type: String,
-      enum: ['enhance_listing_quality', 'declutter_preview'],
+      enum: visionVariantTypes,
       required: true,
+    },
+    variantCategory: {
+      type: String,
+      enum: ['enhancement', 'concept_preview'],
+      default: 'enhancement',
     },
     label: { type: String, required: true },
     mimeType: { type: String, default: 'image/jpeg' },
@@ -25,6 +44,8 @@ const mediaVariantSchema = new mongoose.Schema(
     storageKey: { type: String, required: true },
     byteSize: { type: Number },
     isSelected: { type: Boolean, default: false },
+    useInBrochure: { type: Boolean, default: false },
+    useInReport: { type: Boolean, default: false },
     metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   {

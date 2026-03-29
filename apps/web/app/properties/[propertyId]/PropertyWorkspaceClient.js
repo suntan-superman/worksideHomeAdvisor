@@ -24,7 +24,9 @@ import {
   getReportExportUrl,
   listMediaAssets,
   listMediaVariants,
+  listVisionPresets,
   selectMediaVariant,
+  setMediaVariantUsage,
   updateChecklistItem,
   updateMediaAsset,
 } from '../../../lib/api';
@@ -50,6 +52,19 @@ const REPORT_SECTION_OPTIONS = [
   { id: 'seller_checklist', label: 'Seller Checklist' },
   { id: 'marketing_guidance', label: 'Marketing Guidance' },
   { id: 'draft_listing_description', label: 'Draft Listing Description' },
+];
+
+const VISION_PRESET_GROUPS = [
+  {
+    key: 'enhancement',
+    label: 'Enhance',
+    items: [
+      { key: 'enhance_listing_quality', displayName: 'Enhance for Listing' },
+      { key: 'declutter_light', displayName: 'Light Declutter' },
+      { key: 'declutter_medium', displayName: 'Medium Declutter' },
+      { key: 'combined_listing_refresh', displayName: 'Listing Refresh' },
+    ],
+  },
 ];
 
 function buildAddressQuery(property) {
@@ -88,7 +103,7 @@ function getVariantSummary(variant) {
   return (
     variant?.metadata?.summary ||
     variant?.metadata?.warning ||
-    'This prototype variant is available for flyer and report selection once marked preferred.'
+    'This variant can be reviewed, marked preferred, and optionally used in brochure or report outputs.'
   );
 }
 
@@ -105,8 +120,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [latestReport, setLatestReport] = useState(null);
   const [mediaAssets, setMediaAssets] = useState([]);
   const [mediaVariants, setMediaVariants] = useState([]);
+  const [visionPresets, setVisionPresets] = useState([]);
   const [selectedVariantId, setSelectedVariantId] = useState('');
   const [selectedMediaAssetId, setSelectedMediaAssetId] = useState('');
+  const [activeVisionPresetKey, setActiveVisionPresetKey] = useState('enhance_listing_quality');
   const [flyerType, setFlyerType] = useState('sale');
   const [flyerHeadlineDraft, setFlyerHeadlineDraft] = useState('');
   const [flyerSubheadlineDraft, setFlyerSubheadlineDraft] = useState('');
@@ -146,6 +163,17 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       mediaVariants[0] ||
       null,
     [mediaVariants, selectedVariantId],
+  );
+  const groupedVisionPresets = useMemo(() => {
+    const presetByKey = new Map(visionPresets.map((preset) => [preset.key, preset]));
+    return VISION_PRESET_GROUPS.map((group) => ({
+      ...group,
+      items: group.items.map((item) => presetByKey.get(item.key) || item),
+    }));
+  }, [visionPresets]);
+  const activeVisionPreset = useMemo(
+    () => visionPresets.find((preset) => preset.key === activeVisionPresetKey) || null,
+    [activeVisionPresetKey, visionPresets],
   );
   const selectedComps = useMemo(
     () => (latestPricing?.selectedComps || dashboard?.comps || []).slice(0, 8),
@@ -220,6 +248,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     const nextSession = { ...(getStoredSession() || {}), lastPropertyId: propertyId };
     setStoredSession(nextSession);
   }, [propertyId]);
+
+  useEffect(() => {
+    if (selectedVariant?.variantType) {
+      setActiveVisionPresetKey(selectedVariant.variantType);
+    }
+  }, [selectedVariant?.variantType]);
 
   useEffect(() => {
     setActiveTab('overview');
@@ -344,6 +378,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         setProperty(propertyResponse.property);
         setDashboard(dashboardResponse);
         setChecklist(checklistResponse.checklist);
+        try {
+          const presetsResponse = await listVisionPresets();
+          setVisionPresets(presetsResponse.presets || []);
+        } catch {
+          setVisionPresets([]);
+        }
         try {
           const pricingResponse = await getLatestPricing(propertyId);
           setLatestPricing(pricingResponse.analysis);
@@ -536,22 +576,31 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
   }
 
-  async function handleGenerateVariant(jobType) {
+  async function handleGenerateVariant(presetKey = activeVisionPresetKey) {
     if (!selectedMediaAsset) {
       return;
     }
     setActiveTab('vision');
-    setStatus(jobType === 'declutter_preview' ? 'Generating declutter preview...' : 'Generating enhanced listing version...');
+    setActiveVisionPresetKey(presetKey);
+    const isDeclutterPreset = String(presetKey).includes('declutter');
+    setStatus(
+      isDeclutterPreset
+        ? 'Generating declutter variant...'
+        : 'Generating enhanced listing version...',
+    );
     setToast(null);
     try {
-      const response = await createImageEnhancementJob(selectedMediaAsset.id, { jobType });
+      const response = await createImageEnhancementJob(selectedMediaAsset.id, {
+        presetKey,
+        roomType: selectedMediaAsset.roomLabel,
+      });
       await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id)]);
       setSelectedVariantId(response.variant?.id || '');
       setToast({
         tone: 'success',
         title:
-          jobType === 'declutter_preview'
-            ? 'Declutter preview ready'
+          isDeclutterPreset
+            ? 'Declutter variant ready'
             : 'Enhanced photo ready',
         message:
           response.job?.warning ||
@@ -580,6 +629,40 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setToast({ tone: 'success', title: 'Preferred variant selected', message: 'Flyer and report generation will now prefer this image variant.' });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Could not select variant', message: requestError.message });
+    } finally {
+      setStatus('');
+    }
+  }
+
+  async function handleSetVariantUsage(field, value) {
+    if (!selectedMediaAsset || !selectedVariant) {
+      return;
+    }
+    const label = field === 'brochure' ? 'brochure' : 'report';
+    setStatus(value ? `Adding variant to ${label} use...` : `Removing variant from ${label} use...`);
+    setToast(null);
+    try {
+      const response = await setMediaVariantUsage(
+        selectedMediaAsset.id,
+        selectedVariant.id,
+        field,
+        value,
+      );
+      setMediaVariants((current) =>
+        current.map((variant) =>
+          variant.id === response.variant.id ? response.variant : variant,
+        ),
+      );
+      await refreshMediaAssets(selectedMediaAsset.id);
+      setToast({
+        tone: 'success',
+        title: 'Variant usage updated',
+        message: value
+          ? `This variant is now marked for ${label} use.`
+          : `This variant is no longer marked for ${label} use.`,
+      });
+    } catch (requestError) {
+      setToast({ tone: 'error', title: 'Could not update variant usage', message: requestError.message });
     } finally {
       setStatus('');
     }
@@ -829,7 +912,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               <button type="button" className="button-secondary" onClick={() => { setActiveTab('vision'); handleGenerateVariant('enhance_listing_quality'); }} disabled={Boolean(status)}>
                 Enhance
               </button>
-              <button type="button" className="button-secondary" onClick={() => { setActiveTab('vision'); handleGenerateVariant('declutter_preview'); }} disabled={Boolean(status)}>
+              <button type="button" className="button-secondary" onClick={() => { setActiveTab('vision'); handleGenerateVariant('declutter_light'); }} disabled={Boolean(status)}>
                 Declutter
               </button>
             </div>
@@ -853,7 +936,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       <div ref={visionCompareRef} className="content-card">
         <div className="section-header-tight">
           <div>
-            <span className="label">Vision workspace</span>
+            <span className="label">Listing Vision Mode</span>
             <h2>Before and after</h2>
           </div>
           <span className="section-header-meta">{selectedVariant ? selectedVariant.label : 'No variant selected yet'}</span>
@@ -872,7 +955,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 {selectedVariant ? (
                   <img src={selectedVariant.imageUrl} alt={selectedVariant.label || 'Generated image variant'} className="property-media-variant-image" />
                 ) : (
-                  <div className="property-media-variant-empty">Generate an enhanced version or declutter preview to begin comparison.</div>
+                  <div className="property-media-variant-empty">Generate your first enhancement preset to compare the original photo with a listing-ready version.</div>
                 )}
               </div>
             </div>
@@ -882,7 +965,27 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </div>
             ) : null}
             {selectedVariant?.metadata?.differenceHint ? <p className="property-media-variant-hint">{selectedVariant.metadata.differenceHint}</p> : null}
-            {selectedVariant ? <p className="workspace-control-note">The generated version appears here. The Generated options panel below is where you switch between saved variants.</p> : null}
+            {selectedVariant ? (
+              <div className="mini-stats">
+                <div className="stat-card">
+                  <strong>Preset</strong>
+                  <span>{selectedVariant.metadata?.presetKey || selectedVariant.variantType}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Category</strong>
+                  <span>{selectedVariant.variantCategory === 'concept_preview' ? 'Concept Preview' : 'Enhancement'}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Recommended use</strong>
+                  <span>{(selectedVariant.metadata?.recommendedUse || []).length ? selectedVariant.metadata.recommendedUse.join(', ') : 'Internal review'}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Created</strong>
+                  <span>{selectedVariant.createdAt ? new Date(selectedVariant.createdAt).toLocaleString() : 'Just now'}</span>
+                </div>
+              </div>
+            ) : null}
+            {selectedVariant ? <p className="workspace-control-note">The generated version appears here. The Generated options panel below is where you switch between saved variants and mark them for brochure or report use.</p> : null}
           </div>
         ) : (
           <p>Select a photo in the Photos tab first to use the Vision workspace.</p>
@@ -892,16 +995,41 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       <div className="workspace-two-column">
         <div className="content-card">
           <span className="label">Action presets</span>
-          <h2>Generate a stronger version</h2>
+          <h2>Choose a listing enhancement</h2>
           {selectedMediaAsset ? (
             <>
               <p>Current source photo: <strong>{selectedMediaAsset.roomLabel}</strong></p>
+              <div className="workspace-tab-stack">
+                {groupedVisionPresets.map((group) => (
+                  <div key={group.key} className="workspace-inner-card brochure-control-card">
+                    <span className="label">{group.label}</span>
+                    <div className="property-media-variant-list">
+                      {group.items.map((preset) => (
+                        <button
+                          key={preset.key}
+                          type="button"
+                          className={
+                            activeVisionPresetKey === preset.key
+                              ? 'property-media-variant-chip active'
+                              : 'property-media-variant-chip'
+                          }
+                          onClick={() => setActiveVisionPresetKey(preset.key)}
+                        >
+                          {preset.displayName}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <div className="workspace-inner-card brochure-control-card">
+                  <span className="label">Preset guidance</span>
+                  <strong>{activeVisionPreset?.displayName || 'Enhance for Listing'}</strong>
+                  <p>{activeVisionPreset?.helperText || 'Improve the photo while keeping it believable and listing-safe.'}</p>
+                </div>
+              </div>
               <div className="workspace-action-column">
-                <button type="button" className="button-primary" onClick={() => handleGenerateVariant('enhance_listing_quality')} disabled={Boolean(status)}>
-                  Generate enhanced version
-                </button>
-                <button type="button" className="button-secondary" onClick={() => handleGenerateVariant('declutter_preview')} disabled={Boolean(status)}>
-                  Create declutter preview
+                <button type="button" className="button-primary" onClick={() => handleGenerateVariant(activeVisionPresetKey)} disabled={Boolean(status)}>
+                  Generate {activeVisionPreset?.displayName || 'enhancement'}
                 </button>
               </div>
               <div className="property-media-rail property-photo-grid compact">
@@ -937,6 +1065,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         ? 'Currently selected for flyer and report materials'
                         : 'Preview this version, then select it for materials if you want to use it'}
                     </span>
+                    <span>
+                      {selectedVariant.variantCategory === 'concept_preview'
+                        ? 'Concept preview'
+                        : 'Listing enhancement'}
+                    </span>
                   </div>
                 </div>
               ) : null}
@@ -950,13 +1083,33 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </div>
               {selectedVariant?.metadata?.warning ? <p>{selectedVariant.metadata.warning}</p> : null}
               {selectedVariant ? (
-                <button type="button" className="button-secondary" onClick={() => handleSelectVariant(selectedVariant.id)} disabled={Boolean(status) || selectedVariant.isSelected}>
-                  {selectedVariant.isSelected ? 'Preferred variant selected' : 'Use this variant in materials'}
-                </button>
+                <div className="workspace-action-column">
+                  <button type="button" className="button-secondary" onClick={() => handleSelectVariant(selectedVariant.id)} disabled={Boolean(status) || selectedVariant.isSelected}>
+                    {selectedVariant.isSelected ? 'Preferred variant selected' : 'Set as preferred variant'}
+                  </button>
+                  <div className="checklist-action-row">
+                    <button
+                      type="button"
+                      className={selectedVariant.useInBrochure ? 'checklist-action-chip active' : 'checklist-action-chip'}
+                      onClick={() => handleSetVariantUsage('brochure', !selectedVariant.useInBrochure)}
+                      disabled={Boolean(status)}
+                    >
+                      {selectedVariant.useInBrochure ? 'In brochure' : 'Use in brochure'}
+                    </button>
+                    <button
+                      type="button"
+                      className={selectedVariant.useInReport ? 'checklist-action-chip active' : 'checklist-action-chip'}
+                      onClick={() => handleSetVariantUsage('report', !selectedVariant.useInReport)}
+                      disabled={Boolean(status)}
+                    >
+                      {selectedVariant.useInReport ? 'In report' : 'Use in report'}
+                    </button>
+                  </div>
+                </div>
               ) : null}
             </div>
           ) : (
-            <p>No variants exist for this photo yet. Generate one from the action presets.</p>
+            <p>No variants exist for this photo yet. Choose one of the enhancement presets to generate your first listing-ready version.</p>
           )}
         </div>
       </div>

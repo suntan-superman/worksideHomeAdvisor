@@ -6,10 +6,12 @@ import { readStoredAsset } from '../../services/storageService.js';
 import { getPropertyById } from '../properties/property.service.js';
 import {
   createImageEnhancementJob,
+  getVisionPresetCatalog,
   getImageJobById,
   getMediaVariantById,
   listMediaVariants,
   selectMediaVariant,
+  updateMediaVariantUsage,
 } from './media-ai.service.js';
 import {
   createMediaAssetAndAnalysis,
@@ -17,6 +19,7 @@ import {
   listMediaAssets,
   updateMediaAsset,
 } from './media.service.js';
+import { getVisionPresetKeys } from './vision-presets.js';
 
 const paramsSchema = z.object({
   propertyId: z.string().min(1),
@@ -34,6 +37,10 @@ const variantParamsSchema = z.object({
   variantId: z.string().min(1),
 });
 
+const variantUsageSchema = z.object({
+  value: z.boolean(),
+});
+
 const updateMediaAssetSchema = z.object({
   roomLabel: z.string().min(1).max(120).optional(),
   listingCandidate: z.boolean().optional(),
@@ -41,10 +48,25 @@ const updateMediaAssetSchema = z.object({
 });
 
 const imageJobRequestSchema = z.object({
-  jobType: z.enum(['enhance_listing_quality', 'declutter_preview']).default('enhance_listing_quality'),
+  jobType: z.string().optional(),
+  presetKey: z.string().optional(),
+  roomType: z.string().max(80).optional(),
+}).superRefine((value, context) => {
+  const requestedPresetKey = value.presetKey || value.jobType || 'enhance_listing_quality';
+  if (!getVisionPresetKeys().includes(requestedPresetKey)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Unsupported vision preset: ${requestedPresetKey}`,
+      path: ['presetKey'],
+    });
+  }
 });
 
 export async function mediaRoutes(fastify) {
+  fastify.get('/vision/presets', async (_request, reply) => {
+    return reply.send({ presets: getVisionPresetCatalog() });
+  });
+
   fastify.get('/properties/:propertyId/media', async (request, reply) => {
     try {
       const { propertyId } = paramsSchema.parse(request.params);
@@ -121,6 +143,25 @@ export async function mediaRoutes(fastify) {
       const result = await createImageEnhancementJob({
         assetId,
         jobType: payload.jobType,
+        presetKey: payload.presetKey,
+        roomType: payload.roomType,
+      });
+      return reply.code(201).send(result);
+    } catch (error) {
+      const statusCode = error.message === 'Media asset not found.' ? 404 : 400;
+      return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/media/assets/:assetId/vision/enhance', async (request, reply) => {
+    try {
+      const { assetId } = assetParamsSchema.parse(request.params);
+      const payload = imageJobRequestSchema.parse(request.body ?? {});
+      const result = await createImageEnhancementJob({
+        assetId,
+        jobType: payload.jobType,
+        presetKey: payload.presetKey,
+        roomType: payload.roomType,
       });
       return reply.code(201).send(result);
     } catch (error) {
@@ -130,6 +171,16 @@ export async function mediaRoutes(fastify) {
   });
 
   fastify.get('/media/assets/:assetId/variants', async (request, reply) => {
+    try {
+      const { assetId } = assetParamsSchema.parse(request.params);
+      const variants = await listMediaVariants(assetId);
+      return reply.send({ variants });
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/media/assets/:assetId/vision/variants', async (request, reply) => {
     try {
       const { assetId } = assetParamsSchema.parse(request.params);
       const variants = await listMediaVariants(assetId);
@@ -151,7 +202,52 @@ export async function mediaRoutes(fastify) {
     }
   });
 
+  fastify.patch('/media/assets/:assetId/variants/:variantId/use-in-brochure', async (request, reply) => {
+    try {
+      const { assetId } = assetParamsSchema.parse(request.params);
+      const { variantId } = variantParamsSchema.parse(request.params);
+      const payload = variantUsageSchema.parse(request.body ?? {});
+      const variant = await updateMediaVariantUsage(assetId, variantId, {
+        useInBrochure: payload.value,
+      });
+      return reply.send({ variant });
+    } catch (error) {
+      const statusCode = error.message === 'Media variant not found.' ? 404 : 400;
+      return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
+  fastify.patch('/media/assets/:assetId/variants/:variantId/use-in-report', async (request, reply) => {
+    try {
+      const { assetId } = assetParamsSchema.parse(request.params);
+      const { variantId } = variantParamsSchema.parse(request.params);
+      const payload = variantUsageSchema.parse(request.body ?? {});
+      const variant = await updateMediaVariantUsage(assetId, variantId, {
+        useInReport: payload.value,
+      });
+      return reply.send({ variant });
+    } catch (error) {
+      const statusCode = error.message === 'Media variant not found.' ? 404 : 400;
+      return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
   fastify.get('/image-jobs/:jobId', async (request, reply) => {
+    try {
+      const { jobId } = jobParamsSchema.parse(request.params);
+      const job = await getImageJobById(jobId);
+
+      if (!job) {
+        return reply.code(404).send({ message: 'Image job not found.' });
+      }
+
+      return reply.send({ job });
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/vision/jobs/:jobId', async (request, reply) => {
     try {
       const { jobId } = jobParamsSchema.parse(request.params);
       const job = await getImageJobById(jobId);

@@ -32,14 +32,22 @@ function serializeMediaAsset(document, selectedVariant = null) {
     listingCandidate: Boolean(document.listingCandidate),
     listingNote: document.listingNote || '',
     analysis: document.analysis || null,
-    selectedVariant: selectedVariant
+        selectedVariant: selectedVariant
       ? {
           id: selectedVariant._id?.toString?.() || selectedVariant.id,
+          visionJobId:
+            selectedVariant.visionJobId?._id?.toString?.() ||
+            selectedVariant.visionJobId?.toString?.() ||
+            selectedVariant.visionJobId ||
+            null,
           variantType: selectedVariant.variantType,
+          variantCategory: selectedVariant.variantCategory || 'enhancement',
           label: selectedVariant.label,
           imageUrl:
             selectedVariant.imageUrl ||
             buildMediaVariantUrl(selectedVariant._id?.toString?.() || selectedVariant.id),
+          useInBrochure: Boolean(selectedVariant.useInBrochure),
+          useInReport: Boolean(selectedVariant.useInReport),
           metadata: selectedVariant.metadata || {},
           createdAt: selectedVariant.createdAt,
           updatedAt: selectedVariant.updatedAt,
