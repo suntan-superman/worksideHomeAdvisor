@@ -1,12 +1,16 @@
 import { z } from 'zod';
+import { createProviderCheckoutSession } from '../billing/billing.service.js';
 
 import {
   createProviderLeadRequest,
+  createProviderPortalSession,
   createProviderProfile,
   listProviderCategories,
   listProviderLeadsForProperty,
   listProvidersForProperty,
+  respondToProviderPortalLead,
   saveProviderForProperty,
+  updateProviderPortalProfile,
 } from './providers.service.js';
 
 const propertyParamsSchema = z.object({
@@ -43,12 +47,54 @@ const providerSignupSchema = z.object({
   description: z.string().trim().max(600).optional(),
   websiteUrl: z.string().trim().url().max(180).optional().or(z.literal('')),
   yearsInBusiness: z.number().int().min(0).max(80).optional(),
+  turnaroundLabel: z.string().trim().max(80).optional(),
+  pricingSummary: z.string().trim().max(140).optional(),
+  serviceHighlights: z.array(z.string().trim().min(1).max(60)).max(6).optional(),
   deliveryMode: z.enum(['sms', 'email', 'sms_and_email']).optional(),
   notifyPhone: z.string().trim().max(40).optional(),
   notifyEmail: z.string().trim().email().max(120).optional(),
   preferredContactMethod: z.enum(['sms', 'email', 'phone']).optional(),
   planCode: z.string().trim().max(60).optional(),
+  smsOptIn: z.boolean().optional(),
 });
+
+const providerBillingCheckoutSchema = z.object({
+  providerId: z.string().min(1),
+  planCode: z.string().trim().min(1).max(60),
+  successUrl: z.string().url().optional(),
+  cancelUrl: z.string().url().optional(),
+});
+
+const providerPortalSessionSchema = z.object({
+  providerId: z.string().min(1),
+  token: z.string().min(1),
+});
+
+const providerPortalProfileSchema = z.object({
+  description: z.string().trim().max(600).optional(),
+  websiteUrl: z.string().trim().url().max(180).optional().or(z.literal('')),
+  turnaroundLabel: z.string().trim().max(80).optional(),
+  pricingSummary: z.string().trim().max(140).optional(),
+  serviceHighlights: z.array(z.string().trim().min(1).max(60)).max(6).optional(),
+  city: z.string().trim().max(80).optional(),
+  state: z.string().trim().max(40).optional(),
+  zipCodes: z.array(z.string().trim().min(3).max(12)).max(25).optional(),
+  radiusMiles: z.number().int().min(5).max(150).optional(),
+  deliveryMode: z.enum(['sms', 'email', 'sms_and_email']).optional(),
+  notifyPhone: z.string().trim().max(40).optional(),
+  notifyEmail: z.string().trim().email().max(120).optional(),
+  preferredContactMethod: z.enum(['sms', 'email', 'phone']).optional(),
+});
+
+const providerPortalRespondSchema = z.object({
+  providerId: z.string().min(1),
+  responseStatus: z.enum(['accepted', 'declined']),
+  note: z.string().trim().max(280).optional(),
+});
+
+function getProviderPortalToken(request) {
+  return String(request.headers['x-provider-portal-token'] || '').trim();
+}
 
 export async function providersRoutes(fastify) {
   fastify.get('/provider-categories', async (_request, reply) => {
@@ -121,7 +167,60 @@ export async function providersRoutes(fastify) {
         createdFrom: 'provider_portal',
         status: 'pending_billing',
       });
-      return reply.code(201).send({ provider });
+      const { portalAccessToken = '', ...providerRecord } = provider || {};
+      return reply.code(201).send({ provider: providerRecord, portalAccessToken });
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/provider-portal/billing/checkout', async (request, reply) => {
+    try {
+      const payload = providerBillingCheckoutSchema.parse(request.body || {});
+      const result = await createProviderCheckoutSession(payload);
+      return reply.code(201).send(result);
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/provider-portal/session', async (request, reply) => {
+    try {
+      const payload = providerPortalSessionSchema.parse(request.body || {});
+      const session = await createProviderPortalSession(payload);
+      return reply.send({ session });
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.patch('/provider-portal/providers/:providerId/profile', async (request, reply) => {
+    try {
+      const { providerId } = providerParamsSchema.parse(request.params);
+      const payload = providerPortalProfileSchema.parse(request.body || {});
+      const token = getProviderPortalToken(request);
+      const result = await updateProviderPortalProfile(providerId, token, payload);
+      return reply.send(result);
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.patch('/provider-portal/dispatches/:providerId/:dispatchId/respond', async (request, reply) => {
+    try {
+      const params = z.object({
+        providerId: z.string().min(1),
+        dispatchId: z.string().min(1),
+      }).parse(request.params);
+      const payload = providerPortalRespondSchema.parse(request.body || {});
+      const token = getProviderPortalToken(request);
+      const result = await respondToProviderPortalLead(params.dispatchId, {
+        providerId: payload.providerId || params.providerId,
+        token,
+        responseStatus: payload.responseStatus,
+        note: payload.note,
+      });
+      return reply.send(result);
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }

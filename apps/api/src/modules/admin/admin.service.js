@@ -13,8 +13,11 @@ import {
 } from '../media/variant-lifecycle.service.js';
 import {
   createProviderProfile,
+  closeAdminProviderLead,
   listAdminProviderLeads,
   listAdminProviders,
+  resendAdminProviderLead,
+  updateAdminProviderReview,
 } from '../providers/providers.service.js';
 import { PricingAnalysisModel } from '../pricing/pricing.model.js';
 import { PropertyModel } from '../properties/property.model.js';
@@ -465,4 +468,16 @@ export async function createAdminProvider(payload) {
 
 export async function getAdminProviderLeadSnapshot({ limit = 50 } = {}) {
   return listAdminProviderLeads({ limit });
+}
+
+export async function resendAdminProviderLeadAction(leadRequestId) {
+  return resendAdminProviderLead(leadRequestId);
+}
+
+export async function closeAdminProviderLeadAction(leadRequestId, resolution) {
+  return closeAdminProviderLead(leadRequestId, resolution);
+}
+
+export async function updateAdminProviderReviewAction(providerId, payload) {
+  return updateAdminProviderReview(providerId, payload);
 }

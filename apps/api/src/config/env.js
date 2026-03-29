@@ -45,6 +45,8 @@ const envSchema = z.object({
   STRIPE_PRICE_ID_AGENT_STARTER: z.string().optional(),
   STRIPE_PRICE_ID_AGENT_PRO: z.string().optional(),
   STRIPE_PRICE_ID_AGENT_TEAM: z.string().optional(),
+  STRIPE_PRICE_ID_PROVIDER_STANDARD: z.string().optional(),
+  STRIPE_PRICE_ID_PROVIDER_FEATURED: z.string().optional(),
   STRIPE_PRICE_ID_SAMPLE_ONBOARDING: z.string().optional(),
   STRIPE_PRICE_ID_SAMPLE_MONTHLY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),

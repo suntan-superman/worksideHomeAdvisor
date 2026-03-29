@@ -1851,9 +1851,30 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     {provider.isSponsored ? <span className="checklist-chip checklist-chip-medium">Sponsored</span> : null}
                   </div>
                   <p>{provider.description || 'No provider description has been added yet.'}</p>
+                  <div className="provider-quality-row">
+                    <span>{provider.turnaroundLabel || 'Turnaround not listed'}</span>
+                    <span>{provider.pricingSummary || 'Pricing summary not listed'}</span>
+                    <span>
+                      {provider.compliance?.licenseStatus === 'verified'
+                        ? 'License verified'
+                        : provider.compliance?.licenseStatus === 'not_required'
+                          ? 'License not required'
+                          : 'License unverified'}
+                    </span>
+                    <span>
+                      {provider.compliance?.insuranceStatus === 'verified'
+                        ? 'Insurance verified'
+                        : provider.compliance?.insuranceStatus === 'not_required'
+                          ? 'Insurance not required'
+                          : 'Insurance unverified'}
+                    </span>
+                  </div>
                   <div className="tag-row">
                     {(provider.rankingBadges || []).map((badge) => (
                       <span key={`${provider.id}-${badge}`}>{badge}</span>
+                    ))}
+                    {(provider.serviceHighlights || []).map((highlight) => (
+                      <span key={`${provider.id}-${highlight}`}>{highlight}</span>
                     ))}
                   </div>
                   <div className="provider-card-actions">

@@ -323,12 +323,19 @@ select {
   color: var(--muted);
 }
 
-.form-card input {
+.form-card input,
+.form-card textarea {
   min-height: 48px;
   padding: 0 14px;
   border: 1px solid rgba(25, 33, 42, 0.12);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.8);
+}
+
+.form-card textarea {
+  min-height: 120px;
+  padding: 14px;
+  resize: vertical;
 }
 
 .select-input {
@@ -378,6 +385,62 @@ select {
   margin: 16px 0 0;
   padding: 14px 16px;
   border-radius: 18px;
+}
+
+.onboarding-shell {
+  margin-top: 8px;
+}
+
+.onboarding-progress {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.onboarding-step,
+.onboarding-plan {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.onboarding-step strong,
+.onboarding-plan strong {
+  font-size: 0.95rem;
+}
+
+.onboarding-step span,
+.onboarding-plan span {
+  color: var(--muted);
+}
+
+.onboarding-step.active,
+.onboarding-step.complete,
+.onboarding-plan.active {
+  border-color: rgba(70, 99, 79, 0.25);
+  background: rgba(70, 99, 79, 0.1);
+}
+
+.onboarding-plan-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.onboarding-plan input {
+  margin: 0;
+}
+
+.consent-check {
+  grid-template-columns: auto 1fr;
+  align-items: start;
+}
+
+.consent-check input {
+  min-height: auto;
+  margin-top: 4px;
 }
 
 .status-copy {
@@ -1333,10 +1396,56 @@ select {
   color: var(--muted);
 }
 
+.provider-quality-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.94rem;
+}
+
+.provider-quality-row span {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(70, 99, 79, 0.08);
+}
+
 .provider-card-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.provider-portal-shell {
+  margin-top: 18px;
+}
+
+.provider-portal-hero,
+.provider-portal-profile,
+.provider-portal-leads,
+.provider-portal-sidecard {
+  display: grid;
+  gap: 16px;
+}
+
+.provider-portal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.provider-portal-meta span,
+.provider-portal-response-note {
+  padding: 10px 12px;
+  border-radius: 999px;
+  background: rgba(70, 99, 79, 0.08);
+  color: var(--muted);
+}
+
+.provider-portal-stats {
+  margin-top: 24px;
 }
 
 @media (max-width: 900px) {

@@ -122,6 +122,47 @@ export function saveProvider(propertyId, providerId) {
   });
 }
 
+export function signupProvider(payload) {
+  return request('/api/v1/provider-portal/signup', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createProviderBillingCheckout(payload) {
+  return request('/api/v1/provider-portal/billing/checkout', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createProviderPortalSession(payload) {
+  return request('/api/v1/provider-portal/session', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateProviderPortalProfile(providerId, payload, token) {
+  return request(`/api/v1/provider-portal/providers/${providerId}/profile`, {
+    method: 'PATCH',
+    headers: {
+      'x-provider-portal-token': token,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function respondToProviderPortalLead(providerId, dispatchId, payload, token) {
+  return request(`/api/v1/provider-portal/dispatches/${providerId}/${dispatchId}/respond`, {
+    method: 'PATCH',
+    headers: {
+      'x-provider-portal-token': token,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
 export function createChecklistItem(propertyId, payload) {
   return request(`/api/v1/properties/${propertyId}/checklist/items`, {
     method: 'POST',

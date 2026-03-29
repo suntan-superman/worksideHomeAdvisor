@@ -36,8 +36,45 @@ const providerSubscriptionSchema = new mongoose.Schema(
     planCode: { type: String, default: 'provider_basic' },
     status: { type: String, default: 'inactive' },
     stripeCustomerId: { type: String, default: '' },
+    stripeCheckoutSessionId: { type: String, default: '' },
     stripeSubscriptionId: { type: String, default: '' },
     stripePriceId: { type: String, default: '' },
+    currentPeriodStart: { type: Date, default: null },
+    currentPeriodEnd: { type: Date, default: null },
+    cancelAtPeriodEnd: { type: Boolean, default: false },
+  },
+  { _id: false },
+);
+
+const providerComplianceSchema = new mongoose.Schema(
+  {
+    approvalStatus: {
+      type: String,
+      enum: ['draft', 'review', 'approved', 'rejected'],
+      default: 'draft',
+      index: true,
+    },
+    licenseStatus: {
+      type: String,
+      enum: ['unverified', 'verified', 'not_required'],
+      default: 'unverified',
+    },
+    insuranceStatus: {
+      type: String,
+      enum: ['unverified', 'verified', 'not_required'],
+      default: 'unverified',
+    },
+    reviewedAt: { type: Date, default: null },
+    reviewedBy: { type: String, default: '' },
+  },
+  { _id: false },
+);
+
+const providerPortalAccessSchema = new mongoose.Schema(
+  {
+    tokenHash: { type: String, default: '' },
+    issuedAt: { type: Date, default: null },
+    lastUsedAt: { type: Date, default: null },
   },
   { _id: false },
 );
@@ -62,9 +99,14 @@ const providerSchema = new mongoose.Schema(
     qualityScore: { type: Number, default: 60 },
     averageResponseMinutes: { type: Number, default: 120 },
     yearsInBusiness: { type: Number, default: null },
+    turnaroundLabel: { type: String, default: '' },
+    pricingSummary: { type: String, default: '' },
+    serviceHighlights: { type: [String], default: [] },
     serviceArea: { type: serviceAreaSchema, default: {} },
     leadRouting: { type: leadRoutingSchema, default: {} },
     subscription: { type: providerSubscriptionSchema, default: {} },
+    compliance: { type: providerComplianceSchema, default: {} },
+    portalAccess: { type: providerPortalAccessSchema, default: {} },
     onboardingSource: { type: String, default: 'admin' },
     outreachSource: { type: String, default: 'manual' },
     invitedAt: { type: Date, default: null },

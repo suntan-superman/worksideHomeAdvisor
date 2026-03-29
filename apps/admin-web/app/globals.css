@@ -207,6 +207,107 @@ a {
   gap: 12px;
 }
 
+.lead-operations-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.provider-roster-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.lead-card {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+}
+
+.lead-card-header,
+.lead-action-row,
+.lead-status-stack {
+  display: flex;
+  gap: 12px;
+}
+
+.lead-card-header {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.lead-status-stack {
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.lead-meta-grid,
+.lead-detail-columns {
+  display: grid;
+  gap: 14px;
+}
+
+.lead-meta-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.lead-meta-grid div,
+.lead-message-block,
+.lead-detail-panel,
+.detail-row-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.lead-meta-grid strong,
+.lead-meta-grid span {
+  display: block;
+}
+
+.lead-meta-grid strong,
+.lead-message-block strong,
+.lead-detail-panel h3 {
+  margin-bottom: 6px;
+}
+
+.lead-message-block p,
+.detail-row-body {
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.lead-detail-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.empty-inline {
+  color: var(--muted);
+}
+
+.admin-button-secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.lead-mini-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .stack-row,
 .worker-card-header {
   display: flex;
@@ -391,7 +492,10 @@ a {
   .split-layout,
   .card-grid,
   .card-grid.compact,
-  .mini-admin-stats {
+  .mini-admin-stats,
+  .lead-meta-grid,
+  .lead-detail-columns,
+  .lead-mini-stats {
     grid-template-columns: 1fr;
   }
 
@@ -402,5 +506,12 @@ a {
 
   .section-header {
     flex-direction: column;
+  }
+
+  .lead-card-header,
+  .lead-action-row,
+  .lead-status-stack {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

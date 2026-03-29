@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import {
+  closeAdminProviderLeadAction,
   createAdminProvider,
   getAdminBillingSnapshot,
   getAdminMediaVariantSnapshot,
@@ -11,7 +12,9 @@ import {
   getAdminWorkerSnapshot,
   listAdminProperties,
   listAdminUsers,
+  resendAdminProviderLeadAction,
   runAdminMediaVariantCleanup,
+  updateAdminProviderReviewAction,
 } from './admin.service.js';
 import { requireAdminSession } from './admin-session.service.js';
 
@@ -35,7 +38,28 @@ const createProviderSchema = z.object({
   isSponsored: z.boolean().optional(),
   qualityScore: z.number().int().min(0).max(100).optional(),
   averageResponseMinutes: z.number().int().min(5).max(7 * 24 * 60).optional(),
+  turnaroundLabel: z.string().trim().max(80).optional(),
+  pricingSummary: z.string().trim().max(140).optional(),
+  serviceHighlights: z.array(z.string().trim().min(1).max(60)).max(6).optional(),
+  approvalStatus: z.enum(['draft', 'review', 'approved', 'rejected']).optional(),
+  licenseStatus: z.enum(['unverified', 'verified', 'not_required']).optional(),
+  insuranceStatus: z.enum(['unverified', 'verified', 'not_required']).optional(),
   planCode: z.string().trim().max(60).optional(),
+});
+
+const closeProviderLeadSchema = z.object({
+  resolution: z.enum(['completed', 'cancelled']),
+});
+
+const updateProviderReviewSchema = z.object({
+  approvalStatus: z.enum(['draft', 'review', 'approved', 'rejected']).optional(),
+  licenseStatus: z.enum(['unverified', 'verified', 'not_required']).optional(),
+  insuranceStatus: z.enum(['unverified', 'verified', 'not_required']).optional(),
+  status: z.enum(['active', 'paused', 'pending', 'pending_billing', 'suspended']).optional(),
+  isVerified: z.boolean().optional(),
+  turnaroundLabel: z.string().trim().max(80).optional(),
+  pricingSummary: z.string().trim().max(140).optional(),
+  serviceHighlights: z.array(z.string().trim().min(1).max(60)).max(6).optional(),
 });
 
 export async function adminRoutes(fastify) {
@@ -134,12 +158,43 @@ export async function adminRoutes(fastify) {
     }
   });
 
+  fastify.post('/providers/:providerId/review', async (request, reply) => {
+    try {
+      const payload = updateProviderReviewSchema.parse(request.body || {});
+      return reply.send(await updateAdminProviderReviewAction(request.params.providerId, payload));
+    } catch (error) {
+      request.log.error({ err: error, providerId: request.params?.providerId }, 'admin provider review update failed');
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
   fastify.get('/provider-leads', async (request, reply) => {
     try {
       const query = listQuerySchema.parse(request.query || {});
       return reply.send(await getAdminProviderLeadSnapshot(query));
     } catch (error) {
       request.log.error({ err: error }, 'admin provider leads snapshot failed');
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/provider-leads/:leadRequestId/resend', async (request, reply) => {
+    try {
+      return reply.send(await resendAdminProviderLeadAction(request.params.leadRequestId));
+    } catch (error) {
+      request.log.error({ err: error, leadRequestId: request.params?.leadRequestId }, 'admin provider lead resend failed');
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/provider-leads/:leadRequestId/close', async (request, reply) => {
+    try {
+      const payload = closeProviderLeadSchema.parse(request.body || {});
+      return reply.send(
+        await closeAdminProviderLeadAction(request.params.leadRequestId, payload.resolution),
+      );
+    } catch (error) {
+      request.log.error({ err: error, leadRequestId: request.params?.leadRequestId }, 'admin provider lead close failed');
       return reply.code(400).send({ message: error.message });
     }
   });

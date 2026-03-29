@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 
 import { normalizePhoneNumber, notifyQueuedLeadDispatches } from '../marketplace-sms/marketplace-sms.service.js';
@@ -7,6 +8,8 @@ import {
   LeadDispatchModel,
   LeadRequestModel,
   ProviderAnalyticsModel,
+  ProviderResponseModel,
+  ProviderSmsLogModel,
   SavedProviderModel,
 } from './provider-leads.model.js';
 import { ProviderCategoryModel, ProviderModel } from './provider.model.js';
@@ -35,6 +38,23 @@ function normalizeZipList(value) {
   return Array.isArray(value)
     ? value.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 25)
     : [];
+}
+
+function normalizeStringList(value, { limit = 6, maxLength = 60 } = {}) {
+  return Array.isArray(value)
+    ? value
+        .map((entry) => normalizeString(entry).slice(0, maxLength))
+        .filter(Boolean)
+        .slice(0, limit)
+    : [];
+}
+
+function hashProviderPortalToken(token) {
+  return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+
+function createProviderPortalToken() {
+  return crypto.randomBytes(24).toString('hex');
 }
 
 function serializeCategory(document) {
@@ -135,7 +155,10 @@ function buildProviderRankScore(provider, property, analytics) {
 function buildRankingBadges(provider, scoreBreakdown, rankIndex) {
   const badges = [];
   if (rankIndex === 0) badges.push('Top Pick');
+  if (provider.compliance?.approvalStatus === 'approved') badges.push('Approved');
   if (provider.isVerified) badges.push('Verified');
+  if (provider.compliance?.licenseStatus === 'verified') badges.push('Licensed');
+  if (provider.compliance?.insuranceStatus === 'verified') badges.push('Insured');
   if (provider.isSponsored) badges.push('Sponsored');
   if (scoreBreakdown.responseSpeedScore >= 74) badges.push('Fast Response');
   if (scoreBreakdown.distanceScore >= 100) badges.push('ZIP Match');
@@ -166,6 +189,9 @@ function serializeProvider(document, extras = {}) {
     qualityScore: Number(document.qualityScore || 0),
     averageResponseMinutes: Number(document.averageResponseMinutes || 0),
     yearsInBusiness: document.yearsInBusiness || null,
+    turnaroundLabel: document.turnaroundLabel || '',
+    pricingSummary: document.pricingSummary || '',
+    serviceHighlights: document.serviceHighlights || [],
     serviceArea: {
       city: document.serviceArea?.city || '',
       state: document.serviceArea?.state || '',
@@ -182,10 +208,261 @@ function serializeProvider(document, extras = {}) {
       planCode: document.subscription?.planCode || 'provider_basic',
       status: document.subscription?.status || 'inactive',
     },
+    compliance: {
+      approvalStatus: document.compliance?.approvalStatus || 'draft',
+      licenseStatus: document.compliance?.licenseStatus || 'unverified',
+      insuranceStatus: document.compliance?.insuranceStatus || 'unverified',
+      reviewedAt: document.compliance?.reviewedAt || null,
+      reviewedBy: document.compliance?.reviewedBy || '',
+    },
     createdAt: document.createdAt || null,
     updatedAt: document.updatedAt || null,
     ...extras,
   };
+}
+
+function serializeProviderPortalLead(dispatch, leadRequest) {
+  const propertyAddress =
+    leadRequest?.propertySnapshot?.address ||
+    [leadRequest?.propertySnapshot?.city, leadRequest?.propertySnapshot?.state, leadRequest?.propertySnapshot?.zip]
+      .filter(Boolean)
+      .join(', ');
+
+  return {
+    id: dispatch._id?.toString?.() || String(dispatch._id),
+    leadRequestId: dispatch.leadRequestId?.toString?.() || String(dispatch.leadRequestId),
+    categoryKey: leadRequest?.categoryKey || '',
+    leadStatus: leadRequest?.status || 'open',
+    dispatchStatus: dispatch.status,
+    responseStatus: dispatch.responseStatus || null,
+    message: leadRequest?.message || '',
+    source: leadRequest?.source || 'checklist_task',
+    propertyAddress,
+    propertyCity: leadRequest?.propertySnapshot?.city || '',
+    propertyState: leadRequest?.propertySnapshot?.state || '',
+    propertyZip: leadRequest?.propertySnapshot?.zip || '',
+    sentAt: dispatch.sentAt || null,
+    respondedAt: dispatch.respondedAt || null,
+    createdAt: dispatch.createdAt || null,
+    canRespond: ['queued', 'sent', 'delivered'].includes(dispatch.status),
+  };
+}
+
+function summarizeProviderPortalDispatches(dispatches = []) {
+  const summary = {
+    total: dispatches.length,
+    awaitingResponse: 0,
+    accepted: 0,
+    declined: 0,
+    failed: 0,
+  };
+
+  for (const dispatch of dispatches) {
+    if (['queued', 'sent', 'delivered'].includes(dispatch.status)) {
+      summary.awaitingResponse += 1;
+    }
+    if (dispatch.status === 'accepted' || dispatch.responseStatus === 'accepted') {
+      summary.accepted += 1;
+    }
+    if (
+      dispatch.status === 'declined' ||
+      dispatch.responseStatus === 'declined' ||
+      dispatch.responseStatus === 'opted_out'
+    ) {
+      summary.declined += 1;
+    }
+    if (dispatch.status === 'failed') {
+      summary.failed += 1;
+    }
+  }
+
+  return summary;
+}
+
+async function refreshLeadRequestStatus(leadRequestId) {
+  const dispatches = await LeadDispatchModel.find({ leadRequestId }).lean();
+
+  let nextStatus = 'open';
+  if (dispatches.some((dispatch) => dispatch.status === 'accepted')) {
+    nextStatus = 'matched';
+  } else if (dispatches.some((dispatch) => ['queued', 'sent', 'delivered'].includes(dispatch.status))) {
+    nextStatus = 'routing';
+  } else if (dispatches.some((dispatch) => ['declined', 'failed', 'expired'].includes(dispatch.status))) {
+    nextStatus = 'open';
+  }
+
+  await LeadRequestModel.findByIdAndUpdate(leadRequestId, {
+    $set: {
+      status: nextStatus,
+      updatedAt: new Date(),
+    },
+  });
+}
+
+async function upsertProviderAnalytics(providerId, mutator) {
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const record =
+    (await ProviderAnalyticsModel.findOne({ providerId, monthKey })) ||
+    (await ProviderAnalyticsModel.create({ providerId, monthKey }));
+
+  mutator(record);
+  await record.save();
+}
+
+async function authenticateProviderPortal(providerId, token) {
+  if (!mongoose.Types.ObjectId.isValid(providerId)) {
+    throw new Error('Provider session is invalid.');
+  }
+
+  const provider = await ProviderModel.findById(providerId);
+  if (!provider) {
+    throw new Error('Provider session is invalid.');
+  }
+
+  if (!provider.portalAccess?.tokenHash) {
+    throw new Error('Provider portal access has not been enabled for this account.');
+  }
+
+  if (provider.portalAccess.tokenHash !== hashProviderPortalToken(token)) {
+    throw new Error('Provider session is invalid.');
+  }
+
+  provider.portalAccess.lastUsedAt = new Date();
+  await provider.save();
+
+  return provider;
+}
+
+async function buildProviderPortalDashboard(providerDocument) {
+  const providerId = providerDocument._id;
+  const [dispatches, analytics] = await Promise.all([
+    LeadDispatchModel.find({ providerId }).sort({ createdAt: -1 }).limit(30).lean(),
+    ProviderAnalyticsModel.findOne({
+      providerId,
+      monthKey: new Date().toISOString().slice(0, 7),
+    }).lean(),
+  ]);
+
+  const leadRequestIds = [...new Set(dispatches.map((dispatch) => dispatch.leadRequestId?.toString?.() || String(dispatch.leadRequestId)))];
+  const leadRequests = leadRequestIds.length
+    ? await LeadRequestModel.find({ _id: { $in: leadRequestIds } }).lean()
+    : [];
+  const leadRequestById = new Map(
+    leadRequests.map((leadRequest) => [leadRequest._id?.toString?.() || String(leadRequest._id), leadRequest]),
+  );
+
+  return {
+    provider: serializeProvider(providerDocument.toObject ? providerDocument.toObject() : providerDocument, {
+      portalAccess: {
+        issuedAt: providerDocument.portalAccess?.issuedAt || null,
+        lastUsedAt: providerDocument.portalAccess?.lastUsedAt || null,
+      },
+      subscription: {
+        planCode: providerDocument.subscription?.planCode || 'provider_basic',
+        status: providerDocument.subscription?.status || 'inactive',
+        currentPeriodStart: providerDocument.subscription?.currentPeriodStart || null,
+        currentPeriodEnd: providerDocument.subscription?.currentPeriodEnd || null,
+        cancelAtPeriodEnd: Boolean(providerDocument.subscription?.cancelAtPeriodEnd),
+      },
+      analytics: analytics
+        ? {
+            monthKey: analytics.monthKey,
+            leadCount: Number(analytics.leadCount || 0),
+            acceptedCount: Number(analytics.acceptedCount || 0),
+            declinedCount: Number(analytics.declinedCount || 0),
+            avgResponseMinutes: Number(analytics.avgResponseMinutes || 0),
+          }
+        : null,
+    }),
+    summary: summarizeProviderPortalDispatches(dispatches),
+    leads: dispatches.map((dispatch) =>
+      serializeProviderPortalLead(
+        dispatch,
+        leadRequestById.get(dispatch.leadRequestId?.toString?.() || String(dispatch.leadRequestId)),
+      ),
+    ),
+  };
+}
+
+function serializeLeadDispatch(document, provider = null) {
+  return {
+    id: document._id?.toString?.() || String(document._id),
+    providerId: document.providerId?.toString?.() || String(document.providerId),
+    providerName: provider?.businessName || 'Unknown provider',
+    providerStatus: provider?.status || '',
+    providerPhone: provider?.leadRouting?.notifyPhone || provider?.phone || '',
+    providerEmail: provider?.leadRouting?.notifyEmail || provider?.email || '',
+    deliveryMode: provider?.leadRouting?.deliveryMode || 'sms_and_email',
+    optedOut: Boolean(provider?.leadRouting?.smsOptOut),
+    status: document.status,
+    responseStatus: document.responseStatus || null,
+    sentAt: document.sentAt || null,
+    smsSentAt: document.smsSentAt || null,
+    smsMessageSid: document.smsMessageSid || '',
+    smsError: document.smsError || '',
+    respondedAt: document.respondedAt || null,
+    deliveryChannels: document.deliveryChannels || [],
+    leadFeeCents: Number(document.leadFeeCents || 0),
+  };
+}
+
+function serializeProviderResponse(document, provider = null) {
+  return {
+    id: document._id?.toString?.() || String(document._id),
+    providerId: document.providerId?.toString?.() || String(document.providerId),
+    providerName: provider?.businessName || 'Unknown provider',
+    responseStatus: document.responseStatus,
+    note: document.note || '',
+    rawBody: document.rawBody || '',
+    createdAt: document.createdAt || null,
+  };
+}
+
+function serializeProviderSmsLog(document, provider = null) {
+  return {
+    id: document._id?.toString?.() || String(document._id),
+    providerId: document.providerId?.toString?.() || String(document.providerId),
+    providerName: provider?.businessName || 'Unknown provider',
+    direction: document.direction,
+    messageType: document.messageType || 'lead',
+    fromPhone: document.fromPhone || '',
+    toPhone: document.toPhone || '',
+    body: document.body || '',
+    twilioMessageSid: document.twilioMessageSid || '',
+    deliveryStatus: document.deliveryStatus || '',
+    parseStatus: document.parseStatus || '',
+    createdAt: document.createdAt || null,
+  };
+}
+
+function summarizeLeadDispatches(dispatches = []) {
+  const summary = {
+    contacted: 0,
+    queued: 0,
+    sent: 0,
+    delivered: 0,
+    accepted: 0,
+    declined: 0,
+    failed: 0,
+    help: 0,
+    customReplies: 0,
+    optedOut: 0,
+  };
+
+  for (const dispatch of dispatches) {
+    summary.contacted += 1;
+    if (dispatch.status === 'queued') summary.queued += 1;
+    if (dispatch.status === 'sent') summary.sent += 1;
+    if (dispatch.status === 'delivered') summary.delivered += 1;
+    if (dispatch.status === 'accepted' || dispatch.responseStatus === 'accepted') summary.accepted += 1;
+    if (dispatch.status === 'declined' || dispatch.responseStatus === 'declined') summary.declined += 1;
+    if (dispatch.status === 'failed') summary.failed += 1;
+    if (dispatch.responseStatus === 'help') summary.help += 1;
+    if (dispatch.responseStatus === 'custom_reply') summary.customReplies += 1;
+    if (dispatch.responseStatus === 'opted_out') summary.optedOut += 1;
+  }
+
+  return summary;
 }
 
 function serializeLeadRequest(document, dispatches = []) {
@@ -527,6 +804,15 @@ export async function createProviderProfile(payload = {}, { createdFrom = 'admin
   const notifyPhone = normalizeString(payload.notifyPhone || payload.leadRouting?.notifyPhone || payload.phone).slice(0, 40);
   const notifyPhoneNormalized = normalizePhoneNumber(notifyPhone);
   const activatedAt = status === 'active' ? new Date() : null;
+  const portalAccessToken = createdFrom === 'provider_portal' ? createProviderPortalToken() : '';
+  const smsOptIn =
+    payload.smsOptIn === true ||
+    Boolean(payload.smsConsentAt) ||
+    (createdFrom !== 'provider_portal' && Boolean(notifyPhoneNormalized));
+  const approvalStatus =
+    payload.approvalStatus ||
+    payload.compliance?.approvalStatus ||
+    (createdFrom === 'provider_portal' ? 'review' : 'approved');
   const document = await ProviderModel.create({
     businessName,
     slug,
@@ -544,6 +830,9 @@ export async function createProviderProfile(payload = {}, { createdFrom = 'admin
       payload.yearsInBusiness === null || payload.yearsInBusiness === undefined
         ? null
         : Math.max(0, Math.min(80, Number(payload.yearsInBusiness || 0))),
+    turnaroundLabel: normalizeString(payload.turnaroundLabel).slice(0, 80),
+    pricingSummary: normalizeString(payload.pricingSummary).slice(0, 140),
+    serviceHighlights: normalizeStringList(payload.serviceHighlights),
     serviceArea: {
       city: normalizeString(payload.city || payload.serviceArea?.city).slice(0, 80),
       state: normalizeString(payload.state || payload.serviceArea?.state).slice(0, 40),
@@ -557,9 +846,7 @@ export async function createProviderProfile(payload = {}, { createdFrom = 'admin
       notifyEmail: normalizeString(payload.notifyEmail || payload.leadRouting?.notifyEmail || payload.email).slice(0, 120),
       preferredContactMethod: payload.preferredContactMethod || payload.leadRouting?.preferredContactMethod || 'sms',
       smsOptOut: Boolean(payload.smsOptOut),
-      smsConsentAt:
-        payload.smsConsentAt ||
-        (createdFrom === 'provider_portal' || notifyPhoneNormalized ? new Date() : null),
+      smsConsentAt: payload.smsConsentAt || (smsOptIn ? new Date() : null),
     },
     subscription: {
       planCode: payload.planCode || payload.subscription?.planCode || 'provider_basic',
@@ -568,6 +855,21 @@ export async function createProviderProfile(payload = {}, { createdFrom = 'admin
       stripeSubscriptionId: '',
       stripePriceId: '',
     },
+    compliance: {
+      approvalStatus,
+      licenseStatus: payload.licenseStatus || payload.compliance?.licenseStatus || 'unverified',
+      insuranceStatus: payload.insuranceStatus || payload.compliance?.insuranceStatus || 'unverified',
+      reviewedAt: approvalStatus === 'approved' ? new Date() : null,
+      reviewedBy: normalizeString(payload.reviewedBy || '').slice(0, 80),
+    },
+    portalAccess:
+      createdFrom === 'provider_portal'
+        ? {
+            tokenHash: hashProviderPortalToken(portalAccessToken),
+            issuedAt: new Date(),
+            lastUsedAt: null,
+          }
+        : undefined,
     onboardingSource: createdFrom,
     outreachSource: normalizeString(payload.outreachSource).slice(0, 80) || 'manual',
     invitedAt: payload.invitedAt || null,
@@ -576,7 +878,183 @@ export async function createProviderProfile(payload = {}, { createdFrom = 'admin
     internalNotes: normalizeString(payload.internalNotes).slice(0, 600),
   });
 
-  return serializeProvider(document.toObject(), { categoryLabel: category.label });
+  return serializeProvider(document.toObject(), {
+    categoryLabel: category.label,
+    ...(portalAccessToken ? { portalAccessToken } : {}),
+  });
+}
+
+export async function createProviderPortalSession({ providerId, token }) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required for provider portal access.');
+  }
+
+  const provider = await authenticateProviderPortal(providerId, token);
+  const dashboard = await buildProviderPortalDashboard(provider);
+
+  return {
+    providerId: provider._id?.toString?.() || String(provider._id),
+    dashboard,
+  };
+}
+
+export async function updateProviderPortalProfile(providerId, token, payload = {}) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required for provider portal access.');
+  }
+
+  const provider = await authenticateProviderPortal(providerId, token);
+
+  if (payload.description !== undefined) {
+    provider.description = normalizeString(payload.description).slice(0, 600);
+  }
+  if (payload.websiteUrl !== undefined) {
+    provider.websiteUrl = normalizeString(payload.websiteUrl).slice(0, 180);
+  }
+  if (payload.turnaroundLabel !== undefined) {
+    provider.turnaroundLabel = normalizeString(payload.turnaroundLabel).slice(0, 80);
+  }
+  if (payload.pricingSummary !== undefined) {
+    provider.pricingSummary = normalizeString(payload.pricingSummary).slice(0, 140);
+  }
+  if (payload.serviceHighlights !== undefined) {
+    provider.serviceHighlights = normalizeStringList(payload.serviceHighlights);
+  }
+  if (payload.city !== undefined) {
+    provider.serviceArea.city = normalizeString(payload.city).slice(0, 80);
+  }
+  if (payload.state !== undefined) {
+    provider.serviceArea.state = normalizeString(payload.state).slice(0, 40);
+  }
+  if (payload.zipCodes !== undefined) {
+    provider.serviceArea.zipCodes = normalizeZipList(payload.zipCodes);
+  }
+  if (payload.radiusMiles !== undefined) {
+    provider.serviceArea.radiusMiles = Math.max(5, Math.min(150, Number(payload.radiusMiles || 25)));
+  }
+  if (payload.notifyPhone !== undefined) {
+    const notifyPhone = normalizeString(payload.notifyPhone).slice(0, 40);
+    provider.leadRouting.notifyPhone = notifyPhone;
+    provider.leadRouting.notifyPhoneNormalized = normalizePhoneNumber(notifyPhone);
+  }
+  if (payload.notifyEmail !== undefined) {
+    provider.leadRouting.notifyEmail = normalizeString(payload.notifyEmail).slice(0, 120);
+  }
+  if (payload.deliveryMode !== undefined) {
+    provider.leadRouting.deliveryMode = payload.deliveryMode;
+  }
+  if (payload.preferredContactMethod !== undefined) {
+    provider.leadRouting.preferredContactMethod = payload.preferredContactMethod;
+  }
+
+  await provider.save();
+  const dashboard = await buildProviderPortalDashboard(provider);
+  return { dashboard };
+}
+
+export async function respondToProviderPortalLead(dispatchId, { providerId, token, responseStatus, note = '' }) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required for provider portal access.');
+  }
+
+  if (!['accepted', 'declined'].includes(responseStatus)) {
+    throw new Error('Provider response must be accepted or declined.');
+  }
+
+  const provider = await authenticateProviderPortal(providerId, token);
+  const dispatch = await LeadDispatchModel.findById(dispatchId);
+  if (!dispatch || String(dispatch.providerId) !== String(provider._id)) {
+    throw new Error('Provider lead not found.');
+  }
+
+  if (!['queued', 'sent', 'delivered'].includes(dispatch.status)) {
+    throw new Error('This provider lead can no longer be responded to.');
+  }
+
+  const now = new Date();
+  dispatch.status = responseStatus === 'accepted' ? 'accepted' : 'declined';
+  dispatch.responseStatus = responseStatus;
+  dispatch.respondedAt = now;
+  await dispatch.save();
+
+  await ProviderResponseModel.create({
+    leadRequestId: dispatch.leadRequestId,
+    providerId: provider._id,
+    responseStatus,
+    note: normalizeString(note).slice(0, 280) || `Responded from provider portal: ${responseStatus}`,
+    rawBody: '',
+  });
+
+  await upsertProviderAnalytics(provider._id, (record) => {
+    if (responseStatus === 'accepted') {
+      record.acceptedCount += 1;
+      if (dispatch.sentAt || dispatch.smsSentAt) {
+        const startAt = dispatch.smsSentAt || dispatch.sentAt;
+        const responseMinutes = Math.max(1, Math.round((now.getTime() - new Date(startAt).getTime()) / 60000));
+        const priorAccepted = Math.max(0, record.acceptedCount - 1);
+        record.avgResponseMinutes = priorAccepted
+          ? Math.round(((record.avgResponseMinutes * priorAccepted) + responseMinutes) / record.acceptedCount)
+          : responseMinutes;
+      }
+    } else {
+      record.declinedCount += 1;
+    }
+  });
+
+  await refreshLeadRequestStatus(dispatch.leadRequestId);
+  const dashboard = await buildProviderPortalDashboard(provider);
+  return { dashboard };
+}
+
+export async function updateAdminProviderReview(providerId, payload = {}) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to update providers.');
+  }
+
+  const provider = await ProviderModel.findById(providerId);
+  if (!provider) {
+    throw new Error('Provider not found.');
+  }
+
+  if (payload.approvalStatus) {
+    provider.compliance.approvalStatus = payload.approvalStatus;
+    provider.compliance.reviewedAt = new Date();
+    provider.compliance.reviewedBy = normalizeString(payload.reviewedBy || 'admin_console').slice(0, 80);
+  }
+
+  if (payload.licenseStatus) {
+    provider.compliance.licenseStatus = payload.licenseStatus;
+  }
+
+  if (payload.insuranceStatus) {
+    provider.compliance.insuranceStatus = payload.insuranceStatus;
+  }
+
+  if (payload.status) {
+    provider.status = payload.status;
+    if (payload.status === 'active' && !provider.activatedAt) {
+      provider.activatedAt = new Date();
+    }
+  }
+
+  if (payload.isVerified !== undefined) {
+    provider.isVerified = Boolean(payload.isVerified);
+  }
+
+  if (payload.turnaroundLabel !== undefined) {
+    provider.turnaroundLabel = normalizeString(payload.turnaroundLabel).slice(0, 80);
+  }
+
+  if (payload.pricingSummary !== undefined) {
+    provider.pricingSummary = normalizeString(payload.pricingSummary).slice(0, 140);
+  }
+
+  if (payload.serviceHighlights !== undefined) {
+    provider.serviceHighlights = normalizeStringList(payload.serviceHighlights);
+  }
+
+  await provider.save();
+  return { provider: serializeProvider(provider.toObject()) };
 }
 
 export async function listAdminProviders({ limit = 50 } = {}) {
@@ -625,39 +1103,221 @@ export async function listAdminProviders({ limit = 50 } = {}) {
 
 export async function listAdminProviderLeads({ limit = 50 } = {}) {
   if (mongoose.connection.readyState !== 1) {
-    return { dataSource: 'demo', items: [] };
+    return { dataSource: 'demo', items: [], summary: {} };
   }
 
   const leads = await LeadRequestModel.find({}).sort({ createdAt: -1 }).limit(limit).lean();
   const leadIds = leads.map((lead) => lead._id);
-  const dispatches = leadIds.length ? await LeadDispatchModel.find({ leadRequestId: { $in: leadIds } }).lean() : [];
-  const dispatchCountByLeadId = new Map();
+  const [dispatches, responses, smsLogs] = leadIds.length
+    ? await Promise.all([
+        LeadDispatchModel.find({ leadRequestId: { $in: leadIds } }).sort({ createdAt: -1 }).lean(),
+        ProviderResponseModel.find({ leadRequestId: { $in: leadIds } }).sort({ createdAt: -1 }).lean(),
+        ProviderSmsLogModel.find({ leadRequestId: { $in: leadIds } }).sort({ createdAt: -1 }).lean(),
+      ])
+    : [[], [], []];
+
+  const providerIds = [
+    ...new Set(
+      [...dispatches, ...responses, ...smsLogs]
+        .map((record) => record.providerId?.toString?.() || String(record.providerId || ''))
+        .filter(Boolean),
+    ),
+  ];
+
+  const providers = providerIds.length
+    ? await ProviderModel.find({ _id: { $in: providerIds } }).lean()
+    : [];
+  const providerById = new Map(
+    providers.map((provider) => [provider._id?.toString?.() || String(provider._id), provider]),
+  );
+
+  const dispatchesByLeadId = new Map();
+  const responsesByLeadId = new Map();
+  const smsLogsByLeadId = new Map();
 
   for (const dispatch of dispatches) {
     const leadId = dispatch.leadRequestId?.toString?.() || String(dispatch.leadRequestId);
-    const current = dispatchCountByLeadId.get(leadId) || { contacted: 0, accepted: 0, declined: 0 };
-    current.contacted += 1;
-    if (dispatch.status === 'accepted' || dispatch.responseStatus === 'accepted') current.accepted += 1;
-    if (dispatch.status === 'declined' || dispatch.responseStatus === 'declined') current.declined += 1;
-    dispatchCountByLeadId.set(leadId, current);
+    const current = dispatchesByLeadId.get(leadId) || [];
+    current.push(dispatch);
+    dispatchesByLeadId.set(leadId, current);
   }
+
+  for (const response of responses) {
+    const leadId = response.leadRequestId?.toString?.() || String(response.leadRequestId);
+    const current = responsesByLeadId.get(leadId) || [];
+    current.push(response);
+    responsesByLeadId.set(leadId, current);
+  }
+
+  for (const log of smsLogs) {
+    const leadId = log.leadRequestId?.toString?.() || String(log.leadRequestId);
+    const current = smsLogsByLeadId.get(leadId) || [];
+    current.push(log);
+    smsLogsByLeadId.set(leadId, current);
+  }
+
+  const overallSummary = {
+    open: 0,
+    routing: 0,
+    matched: 0,
+    completed: 0,
+    cancelled: 0,
+    expired: 0,
+    awaitingResponse: 0,
+    failedDispatches: 0,
+  };
 
   return {
     dataSource: 'mongodb',
     items: leads.map((lead) => {
-      const counts = dispatchCountByLeadId.get(lead._id?.toString?.() || String(lead._id)) || { contacted: 0, accepted: 0, declined: 0 };
+      const leadId = lead._id?.toString?.() || String(lead._id);
+      const leadDispatches = dispatchesByLeadId.get(leadId) || [];
+      const leadResponses = responsesByLeadId.get(leadId) || [];
+      const leadSmsLogs = smsLogsByLeadId.get(leadId) || [];
+      const counts = summarizeLeadDispatches(leadDispatches);
+      const propertyAddress = [
+        lead.propertySnapshot?.address,
+        [lead.propertySnapshot?.city, lead.propertySnapshot?.state, lead.propertySnapshot?.zip]
+          .filter(Boolean)
+          .join(', '),
+      ]
+        .filter(Boolean)
+        .join(' • ');
+
+      overallSummary[lead.status] = Number(overallSummary[lead.status] || 0) + 1;
+      if (counts.accepted === 0 && (counts.sent > 0 || counts.delivered > 0)) {
+        overallSummary.awaitingResponse += 1;
+      }
+      if (counts.failed > 0) {
+        overallSummary.failedDispatches += 1;
+      }
+
       return {
-        id: lead._id?.toString?.() || String(lead._id),
+        id: leadId,
         propertyId: lead.propertyId?.toString?.() || String(lead.propertyId),
+        userId: lead.userId?.toString?.() || String(lead.userId),
         categoryKey: lead.categoryKey,
         status: lead.status,
         source: lead.source || 'checklist_task',
+        sourceRefId: lead.sourceRefId || '',
+        requestedByRole: lead.requestedByRole || 'seller',
+        maxProviders: Number(lead.maxProviders || 0),
+        message: lead.message || '',
+        propertyAddress,
         propertyCity: lead.propertySnapshot?.city || '',
+        propertyState: lead.propertySnapshot?.state || '',
+        propertyZip: lead.propertySnapshot?.zip || '',
         contacted: counts.contacted,
         accepted: counts.accepted,
         declined: counts.declined,
+        queued: counts.queued,
+        sent: counts.sent,
+        delivered: counts.delivered,
+        failed: counts.failed,
+        help: counts.help,
+        customReplies: counts.customReplies,
+        optedOut: counts.optedOut,
+        dispatches: leadDispatches.map((dispatch) =>
+          serializeLeadDispatch(
+            dispatch,
+            providerById.get(dispatch.providerId?.toString?.() || String(dispatch.providerId)),
+          ),
+        ),
+        responses: leadResponses
+          .slice(0, 8)
+          .map((response) =>
+            serializeProviderResponse(
+              response,
+              providerById.get(response.providerId?.toString?.() || String(response.providerId)),
+            ),
+          ),
+        smsLogs: leadSmsLogs
+          .slice(0, 10)
+          .map((log) =>
+            serializeProviderSmsLog(
+              log,
+              providerById.get(log.providerId?.toString?.() || String(log.providerId)),
+            ),
+          ),
         createdAt: lead.createdAt || null,
+        updatedAt: lead.updatedAt || null,
       };
     }),
+    summary: overallSummary,
+  };
+}
+
+export async function resendAdminProviderLead(leadRequestId) {
+  if (mongoose.connection.readyState !== 1) {
+    return { dataSource: 'demo', resentCount: 0, failedCount: 0, skippedCount: 0 };
+  }
+
+  const lead = await LeadRequestModel.findById(leadRequestId);
+  if (!lead) {
+    throw new Error('Provider lead not found.');
+  }
+
+  const dispatches = await LeadDispatchModel.find({ leadRequestId: lead._id });
+  if (!dispatches.length) {
+    throw new Error('No provider dispatches exist for this lead.');
+  }
+
+  let requeuedCount = 0;
+  for (const dispatch of dispatches) {
+    if (['accepted', 'declined'].includes(dispatch.status)) {
+      continue;
+    }
+
+    dispatch.status = 'queued';
+    dispatch.sentAt = null;
+    dispatch.smsSentAt = null;
+    dispatch.smsMessageSid = '';
+    dispatch.smsError = '';
+    dispatch.respondedAt = null;
+    if (!['accepted', 'declined', 'opted_out'].includes(dispatch.responseStatus || '')) {
+      dispatch.responseStatus = null;
+    }
+    await dispatch.save();
+    requeuedCount += 1;
+  }
+
+  if (!requeuedCount) {
+    throw new Error('No eligible dispatches were available to resend.');
+  }
+
+  lead.status = 'routing';
+  await lead.save();
+
+  const result = await notifyQueuedLeadDispatches(lead._id);
+
+  return {
+    dataSource: 'mongodb',
+    leadRequestId: lead._id?.toString?.() || String(lead._id),
+    requeuedCount,
+    ...result,
+  };
+}
+
+export async function closeAdminProviderLead(leadRequestId, resolution = 'completed') {
+  if (mongoose.connection.readyState !== 1) {
+    return { dataSource: 'demo', leadRequestId, status: resolution };
+  }
+
+  if (!['completed', 'cancelled'].includes(resolution)) {
+    throw new Error('Resolution must be completed or cancelled.');
+  }
+
+  const lead = await LeadRequestModel.findById(leadRequestId);
+  if (!lead) {
+    throw new Error('Provider lead not found.');
+  }
+
+  lead.status = resolution;
+  await lead.save();
+
+  return {
+    dataSource: 'mongodb',
+    leadRequestId: lead._id?.toString?.() || String(lead._id),
+    status: lead.status,
   };
 }

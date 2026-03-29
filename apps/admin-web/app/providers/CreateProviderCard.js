@@ -25,6 +25,12 @@ const INITIAL_FORM = {
   isSponsored: false,
   qualityScore: 78,
   averageResponseMinutes: 90,
+  turnaroundLabel: '24-48 hours',
+  pricingSummary: '',
+  serviceHighlights: 'Licensed, Local specialist',
+  approvalStatus: 'approved',
+  licenseStatus: 'verified',
+  insuranceStatus: 'verified',
   planCode: 'provider_standard',
 };
 
@@ -47,6 +53,10 @@ export function CreateProviderCard() {
         body: JSON.stringify({
           ...form,
           zipCodes: form.zipCodes
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean),
+          serviceHighlights: form.serviceHighlights
             .split(',')
             .map((value) => value.trim())
             .filter(Boolean),
@@ -199,7 +209,65 @@ export function CreateProviderCard() {
             }
           />
         </label>
+        <label>
+          Turnaround
+          <input
+            value={form.turnaroundLabel}
+            onChange={(event) => setForm((current) => ({ ...current, turnaroundLabel: event.target.value }))}
+            maxLength={80}
+          />
+        </label>
+        <label>
+          Pricing summary
+          <input
+            value={form.pricingSummary}
+            onChange={(event) => setForm((current) => ({ ...current, pricingSummary: event.target.value }))}
+            maxLength={140}
+          />
+        </label>
+        <label>
+          Approval status
+          <select
+            value={form.approvalStatus}
+            onChange={(event) => setForm((current) => ({ ...current, approvalStatus: event.target.value }))}
+          >
+            <option value="approved">Approved</option>
+            <option value="review">Review</option>
+            <option value="draft">Draft</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </label>
+        <label>
+          License
+          <select
+            value={form.licenseStatus}
+            onChange={(event) => setForm((current) => ({ ...current, licenseStatus: event.target.value }))}
+          >
+            <option value="verified">Verified</option>
+            <option value="unverified">Unverified</option>
+            <option value="not_required">Not required</option>
+          </select>
+        </label>
+        <label>
+          Insurance
+          <select
+            value={form.insuranceStatus}
+            onChange={(event) => setForm((current) => ({ ...current, insuranceStatus: event.target.value }))}
+          >
+            <option value="verified">Verified</option>
+            <option value="unverified">Unverified</option>
+            <option value="not_required">Not required</option>
+          </select>
+        </label>
       </div>
+      <label>
+        Service highlights
+        <input
+          value={form.serviceHighlights}
+          onChange={(event) => setForm((current) => ({ ...current, serviceHighlights: event.target.value }))}
+          placeholder="Licensed, Luxury listings, Weekend availability"
+        />
+      </label>
       <div className="check-row">
         <label>
           <input

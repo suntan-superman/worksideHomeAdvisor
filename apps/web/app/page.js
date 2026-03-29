@@ -36,6 +36,12 @@ export default function HomePage() {
             <Link href="/auth" className="button-primary">
               Start seller onboarding
             </Link>
+            <Link href="/providers/join" className="button-secondary">
+              List your business
+            </Link>
+            <Link href="/providers/portal" className="button-secondary">
+              Provider portal
+            </Link>
             <Link href="/dashboard" className="button-secondary">
               View dashboard preview
             </Link>

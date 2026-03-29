@@ -10,6 +10,7 @@ import {
 } from '../../services/stripeClient.js';
 import { UserModel } from '../auth/auth.model.js';
 import { BillingSubscriptionModel } from './billing.model.js';
+import { ProviderModel } from '../providers/provider.model.js';
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing', 'past_due', 'paid']);
 const BASE_FREE_FEATURES = ['pricing.preview', 'photo.capture.basic'];
@@ -41,6 +42,10 @@ function toDateFromUnixTimestamp(value) {
 
 function isSubscriptionActive(status) {
   return ACTIVE_SUBSCRIPTION_STATUSES.has(status);
+}
+
+function toObjectIdString(value) {
+  return value?.toString?.() || String(value);
 }
 
 function serializeSubscription(document) {
@@ -122,6 +127,21 @@ function buildCheckoutUrls(overrides) {
   };
 }
 
+function buildProviderCheckoutUrls(providerId, overrides = {}) {
+  const successBase =
+    overrides.successUrl ||
+    `${env.PUBLIC_WEB_URL}/providers/join?billing=success&providerId=${encodeURIComponent(providerId)}`;
+  const cancelBase =
+    overrides.cancelUrl ||
+    `${env.PUBLIC_WEB_URL}/providers/join?billing=cancelled&providerId=${encodeURIComponent(providerId)}`;
+  const separator = successBase.includes('?') ? '&' : '?';
+
+  return {
+    successUrl: `${successBase}${separator}session_id={CHECKOUT_SESSION_ID}`,
+    cancelUrl: cancelBase,
+  };
+}
+
 function planFromMetadataOrPrice(planKey, priceId) {
   if (planKey) {
     return getPlanConfig(planKey);
@@ -152,13 +172,107 @@ async function upsertSubscriptionRecord(query, values) {
   return serializeSubscription(document);
 }
 
+async function syncProviderCheckoutSession(session, plan) {
+  const providerId = session.metadata?.providerId;
+  if (!providerId) {
+    throw new Error('Stripe checkout session is missing provider metadata.');
+  }
+
+  const provider = await ProviderModel.findById(providerId);
+  if (!provider) {
+    throw new Error('Provider not found for checkout session.');
+  }
+
+  provider.subscription.planCode = plan.planKey;
+  provider.subscription.status = session.status || 'open';
+  provider.subscription.stripeCustomerId = session.customer || provider.subscription.stripeCustomerId || '';
+  provider.subscription.stripeCheckoutSessionId = session.id;
+  provider.subscription.stripePriceId = plan.priceId;
+
+  await provider.save();
+
+  if (session.subscription) {
+    const stripe = getStripeClient();
+    const subscription = await stripe.subscriptions.retrieve(session.subscription, {
+      expand: ['items.data.price'],
+    });
+
+    return syncProviderSubscription(subscription, {
+      stripeCheckoutSessionId: session.id,
+      metadata: session.metadata || {},
+    });
+  }
+
+  return {
+    providerId,
+    planKey: plan.planKey,
+    status: provider.subscription.status,
+  };
+}
+
+async function syncProviderSubscription(subscription, overrides = {}) {
+  const firstItem = subscription.items?.data?.[0];
+  const plan = planFromMetadataOrPrice(
+    subscription.metadata?.planKey || overrides.metadata?.planKey,
+    firstItem?.price?.id,
+  );
+  const providerId = subscription.metadata?.providerId || overrides.metadata?.providerId;
+
+  if (!providerId) {
+    throw new Error('Stripe subscription is missing provider metadata.');
+  }
+
+  const provider = await ProviderModel.findById(providerId);
+  if (!provider) {
+    throw new Error('Provider not found for Stripe subscription.');
+  }
+
+  provider.subscription.planCode = plan.planKey;
+  provider.subscription.status = subscription.status;
+  provider.subscription.stripeCustomerId = subscription.customer || provider.subscription.stripeCustomerId || '';
+  provider.subscription.stripeCheckoutSessionId =
+    overrides.stripeCheckoutSessionId || provider.subscription.stripeCheckoutSessionId || '';
+  provider.subscription.stripeSubscriptionId = subscription.id;
+  provider.subscription.stripePriceId = firstItem?.price?.id || plan.priceId || '';
+  provider.subscription.currentPeriodStart = toDateFromUnixTimestamp(subscription.current_period_start);
+  provider.subscription.currentPeriodEnd = toDateFromUnixTimestamp(subscription.current_period_end);
+  provider.subscription.cancelAtPeriodEnd = Boolean(subscription.cancel_at_period_end);
+
+  const active = isSubscriptionActive(subscription.status);
+  if (active) {
+    provider.status = provider.status === 'suspended' ? 'suspended' : 'active';
+    if (!provider.activatedAt) {
+      provider.activatedAt = new Date();
+    }
+    provider.isSponsored = plan.planKey === 'provider_featured';
+  } else if (provider.status !== 'suspended') {
+    provider.status = 'paused';
+    if (plan.planKey === 'provider_featured') {
+      provider.isSponsored = false;
+    }
+  }
+
+  await provider.save();
+
+  return {
+    providerId: toObjectIdString(provider._id),
+    planKey: plan.planKey,
+    status: provider.subscription.status,
+    isActive: active,
+  };
+}
+
 async function syncCheckoutSession(session) {
   const userId = session.metadata?.userId || session.client_reference_id;
+  const plan = planFromMetadataOrPrice(session.metadata?.planKey, session.metadata?.priceId);
+
+  if (plan.audience === 'provider') {
+    return syncProviderCheckoutSession(session, plan);
+  }
+
   if (!userId) {
     throw new Error('Stripe checkout session is missing user metadata.');
   }
-
-  const plan = planFromMetadataOrPrice(session.metadata?.planKey, session.metadata?.priceId);
 
   if (plan.mode === 'payment') {
     return upsertSubscriptionRecord(
@@ -204,6 +318,11 @@ async function syncStripeSubscription(subscription, overrides = {}) {
     subscription.metadata?.planKey || overrides.metadata?.planKey,
     firstItem?.price?.id,
   );
+
+  if (plan.audience === 'provider') {
+    return syncProviderSubscription(subscription, overrides);
+  }
+
   const userId =
     subscription.metadata?.userId || overrides.metadata?.userId || subscription.customer_email;
 
@@ -352,6 +471,115 @@ export async function createCheckoutSession({
   );
 
   return {
+    sessionId: session.id,
+    url: session.url,
+    planKey: plan.planKey,
+    mode: plan.mode,
+  };
+}
+
+export async function createProviderCheckoutSession({
+  providerId,
+  planKey,
+  planCode,
+  successUrl,
+  cancelUrl,
+}) {
+  if (!isStripeConfigured()) {
+    throw new Error('Stripe is not configured.');
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(providerId)) {
+    throw new Error('A valid providerId is required for billing.');
+  }
+
+  const provider = await ProviderModel.findById(providerId);
+  if (!provider) {
+    throw new Error('Provider not found.');
+  }
+
+  if (!provider.email) {
+    throw new Error('Provider email is required before starting checkout.');
+  }
+
+  const resolvedPlanKey = planKey || planCode;
+
+  if (resolvedPlanKey === 'provider_basic') {
+    provider.subscription.planCode = 'provider_basic';
+    provider.subscription.status = 'inactive';
+    await provider.save();
+
+    return {
+      providerId,
+      sessionId: null,
+      url: null,
+      planKey: resolvedPlanKey,
+      mode: 'free',
+    };
+  }
+
+  const plan = getPlanConfig(resolvedPlanKey);
+  if (plan.audience !== 'provider') {
+    throw new Error('Provider checkout requires a provider billing plan.');
+  }
+
+  const stripe = getStripeClient();
+  let customerId = provider.subscription?.stripeCustomerId || '';
+  if (!customerId) {
+    const customer = await stripe.customers.create({
+      email: provider.email,
+      name: provider.businessName,
+      phone: provider.phone || undefined,
+      metadata: {
+        providerId: toObjectIdString(provider._id),
+        categoryKey: provider.categoryKey,
+      },
+    });
+    customerId = customer.id;
+    provider.subscription.stripeCustomerId = customerId;
+    await provider.save();
+  }
+
+  const urls = buildProviderCheckoutUrls(providerId, { successUrl, cancelUrl });
+
+  const session = await stripe.checkout.sessions.create({
+    mode: plan.mode,
+    customer: customerId,
+    allow_promotion_codes: true,
+    success_url: urls.successUrl,
+    cancel_url: urls.cancelUrl,
+    line_items: [
+      {
+        price: plan.priceId,
+        quantity: 1,
+      },
+    ],
+    metadata: {
+      providerId: toObjectIdString(provider._id),
+      planKey: plan.planKey,
+      productKey: plan.productKey,
+      audience: plan.audience,
+      priceId: plan.priceId,
+    },
+    subscription_data:
+      plan.mode === 'subscription'
+        ? {
+            metadata: {
+              providerId: toObjectIdString(provider._id),
+              planKey: plan.planKey,
+            },
+          }
+        : undefined,
+  });
+
+  provider.subscription.planCode = plan.planKey;
+  provider.subscription.status = 'checkout_created';
+  provider.subscription.stripeCheckoutSessionId = session.id;
+  provider.subscription.stripePriceId = plan.priceId;
+  await provider.save();
+
+  return {
+    providerId: toObjectIdString(provider._id),
     sessionId: session.id,
     url: session.url,
     planKey: plan.planKey,
