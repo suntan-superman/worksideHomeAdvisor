@@ -94,6 +94,8 @@ function getVariantSummary(variant) {
 
 export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const flyerPreviewRef = useRef(null);
+  const visionCompareRef = useRef(null);
+  const visionGalleryRef = useRef(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [property, setProperty] = useState(null);
   const [dashboard, setDashboard] = useState(null);
@@ -538,13 +540,26 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (!selectedMediaAsset) {
       return;
     }
+    setActiveTab('vision');
     setStatus(jobType === 'declutter_preview' ? 'Generating declutter preview...' : 'Generating enhanced listing version...');
     setToast(null);
     try {
       const response = await createImageEnhancementJob(selectedMediaAsset.id, { jobType });
       await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id)]);
       setSelectedVariantId(response.variant?.id || '');
-      setToast({ tone: 'success', title: jobType === 'declutter_preview' ? 'Declutter preview ready' : 'Enhanced photo ready', message: response.job?.warning || 'A new image variant is available below for review and selection.' });
+      setToast({
+        tone: 'success',
+        title:
+          jobType === 'declutter_preview'
+            ? 'Declutter preview ready'
+            : 'Enhanced photo ready',
+        message:
+          response.job?.warning ||
+          'The new image is now shown in the Vision compare area and the Generated options panel.',
+      });
+      requestAnimationFrame(() => {
+        visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Variant generation failed', message: requestError.message });
     } finally {
@@ -835,7 +850,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   const renderVisionTab = () => (
     <div className="workspace-tab-stack">
-      <div className="content-card">
+      <div ref={visionCompareRef} className="content-card">
         <div className="section-header-tight">
           <div>
             <span className="label">Vision workspace</span>
@@ -867,6 +882,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </div>
             ) : null}
             {selectedVariant?.metadata?.differenceHint ? <p className="property-media-variant-hint">{selectedVariant.metadata.differenceHint}</p> : null}
+            {selectedVariant ? <p className="workspace-control-note">The generated version appears here. The Generated options panel below is where you switch between saved variants.</p> : null}
           </div>
         ) : (
           <p>Select a photo in the Photos tab first to use the Vision workspace.</p>
@@ -902,11 +918,28 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           )}
         </div>
 
-        <div className="content-card workspace-side-panel">
+        <div ref={visionGalleryRef} className="content-card workspace-side-panel">
           <span className="label">Variant gallery</span>
           <h2>Generated options</h2>
           {mediaVariants.length ? (
             <div className="workspace-tab-stack">
+              {selectedVariant ? (
+                <div className="property-media-variant-selected-card">
+                  <img
+                    src={selectedVariant.imageUrl}
+                    alt={selectedVariant.label || 'Selected generated variant'}
+                    className="property-media-variant-selected-image"
+                  />
+                  <div className="property-media-variant-selected-copy">
+                    <strong>{selectedVariant.label}</strong>
+                    <span>
+                      {selectedVariant.isSelected
+                        ? 'Currently selected for flyer and report materials'
+                        : 'Preview this version, then select it for materials if you want to use it'}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
               <div className="property-media-variant-list">
                 {mediaVariants.map((variant) => (
                   <button key={variant.id} type="button" className={variant.id === selectedVariant?.id ? 'property-media-variant-chip active' : 'property-media-variant-chip'} onClick={() => setSelectedVariantId(variant.id)}>

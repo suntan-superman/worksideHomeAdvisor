@@ -1165,6 +1165,34 @@ select {
   gap: 10px;
 }
 
+.property-media-variant-selected-card {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(36, 40, 45, 0.08);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.property-media-variant-selected-image {
+  width: 100%;
+  border-radius: 14px;
+  object-fit: cover;
+}
+
+.property-media-variant-selected-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.property-media-variant-selected-copy strong {
+  color: var(--ink);
+}
+
+.property-media-variant-selected-copy span {
+  color: var(--muted);
+}
+
 .property-media-variant-chip {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.82);
