@@ -72,6 +72,7 @@ export function AppFrame({ children, busy = false }) {
         <span>Copyright 2026 Workside Software LLC.</span>
         <Link href="/terms">Terms of Service</Link>
         <Link href="/privacy">Privacy Notice</Link>
+        <Link href="/sms-consent">SMS Consent</Link>
         <a href="mailto:support@worksidesoftware.com">support@worksidesoftware.com</a>
         <a href="mailto:sales@worksidesoftware.com">sales@worksidesoftware.com</a>
         <a href="mailto:feedback@worksidesoftware.com">feedback@worksidesoftware.com</a>

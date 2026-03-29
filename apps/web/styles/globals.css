@@ -515,6 +515,17 @@ select {
   margin-top: 20px;
 }
 
+.legal-quote {
+  margin: 16px 0;
+  padding: 14px 18px;
+  border-left: 4px solid var(--clay);
+  border-radius: 0 16px 16px 0;
+  background: rgba(255, 255, 255, 0.58);
+  color: var(--ink);
+  font-size: 0.96rem;
+  line-height: 1.7;
+}
+
 .legal-section ul {
   padding-left: 24px;
   color: var(--muted);

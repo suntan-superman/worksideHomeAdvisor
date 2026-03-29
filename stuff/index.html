@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SMS Consent | Merxus AI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Merxus AI SMS consent and A2P 10DLC messaging disclosures." />
+  <style>
+    :root {
+      --bg: #f9fafb;
+      --card: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --link: #16a34a;
+      --linkHover: #15803d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .wrap {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 48px 16px;
+    }
+    .back {
+      display: inline-block;
+      margin-bottom: 16px;
+      color: var(--link);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .back:hover { color: var(--linkHover); text-decoration: underline; }
+    h1 {
+      margin: 0 0 8px 0;
+      font-size: 36px;
+      line-height: 1.2;
+    }
+    .updated {
+      margin: 0 0 24px 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+    h2 {
+      margin: 0 0 12px 0;
+      font-size: 22px;
+    }
+    p { margin: 0 0 14px 0; }
+    ul {
+      margin: 0 0 14px 22px;
+      padding: 0;
+    }
+    li { margin: 6px 0; }
+    blockquote {
+      background: #f3f4f6;
+      border-left: 4px solid var(--link);
+      padding: 12px 16px;
+      margin: 16px 0;
+      font-size: 14px;
+    }
+    .footer {
+      margin-top: 24px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    a { color: var(--link); }
+    a:hover { color: var(--linkHover); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="https://merxus.ai">← Back to Home</a>
+    <h1>SMS Consent & Messaging Disclosure</h1>
+    <p class="updated">Last updated: <span id="last-updated"></span></p>
+
+    <div class="card">
+      <h2>Merxus AI Transactional SMS Notifications</h2>
+
+      <p>
+        Merxus AI provides transactional and service-related SMS notifications
+        to users who provide explicit written consent.
+      </p>
+
+      <p>
+        End users provide consent by selecting an <strong>unchecked opt-in checkbox</strong>
+        displayed adjacent to the phone number field during account registration
+        and onboarding at https://merxus.ai.
+      </p>
+
+      <p>The opt-in checkbox states:</p>
+
+      <blockquote>
+        “I agree to receive SMS messages from Merxus AI regarding missed-call
+        notifications, appointment confirmations, and account-related updates.
+        Message frequency varies. Message and data rates may apply.
+        Reply STOP to opt out or HELP for assistance.”
+      </blockquote>
+
+      <p>
+        The checkbox is <strong>not pre-selected</strong>.
+        Users must manually select it to enable SMS notifications.
+      </p>
+
+      <p>
+        <strong>Consent to receive SMS messages is not a condition of purchasing
+        any goods or services.</strong>
+      </p>
+
+      <ul>
+        <li>Message frequency varies based on account activity.</li>
+        <li>Message and data rates may apply.</li>
+        <li>Reply <strong>STOP</strong> at any time to opt out.</li>
+        <li>Reply <strong>HELP</strong> for assistance.</li>
+      </ul>
+
+      <p>
+        Opt-in events are logged and stored with timestamp, IP address,
+        and user account reference in our secure application database.
+        No SMS messages are sent without explicit consent.
+      </p>
+
+      <p>
+        Merxus AI does not sell, rent, or share mobile phone numbers
+        for marketing purposes.
+      </p>
+
+      <hr />
+
+      <p>
+        <strong>Privacy Policy:</strong>
+        <a href="https://merxus.ai/privacy-policy/" target="_blank">
+          https://merxus.ai/privacy-policy/
+        </a>
+      </p>
+
+      <p>
+        <strong>Terms & Conditions:</strong>
+        <a href="https://merxus.ai/terms-and-conditions/" target="_blank">
+          https://merxus.ai/terms-and-conditions/
+        </a>
+      </p>
+
+    </div>
+
+    <div class="footer">
+      © <span id="year"></span> Workside Software LLC. All rights reserved.
+    </div>
+  </div>
+
+  <script>
+    const now = new Date();
+    document.getElementById("last-updated").textContent =
+      now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    document.getElementById("year").textContent = now.getFullYear();
+  </script>
+</body>
+</html>
