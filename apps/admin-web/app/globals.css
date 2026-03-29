@@ -158,6 +158,44 @@ a {
   font-size: 1.1rem;
 }
 
+.subpanel form,
+.subpanel label {
+  display: grid;
+  gap: 8px;
+}
+
+.subpanel input,
+.subpanel select,
+.subpanel textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font: inherit;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+}
+
+.check-row label {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+}
+
 .bullet-list {
   margin: 0;
   padding-left: 18px;

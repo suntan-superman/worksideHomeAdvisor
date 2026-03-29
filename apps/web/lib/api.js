@@ -90,6 +90,38 @@ export function getChecklist(propertyId) {
   return request(`/api/v1/properties/${propertyId}/checklist`);
 }
 
+export function listProviders(propertyId, { categoryKey, taskKey, limit } = {}) {
+  const search = new URLSearchParams();
+  if (categoryKey) {
+    search.set('category', categoryKey);
+  }
+  if (taskKey) {
+    search.set('taskKey', taskKey);
+  }
+  if (limit) {
+    search.set('limit', String(limit));
+  }
+  const query = search.toString();
+  return request(`/api/v1/properties/${propertyId}/providers${query ? `?${query}` : ''}`);
+}
+
+export function createProviderLead(propertyId, payload) {
+  return request(`/api/v1/properties/${propertyId}/provider-leads`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listProviderLeads(propertyId) {
+  return request(`/api/v1/properties/${propertyId}/provider-leads`);
+}
+
+export function saveProvider(propertyId, providerId) {
+  return request(`/api/v1/properties/${propertyId}/providers/${providerId}/save`, {
+    method: 'POST',
+  });
+}
+
 export function createChecklistItem(propertyId, payload) {
   return request(`/api/v1/properties/${propertyId}/checklist/items`, {
     method: 'POST',

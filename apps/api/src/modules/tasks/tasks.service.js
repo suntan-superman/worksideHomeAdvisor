@@ -34,6 +34,9 @@ function serializeChecklistItem(item) {
     priority: item.priority || 'medium',
     status: item.status || 'todo',
     source: item.source || 'system',
+    providerCategoryKey: item.providerCategoryKey || '',
+    providerCategoryLabel: item.providerCategoryLabel || '',
+    providerPrompt: item.providerPrompt || '',
     readinessImpact: Number(item.readinessImpact || 0),
     note: item.note || '',
     sortOrder: Number(item.sortOrder || 0),
@@ -116,6 +119,9 @@ function buildFallbackChecklist(propertyId) {
       status,
       source: 'system',
       readinessImpact: 10,
+      providerCategoryKey: '',
+      providerCategoryLabel: '',
+      providerPrompt: '',
       note: '',
       sortOrder: index,
       updatedByUser: false,
@@ -170,6 +176,9 @@ async function buildSuggestedChecklistItems(propertyId) {
       priority: 'high',
       status: pricing?.recommendedListMid ? 'done' : 'todo',
       source: 'system',
+      providerCategoryKey: '',
+      providerCategoryLabel: '',
+      providerPrompt: '',
       readinessImpact: 18,
       sortOrder: 0,
     },
@@ -192,6 +201,9 @@ async function buildSuggestedChecklistItems(propertyId) {
             ? 'in_progress'
             : 'todo',
       source: 'system',
+      providerCategoryKey: '',
+      providerCategoryLabel: '',
+      providerPrompt: '',
       readinessImpact: 18,
       sortOrder: 1,
     },
@@ -207,6 +219,9 @@ async function buildSuggestedChecklistItems(propertyId) {
       priority: retakeCount ? 'high' : 'medium',
       status: mediaAssets.length ? (retakeCount ? 'in_progress' : 'done') : 'todo',
       source: 'system',
+      providerCategoryKey: 'photographer',
+      providerCategoryLabel: 'Photographers',
+      providerPrompt: 'A listing photographer can help if key rooms still need stronger capture.',
       readinessImpact: 14,
       sortOrder: 2,
     },
@@ -229,8 +244,28 @@ async function buildSuggestedChecklistItems(propertyId) {
             ? 'in_progress'
             : 'todo',
       source: 'system',
+      providerCategoryKey: 'photographer',
+      providerCategoryLabel: 'Photographers',
+      providerPrompt: 'Good listing photos often benefit from a local real-estate photographer.',
       readinessImpact: 14,
       sortOrder: 3,
+    },
+    {
+      systemKey: 'pre_listing_clean',
+      title: 'Decide if a pre-listing deep clean would help',
+      detail:
+        mediaAssets.length || roomCoverageCount
+          ? 'A cleaner can help the home photograph better and tighten showing readiness before final launch materials.'
+          : 'If you plan to capture photos soon, a pre-listing cleaner may improve the first set significantly.',
+      category: 'preparation',
+      priority: 'medium',
+      status: listingCandidateCount >= 3 ? 'in_progress' : 'todo',
+      source: 'system',
+      providerCategoryKey: 'cleaning_service',
+      providerCategoryLabel: 'Cleaning Services',
+      providerPrompt: 'Useful before final photos, brochure generation, and early showings.',
+      readinessImpact: 8,
+      sortOrder: 4,
     },
     {
       systemKey: 'flyer_review',
@@ -242,8 +277,11 @@ async function buildSuggestedChecklistItems(propertyId) {
       priority: 'medium',
       status: latestFlyer ? 'done' : 'todo',
       source: 'system',
+      providerCategoryKey: '',
+      providerCategoryLabel: '',
+      providerPrompt: '',
       readinessImpact: 10,
-      sortOrder: 4,
+      sortOrder: 5,
     },
     {
       systemKey: 'seller_report',
@@ -255,8 +293,11 @@ async function buildSuggestedChecklistItems(propertyId) {
       priority: 'medium',
       status: latestReport ? 'done' : 'todo',
       source: 'system',
+      providerCategoryKey: '',
+      providerCategoryLabel: '',
+      providerPrompt: '',
       readinessImpact: 10,
-      sortOrder: 5,
+      sortOrder: 6,
     },
   ];
 }
@@ -297,6 +338,9 @@ async function syncChecklistDocument(document, suggestedItems) {
       existing.priority = suggestion.priority;
       existing.status = suggestion.status;
       existing.source = suggestion.source;
+      existing.providerCategoryKey = suggestion.providerCategoryKey || '';
+      existing.providerCategoryLabel = suggestion.providerCategoryLabel || '';
+      existing.providerPrompt = suggestion.providerPrompt || '';
       existing.readinessImpact = suggestion.readinessImpact;
       existing.sortOrder = suggestion.sortOrder;
       existing.completedAt = suggestion.status === 'done' ? existing.completedAt || new Date() : null;

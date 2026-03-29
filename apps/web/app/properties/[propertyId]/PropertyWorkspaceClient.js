@@ -13,6 +13,7 @@ import {
   createBillingCheckoutSession,
   createChecklistItem,
   createImageEnhancementJob,
+  createProviderLead,
   generateFlyer,
   generateReport,
   getChecklist,
@@ -23,9 +24,12 @@ import {
   getLatestReport,
   getProperty,
   getReportExportUrl,
+  listProviderLeads,
+  listProviders,
   listMediaAssets,
   listMediaVariants,
   listVisionPresets,
+  saveProvider,
   selectMediaVariant,
   setMediaVariantUsage,
   updateChecklistItem,
@@ -159,6 +163,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [listingNoteDraft, setListingNoteDraft] = useState('');
   const [customChecklistTitle, setCustomChecklistTitle] = useState('');
   const [customChecklistDetail, setCustomChecklistDetail] = useState('');
+  const [providerRecommendations, setProviderRecommendations] = useState([]);
+  const [providerLeads, setProviderLeads] = useState([]);
+  const [providerSource, setProviderSource] = useState(null);
+  const [activeProviderTaskKey, setActiveProviderTaskKey] = useState('');
   const [showMoreVisionVariants, setShowMoreVisionVariants] = useState(false);
   const [status, setStatus] = useState('Loading property workspace...');
   const [toast, setToast] = useState(null);
@@ -253,6 +261,23 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
     return [...groups.entries()];
   }, [checklist?.items]);
+  const providerSuggestionTask = useMemo(() => {
+    const tasksWithProviders = (checklist?.items || []).filter((item) => item.providerCategoryKey);
+    if (!tasksWithProviders.length) {
+      return null;
+    }
+
+    if (activeProviderTaskKey) {
+      const matchingTask = tasksWithProviders.find(
+        (item) => item.id === activeProviderTaskKey || item.systemKey === activeProviderTaskKey,
+      );
+      if (matchingTask) {
+        return matchingTask;
+      }
+    }
+
+    return tasksWithProviders.find((item) => item.status !== 'done') || tasksWithProviders[0];
+  }, [activeProviderTaskKey, checklist?.items]);
   const recentOutputs = useMemo(
     () =>
       [
@@ -409,12 +434,55 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     return checklistResponse.checklist;
   }
 
+  async function refreshProviders(task = providerSuggestionTask) {
+    if (!task?.providerCategoryKey) {
+      setProviderRecommendations([]);
+      setProviderSource(null);
+      return [];
+    }
+
+    const response = await listProviders(propertyId, {
+      taskKey: task.systemKey || task.id,
+      limit: 4,
+    });
+    const nextProviders = response.providers?.items || [];
+    setProviderRecommendations(nextProviders);
+    setProviderSource(response.providers?.source || null);
+    return nextProviders;
+  }
+
+  async function refreshProviderLeads() {
+    const response = await listProviderLeads(propertyId);
+    const nextLeads = response.leads?.items || [];
+    setProviderLeads(nextLeads);
+    return nextLeads;
+  }
+
   useEffect(() => {
     refreshMediaVariants(selectedMediaAsset?.id).catch(() => {
       setMediaVariants([]);
       setSelectedVariantId('');
     });
   }, [selectedMediaAsset?.id]);
+
+  useEffect(() => {
+    if (!activeProviderTaskKey && providerSuggestionTask?.id) {
+      setActiveProviderTaskKey(providerSuggestionTask.id);
+    }
+  }, [activeProviderTaskKey, providerSuggestionTask?.id]);
+
+  useEffect(() => {
+    refreshProviders(providerSuggestionTask).catch(() => {
+      setProviderRecommendations([]);
+      setProviderSource(null);
+    });
+  }, [propertyId, providerSuggestionTask?.id, providerSuggestionTask?.providerCategoryKey]);
+
+  useEffect(() => {
+    refreshProviderLeads().catch(() => {
+      setProviderLeads([]);
+    });
+  }, [propertyId]);
 
   useEffect(() => {
     async function loadWorkspace() {
@@ -458,6 +526,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         } catch {
           setMediaAssets([]);
           setSelectedMediaAssetId('');
+        }
+        try {
+          await refreshProviderLeads();
+        } catch {
+          setProviderLeads([]);
         }
       } catch (requestError) {
         setToast({ tone: 'error', title: 'Could not load property', message: requestError.message });
@@ -756,6 +829,59 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setToast({ tone: 'success', title: 'Task added', message: 'The custom checklist task now appears in the shared property workflow.' });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Could not add task', message: requestError.message });
+    } finally {
+      setStatus('');
+    }
+  }
+
+  async function handleSaveProvider(providerId) {
+    setStatus('Saving provider...');
+    setToast(null);
+    try {
+      await saveProvider(propertyId, providerId);
+      setProviderRecommendations((current) =>
+        current.map((provider) =>
+          provider.id === providerId ? { ...provider, saved: true } : provider,
+        ),
+      );
+      setToast({
+        tone: 'success',
+        title: 'Provider saved',
+        message: 'This provider is now attached to the property workflow for later follow-up.',
+      });
+    } catch (requestError) {
+      setToast({ tone: 'error', title: 'Could not save provider', message: requestError.message });
+    } finally {
+      setStatus('');
+    }
+  }
+
+  async function handleRequestProviderLead(provider) {
+    if (!providerSuggestionTask) {
+      return;
+    }
+
+    setStatus('Requesting provider contact...');
+    setToast(null);
+    try {
+      await createProviderLead(propertyId, {
+        categoryKey: provider.categoryKey,
+        source: 'checklist_task',
+        sourceRefId: providerSuggestionTask.systemKey || providerSuggestionTask.id,
+        message:
+          providerSuggestionTask.providerPrompt ||
+          providerSuggestionTask.detail ||
+          `Seller requested ${providerSuggestionTask.providerCategoryLabel || provider.categoryKey} support.`,
+        maxProviders: 3,
+      });
+      await refreshProviderLeads();
+      setToast({
+        tone: 'success',
+        title: 'Lead request created',
+        message: `The ${provider.categoryKey.replace(/_/g, ' ')} request is now queued for provider routing.`,
+      });
+    } catch (requestError) {
+      setToast({ tone: 'error', title: 'Could not request provider', message: requestError.message });
     } finally {
       setStatus('');
     }
@@ -1657,6 +1783,21 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       </div>
                       <h3>{item.title}</h3>
                       <p>{item.detail || 'No additional guidance is attached to this task yet.'}</p>
+                      {item.providerCategoryLabel ? (
+                        <div className="checklist-provider-inline">
+                          <div>
+                            <strong>{item.providerCategoryLabel}</strong>
+                            <span>{item.providerPrompt || 'Local provider recommendations are available for this task.'}</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            onClick={() => setActiveProviderTaskKey(item.id)}
+                          >
+                            Show providers
+                          </button>
+                        </div>
+                      ) : null}
                       <div className="checklist-action-row">
                         {['todo', 'in_progress', 'done'].map((nextStatus) => (
                           <button key={`${item.id}-${nextStatus}`} type="button" className={item.status === nextStatus ? 'checklist-action-chip active' : 'checklist-action-chip'} onClick={() => handleSetChecklistItemStatus(item.id, nextStatus)} disabled={Boolean(status)}>{formatChecklistStatus(nextStatus)}</button>
@@ -1693,8 +1834,66 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
         <div className="content-card workspace-side-panel">
           <span className="label">Provider suggestions</span>
-          <h2>Future add-on panel</h2>
-          <p>This right rail is ready for provider recommendations later without pushing the main task workflow farther down the page.</p>
+          <h2>{providerSuggestionTask?.providerCategoryLabel || 'No provider-linked task yet'}</h2>
+          <p>
+            {providerSuggestionTask?.providerPrompt ||
+              'Provider recommendations appear here when a checklist task has a linked marketplace category.'}
+          </p>
+          {providerRecommendations.length ? (
+            <div className="provider-card-list">
+              {providerRecommendations.map((provider) => (
+                <article key={provider.id} className="provider-card">
+                  <div className="provider-card-header">
+                    <div>
+                      <strong>{provider.businessName}</strong>
+                      <span>{provider.coverageLabel || [provider.city, provider.state].filter(Boolean).join(', ')}</span>
+                    </div>
+                    {provider.isSponsored ? <span className="checklist-chip checklist-chip-medium">Sponsored</span> : null}
+                  </div>
+                  <p>{provider.description || 'No provider description has been added yet.'}</p>
+                  <div className="tag-row">
+                    {(provider.rankingBadges || []).map((badge) => (
+                      <span key={`${provider.id}-${badge}`}>{badge}</span>
+                    ))}
+                  </div>
+                  <div className="provider-card-actions">
+                    <button type="button" className="button-secondary" onClick={() => handleSaveProvider(provider.id)} disabled={Boolean(status) || provider.saved}>
+                      {provider.saved ? 'Saved' : 'Save provider'}
+                    </button>
+                    <button type="button" className="button-primary" onClick={() => handleRequestProviderLead(provider)} disabled={Boolean(status)}>
+                      Request contact
+                    </button>
+                    {provider.websiteUrl ? (
+                      <a href={provider.websiteUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button">
+                        Visit website
+                      </a>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : providerSuggestionTask ? (
+            <p className="workspace-control-note">
+              No active providers are available for this category yet. The discovery endpoint is live, but the marketplace still needs provider data or Google fallback to broaden coverage.
+            </p>
+          ) : null}
+          {providerSource ? (
+            <p className="workspace-control-note">
+              {providerSource.internalProviders || 0} internal provider match(es). Google fallback is not enabled in this slice yet.
+            </p>
+          ) : null}
+          {providerLeads.length ? (
+            <div className="provider-lead-list">
+              <strong>Recent lead requests</strong>
+              <ul className="plain-list">
+                {providerLeads.slice(0, 3).map((lead) => (
+                  <li key={lead.id}>
+                    {lead.categoryKey.replace(/_/g, ' ')}: {lead.status} · {lead.dispatches?.length || 0} provider(s)
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -1753,7 +1952,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           <aside className="workspace-quick-rail">
             <div className="content-card workspace-quick-card"><span className="label">Readiness score</span><h2>{readinessScore}/100</h2><p>{readinessLabel}</p></div>
             <div className="content-card workspace-quick-card"><span className="label">Next best action</span><h3>{nextBestAction.title}</h3><p>{nextBestAction.detail}</p><button type="button" className="button-primary" onClick={() => setActiveTab(nextBestAction.tab)} disabled={Boolean(status)}>Open {WORKSPACE_TABS.find((tab) => tab.id === nextBestAction.tab)?.label || 'workspace'}</button></div>
-            <div className="content-card workspace-quick-card"><span className="label">Quick stats</span><ul className="plain-list"><li>{selectedComps.length} comp(s) loaded</li><li>{listingCandidateAssets.length} listing photo pick(s)</li><li>{mediaAssets.filter((asset) => asset.selectedVariant).length} preferred vision variant(s)</li><li>{checklist?.summary?.completedCount ?? 0} task(s) complete</li></ul></div>
+            <div className="content-card workspace-quick-card"><span className="label">Quick stats</span><ul className="plain-list"><li>{selectedComps.length} comp(s) loaded</li><li>{listingCandidateAssets.length} listing photo pick(s)</li><li>{mediaAssets.filter((asset) => asset.selectedVariant).length} preferred vision variant(s)</li><li>{checklist?.summary?.completedCount ?? 0} task(s) complete</li><li>{providerRecommendations.length} provider recommendation(s)</li></ul></div>
           </aside>
         </section>
       </section>

@@ -11,6 +11,11 @@ import {
   cleanupExpiredMediaVariants,
   getTemporaryVariantTtlMs,
 } from '../media/variant-lifecycle.service.js';
+import {
+  createProviderProfile,
+  listAdminProviderLeads,
+  listAdminProviders,
+} from '../providers/providers.service.js';
 import { PricingAnalysisModel } from '../pricing/pricing.model.js';
 import { PropertyModel } from '../properties/property.model.js';
 import { AnalysisLockModel } from '../usage/analysis-lock.model.js';
@@ -443,4 +448,21 @@ export async function getAdminWorkerSnapshot() {
 
 export async function runAdminMediaVariantCleanup() {
   return cleanupExpiredMediaVariants();
+}
+
+export async function getAdminProviderSnapshot({ limit = 50 } = {}) {
+  return listAdminProviders({ limit });
+}
+
+export async function createAdminProvider(payload) {
+  const provider = await createProviderProfile(payload, {
+    createdFrom: 'admin_console',
+    status: 'active',
+  });
+
+  return { provider };
+}
+
+export async function getAdminProviderLeadSnapshot({ limit = 50 } = {}) {
+  return listAdminProviderLeads({ limit });
 }

@@ -11,6 +11,7 @@ const navigation = [
   { href: '/', label: 'Overview' },
   { href: '/users', label: 'Users' },
   { href: '/properties', label: 'Properties' },
+  { href: '/providers', label: 'Providers' },
   { href: '/billing', label: 'Billing' },
   { href: '/usage', label: 'Usage' },
   { href: '/workers', label: 'Workers' },

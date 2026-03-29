@@ -8,6 +8,7 @@ import { dashboardRoutes } from './modules/dashboard/dashboard.routes.js';
 import { documentsRoutes } from './modules/documents/documents.routes.js';
 import { aiRoutes } from './modules/ai/ai.routes.js';
 import { mediaRoutes } from './modules/media/media.routes.js';
+import { providersRoutes } from './modules/providers/providers.routes.js';
 import { propertyRoutes } from './modules/properties/property.routes.js';
 import { pricingRoutes } from './modules/pricing/pricing.routes.js';
 import { tasksRoutes } from './modules/tasks/tasks.routes.js';
@@ -34,6 +35,7 @@ export function buildApp() {
   app.register(billingRoutes, { prefix: '/api/v1/billing' });
   app.register(propertyRoutes, { prefix: '/api/v1/properties' });
   app.register(mediaRoutes, { prefix: '/api/v1' });
+  app.register(providersRoutes, { prefix: '/api/v1' });
   app.register(pricingRoutes, { prefix: '/api/v1/properties' });
   app.register(tasksRoutes, { prefix: '/api/v1' });
   app.register(dashboardRoutes, { prefix: '/api/v1/properties' });

@@ -31,6 +31,30 @@ This document assumes the current Workside Home Advisor platform already has:
 - flyer generation foundation
 - report and Vision planning specs already defined
 
+## 1.1 Status Legend
+
+This checklist now reflects the actual repo state as of `2026-03-29`.
+
+- `[x]` implemented in the current codebase
+- `[~]` partially implemented or implemented with a narrower shape than originally planned
+- `[ ]` not implemented yet
+
+## 1.2 Current Repo Notes
+
+The current backend is functionally ahead of the original planning baseline in several areas, but some module names differ from the idealized structure in this document.
+
+Notable implementation realities:
+
+- document generation currently lives under `apps/api/src/modules/documents/`
+- checklist persistence currently lives under `apps/api/src/modules/tasks/`
+- vision/media-AI currently lives under `apps/api/src/modules/media/`
+- current route shapes differ slightly from the original examples below, especially for media and checklist:
+  - media uses `/media/assets/:assetId/...`
+  - checklist creation uses `/properties/:propertyId/checklist/items`
+- current media upload flow is direct create/analyze storage, not signed-upload plus completion callbacks
+- report and flyer export are implemented with `pdf-lib`, not HTML-to-PDF rendering
+- admin operations and variant lifecycle management now exist beyond the original scope of this document
+
 ---
 
 # 2. Core Backend Principles
@@ -205,22 +229,22 @@ All timestamps must be ISO-8601 UTC strings.
 Codex should confirm these collections exist or are extended.
 
 ## 5.1 Existing / Required Core Collections
-- users
-- properties
-- pricingAnalyses
-- media
-- subscriptions
-- usageTracking
+- [x] users
+- [x] properties
+- [x] pricingAnalyses
+- [x] media
+- [x] subscriptions
+- [x] usageTracking
 
 ## 5.2 New / Expanded Collections
-- brochures
-- reports
-- reportSnapshots
-- checklistItems or checklistStates
-- providerDirectory
-- visionJobs
-- visionVariants
-- abuseEvents later if not already present
+- [x] brochures via `flyers`
+- [x] reports
+- [~] reportSnapshots via embedded `sourceSnapshot` payload data instead of a separate collection
+- [x] checklist state via `propertyChecklists`
+- [ ] providerDirectory
+- [x] visionJobs via `imageJobs`
+- [x] visionVariants via `mediaVariants`
+- [ ] abuseEvents later if needed
 
 ---
 
@@ -229,15 +253,15 @@ Codex should confirm these collections exist or are extended.
 # 6A. Pricing Domain
 
 ## Checklist
-- [ ] confirm latest pricing analysis schema is stable
-- [ ] confirm selected comps are persisted
-- [ ] persist pricing narrative + confidence
-- [ ] expose lightweight summary endpoint
+- [x] confirm latest pricing analysis schema is stable
+- [x] confirm selected comps are persisted
+- [x] persist pricing narrative + confidence
+- [x] expose lightweight summary endpoint
 - [ ] expose full pricing detail endpoint
-- [ ] expose map-ready comp payload
+- [~] expose map-ready comp payload
 - [ ] add stale-analysis detection
-- [ ] add report-integration payload builder
-- [ ] add brochure-integration pricing summary builder
+- [x] add report-integration payload builder
+- [x] add brochure-integration pricing summary builder
 
 ## Required outcome
 Pricing data must be consumable by:
@@ -251,16 +275,16 @@ Pricing data must be consumable by:
 # 6B. Media Domain
 
 ## Checklist
-- [ ] confirm media upload URL flow
-- [ ] confirm media completion endpoint
-- [ ] persist room tags
-- [ ] persist descriptions / notes
-- [ ] persist AI photo review fields
-- [ ] add listing-candidate flags
-- [ ] add brochure-use flags
-- [ ] add report-use flags
+- [~] confirm media upload URL flow
+- [~] confirm media completion endpoint
+- [x] persist room tags
+- [~] persist descriptions / notes
+- [x] persist AI photo review fields
+- [x] add listing-candidate flags
+- [ ] add brochure-use flags on base media assets
+- [ ] add report-use flags on base media assets
 - [ ] add media ordering support
-- [ ] add media summary endpoint by property
+- [~] add media summary endpoint by property
 
 ## Required outcome
 Media must support:
@@ -274,19 +298,19 @@ Media must support:
 # 6C. Vision / Media-AI Domain
 
 ## Checklist
-- [ ] create visionJobs collection support
-- [ ] create visionVariants collection support
-- [ ] implement vision preset catalog
-- [ ] implement provider router
-- [ ] implement first provider adapter
-- [ ] add cached duplicate-job detection
+- [x] create visionJobs collection support
+- [x] create visionVariants collection support
+- [x] implement vision preset catalog
+- [~] implement provider router
+- [x] implement first provider adapter
+- [x] add cached duplicate-job detection
 - [ ] enforce credits / quotas
-- [ ] return job status and variants
-- [ ] allow preferred variant selection
-- [ ] allow useInBrochure / useInReport flags
-- [ ] add variant list endpoint per media
-- [ ] add job polling endpoint
-- [ ] log provider latency and failures
+- [x] return job status and variants
+- [x] allow preferred variant selection
+- [x] allow useInBrochure / useInReport flags
+- [x] add variant list endpoint per media
+- [x] add job polling endpoint
+- [~] log provider latency and failures
 
 ## Required outcome
 Vision system must support:
@@ -295,21 +319,28 @@ Vision system must support:
 - multiple variants
 - brochure/report integration
 
+Additional status now implemented beyond the original checklist:
+
+- [x] Replicate provider support for `declutter_light`, `declutter_medium`, and `remove_furniture`
+- [x] before/after slider in the web Vision tab
+- [x] variant review/ranking metadata
+- [x] variant lifecycle with temporary expiration, preferred-selection persistence, and cleanup job
+
 ---
 
 # 6D. Brochure Domain
 
 ## Checklist
-- [ ] create brochure record schema
-- [ ] implement brochure payload assembler
-- [ ] implement copy-generation logic
-- [ ] support selected photos only
-- [ ] support listing-candidate fallback logic
-- [ ] support manual overrides
-- [ ] add brochure preview endpoint
-- [ ] add brochure PDF export endpoint
-- [ ] persist brochure generation metadata
-- [ ] enforce plan gating
+- [x] create brochure record schema
+- [x] implement brochure payload assembler
+- [x] implement copy-generation logic
+- [x] support selected photos only
+- [x] support listing-candidate fallback logic
+- [x] support manual overrides
+- [x] add brochure preview endpoint
+- [x] add brochure PDF export endpoint
+- [x] persist brochure generation metadata
+- [x] enforce plan gating
 
 ## Required outcome
 Brochure system should be a distinct backend asset pipeline, not a transient text blob.
@@ -319,18 +350,18 @@ Brochure system should be a distinct backend asset pipeline, not a transient tex
 # 6E. Reports Domain
 
 ## Checklist
-- [ ] create reports schema
-- [ ] create reportSnapshots schema or equivalent
-- [ ] implement report payload assembler
-- [ ] aggregate pricing + comps + map + media + checklist + providers
-- [ ] support selected enhancement variants
-- [ ] support optional concept preview section
+- [x] create reports schema
+- [~] create reportSnapshots schema or equivalent
+- [x] implement report payload assembler
+- [~] aggregate pricing + comps + map + media + checklist + providers
+- [x] support selected enhancement variants
+- [x] support optional concept preview section
 - [ ] render HTML template
 - [ ] convert HTML to PDF
 - [ ] store PDF in cloud storage
 - [ ] return download URL
-- [ ] support stale vs current report status
-- [ ] enforce plan gating / regeneration rules
+- [x] support stale vs current report status
+- [x] enforce plan gating / regeneration rules
 
 ## Required outcome
 Report system must produce a presentation-grade downloadable asset.
@@ -340,16 +371,16 @@ Report system must produce a presentation-grade downloadable asset.
 # 6F. Checklist Domain
 
 ## Checklist
-- [ ] create checklist state model
-- [ ] support system-generated default tasks
-- [ ] support custom tasks
-- [ ] support status updates
-- [ ] support notes
-- [ ] support phase grouping
-- [ ] support next-best-task calculation
+- [x] create checklist state model
+- [x] support system-generated default tasks
+- [x] support custom tasks
+- [x] support status updates
+- [x] support notes
+- [x] support phase grouping
+- [x] support next-best-task calculation
 - [ ] support provider linkage by task
-- [ ] expose summary + detailed checklist endpoints
-- [ ] expose report-ready checklist payload
+- [x] expose summary + detailed checklist endpoints
+- [x] expose report-ready checklist payload
 
 ## Required outcome
 Checklist should work as an actual guided workflow, not just notes storage.
@@ -377,12 +408,12 @@ Providers should be pluggable into checklist and report sections without rewriti
 
 ## Checklist
 - [ ] enforce plan-based quotas for vision jobs
-- [ ] enforce plan-based quotas for report generation
-- [ ] enforce pricing cooldown rules
-- [ ] enforce duplicate-job caching
-- [ ] track cache hits vs fresh runs
+- [x] enforce plan-based quotas for report generation
+- [x] enforce pricing cooldown rules
+- [x] enforce duplicate-job caching
+- [x] track cache hits vs fresh runs
 - [ ] expose usage summary for UI
-- [ ] return structured upgrade-required responses
+- [x] return structured upgrade-required responses
 
 ## Required outcome
 No expensive feature should run without going through usage enforcement.
@@ -390,6 +421,8 @@ No expensive feature should run without going through usage enforcement.
 ---
 
 # 7. API Contract Pack
+
+The contract examples below remain useful as product-shape references, but they should now be read alongside the current repo routes and serializers in the actual modules.
 
 # 7A. Pricing Contracts
 
@@ -1102,24 +1135,58 @@ Add correlation IDs where practical.
 # 11. Recommended Build Order for Codex
 
 ## Phase 1
-- [ ] stabilize media flags and candidate selection
-- [ ] implement brochure contract end to end
-- [ ] implement reports schema + payload assembler
-- [ ] implement report generation endpoint
-- [ ] implement usage enforcement hooks
+- [x] stabilize media flags and candidate selection
+- [x] implement brochure contract end to end
+- [x] implement reports schema + payload assembler
+- [x] implement report generation endpoint
+- [x] implement usage enforcement hooks
 
 ## Phase 2
-- [ ] implement vision jobs + variants
-- [ ] implement first vision provider
-- [ ] implement polling/status endpoints
-- [ ] implement selected-variant flows
-- [ ] connect variants to brochure/report
+- [x] implement vision jobs + variants
+- [x] implement first vision provider
+- [x] implement polling/status endpoints
+- [x] implement selected-variant flows
+- [x] connect variants to brochure/report
 
 ## Phase 3
-- [ ] implement checklist persistence
+- [x] implement checklist persistence
 - [ ] implement provider retrieval contracts
 - [ ] implement report provider/checklist sections
-- [ ] add diagnostics and admin views later
+- [x] add diagnostics and admin views later
+
+## Phase 4
+- [ ] add provider directory + provider-task linkage
+- [ ] add vision usage enforcement and quota visibility
+- [ ] add property-scoped media ordering and explicit brochure/report asset state
+- [ ] move heavy vision/report work toward worker-backed async processing
+- [ ] strengthen automated test coverage for pricing, media, documents, and admin auth
+
+## 11.1 Highest-Value Next Work
+
+Based on the current implementation, the most valuable next implementation/refinement order is:
+
+1. Provider marketplace foundation
+- add provider schema, seedable provider data, property/provider query endpoints, and checklist task linkage
+- include provider summaries in reports once real provider retrieval exists
+
+2. Vision quality and governance
+- enforce plan-aware quotas for vision jobs
+- improve mask quality, preset tuning, and artifact rejection for the Replicate-powered presets
+- expose lifecycle/expiration state in the seller UI where appropriate
+
+3. Media selection maturity
+- add explicit media ordering
+- add first-class brochure/report inclusion flags at the base media level
+- persist builder draft state per property so brochure/report selections survive without immediate regeneration
+
+4. Document pipeline hardening
+- decide whether to keep `pdf-lib` or move to HTML-to-PDF for higher-end layout control
+- store generated PDFs in cloud storage and return stable download URLs
+- improve export quality for premium deliverables
+
+5. Testing and operational hardening
+- replace placeholder tests with real coverage for auth, pricing, media upload/vision, report generation, and admin auth
+- expand diagnostics for provider calls, vision provider failures, and usage decisions
 
 ---
 

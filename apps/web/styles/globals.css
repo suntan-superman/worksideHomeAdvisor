@@ -1265,6 +1265,69 @@ select {
   border: 1px solid var(--line);
 }
 
+.checklist-provider-inline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(170, 92, 60, 0.16);
+  background: rgba(255, 245, 239, 0.72);
+}
+
+.checklist-provider-inline strong {
+  display: block;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+
+.checklist-provider-inline span {
+  color: var(--muted);
+}
+
+.provider-card-list,
+.provider-lead-list {
+  display: grid;
+  gap: 14px;
+}
+
+.provider-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.provider-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.provider-card-header strong {
+  display: block;
+  color: var(--ink);
+}
+
+.provider-card-header span {
+  color: var(--muted);
+}
+
+.provider-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.provider-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 @media (max-width: 900px) {
   .hero-grid,
   .content-grid,
@@ -1329,6 +1392,10 @@ select {
   .property-media-variant-compare,
   .property-media-detail,
   .vision-story-images {
+    grid-template-columns: 1fr;
+  }
+
+  .checklist-provider-inline {
     grid-template-columns: 1fr;
   }
 }

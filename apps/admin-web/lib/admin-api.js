@@ -27,17 +27,26 @@ async function request(path) {
   }
 }
 
-async function post(path) {
+async function post(path, body) {
   try {
     const session = await getAdminSession();
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-      method: 'POST',
-      cache: 'no-store',
-      headers: session.token
+    const headers = {
+      ...(session.token
         ? {
             Authorization: `Bearer ${session.token}`,
           }
-        : {},
+        : {}),
+    };
+
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
     });
 
     if (!response.ok) {
@@ -70,6 +79,18 @@ export function getAdminBilling() {
 
 export function getAdminUsage() {
   return request('/api/v1/admin/usage');
+}
+
+export function getAdminProviders() {
+  return request('/api/v1/admin/providers');
+}
+
+export function getAdminProviderLeads() {
+  return request('/api/v1/admin/provider-leads');
+}
+
+export function createAdminProvider(payload) {
+  return post('/api/v1/admin/providers', payload);
 }
 
 export function getAdminWorkers() {
