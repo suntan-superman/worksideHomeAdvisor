@@ -127,6 +127,35 @@ function buildCheckoutUrls(overrides) {
   };
 }
 
+function buildSharedBillingMetadata({
+  app = 'home_advisor',
+  billingKind,
+  planKey,
+  productKey,
+  audience,
+  priceId,
+  userId = '',
+  orgId = '',
+  providerId = '',
+}) {
+  const resolvedOrgId = orgId || providerId || userId || '';
+
+  return {
+    app,
+    billingKind,
+    internalPlanCode: planKey,
+    worksideUserId: userId || '',
+    worksideOrgId: resolvedOrgId,
+    worksideProviderId: providerId || '',
+    userId: userId || '',
+    providerId: providerId || '',
+    planKey,
+    productKey,
+    audience,
+    priceId,
+  };
+}
+
 function buildProviderCheckoutUrls(providerId, overrides = {}) {
   const successBase =
     overrides.successUrl ||
@@ -156,6 +185,18 @@ function planFromMetadataOrPrice(planKey, priceId) {
   return getPlanConfig(matchedPlan.planKey);
 }
 
+function resolvePlanKeyFromMetadata(metadata = {}) {
+  return metadata.planKey || metadata.internalPlanCode || '';
+}
+
+function resolveUserIdFromMetadata(metadata = {}, fallback = '') {
+  return metadata.userId || metadata.worksideUserId || fallback;
+}
+
+function resolveProviderIdFromMetadata(metadata = {}) {
+  return metadata.providerId || metadata.worksideProviderId || '';
+}
+
 async function upsertSubscriptionRecord(query, values) {
   const document = await BillingSubscriptionModel.findOneAndUpdate(
     query,
@@ -173,7 +214,7 @@ async function upsertSubscriptionRecord(query, values) {
 }
 
 async function syncProviderCheckoutSession(session, plan) {
-  const providerId = session.metadata?.providerId;
+  const providerId = resolveProviderIdFromMetadata(session.metadata || {});
   if (!providerId) {
     throw new Error('Stripe checkout session is missing provider metadata.');
   }
@@ -213,10 +254,13 @@ async function syncProviderCheckoutSession(session, plan) {
 async function syncProviderSubscription(subscription, overrides = {}) {
   const firstItem = subscription.items?.data?.[0];
   const plan = planFromMetadataOrPrice(
-    subscription.metadata?.planKey || overrides.metadata?.planKey,
+    resolvePlanKeyFromMetadata(subscription.metadata || {}) ||
+      resolvePlanKeyFromMetadata(overrides.metadata || {}),
     firstItem?.price?.id,
   );
-  const providerId = subscription.metadata?.providerId || overrides.metadata?.providerId;
+  const providerId =
+    resolveProviderIdFromMetadata(subscription.metadata || {}) ||
+    resolveProviderIdFromMetadata(overrides.metadata || {});
 
   if (!providerId) {
     throw new Error('Stripe subscription is missing provider metadata.');
@@ -263,8 +307,11 @@ async function syncProviderSubscription(subscription, overrides = {}) {
 }
 
 async function syncCheckoutSession(session) {
-  const userId = session.metadata?.userId || session.client_reference_id;
-  const plan = planFromMetadataOrPrice(session.metadata?.planKey, session.metadata?.priceId);
+  const userId = resolveUserIdFromMetadata(session.metadata || {}, session.client_reference_id);
+  const plan = planFromMetadataOrPrice(
+    resolvePlanKeyFromMetadata(session.metadata || {}),
+    session.metadata?.priceId,
+  );
 
   if (plan.audience === 'provider') {
     return syncProviderCheckoutSession(session, plan);
@@ -315,7 +362,8 @@ async function syncCheckoutSession(session) {
 async function syncStripeSubscription(subscription, overrides = {}) {
   const firstItem = subscription.items?.data?.[0];
   const plan = planFromMetadataOrPrice(
-    subscription.metadata?.planKey || overrides.metadata?.planKey,
+    resolvePlanKeyFromMetadata(subscription.metadata || {}) ||
+      resolvePlanKeyFromMetadata(overrides.metadata || {}),
     firstItem?.price?.id,
   );
 
@@ -324,7 +372,9 @@ async function syncStripeSubscription(subscription, overrides = {}) {
   }
 
   const userId =
-    subscription.metadata?.userId || overrides.metadata?.userId || subscription.customer_email;
+    resolveUserIdFromMetadata(subscription.metadata || {}) ||
+    resolveUserIdFromMetadata(overrides.metadata || {}) ||
+    subscription.customer_email;
 
   if (!userId) {
     throw new Error('Stripe subscription is missing user metadata.');
@@ -421,29 +471,41 @@ export async function createCheckoutSession({
         quantity: 1,
       },
     ],
-    metadata: {
-      userId: user._id.toString(),
+    metadata: buildSharedBillingMetadata({
+      billingKind: plan.mode === 'subscription' ? 'subscription' : 'onboarding',
       planKey: plan.planKey,
       productKey: plan.productKey,
       audience: plan.audience,
       priceId: plan.priceId,
-    },
+      userId: user._id.toString(),
+      orgId: user._id.toString(),
+    }),
     subscription_data:
       plan.mode === 'subscription'
         ? {
-            metadata: {
-              userId: user._id.toString(),
+            metadata: buildSharedBillingMetadata({
+              billingKind: 'subscription',
               planKey: plan.planKey,
-            },
+              productKey: plan.productKey,
+              audience: plan.audience,
+              priceId: plan.priceId,
+              userId: user._id.toString(),
+              orgId: user._id.toString(),
+            }),
           }
         : undefined,
     payment_intent_data:
       plan.mode === 'payment'
         ? {
-            metadata: {
-              userId: user._id.toString(),
+            metadata: buildSharedBillingMetadata({
+              billingKind: 'onboarding',
               planKey: plan.planKey,
-            },
+              productKey: plan.productKey,
+              audience: plan.audience,
+              priceId: plan.priceId,
+              userId: user._id.toString(),
+              orgId: user._id.toString(),
+            }),
           }
         : undefined,
   });
@@ -554,20 +616,27 @@ export async function createProviderCheckoutSession({
         quantity: 1,
       },
     ],
-    metadata: {
-      providerId: toObjectIdString(provider._id),
+    metadata: buildSharedBillingMetadata({
+      billingKind: 'subscription',
       planKey: plan.planKey,
       productKey: plan.productKey,
       audience: plan.audience,
       priceId: plan.priceId,
-    },
+      orgId: toObjectIdString(provider._id),
+      providerId: toObjectIdString(provider._id),
+    }),
     subscription_data:
       plan.mode === 'subscription'
         ? {
-            metadata: {
-              providerId: toObjectIdString(provider._id),
+            metadata: buildSharedBillingMetadata({
+              billingKind: 'subscription',
               planKey: plan.planKey,
-            },
+              productKey: plan.productKey,
+              audience: plan.audience,
+              priceId: plan.priceId,
+              orgId: toObjectIdString(provider._id),
+              providerId: toObjectIdString(provider._id),
+            }),
           }
         : undefined,
   });
