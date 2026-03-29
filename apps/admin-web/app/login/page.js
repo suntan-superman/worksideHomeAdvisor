@@ -79,10 +79,6 @@ export default function AdminLoginPage() {
           Use the same email and password as the regular app, but the account must have
           an admin role.
         </p>
-        <p className="muted auth-helper">
-          Local note: `admin-web` prefers `ADMIN_API_URL` or `NEXT_PUBLIC_ADMIN_API_URL`
-          before falling back to the shared API env.
-        </p>
         <form className="auth-form" onSubmit={handleSubmit}>
           <label>
             Email

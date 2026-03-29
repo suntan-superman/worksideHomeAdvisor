@@ -225,7 +225,9 @@ export async function ensureProviderCategories() {
       ProviderCategoryModel.updateOne(
         { key: category.key },
         {
-          $setOnInsert: category,
+          $setOnInsert: {
+            key: category.key,
+          },
           $set: {
             label: category.label,
             description: category.description,
