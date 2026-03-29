@@ -30,14 +30,15 @@ function serializeFlyer(document) {
     selectedPhotos: document.selectedPhotos || [],
     callToAction: document.callToAction,
     disclaimer: document.disclaimer,
+    customizations: document.customizations || {},
     source: document.source || 'fallback',
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
   };
 }
 
-function chooseFlyerPhotos(assets) {
-  const rankedAssets = [...(assets || [])].sort((left, right) => {
+function sortFlyerAssets(assets) {
+  return [...(assets || [])].sort((left, right) => {
     if (Boolean(left.listingCandidate) !== Boolean(right.listingCandidate)) {
       return left.listingCandidate ? -1 : 1;
     }
@@ -47,8 +48,21 @@ function chooseFlyerPhotos(assets) {
       Number(left.analysis?.overallQualityScore || 0)
     );
   });
+}
 
-  return rankedAssets
+function chooseFlyerPhotos(assets, selectedPhotoAssetIds = []) {
+  const rankedAssets = sortFlyerAssets(assets);
+  const requestedPhotoIds = (selectedPhotoAssetIds || []).filter(Boolean);
+  const manualSelection = requestedPhotoIds.length
+    ? requestedPhotoIds
+        .map((assetId) => rankedAssets.find((asset) => asset.id === assetId))
+        .filter(Boolean)
+    : [];
+  const fallbackSelection = rankedAssets.filter(
+    (asset) => !manualSelection.some((selectedAsset) => selectedAsset.id === asset.id),
+  );
+
+  return [...manualSelection, ...fallbackSelection]
     .slice(0, 4)
     .map((asset) => {
       const selectedVariant = asset.selectedVariant || null;
@@ -110,7 +124,21 @@ function buildFallbackFlyer({ property, pricing, flyerType, selectedPhotos }) {
   };
 }
 
-export async function generatePropertyFlyer({ propertyId, flyerType = 'sale' }) {
+function normalizeFlyerCustomizations(customizations = {}) {
+  return {
+    headline: customizations.headline?.trim() || '',
+    subheadline: customizations.subheadline?.trim() || '',
+    summary: customizations.summary?.trim() || '',
+    callToAction: customizations.callToAction?.trim() || '',
+    selectedPhotoAssetIds: (customizations.selectedPhotoAssetIds || []).filter(Boolean),
+  };
+}
+
+export async function generatePropertyFlyer({
+  propertyId,
+  flyerType = 'sale',
+  customizations = {},
+}) {
   if (mongoose.connection.readyState !== 1) {
     throw new Error('Database connection is required to generate flyers.');
   }
@@ -125,7 +153,11 @@ export async function generatePropertyFlyer({ propertyId, flyerType = 'sale' }) 
     listMediaAssets(propertyId),
   ]);
 
-  const selectedPhotos = chooseFlyerPhotos(mediaAssets);
+  const normalizedCustomizations = normalizeFlyerCustomizations(customizations);
+  const selectedPhotos = chooseFlyerPhotos(
+    mediaAssets,
+    normalizedCustomizations.selectedPhotoAssetIds,
+  );
   const fallbackFlyer = buildFallbackFlyer({
     property,
     pricing,
@@ -157,22 +189,36 @@ export async function generatePropertyFlyer({ propertyId, flyerType = 'sale' }) 
   const flyerPayload = marketing
     ? {
         flyerType,
-        headline: marketing.headline || fallbackFlyer.headline,
-        subheadline: marketing.shortDescription || fallbackFlyer.subheadline,
+        headline:
+          normalizedCustomizations.headline || marketing.headline || fallbackFlyer.headline,
+        subheadline:
+          normalizedCustomizations.subheadline ||
+          marketing.shortDescription ||
+          fallbackFlyer.subheadline,
         priceText: buildPriceText(pricing, flyerType),
         locationLine: fallbackFlyer.locationLine,
-        summary: marketing.shortDescription || fallbackFlyer.summary,
+        summary:
+          normalizedCustomizations.summary ||
+          marketing.shortDescription ||
+          fallbackFlyer.summary,
         highlights: marketing.featureHighlights?.length
           ? marketing.featureHighlights
           : fallbackFlyer.highlights,
         selectedPhotos,
-        callToAction: fallbackFlyer.callToAction,
+        callToAction:
+          normalizedCustomizations.callToAction || fallbackFlyer.callToAction,
         disclaimer: marketing.disclaimer || fallbackFlyer.disclaimer,
+        customizations: normalizedCustomizations,
         source: marketing.source || 'fallback',
         rawMarketing: marketing,
       }
     : {
         ...fallbackFlyer,
+        headline: normalizedCustomizations.headline || fallbackFlyer.headline,
+        subheadline: normalizedCustomizations.subheadline || fallbackFlyer.subheadline,
+        summary: normalizedCustomizations.summary || fallbackFlyer.summary,
+        callToAction: normalizedCustomizations.callToAction || fallbackFlyer.callToAction,
+        customizations: normalizedCustomizations,
         rawMarketing: null,
       };
 

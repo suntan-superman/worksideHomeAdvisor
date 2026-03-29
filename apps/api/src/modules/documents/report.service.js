@@ -11,6 +11,18 @@ import { getLatestPropertyFlyer } from './flyer.service.js';
 import { ReportModel } from './report.model.js';
 
 const CORE_ROOM_LABELS = ['Living room', 'Kitchen', 'Primary bedroom', 'Bathroom', 'Exterior'];
+const REPORT_SECTION_LABELS = {
+  executive_summary: 'Executive Summary',
+  pricing_analysis: 'Pricing Analysis',
+  comparable_properties: 'Comparable Properties',
+  photo_review: 'Photo Review Summary',
+  readiness_score: 'Listing Readiness Score',
+  improvement_recommendations: 'Improvement Recommendations',
+  seller_checklist: 'Seller Checklist',
+  marketing_guidance: 'Marketing Guidance',
+  draft_listing_description: 'Draft Listing Description',
+};
+const DEFAULT_REPORT_SECTION_IDS = Object.keys(REPORT_SECTION_LABELS);
 
 function serializeReport(document) {
   if (!document) {
@@ -36,6 +48,7 @@ function serializeReport(document) {
     improvementItems: document.improvementItems || [],
     marketingHighlights: document.marketingHighlights || [],
     freshness: document.payload?.freshness || null,
+    customizations: document.customizations || document.payload?.customizations || {},
     disclaimer: document.disclaimer,
     source: document.source || 'system',
     payload: document.payload || {},
@@ -60,6 +73,35 @@ function sortPhotosForReport(assets) {
 
 function selectReportPhotos(assets) {
   return sortPhotosForReport(assets).slice(0, 4).map((asset) => {
+    const selectedVariant = asset.selectedVariant || null;
+
+    return {
+      assetId: asset.id,
+      roomLabel: asset.roomLabel,
+      imageUrl: selectedVariant?.imageUrl || asset.imageUrl || null,
+      score: asset.analysis?.overallQualityScore || null,
+      listingCandidate: Boolean(asset.listingCandidate),
+      listingNote: asset.listingNote || '',
+      usesPreferredVariant: Boolean(selectedVariant),
+      variantLabel: selectedVariant?.label || '',
+      variantType: selectedVariant?.variantType || '',
+    };
+  });
+}
+
+function chooseReportPhotos(assets, selectedPhotoAssetIds = []) {
+  const rankedAssets = sortPhotosForReport(assets);
+  const requestedPhotoIds = (selectedPhotoAssetIds || []).filter(Boolean);
+  const manualSelection = requestedPhotoIds.length
+    ? requestedPhotoIds
+        .map((assetId) => rankedAssets.find((asset) => asset.id === assetId))
+        .filter(Boolean)
+    : [];
+  const fallbackSelection = rankedAssets.filter(
+    (asset) => !manualSelection.some((selectedAsset) => selectedAsset.id === asset.id),
+  );
+
+  return [...manualSelection, ...fallbackSelection].slice(0, 4).map((asset) => {
     const selectedVariant = asset.selectedVariant || null;
 
     return {
@@ -125,7 +167,7 @@ function buildReadinessSummary({ pricing, checklist, photoSummary, flyer }) {
   };
 }
 
-function buildSourceSnapshot({ property, pricing, mediaAssets, checklist, flyer }) {
+function buildSourceSnapshot({ property, pricing, mediaAssets, checklist, flyer, customizations }) {
   const mediaUpdatedAt = mediaAssets.reduce((latest, asset) => {
     const timestamp = normalizeDate(asset.updatedAt || asset.createdAt);
     return !timestamp || (latest && latest > timestamp) ? latest : timestamp;
@@ -148,6 +190,7 @@ function buildSourceSnapshot({ property, pricing, mediaAssets, checklist, flyer 
     checklistUpdatedAt: normalizeDate(checklist?.updatedAt || checklist?.createdAt),
     checklistProgress: checklist?.summary?.progressPercent || 0,
     flyerUpdatedAt: normalizeDate(flyer?.updatedAt || flyer?.createdAt),
+    customizations: customizations || null,
   };
 }
 
@@ -175,6 +218,13 @@ function compareSourceSnapshots(saved = {}, current = {}) {
     staleReasons.push('Checklist progress changed after this report was generated.');
   }
 
+  if (
+    JSON.stringify(saved.customizations || null) !==
+    JSON.stringify(current.customizations || null)
+  ) {
+    staleReasons.push('Report builder selections changed after this report was generated.');
+  }
+
   return staleReasons;
 }
 
@@ -194,6 +244,20 @@ function buildListingDescriptions({ property, marketingGuidance, pricing, readin
   };
 }
 
+function normalizeReportCustomizations(customizations = {}) {
+  const includedSections = (customizations.includedSections || []).filter(
+    (sectionId) => REPORT_SECTION_LABELS[sectionId],
+  );
+
+  return {
+    title: customizations.title?.trim() || '',
+    executiveSummary: customizations.executiveSummary?.trim() || '',
+    listingDescription: customizations.listingDescription?.trim() || '',
+    selectedPhotoAssetIds: (customizations.selectedPhotoAssetIds || []).filter(Boolean),
+    includedSections: includedSections.length ? includedSections : DEFAULT_REPORT_SECTION_IDS,
+  };
+}
+
 function buildExecutiveSummary({ property, pricing, photoSummary, checklist, readinessSummary, strongestOpportunity, biggestRisk }) {
   return [
     `${property.title} is currently rated ${readinessSummary.label.toLowerCase()} at ${readinessSummary.overallScore}/100.`,
@@ -209,11 +273,29 @@ function buildExecutiveSummary({ property, pricing, photoSummary, checklist, rea
   ].join(' ');
 }
 
-function buildReportPayload({ property, pricing, mediaAssets, flyer, checklist, marketingGuidance, improvementGuidance, sourceSnapshot }) {
-  const selectedPhotos = selectReportPhotos(mediaAssets);
+function buildReportPayload({
+  property,
+  pricing,
+  mediaAssets,
+  flyer,
+  checklist,
+  marketingGuidance,
+  improvementGuidance,
+  sourceSnapshot,
+  customizations,
+}) {
+  const selectedPhotos = chooseReportPhotos(
+    mediaAssets,
+    customizations.selectedPhotoAssetIds,
+  );
   const photoSummary = buildPhotoSummary(mediaAssets, selectedPhotos);
   const readinessSummary = buildReadinessSummary({ pricing, checklist, photoSummary, flyer });
-  const listingDescriptions = buildListingDescriptions({ property, marketingGuidance, pricing, readinessSummary });
+  const listingDescriptions = buildListingDescriptions({
+    property,
+    marketingGuidance,
+    pricing,
+    readinessSummary,
+  });
   const improvementItems = improvementGuidance?.recommendations?.length
     ? improvementGuidance.recommendations.slice(0, 5).map((item) => item.title)
     : (checklist?.items || []).filter((item) => item.status !== 'done').slice(0, 5).map((item) => item.title);
@@ -235,40 +317,59 @@ function buildReportPayload({ property, pricing, mediaAssets, flyer, checklist, 
   const biggestRisk = photoSummary.retakeCount
     ? `${photoSummary.retakeCount} photo retake recommendation${photoSummary.retakeCount === 1 ? '' : 's'} remain`
     : pricing?.risks?.[0] || null;
+  const includedSectionSet = new Set(customizations.includedSections);
+  const customizedListingDescriptions = {
+    ...listingDescriptions,
+    shortDescription:
+      customizations.listingDescription || listingDescriptions.shortDescription,
+  };
+  const sectionOutline = customizations.includedSections.map(
+    (sectionId) => REPORT_SECTION_LABELS[sectionId],
+  );
 
   return {
     reportType: 'seller_intelligence_report',
     status: 'completed',
     reportVersion: 2,
-    title: `${property.title} Seller Intelligence Report`,
-    executiveSummary: buildExecutiveSummary({
-      property,
-      pricing,
-      photoSummary,
-      checklist,
-      readinessSummary,
-      strongestOpportunity,
-      biggestRisk,
-    }),
-    pricingSummary: {
-      low: pricing?.recommendedListLow || null,
-      mid: pricing?.recommendedListMid || null,
-      high: pricing?.recommendedListHigh || null,
-      confidence: pricing?.confidenceScore || null,
-      narrative: pricing?.summary || '',
-      strategy: pricing?.pricingStrategy || '',
-      strengths: pricing?.strengths || [],
-      risks: pricing?.risks || [],
-    },
-    selectedComps,
-    selectedPhotos,
-    checklistItems,
-    improvementItems,
-    marketingHighlights,
+    title: customizations.title || `${property.title} Seller Intelligence Report`,
+    executiveSummary:
+      customizations.executiveSummary ||
+      buildExecutiveSummary({
+        property,
+        pricing,
+        photoSummary,
+        checklist,
+        readinessSummary,
+        strongestOpportunity,
+        biggestRisk,
+      }),
+    pricingSummary: includedSectionSet.has('pricing_analysis')
+      ? {
+          low: pricing?.recommendedListLow || null,
+          mid: pricing?.recommendedListMid || null,
+          high: pricing?.recommendedListHigh || null,
+          confidence: pricing?.confidenceScore || null,
+          narrative: pricing?.summary || '',
+          strategy: pricing?.pricingStrategy || '',
+          strengths: pricing?.strengths || [],
+          risks: pricing?.risks || [],
+        }
+      : {},
+    selectedComps: includedSectionSet.has('comparable_properties') ? selectedComps : [],
+    selectedPhotos: includedSectionSet.has('photo_review') ? selectedPhotos : [],
+    checklistItems: includedSectionSet.has('seller_checklist') ? checklistItems : [],
+    improvementItems: includedSectionSet.has('improvement_recommendations')
+      ? improvementItems
+      : [],
+    marketingHighlights: includedSectionSet.has('marketing_guidance')
+      ? marketingHighlights
+      : [],
     disclaimer:
       'This report is informational only. Pricing is not an appraisal, provider guidance is not a guarantee, and AI-generated outputs should be independently reviewed before use.',
+    customizations,
     payload: {
       generatedAt,
+      customizations,
       property: {
         title: property.title,
         addressLine1: property.addressLine1,
@@ -280,32 +381,37 @@ function buildReportPayload({ property, pricing, mediaAssets, flyer, checklist, 
         squareFeet: property.squareFeet,
         propertyType: property.propertyType,
       },
-      sectionOutline: [
-        'Executive Summary',
-        'Pricing Analysis',
-        'Comparable Properties',
-        'Photo Review Summary',
-        'Listing Readiness Score',
-        'Improvement Recommendations',
-        'Seller Checklist',
-        'Marketing Guidance',
-        'Draft Listing Description',
-      ],
-      checklistSummary: checklist?.summary || null,
-      nextTask: checklist?.nextTask || null,
-      photoSummary,
-      readinessSummary,
-      marketingGuidance: {
-        headline: marketingGuidance?.headline || flyer?.headline || property.title,
-        shortDescription: marketingGuidance?.shortDescription || flyer?.summary || listingDescriptions.shortDescription,
-        featureHighlights: marketingHighlights,
-        photoSuggestions: marketingGuidance?.photoSuggestions || [],
-      },
-      improvementGuidance: {
-        summary: improvementGuidance?.summary || 'Complete the remaining checklist and photo recommendations before launch.',
-        recommendations: improvementGuidance?.recommendations || [],
-      },
-      listingDescriptions,
+      sectionOutline,
+      checklistSummary: includedSectionSet.has('seller_checklist')
+        ? checklist?.summary || null
+        : null,
+      nextTask: includedSectionSet.has('seller_checklist') ? checklist?.nextTask || null : null,
+      photoSummary: includedSectionSet.has('photo_review') ? photoSummary : null,
+      readinessSummary: includedSectionSet.has('readiness_score')
+        ? readinessSummary
+        : null,
+      marketingGuidance: includedSectionSet.has('marketing_guidance')
+        ? {
+            headline: marketingGuidance?.headline || flyer?.headline || property.title,
+            shortDescription:
+              marketingGuidance?.shortDescription ||
+              flyer?.summary ||
+              customizedListingDescriptions.shortDescription,
+            featureHighlights: marketingHighlights,
+            photoSuggestions: marketingGuidance?.photoSuggestions || [],
+          }
+        : null,
+      improvementGuidance: includedSectionSet.has('improvement_recommendations')
+        ? {
+            summary:
+              improvementGuidance?.summary ||
+              'Complete the remaining checklist and photo recommendations before launch.',
+            recommendations: improvementGuidance?.recommendations || [],
+          }
+        : null,
+      listingDescriptions: includedSectionSet.has('draft_listing_description')
+        ? customizedListingDescriptions
+        : null,
       sourceSnapshot,
       freshness: {
         isStale: false,
@@ -338,7 +444,7 @@ function attachFreshness(report, sourceSnapshot) {
   };
 }
 
-export async function getPropertyReportInputSignature(propertyId) {
+export async function getPropertyReportInputSignature(propertyId, customizations = {}) {
   const [property, pricing, mediaAssets, checklist, flyer] = await Promise.all([
     getPropertyById(propertyId),
     getLatestPricingAnalysis(propertyId),
@@ -357,10 +463,11 @@ export async function getPropertyReportInputSignature(propertyId) {
     mediaAssets,
     checklist,
     flyer,
+    customizations: normalizeReportCustomizations(customizations),
   });
 }
 
-export async function generatePropertyReport({ propertyId }) {
+export async function generatePropertyReport({ propertyId, customizations = {} }) {
   if (mongoose.connection.readyState !== 1) {
     throw new Error('Database connection is required to generate reports.');
   }
@@ -376,6 +483,8 @@ export async function generatePropertyReport({ propertyId }) {
   if (!property) {
     throw new Error('Property not found.');
   }
+
+  const normalizedCustomizations = normalizeReportCustomizations(customizations);
 
   const simplifiedMedia = mediaAssets.map((asset) => ({
     roomLabel: asset.roomLabel,
@@ -414,6 +523,7 @@ export async function generatePropertyReport({ propertyId }) {
     mediaAssets,
     checklist,
     flyer,
+    customizations: normalizedCustomizations,
   });
 
   const reportPayload = buildReportPayload({
@@ -425,6 +535,7 @@ export async function generatePropertyReport({ propertyId }) {
     marketingGuidance,
     improvementGuidance,
     sourceSnapshot,
+    customizations: normalizedCustomizations,
   });
 
   const document = await ReportModel.create({
@@ -448,7 +559,10 @@ export async function getLatestPropertyReport(propertyId) {
     return null;
   }
 
-  const sourceSnapshot = await getPropertyReportInputSignature(propertyId);
+  const sourceSnapshot = await getPropertyReportInputSignature(
+    propertyId,
+    serialized.customizations || {},
+  );
   return attachFreshness(serialized, sourceSnapshot);
 }
 

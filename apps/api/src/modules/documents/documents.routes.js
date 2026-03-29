@@ -21,6 +21,27 @@ import {
 
 const flyerRequestSchema = z.object({
   flyerType: z.enum(['sale', 'rental']).default('sale'),
+  customizations: z
+    .object({
+      headline: z.string().trim().max(140).optional(),
+      subheadline: z.string().trim().max(220).optional(),
+      summary: z.string().trim().max(600).optional(),
+      callToAction: z.string().trim().max(180).optional(),
+      selectedPhotoAssetIds: z.array(z.string().trim().min(1)).max(6).optional(),
+    })
+    .default({}),
+});
+
+const reportRequestSchema = z.object({
+  customizations: z
+    .object({
+      title: z.string().trim().max(180).optional(),
+      executiveSummary: z.string().trim().max(1200).optional(),
+      listingDescription: z.string().trim().max(1200).optional(),
+      selectedPhotoAssetIds: z.array(z.string().trim().min(1)).max(8).optional(),
+      includedSections: z.array(z.string().trim().min(1)).max(12).optional(),
+    })
+    .default({}),
 });
 
 export async function documentsRoutes(fastify) {
@@ -45,6 +66,7 @@ export async function documentsRoutes(fastify) {
           propertyId: request.params.propertyId,
           flyerType: payload.flyerType,
           updatedAt: property.updatedAt,
+          customizations: payload.customizations,
         },
       });
 
@@ -87,6 +109,7 @@ export async function documentsRoutes(fastify) {
         flyer = await generatePropertyFlyer({
           propertyId: request.params.propertyId,
           flyerType: payload.flyerType,
+          customizations: payload.customizations,
         });
         await finalizeFreshAnalysisRun({
           userId: property.ownerUserId,
@@ -150,13 +173,17 @@ export async function documentsRoutes(fastify) {
 
   fastify.post('/:propertyId/report/generate', async (request, reply) => {
     try {
+      const payload = reportRequestSchema.parse(request.body || {});
       const property = await getPropertyById(request.params.propertyId);
       if (!property) {
         return reply.code(404).send({ message: 'Property not found.' });
       }
 
       const latestReport = await getLatestPropertyReport(request.params.propertyId);
-      const reportInputSignature = await getPropertyReportInputSignature(request.params.propertyId);
+      const reportInputSignature = await getPropertyReportInputSignature(
+        request.params.propertyId,
+        payload.customizations,
+      );
       const decision = await enforceAnalysisRequest({
         userId: property.ownerUserId,
         propertyId: request.params.propertyId,
@@ -206,6 +233,7 @@ export async function documentsRoutes(fastify) {
       try {
         report = await generatePropertyReport({
           propertyId: request.params.propertyId,
+          customizations: payload.customizations,
         });
         await finalizeFreshAnalysisRun({
           userId: property.ownerUserId,

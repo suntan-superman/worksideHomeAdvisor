@@ -33,6 +33,7 @@ const flyerSchema = new mongoose.Schema(
     selectedPhotos: { type: [flyerPhotoSchema], default: [] },
     callToAction: { type: String, required: true },
     disclaimer: { type: String, required: true },
+    customizations: { type: mongoose.Schema.Types.Mixed, default: {} },
     source: { type: String, default: 'fallback' },
     rawMarketing: { type: mongoose.Schema.Types.Mixed, default: null },
   },

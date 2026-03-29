@@ -1245,3 +1245,397 @@ select {
     grid-template-columns: 1fr;
   }
 }
+
+.workspace-shell {
+  display: grid;
+  gap: 18px;
+}
+
+.workspace-page-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: rgba(255, 248, 240, 0.92);
+  backdrop-filter: blur(18px);
+}
+
+.workspace-page-header-copy {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-address-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.workspace-page-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.workspace-action-bar,
+.workspace-tab-bar {
+  position: sticky;
+  z-index: 18;
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 250, 243, 0.88);
+  backdrop-filter: blur(16px);
+}
+
+.workspace-action-bar {
+  top: 112px;
+}
+
+.workspace-tab-bar {
+  top: 182px;
+}
+
+.workspace-action-pill,
+.workspace-tab {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.workspace-action-pill-primary {
+  background: linear-gradient(135deg, var(--clay), #d89a6b);
+  color: white;
+  border-color: transparent;
+}
+
+.workspace-tab {
+  background: transparent;
+  border-color: transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.workspace-tab.active {
+  color: var(--clay);
+  border-bottom-color: var(--clay);
+}
+
+.workspace-tab-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  align-items: start;
+}
+
+.workspace-tab-main,
+.workspace-tab-stack {
+  display: grid;
+  gap: 24px;
+}
+
+.workspace-two-column {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.workspace-quick-rail {
+  position: sticky;
+  top: 252px;
+  display: grid;
+  gap: 18px;
+}
+
+.workspace-quick-card,
+.workspace-side-panel,
+.workspace-inner-card {
+  display: grid;
+  gap: 12px;
+}
+
+.workspace-hero-card {
+  background: linear-gradient(180deg, rgba(255, 249, 241, 0.94), rgba(255, 244, 233, 0.9)), var(--panel);
+}
+
+.workspace-output-list {
+  display: grid;
+  gap: 12px;
+}
+
+.workspace-output-card {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.74);
+  text-align: left;
+}
+
+.workspace-output-card strong {
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.workspace-output-card span:last-child {
+  color: var(--muted);
+}
+
+.brochure-control-card {
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(36, 40, 45, 0.08);
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.brochure-control-grid,
+.report-outline-grid,
+.report-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.brochure-control-grid-form {
+  align-items: start;
+}
+
+.brochure-control-grid strong,
+.report-outline-item strong,
+.brochure-preview-card strong {
+  color: var(--ink);
+}
+
+.brochure-control-grid p,
+.report-outline-item span,
+.brochure-preview-card p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.workspace-control-field {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.workspace-control-field span {
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.workspace-control-field input,
+.workspace-control-field textarea {
+  width: 100%;
+  border: 1px solid rgba(25, 33, 42, 0.12);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--ink);
+}
+
+.workspace-control-field input {
+  min-height: 48px;
+  padding: 0 14px;
+}
+
+.workspace-control-field textarea {
+  min-height: 120px;
+  padding: 12px 14px;
+  resize: vertical;
+}
+
+.workspace-control-field-full {
+  grid-column: 1 / -1;
+}
+
+.workspace-control-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+}
+
+.brochure-photo-plan {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.brochure-photo-plan-card {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.74);
+  text-align: left;
+}
+
+.brochure-photo-plan-card.active,
+.report-outline-item.active {
+  border-color: rgba(70, 99, 79, 0.32);
+  background: rgba(70, 99, 79, 0.12);
+}
+
+.brochure-photo-plan-card img {
+  width: 92px;
+  height: 92px;
+  object-fit: cover;
+  border-radius: 14px;
+}
+
+.brochure-photo-plan-card div {
+  display: grid;
+  gap: 4px;
+}
+
+.brochure-photo-plan-card span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.brochure-photo-plan-card em {
+  color: var(--moss);
+  font-style: normal;
+  font-size: 0.84rem;
+}
+
+.brochure-preview-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.brochure-preview-card,
+.report-outline-item {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(36, 40, 45, 0.08);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.report-outline-card {
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(36, 40, 45, 0.08);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.report-outline-item {
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+
+.workspace-scroll-panel {
+  max-height: 520px;
+}
+
+.property-photo-grid {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.property-photo-grid.compact {
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+}
+
+.photo-detail-panel {
+  position: sticky;
+  top: 252px;
+}
+
+.workspace-action-column {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-accordion-list {
+  display: grid;
+  gap: 14px;
+}
+
+.workspace-accordion {
+  border: 1px solid rgba(36, 40, 45, 0.08);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.68);
+  overflow: hidden;
+}
+
+.workspace-accordion summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  cursor: pointer;
+  list-style: none;
+  font-weight: 700;
+}
+
+.workspace-accordion summary::-webkit-details-marker {
+  display: none;
+}
+
+.workspace-accordion .checklist-list {
+  padding: 0 16px 16px;
+}
+
+.property-media-variant-empty {
+  display: grid;
+  place-items: center;
+  min-height: 240px;
+  margin-top: 8px;
+  border-radius: 18px;
+  border: 1px dashed var(--line);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--muted);
+  text-align: center;
+  padding: 20px;
+}
+
+@media (max-width: 1100px) {
+  .workspace-tab-layout,
+  .workspace-two-column,
+  .brochure-control-grid,
+  .report-outline-grid,
+  .report-preview-grid,
+  .brochure-preview-sections,
+  .brochure-photo-plan {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-quick-rail,
+  .photo-detail-panel {
+    position: static;
+  }
+}
+
+@media (max-width: 900px) {
+  .workspace-page-header {
+    position: static;
+    flex-direction: column;
+  }
+
+  .workspace-action-bar,
+  .workspace-tab-bar {
+    position: static;
+  }
+}

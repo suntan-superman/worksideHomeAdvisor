@@ -65,6 +65,7 @@ const reportSchema = new mongoose.Schema(
     improvementItems: { type: [String], default: [] },
     marketingHighlights: { type: [String], default: [] },
     disclaimer: { type: String, required: true },
+    customizations: { type: mongoose.Schema.Types.Mixed, default: {} },
     source: { type: String, default: 'system' },
     payload: { type: mongoose.Schema.Types.Mixed, default: {} },
   },

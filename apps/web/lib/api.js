@@ -160,10 +160,10 @@ export function createBillingCheckoutSession(payload, userId) {
   });
 }
 
-export function generateFlyer(propertyId, flyerType = 'sale') {
+export function generateFlyer(propertyId, flyerType = 'sale', customizations = {}) {
   return request(`/api/v1/properties/${propertyId}/flyer/generate`, {
     method: 'POST',
-    body: JSON.stringify({ flyerType }),
+    body: JSON.stringify({ flyerType, customizations }),
   });
 }
 
@@ -176,9 +176,10 @@ export function getFlyerExportUrl(propertyId, flyerType = 'sale') {
   return `${API_BASE_URL}/api/v1/properties/${propertyId}/flyer/export.pdf?${search.toString()}`;
 }
 
-export function generateReport(propertyId) {
+export function generateReport(propertyId, customizations = {}) {
   return request(`/api/v1/properties/${propertyId}/report/generate`, {
     method: 'POST',
+    body: JSON.stringify({ customizations }),
   });
 }
 
