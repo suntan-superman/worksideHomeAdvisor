@@ -44,6 +44,8 @@ const envSchema = z.object({
   STRIPE_PRICE_ID_SAMPLE_ONBOARDING: z.string().optional(),
   STRIPE_PRICE_ID_SAMPLE_MONTHLY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
+  REPLICATE_API_KEY: z.string().optional(),
+  REPLICATE_API_TOKEN: z.string().optional(),
   OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
   OPENAI_MODEL_DEFAULT: z.string().default('gpt-4.1-mini'),
   MARKET_DATA_PROVIDER: z.string().default('rentcast'),
@@ -60,6 +62,10 @@ const envSchema = z.object({
 export const env = envSchema.parse({
   ...process.env,
   OPENAI_API_KEY: stripSecret(process.env.OPENAI_API_KEY),
+  REPLICATE_API_KEY: stripSecret(process.env.REPLICATE_API_KEY),
+  REPLICATE_API_TOKEN: stripSecret(
+    process.env.REPLICATE_API_TOKEN || process.env.REPLICATE_API_KEY,
+  ),
   SENDGRID_API_KEY: stripSecret(process.env.SENDGRID_API_KEY),
   STRIPE_SECRET_KEY: stripSecret(process.env.STRIPE_SECRET_KEY),
   STRIPE_WEBHOOK_SECRET: stripSecret(process.env.STRIPE_WEBHOOK_SECRET),

@@ -23,15 +23,19 @@ export const VISION_PRESETS = [
     shortLabel: 'Declutter',
     category: 'enhancement',
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'unknown'],
-    providerPreference: 'local_sharp',
+    providerPreference: 'replicate',
     promptVersion: 1,
-    outputCount: 1,
+    outputCount: 2,
     disclaimerType: 'truthful_enhancement',
     recommendedUse: ['brochure', 'report'],
     basePrompt:
-      'Create a cleaner, more listing-ready version of this room by lightly reducing visible clutter, simplifying surfaces, and improving presentation quality. Keep the room realistic and truthful. Preserve architecture, major furniture, layout, and core finishes.',
+      'Clean up this residential interior photo for real estate listing use. Remove small clutter items, improve brightness and cleanliness. Keep all furniture and structure. Stay realistic.',
     helperText:
       'Reduce small distractions and improve presentation while keeping the room believable.',
+    strength: 0.6,
+    guidanceScale: 7.5,
+    numInferenceSteps: 35,
+    replicateModel: 'lucataco/sdxl-inpainting:latest',
   },
   {
     key: 'declutter_medium',
@@ -40,15 +44,40 @@ export const VISION_PRESETS = [
     shortLabel: 'Declutter+',
     category: 'enhancement',
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'unknown'],
-    providerPreference: 'local_sharp',
+    providerPreference: 'replicate',
     promptVersion: 1,
-    outputCount: 1,
+    outputCount: 2,
     disclaimerType: 'truthful_enhancement',
     recommendedUse: ['report'],
     basePrompt:
-      'Create a significantly cleaner and more presentation-ready version of this room by reducing visual clutter, simplifying countertops and surfaces, and improving overall buyer appeal. Keep the room realistic and believable. Preserve the true room layout, major architecture, and essential permanent features.',
+      'Clean and simplify this residential interior photo. Reduce clutter and visual noise but preserve layout and furniture. Make the space feel open and tidy.',
     helperText:
       'A stronger cleanup pass that pushes the room toward listing-readiness without restaging it.',
+    strength: 0.75,
+    guidanceScale: 7.5,
+    numInferenceSteps: 35,
+    replicateModel: 'lucataco/sdxl-inpainting:latest',
+  },
+  {
+    key: 'remove_furniture',
+    legacyKeys: [],
+    displayName: 'Remove Furniture',
+    shortLabel: 'Empty Room',
+    category: 'concept_preview',
+    roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'exterior', 'unknown'],
+    providerPreference: 'replicate',
+    promptVersion: 1,
+    outputCount: 2,
+    disclaimerType: 'concept_preview',
+    recommendedUse: ['report'],
+    basePrompt:
+      'Create a realistic version of this room with most movable furniture removed. Keep structure and layout intact. Make the room feel open and empty.',
+    helperText:
+      'Create a conceptual empty-room version for planning and persuasion, not direct listing replacement.',
+    strength: 0.85,
+    guidanceScale: 7.5,
+    numInferenceSteps: 35,
+    replicateModel: 'lucataco/sdxl-inpainting:latest',
   },
   {
     key: 'combined_listing_refresh',
@@ -91,4 +120,3 @@ export function resolveVisionPreset(presetKey = 'enhance_listing_quality') {
 export function getVisionPresetKeys() {
   return VISION_PRESETS.flatMap((preset) => [preset.key, ...(preset.legacyKeys || [])]);
 }
-

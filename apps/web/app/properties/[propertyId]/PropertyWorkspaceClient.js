@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 import { formatCurrency } from '@workside/utils';
 
 import { AppFrame } from '../../../components/AppFrame';
@@ -59,10 +60,15 @@ const VISION_PRESET_GROUPS = [
     key: 'enhancement',
     label: 'Enhance',
     items: [
-      { key: 'enhance_listing_quality', displayName: 'Enhance for Listing' },
       { key: 'declutter_light', displayName: 'Light Declutter' },
       { key: 'declutter_medium', displayName: 'Medium Declutter' },
-      { key: 'combined_listing_refresh', displayName: 'Listing Refresh' },
+    ],
+  },
+  {
+    key: 'concept_preview',
+    label: 'Preview',
+    items: [
+      { key: 'remove_furniture', displayName: 'Remove Furniture' },
     ],
   },
 ];
@@ -123,7 +129,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [visionPresets, setVisionPresets] = useState([]);
   const [selectedVariantId, setSelectedVariantId] = useState('');
   const [selectedMediaAssetId, setSelectedMediaAssetId] = useState('');
-  const [activeVisionPresetKey, setActiveVisionPresetKey] = useState('enhance_listing_quality');
+  const [activeVisionPresetKey, setActiveVisionPresetKey] = useState('declutter_light');
   const [flyerType, setFlyerType] = useState('sale');
   const [flyerHeadlineDraft, setFlyerHeadlineDraft] = useState('');
   const [flyerSubheadlineDraft, setFlyerSubheadlineDraft] = useState('');
@@ -583,8 +589,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setActiveTab('vision');
     setActiveVisionPresetKey(presetKey);
     const isDeclutterPreset = String(presetKey).includes('declutter');
+    const isFurnitureRemovalPreset = presetKey === 'remove_furniture';
     setStatus(
-      isDeclutterPreset
+      isFurnitureRemovalPreset
+        ? 'Generating furniture-removal preview...'
+        : isDeclutterPreset
         ? 'Generating declutter variant...'
         : 'Generating enhanced listing version...',
     );
@@ -599,7 +608,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setToast({
         tone: 'success',
         title:
-          isDeclutterPreset
+          isFurnitureRemovalPreset
+            ? 'Furniture removal preview ready'
+            : isDeclutterPreset
             ? 'Declutter variant ready'
             : 'Enhanced photo ready',
         message:
@@ -943,6 +954,32 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         </div>
         {selectedMediaAsset ? (
           <div className="property-media-variant-panel">
+            {selectedVariant ? (
+              <div className="property-media-slider-card">
+                <span className="label">Before / after slider</span>
+                <p className="property-media-variant-caption">{getVariantSummary(selectedVariant)}</p>
+                <div className="property-media-slider-shell">
+                  <ReactCompareSlider
+                    itemOne={
+                      <ReactCompareSliderImage
+                        src={selectedMediaAsset.imageUrl}
+                        alt={selectedMediaAsset.roomLabel || 'Original property photo'}
+                      />
+                    }
+                    itemTwo={
+                      <ReactCompareSliderImage
+                        src={selectedVariant.imageUrl}
+                        alt={selectedVariant.label || 'Generated image variant'}
+                      />
+                    }
+                  />
+                </div>
+                <div className="tag-row">
+                  <span>Original</span>
+                  <span>{selectedVariant.variantCategory === 'concept_preview' ? 'Concept Preview' : 'Enhanced'}</span>
+                </div>
+              </div>
+            ) : null}
             <div className="property-media-variant-compare">
               <div>
                 <span className="label">Original</span>
@@ -951,7 +988,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </div>
               <div>
                 <span className="label">Vision output</span>
-                <p className="property-media-variant-caption">{selectedVariant ? getVariantSummary(selectedVariant) : 'Generate a variant to compare the output.'}</p>
+                <p className="property-media-variant-caption">{selectedVariant ? getVariantSummary(selectedVariant) : 'Generate one of the Phase 1 presets to begin comparison.'}</p>
                 {selectedVariant ? (
                   <img src={selectedVariant.imageUrl} alt={selectedVariant.label || 'Generated image variant'} className="property-media-variant-image" />
                 ) : (
@@ -995,7 +1032,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       <div className="workspace-two-column">
         <div className="content-card">
           <span className="label">Action presets</span>
-          <h2>Choose a listing enhancement</h2>
+          <h2>Choose a Phase 1 preset</h2>
           {selectedMediaAsset ? (
             <>
               <p>Current source photo: <strong>{selectedMediaAsset.roomLabel}</strong></p>
@@ -1023,8 +1060,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 ))}
                 <div className="workspace-inner-card brochure-control-card">
                   <span className="label">Preset guidance</span>
-                  <strong>{activeVisionPreset?.displayName || 'Enhance for Listing'}</strong>
-                  <p>{activeVisionPreset?.helperText || 'Improve the photo while keeping it believable and listing-safe.'}</p>
+                  <strong>{activeVisionPreset?.displayName || 'Light Declutter'}</strong>
+                  <p>{activeVisionPreset?.helperText || 'Reduce clutter or preview furniture removal with the current Phase 1 preset set.'}</p>
                 </div>
               </div>
               <div className="workspace-action-column">

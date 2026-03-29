@@ -5,6 +5,7 @@ const visionJobTypes = [
   'declutter_preview',
   'declutter_light',
   'declutter_medium',
+  'remove_furniture',
   'combined_listing_refresh',
 ];
 

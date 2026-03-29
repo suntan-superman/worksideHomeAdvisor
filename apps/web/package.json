@@ -15,6 +15,7 @@
     "@workside/utils": "file:../../packages/utils",
     "next": "^15.2.0",
     "react": "19.0.0",
+    "react-compare-slider": "^4.0.0",
     "react-dom": "19.0.0"
   }
 }

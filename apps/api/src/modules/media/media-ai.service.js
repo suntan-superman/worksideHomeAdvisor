@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import sharp from 'sharp';
 
 import {
+  buildMediaAssetUrl,
   buildMediaVariantUrl,
   readStoredAsset,
   saveBinaryBuffer,
@@ -11,6 +12,7 @@ import {
 import { ImageJobModel } from './image-job.model.js';
 import { MediaAssetModel } from './media.model.js';
 import { MediaVariantModel } from './media-variant.model.js';
+import { runReplicateInpainting } from './replicate-provider.service.js';
 import { listVisionPresets, resolveVisionPreset } from './vision-presets.js';
 
 const CACHE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -173,21 +175,12 @@ function buildPresetRenderPlan(presetKey) {
     return {
       preset,
       label: 'Light Declutter',
-      warning:
-        'This version is a listing-safe cleanup pass. It improves presentation, but it does not yet do full AI object removal.',
+      warning: '',
       summary:
-        'A lighter declutter pass that trims distractions, lifts brightness, and keeps the room believable.',
+        'A lighter declutter pass that reduces small distractions while keeping the room realistic.',
       differenceHint:
-        'Look at countertops, edges, and visual distractions first. This pass makes the room feel calmer without changing the structure.',
-      effects: ['Cleaner framing', 'Brighter exposure', 'Reduced distraction emphasis'],
-      cropInsetRatio: 0.05,
-      transform: (image, metadata) =>
-        applyCenterCrop(image, metadata, 0.05)
-          .normalize()
-          .gamma(1.08)
-          .linear(1.08, -10)
-          .modulate({ brightness: 1.1, saturation: 0.94 })
-          .sharpen({ sigma: 1.1, m1: 0.75, m2: 1.8, x1: 2, x2: 12, x3: 24 }),
+        'Look for cleaner counters, fewer distractions, and a calmer overall room presentation.',
+      effects: ['Small clutter reduction', 'Cleaner surfaces', 'Listing-safe cleanup'],
     };
   }
 
@@ -195,22 +188,26 @@ function buildPresetRenderPlan(presetKey) {
     return {
       preset,
       label: 'Medium Declutter',
-      warning:
-        'This stronger cleanup pass is still a truthful enhancement, not full AI furniture removal or virtual staging.',
+      warning: '',
       summary:
-        'A stronger declutter treatment that pushes the image toward listing-readiness while staying realistic.',
+        'A stronger declutter treatment that simplifies the room more aggressively while preserving layout and furniture.',
       differenceHint:
-        'This version should feel cleaner and calmer overall, with stronger brightness and less visual noise than the original.',
-      effects: ['Stronger cleanup pass', 'Higher brightness', 'Lower clutter emphasis', 'Sharper detail'],
-      cropInsetRatio: 0.07,
-      transform: (image, metadata) =>
-        applyCenterCrop(image, metadata, 0.07)
-          .normalize()
-          .gamma(1.14)
-          .linear(1.12, -12)
-          .modulate({ brightness: 1.16, saturation: 0.88 })
-          .median(1)
-          .sharpen({ sigma: 1.2, m1: 0.9, m2: 1.9, x1: 2, x2: 14, x3: 28 }),
+        'The room should feel more open, tidier, and less visually noisy than the original.',
+      effects: ['Stronger declutter', 'Tidier presentation', 'Open-room feel'],
+    };
+  }
+
+  if (preset.key === 'remove_furniture') {
+    return {
+      preset,
+      label: 'Furniture Removal Concept',
+      warning:
+        'This is a concept preview only. It is intended for planning and seller discussion, not silent replacement of the actual room photo.',
+      summary:
+        'A concept preview that removes most movable furniture to show how the room could feel more open.',
+      differenceHint:
+        'Look at the perceived openness of the room rather than exact decor details.',
+      effects: ['Furniture removal', 'Open-room concept', 'Planning preview'],
     };
   }
 
@@ -275,6 +272,15 @@ async function renderVariantBuffer(buffer, presetKey, roomType) {
     preset: renderPlan.preset,
     roomPromptAddon,
   };
+}
+
+async function downloadRemoteImageAsBuffer(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Could not download generated variant from provider (${response.status}).`);
+  }
+
+  return Buffer.from(await response.arrayBuffer());
 }
 
 function buildVisionInputHash({ assetId, presetKey, roomType, promptVersion }) {
@@ -397,64 +403,131 @@ export async function createImageEnhancementJob({
   });
 
   try {
-    const stored = await readStoredAsset({
-      storageProvider: asset.storageProvider,
-      storageKey: asset.storageKey,
-    });
-    const rendered = await renderVariantBuffer(stored.buffer, preset.key, resolvedRoomType);
-    const saved = await saveBinaryBuffer({
-      propertyId: asset.propertyId.toString(),
-      mimeType: 'image/jpeg',
-      buffer: rendered.buffer,
-    });
+    const renderPlan = buildPresetRenderPlan(preset.key);
+    const fullPrompt = [preset.basePrompt, getRoomPromptAddon(resolvedRoomType)]
+      .filter(Boolean)
+      .join(' ');
+    let createdVariants = [];
 
-    const variant = await MediaVariantModel.create({
-      visionJobId: job._id,
-      mediaId: asset._id,
-      propertyId: asset.propertyId,
-      variantType: preset.key,
-      variantCategory: preset.category,
-      label: rendered.label,
-      mimeType: 'image/jpeg',
-      storageProvider: saved.storageProvider,
-      storageKey: saved.storageKey,
-      byteSize: saved.byteSize,
-      isSelected: false,
-      useInBrochure: false,
-      useInReport: false,
-      metadata: {
-        warning: rendered.warning,
-        summary: rendered.summary,
-        differenceHint: rendered.differenceHint,
-        effects: rendered.effects,
-        cropInsetPercent: rendered.cropInsetPercent,
-        sourceAssetId: asset._id.toString(),
-        roomLabel: asset.roomLabel,
-        roomType: resolvedRoomType,
-        provider: preset.providerPreference || 'local_sharp',
-        presetKey: preset.key,
-        promptVersion: preset.promptVersion,
-        helperText: preset.helperText,
-        recommendedUse: preset.recommendedUse,
-        category: preset.category,
-        disclaimerType: preset.disclaimerType,
-        roomPromptAddon: rendered.roomPromptAddon,
-      },
-    });
+    if (preset.providerPreference === 'replicate') {
+      const imageUrl = buildMediaAssetUrl(asset._id.toString());
+      const providerOutputs = await runReplicateInpainting({
+        imageUrl,
+        model: preset.replicateModel,
+        prompt: fullPrompt,
+        strength: preset.strength,
+        outputCount: preset.outputCount || 2,
+        guidanceScale: preset.guidanceScale,
+        numInferenceSteps: preset.numInferenceSteps,
+      });
+
+      createdVariants = await Promise.all(
+        providerOutputs.map(async (outputUrl, index) => {
+          const buffer = await downloadRemoteImageAsBuffer(outputUrl);
+          const saved = await saveBinaryBuffer({
+            propertyId: asset.propertyId.toString(),
+            mimeType: 'image/jpeg',
+            buffer,
+          });
+
+          const variant = await MediaVariantModel.create({
+            visionJobId: job._id,
+            mediaId: asset._id,
+            propertyId: asset.propertyId,
+            variantType: preset.key,
+            variantCategory: preset.category,
+            label: `${renderPlan.label} ${String.fromCharCode(65 + index)}`,
+            mimeType: 'image/jpeg',
+            storageProvider: saved.storageProvider,
+            storageKey: saved.storageKey,
+            byteSize: saved.byteSize,
+            isSelected: false,
+            useInBrochure: false,
+            useInReport: false,
+            metadata: {
+              warning: renderPlan.warning,
+              summary: renderPlan.summary,
+              differenceHint: renderPlan.differenceHint,
+              effects: renderPlan.effects,
+              sourceAssetId: asset._id.toString(),
+              roomLabel: asset.roomLabel,
+              roomType: resolvedRoomType,
+              provider: 'replicate',
+              presetKey: preset.key,
+              promptVersion: preset.promptVersion,
+              helperText: preset.helperText,
+              recommendedUse: preset.recommendedUse,
+              category: preset.category,
+              disclaimerType: preset.disclaimerType,
+              roomPromptAddon: getRoomPromptAddon(resolvedRoomType),
+              providerSourceUrl: outputUrl,
+            },
+          });
+
+          return serializeMediaVariant(variant.toObject());
+        }),
+      );
+    } else {
+      const stored = await readStoredAsset({
+        storageProvider: asset.storageProvider,
+        storageKey: asset.storageKey,
+      });
+      const rendered = await renderVariantBuffer(stored.buffer, preset.key, resolvedRoomType);
+      const saved = await saveBinaryBuffer({
+        propertyId: asset.propertyId.toString(),
+        mimeType: 'image/jpeg',
+        buffer: rendered.buffer,
+      });
+
+      const variant = await MediaVariantModel.create({
+        visionJobId: job._id,
+        mediaId: asset._id,
+        propertyId: asset.propertyId,
+        variantType: preset.key,
+        variantCategory: preset.category,
+        label: rendered.label,
+        mimeType: 'image/jpeg',
+        storageProvider: saved.storageProvider,
+        storageKey: saved.storageKey,
+        byteSize: saved.byteSize,
+        isSelected: false,
+        useInBrochure: false,
+        useInReport: false,
+        metadata: {
+          warning: rendered.warning,
+          summary: rendered.summary,
+          differenceHint: rendered.differenceHint,
+          effects: rendered.effects,
+          cropInsetPercent: rendered.cropInsetPercent,
+          sourceAssetId: asset._id.toString(),
+          roomLabel: asset.roomLabel,
+          roomType: resolvedRoomType,
+          provider: preset.providerPreference || 'local_sharp',
+          presetKey: preset.key,
+          promptVersion: preset.promptVersion,
+          helperText: preset.helperText,
+          recommendedUse: preset.recommendedUse,
+          category: preset.category,
+          disclaimerType: preset.disclaimerType,
+          roomPromptAddon: rendered.roomPromptAddon,
+        },
+      });
+
+      createdVariants = [serializeMediaVariant(variant.toObject())];
+    }
 
     job.status = 'completed';
-    job.outputVariantIds = [variant._id];
-    job.warning = rendered.warning;
-    job.message = `${rendered.label} generated.`;
+    job.outputVariantIds = createdVariants.map((variant) => variant.id);
+    job.warning = renderPlan.warning;
+    job.message = `${createdVariants.length} ${renderPlan.label.toLowerCase()} variant${createdVariants.length === 1 ? '' : 's'} generated.`;
     await job.save();
 
-    const serializedVariant = serializeMediaVariant(variant.toObject());
     return {
       cached: false,
       preset,
-      job: serializeImageJob(job.toObject(), [serializedVariant]),
-      variants: [serializedVariant],
-      variant: serializedVariant,
+      job: serializeImageJob(job.toObject(), createdVariants),
+      variants: createdVariants,
+      variant: createdVariants[0] || null,
     };
   } catch (error) {
     job.status = 'failed';
@@ -518,4 +591,3 @@ export async function getMediaVariantById(variantId) {
   const variant = await MediaVariantModel.findById(variantId).lean();
   return serializeMediaVariant(variant);
 }
-
