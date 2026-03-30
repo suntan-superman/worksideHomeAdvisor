@@ -156,11 +156,18 @@ async function deliverEmail({ to, subject, text, html, logLabel, logMeta }) {
   await sendViaSendGrid({ to, subject, text, html });
 }
 
-function buildOtpHtml(code) {
+function buildOtpHtml(code, role = 'seller') {
+  const workspaceLabel =
+    role === 'provider'
+      ? 'provider portal'
+      : role === 'agent'
+        ? 'agent workspace'
+        : 'seller workspace';
+
   return renderEmailShell({
     eyebrow: 'Email verification',
     title: 'Confirm your email to start selling smarter.',
-    intro: `Use this one-time verification code to unlock your ${BRANDING.shortProductName} workspace.`,
+    intro: `Use this one-time verification code to unlock your ${BRANDING.shortProductName} ${workspaceLabel}.`,
     bodyHtml: `
       ${renderCodeCard(code)}
       <p style="margin: 0 0 14px; font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.slate}; font-size: 15px; line-height: 1.7;">
@@ -174,26 +181,61 @@ function buildOtpHtml(code) {
   });
 }
 
-function buildWelcomeHtml(firstName = 'there') {
+function buildWelcomeHtml(firstName = 'there', role = 'seller') {
   const safeFirstName = escapeHtml(firstName);
+  const workspaceLabel =
+    role === 'provider'
+      ? 'provider workspace'
+      : role === 'agent'
+        ? 'agent workspace'
+        : 'seller workspace';
+  const intro =
+    role === 'provider'
+      ? `You’re all set to manage your marketplace profile, provider leads, and billing setup inside ${BRANDING.shortProductName}.`
+      : role === 'agent'
+        ? `You’re all set to start pricing properties, reviewing prep guidance, and using listing presentation tools built for agents.`
+        : `You’re all set to start preparing your property with pricing insights, photo guidance, and AI support built for home sellers.`;
+  const nextStepItems =
+    role === 'provider'
+      ? `
+          <li>Finish your provider profile and service area coverage</li>
+          <li>Complete billing setup if you selected a paid provider plan</li>
+          <li>Review and respond to seller lead requests in the provider portal</li>
+        `
+      : role === 'agent'
+        ? `
+          <li>Add a property and review pricing guidance</li>
+          <li>Build listing-ready reports, comps, and presentation materials</li>
+          <li>Use AI guidance to accelerate listing prep decisions</li>
+        `
+        : `
+          <li>Add your property and organize the selling workflow</li>
+          <li>Review pricing guidance powered by market data and AI</li>
+          <li>Capture listing photos and get room-by-room quality feedback</li>
+        `;
 
   return renderEmailShell({
     eyebrow: 'Welcome aboard',
-    title: `Welcome, ${safeFirstName}. Your seller workspace is live.`,
-    intro: `You’re all set to start preparing your property with pricing insights, photo guidance, and AI support built for home sellers.`,
+    title: `Welcome, ${safeFirstName}. Your ${workspaceLabel} is live.`,
+    intro,
     bodyHtml: `
       <div style="margin: 0 0 22px; padding: 22px; border-radius: 22px; background: #f6efe8; border: 1px solid #ead9cb;">
         <div style="font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.ink}; font-size: 16px; line-height: 1.7; margin-bottom: 12px;">
           Here’s what you can do next:
         </div>
         <ul style="margin: 0; padding-left: 18px; font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.slate}; font-size: 15px; line-height: 1.8;">
-          <li>Add your property and organize the selling workflow</li>
-          <li>Review pricing guidance powered by market data and AI</li>
-          <li>Capture listing photos and get room-by-room quality feedback</li>
+          ${nextStepItems}
         </ul>
       </div>
       <div style="margin: 0 0 18px;">
-        ${renderButton('Open your seller workspace', env.PUBLIC_WEB_URL)}
+        ${renderButton(
+          role === 'provider'
+            ? 'Open provider portal'
+            : role === 'agent'
+              ? 'Open your agent workspace'
+              : 'Open your seller workspace',
+          role === 'provider' ? `${env.PUBLIC_WEB_URL}/providers/portal` : env.PUBLIC_WEB_URL,
+        )}
       </div>
       <p style="margin: 0; font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.slate}; font-size: 15px; line-height: 1.7;">
         We’re glad you’re here, and we’ll help you move from prep to listing with more confidence.
@@ -203,10 +245,16 @@ function buildWelcomeHtml(firstName = 'there') {
   });
 }
 
-export async function sendOtpEmail({ to, code }) {
+export async function sendOtpEmail({ to, code, role = 'seller' }) {
+  const subject =
+    role === 'provider'
+      ? 'Verify your Workside Provider account'
+      : role === 'agent'
+        ? 'Verify your Workside Agent account'
+        : 'Verify your Workside Home Seller account';
   await deliverEmail({
     to,
-    subject: 'Verify your Workside Home Seller account',
+    subject,
     text: [
       `Verify your ${BRANDING.shortProductName} account`,
       '',
@@ -218,36 +266,65 @@ export async function sendOtpEmail({ to, code }) {
       `${BRANDING.tagline}`,
       `Sent from ${getFromEmail()}`,
     ].join('\n'),
-    html: buildOtpHtml(code),
+    html: buildOtpHtml(code, role),
     logLabel: 'OTP email',
-    logMeta: { code },
+    logMeta: { code, role },
   });
 }
 
-export async function sendWelcomeEmail({ to, firstName }) {
+export async function sendWelcomeEmail({ to, firstName, role = 'seller' }) {
   const safeFirstName = firstName?.trim() || 'there';
+  const subject =
+    role === 'provider'
+      ? 'Welcome to Workside Provider Portal'
+      : role === 'agent'
+        ? 'Welcome to Workside Agent Workspace'
+        : 'Welcome to Workside Home Seller';
+  const introLine =
+    role === 'provider'
+      ? `Hi ${safeFirstName}, your email has been verified and your provider workspace is ready.`
+      : role === 'agent'
+        ? `Hi ${safeFirstName}, your email has been verified and your agent workspace is ready.`
+        : `Hi ${safeFirstName}, your email has been verified and your seller workspace is ready.`;
+  const nextStepLines =
+    role === 'provider'
+      ? [
+          '- Finish your provider profile',
+          '- Complete billing setup if needed',
+          '- Review provider leads in the portal',
+        ]
+      : role === 'agent'
+        ? [
+            '- Add a property',
+            '- Review pricing guidance',
+            '- Build reports and presentation materials',
+          ]
+        : [
+            '- Add your property',
+            '- Review pricing guidance',
+            '- Capture listing photos and get AI feedback',
+          ];
+  const workspaceUrl = role === 'provider' ? `${env.PUBLIC_WEB_URL}/providers/portal` : env.PUBLIC_WEB_URL;
 
   try {
     await deliverEmail({
       to,
-      subject: 'Welcome to Workside Home Seller',
+      subject,
       text: [
         `Welcome to ${BRANDING.shortProductName}`,
         '',
-        `Hi ${safeFirstName}, your email has been verified and your seller workspace is ready.`,
+        introLine,
         '',
         'Next steps:',
-        '- Add your property',
-        '- Review pricing guidance',
-        '- Capture listing photos and get AI feedback',
+        ...nextStepLines,
         '',
-        `Open your workspace: ${env.PUBLIC_WEB_URL}`,
+        `Open your workspace: ${workspaceUrl}`,
         '',
         `${BRANDING.footerCopy} ${BRANDING.supportEmail}`,
       ].join('\n'),
-      html: buildWelcomeHtml(safeFirstName),
+      html: buildWelcomeHtml(safeFirstName, role),
       logLabel: 'Welcome email',
-      logMeta: { firstName: safeFirstName },
+      logMeta: { firstName: safeFirstName, role },
     });
   } catch (error) {
     logError('Welcome email failed', {

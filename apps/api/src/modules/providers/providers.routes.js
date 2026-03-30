@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { createProviderCheckoutSession } from '../billing/billing.service.js';
 import { verifySessionToken } from '../../services/sessionService.js';
+import { signup as signupAccount } from '../auth/auth.service.js';
+import { UserModel } from '../auth/auth.model.js';
+import { ProviderModel } from './provider.model.js';
 
 import {
   createProviderLeadRequest,
@@ -38,10 +41,13 @@ const createLeadSchema = z.object({
 });
 
 const providerSignupSchema = z.object({
+  firstName: z.string().trim().min(1).max(80).optional(),
+  lastName: z.string().trim().min(1).max(80).optional(),
   businessName: z.string().trim().min(1).max(140),
   categoryKey: z.string().trim().min(1).max(80),
   email: z.string().trim().email().max(120),
   phone: z.string().trim().min(7).max(40),
+  password: z.string().min(8).max(120).optional(),
   city: z.string().trim().min(1).max(80),
   state: z.string().trim().min(1).max(40),
   zipCodes: z.array(z.string().trim().min(3).max(12)).max(25).optional(),
@@ -181,15 +187,58 @@ export async function providersRoutes(fastify) {
     try {
       const payload = providerSignupSchema.parse(request.body || {});
       const session = getAuthenticatedSession(request);
+      const normalizedEmail = payload.email.toLowerCase();
+      let userId = session?.sub || '';
+      let userEmail = session?.email || normalizedEmail;
+      let userRole = session?.role || '';
+      let requiresOtpVerification = false;
+
+      if (!session?.sub) {
+        if (!payload.password || !payload.firstName || !payload.lastName) {
+          throw new Error('First name, last name, password, and email verification are required for provider signup.');
+        }
+
+        const [existingUser, existingProvider] = await Promise.all([
+          UserModel.findOne({ email: normalizedEmail }).lean(),
+          ProviderModel.findOne({ email: normalizedEmail }).lean(),
+        ]);
+
+        if (existingUser) {
+          throw new Error('An account with that email already exists. Log in as a provider to continue.');
+        }
+
+        if (existingProvider) {
+          throw new Error('A provider profile already exists for that email address. Log in as that provider to continue.');
+        }
+
+        const authSignup = await signupAccount({
+          email: normalizedEmail,
+          password: payload.password,
+          firstName: payload.firstName,
+          lastName: payload.lastName,
+          role: 'provider',
+        });
+
+        userId = authSignup.userId;
+        userEmail = authSignup.email;
+        userRole = 'provider';
+        requiresOtpVerification = Boolean(authSignup.requiresOtpVerification);
+      }
+
       const provider = await createProviderProfile(payload, {
         createdFrom: 'provider_portal',
         status: 'pending_billing',
-        userId: session?.sub || '',
-        userEmail: session?.email || '',
-        userRole: session?.role || '',
+        userId,
+        userEmail,
+        userRole,
       });
       const { portalAccessToken = '', ...providerRecord } = provider || {};
-      return reply.code(201).send({ provider: providerRecord, portalAccessToken });
+      return reply.code(201).send({
+        provider: providerRecord,
+        portalAccessToken,
+        requiresOtpVerification,
+        email: userEmail,
+      });
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }

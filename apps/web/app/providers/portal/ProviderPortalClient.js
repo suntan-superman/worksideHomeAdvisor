@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import {
+  createProviderBillingCheckout,
   createProviderPortalSession,
   respondToProviderPortalLead,
   updateProviderPortalProfile,
@@ -129,7 +130,14 @@ export function ProviderPortalClient({
           return;
         }
 
-        if (incomingSession?.providerId && incomingSession?.token) {
+        if (result.session?.providerId && result.session?.portalAccessToken) {
+          const nextSession = {
+            providerId: result.session.providerId,
+            token: result.session.portalAccessToken,
+          };
+          setStoredProviderSession(nextSession);
+          setPortalSession(nextSession);
+        } else if (incomingSession?.providerId && incomingSession?.token) {
           setStoredProviderSession(incomingSession);
           setPortalSession(incomingSession);
         } else {
@@ -285,6 +293,41 @@ export function ProviderPortalClient({
     }
   }
 
+  async function handleContinueBilling() {
+    const provider = dashboard?.provider;
+    if (!provider) {
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+
+    try {
+      const origin = window.location.origin;
+      const checkout = await createProviderBillingCheckout({
+        providerId: provider.id,
+        planCode: provider.subscription?.planCode || 'provider_standard',
+        successUrl: `${origin}/providers/portal?billing=success`,
+        cancelUrl: `${origin}/providers/portal?billing=cancelled`,
+      });
+
+      if (checkout?.url) {
+        window.location.href = checkout.url;
+        return;
+      }
+
+      throw new Error('Stripe did not return a checkout URL.');
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not start provider billing',
+        message: requestError.message,
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function handleSignOut() {
     clearStoredProviderSession();
     setPortalSession(null);
@@ -341,6 +384,10 @@ export function ProviderPortalClient({
   const provider = dashboard.provider;
   const summary = dashboard.summary || {};
   const leads = dashboard.leads || [];
+  const billingNeedsAction =
+    provider.subscription?.planCode &&
+    provider.subscription?.planCode !== 'provider_basic' &&
+    !['active', 'trialing', 'past_due', 'paid'].includes(provider.subscription?.status || '');
 
   return (
     <>
@@ -386,6 +433,11 @@ export function ProviderPortalClient({
           <span className="label">Quick actions</span>
           <h2>Marketplace controls</h2>
           <div className="button-stack">
+            {billingNeedsAction ? (
+              <button type="button" className="button-primary" onClick={handleContinueBilling} disabled={busy}>
+                Continue billing setup
+              </button>
+            ) : null}
             <button type="button" className="button-secondary" onClick={handleSignOut}>
               Sign out
             </button>

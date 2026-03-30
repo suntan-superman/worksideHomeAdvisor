@@ -968,6 +968,9 @@ export async function createProviderPortalSessionForUser(userId) {
     throw new Error('No provider profile is linked to this account yet.');
   }
 
+  const portalAccessToken = createProviderPortalToken();
+  provider.portalAccess.tokenHash = hashProviderPortalToken(portalAccessToken);
+  provider.portalAccess.issuedAt = provider.portalAccess.issuedAt || new Date();
   provider.portalAccess.lastUsedAt = new Date();
   await provider.save();
 
@@ -975,6 +978,7 @@ export async function createProviderPortalSessionForUser(userId) {
   return {
     providerId: provider._id?.toString?.() || String(provider._id),
     dashboard,
+    portalAccessToken,
   };
 }
 

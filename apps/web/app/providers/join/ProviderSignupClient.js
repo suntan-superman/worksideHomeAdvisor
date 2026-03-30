@@ -32,10 +32,14 @@ const PLAN_OPTIONS = [
 ];
 
 const INITIAL_FORM = {
+  firstName: '',
+  lastName: '',
   businessName: '',
   categoryKey: 'photographer',
   phone: '',
   email: '',
+  password: '',
+  confirmPassword: '',
   city: '',
   state: '',
   primaryZip: '',
@@ -85,6 +89,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
   const [toast, setToast] = useState(null);
   const [createdProvider, setCreatedProvider] = useState(null);
   const [appSession, setAppSession] = useState(null);
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState('');
 
   useEffect(() => {
     setAppSession(getStoredSession());
@@ -119,14 +124,24 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
 
   function validateCurrentStep() {
     if (stepIndex === 0) {
+      const signedInProvider = ['provider', 'admin', 'super_admin'].includes(appSession?.user?.role || '');
       if (!form.businessName || !form.phone || !form.email) {
         throw new Error('Business name, phone, and email are required.');
+      }
+      if (!signedInProvider && (!form.firstName || !form.lastName || !form.password)) {
+        throw new Error('First name, last name, and a password are required to create a provider account.');
       }
       if (countPhoneDigits(form.phone) < 10) {
         throw new Error('Enter a valid business phone number before continuing.');
       }
       if (!isValidEmail(form.email)) {
         throw new Error('Enter a valid email address before continuing.');
+      }
+      if (!signedInProvider && form.password.length < 8) {
+        throw new Error('Choose a password with at least 8 characters.');
+      }
+      if (!signedInProvider && form.password !== form.confirmPassword) {
+        throw new Error('Password confirmation does not match.');
       }
     }
 
@@ -213,7 +228,18 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
       const result = await signupProvider(payload, appSession?.token);
       const provider = result.provider || null;
       const portalAccessToken = result.portalAccessToken || provider?.portalAccessToken || '';
+      const requiresOtpVerification = Boolean(result.requiresOtpVerification);
       setCreatedProvider(provider);
+      setPendingVerificationEmail(result.email || provider?.email || '');
+
+      if (requiresOtpVerification) {
+        setToast({
+          tone: 'success',
+          title: 'Verify your email to continue',
+          message: 'We sent a verification code to your email. Once verified, log in as a provider to continue with billing.',
+        });
+        return;
+      }
 
       if (provider && portalAccessToken) {
         setStoredProviderSession({
@@ -268,11 +294,11 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
         <section className="content-grid onboarding-shell">
           <div className="content-card">
             <span className="label">Provider onboarding</span>
-            <h1>You&apos;re in the queue.</h1>
+            <h1>{pendingVerificationEmail ? 'Verify your provider account first.' : 'You&apos;re in the queue.'}</h1>
             <p>
-              {createdProvider.businessName} has been submitted to Workside Home Advisor. Your
-              profile is now in review, and billing setup is the next step before marketplace
-              activation.
+              {pendingVerificationEmail
+                ? `${createdProvider.businessName} has been saved. We sent a verification code to ${pendingVerificationEmail}. Verify that email, then log in as a provider to continue billing and activation.`
+                : `${createdProvider.businessName} has been submitted to Workside Home Advisor. Your profile is now in review, and billing setup is the next step before marketplace activation.`}
             </p>
             <div className="mini-stats">
               <div className="stat-card">
@@ -294,14 +320,30 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
             <span className="label">Next steps</span>
             <h2>What happens next</h2>
             <ul className="plain-list">
-              <li>Your profile can now be reviewed by the Workside team.</li>
-              <li>Billing setup and activation are the next step before you go live.</li>
-              <li>You can contact support if you need faster onboarding help.</li>
+              {pendingVerificationEmail ? (
+                <>
+                  <li>Open the verification email and enter the OTP on the login screen.</li>
+                  <li>Log back in with your provider account to open the provider portal.</li>
+                  <li>Finish billing setup only after the email is verified.</li>
+                </>
+              ) : (
+                <>
+                  <li>Your profile can now be reviewed by the Workside team.</li>
+                  <li>Billing setup and activation are the next step before you go live.</li>
+                  <li>You can contact support if you need faster onboarding help.</li>
+                </>
+              )}
             </ul>
             <div className="button-stack">
-              <a className="button-primary" href="mailto:support@worksidesoftware.com">
-                Contact support
-              </a>
+              {pendingVerificationEmail ? (
+                <Link className="button-primary" href="/auth">
+                  Verify and log in
+                </Link>
+              ) : (
+                <a className="button-primary" href="mailto:support@worksidesoftware.com">
+                  Contact support
+                </a>
+              )}
               <Link className="button-secondary" href="/">
                 Back to homepage
               </Link>
@@ -374,6 +416,18 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
         <form className="form-card" onSubmit={handleSubmit}>
           {stepIndex === 0 ? (
             <>
+              {!['provider', 'admin', 'super_admin'].includes(appSession?.user?.role || '') ? (
+                <div className="split-fields">
+                  <label>
+                    First name
+                    <input value={form.firstName} onChange={(event) => updateField('firstName', event.target.value)} />
+                  </label>
+                  <label>
+                    Last name
+                    <input value={form.lastName} onChange={(event) => updateField('lastName', event.target.value)} />
+                  </label>
+                </div>
+              ) : null}
               <label>
                 Business name
                 <input value={form.businessName} onChange={(event) => updateField('businessName', event.target.value)} />
@@ -406,6 +460,28 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
                   placeholder="name@business.com"
                 />
               </label>
+              {!['provider', 'admin', 'super_admin'].includes(appSession?.user?.role || '') ? (
+                <div className="split-fields">
+                  <label>
+                    Password
+                    <input
+                      type="password"
+                      value={form.password}
+                      onChange={(event) => updateField('password', event.target.value)}
+                      placeholder="Minimum 8 characters"
+                    />
+                  </label>
+                  <label>
+                    Confirm password
+                    <input
+                      type="password"
+                      value={form.confirmPassword}
+                      onChange={(event) => updateField('confirmPassword', event.target.value)}
+                      placeholder="Repeat password"
+                    />
+                  </label>
+                </div>
+              ) : null}
             </>
           ) : null}
 
@@ -579,8 +655,9 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
                 </strong>
               </div>
               <div className="legal-notice">
-                Billing checkout is the next step after profile submission. For now, your business
-                will be created in a pending billing state so the Workside team can finish setup.
+                {!['provider', 'admin', 'super_admin'].includes(appSession?.user?.role || '')
+                  ? 'Your provider account must verify its email before billing setup can continue.'
+                  : 'Billing checkout is the next step after profile submission. For now, your business will be created in a pending billing state so the Workside team can finish setup.'}
               </div>
               <div className="legal-section">
                 <p>
@@ -604,7 +681,11 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
               </button>
             ) : (
               <button type="submit" className={loading ? 'button-primary button-busy' : 'button-primary'} disabled={loading}>
-                {loading ? 'Submitting...' : 'Submit and continue to billing'}
+                {loading
+                  ? 'Submitting...'
+                  : !['provider', 'admin', 'super_admin'].includes(appSession?.user?.role || '')
+                    ? 'Create account and send verification code'
+                    : 'Submit and continue to billing'}
               </button>
             )}
           </div>

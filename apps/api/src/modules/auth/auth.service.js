@@ -50,7 +50,7 @@ async function storeVerificationOtp(user) {
   };
 
   await user.save();
-  await sendOtpEmail({ to: user.email, code });
+  await sendOtpEmail({ to: user.email, code, role: user.role });
 }
 
 export async function signup(payload) {
@@ -141,6 +141,7 @@ export async function verifyEmailOtp(payload) {
   await sendWelcomeEmail({
     to: user.email,
     firstName: user.firstName,
+    role: user.role,
   });
 
   return {
