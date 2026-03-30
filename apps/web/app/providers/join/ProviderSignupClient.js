@@ -427,7 +427,10 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
             </ul>
             <div className="button-stack">
               {pendingVerificationEmail ? (
-                <Link className="button-primary" href="/auth">
+                <Link
+                  className="button-primary"
+                  href={`/auth?mode=verify&email=${encodeURIComponent(pendingVerificationEmail)}`}
+                >
                   Verify and log in
                 </Link>
               ) : (
@@ -684,7 +687,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
                   <option value="email">Email only</option>
                 </select>
               </label>
-              <div className="split-fields">
+              <div className="split-fields split-fields-lead-routing">
                 <label>
                   SMS phone
                   <input

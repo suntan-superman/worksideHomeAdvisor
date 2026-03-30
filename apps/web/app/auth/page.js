@@ -89,7 +89,27 @@ export default function AuthPage() {
     }
 
     const params = new URLSearchParams(window.location.search);
-    if (params.get('timedOut') !== '1') {
+    const timedOut = params.get('timedOut') === '1';
+    const requestedMode = params.get('mode');
+    const requestedEmail = String(params.get('email') || '').trim();
+
+    if (requestedEmail) {
+      setForm((current) => ({
+        ...current,
+        email: requestedEmail,
+        password: '',
+        otpCode: '',
+      }));
+    }
+
+    if (requestedMode === 'verify' && requestedEmail) {
+      setMode('verify');
+      setShowVerificationOption(true);
+      setStatus(`Enter the OTP sent to ${requestedEmail} to finish verification.`);
+      return;
+    }
+
+    if (!timedOut) {
       return;
     }
 

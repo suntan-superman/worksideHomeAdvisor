@@ -10,7 +10,6 @@ import {
   updateProviderPortalProfile,
 } from '../../../lib/api';
 import {
-  clearStoredProviderSession,
   getStoredProviderSession,
   setStoredProviderSession,
 } from '../../../lib/provider-session';
@@ -367,18 +366,6 @@ export function ProviderPortalClient({
     }
   }
 
-  function handleSignOut() {
-    clearStoredProviderSession();
-    setPortalSession(null);
-    setDashboard(null);
-    setError('');
-    setToast({
-      tone: 'info',
-      title: 'Signed out',
-      message: 'Provider portal access has been cleared from this browser.',
-    });
-  }
-
   if (loading) {
     return (
       <>
@@ -477,9 +464,6 @@ export function ProviderPortalClient({
                 Continue billing setup
               </button>
             ) : null}
-            <button type="button" className="button-secondary" onClick={handleSignOut}>
-              Sign out
-            </button>
             <Link href="/providers/join" className="button-secondary">
               Review onboarding
             </Link>

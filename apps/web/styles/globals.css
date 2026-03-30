@@ -420,6 +420,14 @@ select {
   min-width: 0;
 }
 
+.split-fields-lead-routing > label:first-child {
+  flex: 0.85 1 0;
+}
+
+.split-fields-lead-routing > label:last-child {
+  flex: 1.35 1 0;
+}
+
 .mode-switch {
   margin-top: 18px;
 }
