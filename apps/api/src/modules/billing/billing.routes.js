@@ -5,6 +5,7 @@ import {
   getBillingSummary,
   handleStripeWebhook,
   listBillingPlans,
+  syncStripeCheckoutSessionById,
 } from './billing.service.js';
 
 const checkoutSchema = z.object({
@@ -12,6 +13,10 @@ const checkoutSchema = z.object({
   planKey: z.string().min(1),
   successUrl: z.string().url().optional(),
   cancelUrl: z.string().url().optional(),
+});
+
+const syncSessionSchema = z.object({
+  sessionId: z.string().trim().min(1),
 });
 
 function parseJsonBody(body) {
@@ -57,6 +62,17 @@ export async function billingRoutes(fastify) {
       });
 
       return reply.code(201).send(result);
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/sync-session', async (request, reply) => {
+    try {
+      const parsedBody = parseJsonBody(request.body);
+      const payload = syncSessionSchema.parse(parsedBody);
+      const result = await syncStripeCheckoutSessionById(payload.sessionId);
+      return reply.send({ ok: true, result });
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { ClientDataTable } from './ClientDataTable';
 import { ClientMetricCard } from './ClientMetricCard';
@@ -21,20 +22,42 @@ function formatCategoryLabel(value) {
 }
 
 export function ProvidersTabbedWorkspace({
-  providers = [],
-  leadSummary = {},
-  leadOpsSummary = {},
-  leads = [],
-  providerError = '',
-  leadError = '',
+  initialSnapshot = {},
 }) {
   const [activeTab, setActiveTab] = useState('overview');
+  const providersSnapshotQuery = useQuery({
+    queryKey: ['admin-provider-snapshot'],
+    queryFn: async () => {
+      const response = await fetch('/api/admin/providers/snapshot', {
+        cache: 'no-store',
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(payload.message || `Request failed with ${response.status}`);
+      }
+
+      return payload;
+    },
+    initialData: initialSnapshot,
+    staleTime: 3_000,
+    refetchInterval: 10_000,
+  });
+
+  const snapshot = providersSnapshotQuery.data || initialSnapshot;
+  const providers = snapshot.providers || [];
+  const leadSummary = snapshot.leadSummary || {};
+  const leadOpsSummary = snapshot.leadOpsSummary || {};
+  const leads = snapshot.leads || [];
+  const providerError = snapshot.providerError || '';
+  const leadError = snapshot.leadError || '';
 
   const rosterPreview = useMemo(() => providers.slice(0, 6), [providers]);
   const leadPreview = useMemo(() => leads.slice(0, 6), [leads]);
 
   return (
     <div className="providers-workspace">
+      {providersSnapshotQuery.isFetching ? <div className="notice">Refreshing provider data...</div> : null}
       {providerError ? <div className="notice error">{providerError}</div> : null}
       {leadError ? <div className="notice error">{leadError}</div> : null}
 
@@ -147,7 +170,7 @@ export function ProvidersTabbedWorkspace({
 
           {activeTab === 'create' ? (
             <div className="split-layout">
-              <CreateProviderCard />
+              <CreateProviderCard onCreated={() => providersSnapshotQuery.refetch()} />
               <div className="subpanel">
                 <h2>Seeding guidance</h2>
                 <ul className="bullet-list muted">
@@ -159,7 +182,12 @@ export function ProvidersTabbedWorkspace({
             </div>
           ) : null}
 
-          {activeTab === 'roster' ? <ProviderRoster providers={providers} /> : null}
+          {activeTab === 'roster' ? (
+            <ProviderRoster
+              providers={providers}
+              onUpdated={() => providersSnapshotQuery.refetch()}
+            />
+          ) : null}
 
           {activeTab === 'lead-queue' ? (
             <ClientDataTable
@@ -176,7 +204,12 @@ export function ProvidersTabbedWorkspace({
             />
           ) : null}
 
-          {activeTab === 'lead-ops' ? <ProviderLeadOperations leads={leads} /> : null}
+          {activeTab === 'lead-ops' ? (
+            <ProviderLeadOperations
+              leads={leads}
+              onUpdated={() => providersSnapshotQuery.refetch()}
+            />
+          ) : null}
         </div>
       </div>
     </div>

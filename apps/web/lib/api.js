@@ -141,6 +141,13 @@ export function createProviderBillingCheckout(payload) {
   });
 }
 
+export function syncProviderBillingSession(sessionId) {
+  return request('/api/v1/provider-portal/billing/sync-session', {
+    method: 'POST',
+    body: JSON.stringify({ sessionId }),
+  });
+}
+
 export function createProviderPortalSession(payload, token) {
   return request('/api/v1/provider-portal/session', {
     method: 'POST',
@@ -256,6 +263,13 @@ export function createBillingCheckoutSession(payload, userId) {
       'x-user-id': userId,
     },
     body: JSON.stringify(payload),
+  });
+}
+
+export function syncBillingSession(sessionId) {
+  return request('/api/v1/billing/sync-session', {
+    method: 'POST',
+    body: JSON.stringify({ sessionId }),
   });
 }
 

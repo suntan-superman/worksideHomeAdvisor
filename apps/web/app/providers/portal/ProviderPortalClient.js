@@ -2,14 +2,17 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   createProviderBillingCheckout,
   createProviderPortalSession,
   respondToProviderPortalLead,
+  syncProviderBillingSession,
   updateProviderPortalProfile,
 } from '../../../lib/api';
 import {
+  clearStoredProviderSession,
   getStoredProviderSession,
   setStoredProviderSession,
 } from '../../../lib/provider-session';
@@ -82,19 +85,31 @@ export function ProviderPortalClient({
   providerId = '',
   token = '',
   billingState = '',
+  sessionId = '',
   createdState = '',
 }) {
+  const queryClient = useQueryClient();
   const [portalSession, setPortalSession] = useState(null);
   const [dashboard, setDashboard] = useState(null);
   const [profileForm, setProfileForm] = useState(INITIAL_PROFILE_FORM);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
   const [error, setError] = useState('');
   const [appSession, setAppSession] = useState(null);
+  const [appSessionReady, setAppSessionReady] = useState(false);
+  const portalSessionQueryKey = [
+    'provider-portal-session',
+    providerId,
+    token,
+    appSession?.token || '',
+    appSession?.user?.role || '',
+    billingState,
+    sessionId,
+  ];
 
   useEffect(() => {
     setAppSession(getStoredSession());
+    setAppSessionReady(true);
   }, []);
 
   useEffect(() => {
@@ -119,77 +134,105 @@ export function ProviderPortalClient({
     }
   }, [billingState, createdState]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadSession() {
-      setLoading(true);
-      setError('');
-
+  const portalSessionQuery = useQuery({
+    queryKey: portalSessionQueryKey,
+    enabled: appSessionReady,
+    staleTime: 3_000,
+    refetchInterval: (query) => {
+      const subscriptionStatus = query.state.data?.dashboard?.provider?.subscription?.status || '';
+      if (['checkout_created', 'open', 'incomplete', 'unpaid'].includes(subscriptionStatus)) {
+        return 5_000;
+      }
+      if (billingState === 'success') {
+        return 10_000;
+      }
+      return 20_000;
+    },
+    queryFn: async () => {
       const incomingSession =
         providerId && token
           ? { providerId, token }
           : getStoredProviderSession();
 
-      try {
-        let result = null;
-
-        if (appSession?.token && ['provider', 'admin', 'super_admin'].includes(appSession.user?.role)) {
-          result = await createProviderPortalSession({}, appSession.token);
-        } else if (incomingSession?.providerId && incomingSession?.token) {
-          result = await createProviderPortalSession(incomingSession);
-        } else {
-          if (!cancelled) {
-            setLoading(false);
-            setPortalSession(null);
-            setDashboard(null);
-          }
-          return;
-        }
-
-        if (cancelled) {
-          return;
-        }
-
-        if (result.session?.providerId && result.session?.portalAccessToken) {
-          const nextSession = {
-            providerId: result.session.providerId,
-            token: result.session.portalAccessToken,
-          };
-          setStoredProviderSession(nextSession);
-          setPortalSession(nextSession);
-        } else if (incomingSession?.providerId && incomingSession?.token) {
-          setStoredProviderSession(incomingSession);
-          setPortalSession(incomingSession);
-        } else {
-          setPortalSession(null);
-        }
-        setDashboard(result.session?.dashboard || null);
-        if (providerId && token && typeof window !== 'undefined') {
-          window.history.replaceState({}, '', '/providers/portal');
-        }
-      } catch (requestError) {
-        if (cancelled) {
-          return;
-        }
-
-        clearStoredProviderSession();
-        setPortalSession(null);
-        setDashboard(null);
-        setError(requestError.message);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+      if (billingState === 'success' && sessionId) {
+        await syncProviderBillingSession(sessionId);
       }
+
+      let result = null;
+      if (appSession?.token && ['provider', 'admin', 'super_admin'].includes(appSession.user?.role)) {
+        result = await createProviderPortalSession({}, appSession.token);
+      } else if (incomingSession?.providerId && incomingSession?.token) {
+        result = await createProviderPortalSession(incomingSession);
+      } else {
+        return {
+          dashboard: null,
+          portalSession: null,
+        };
+      }
+
+      if (result.session?.providerId && result.session?.portalAccessToken) {
+        const nextSession = {
+          providerId: result.session.providerId,
+          token: result.session.portalAccessToken,
+        };
+        return {
+          dashboard: result.session?.dashboard || null,
+          portalSession: nextSession,
+        };
+      }
+
+      if (incomingSession?.providerId && incomingSession?.token) {
+        return {
+          dashboard: result.session?.dashboard || null,
+          portalSession: incomingSession,
+        };
+      }
+
+      return {
+        dashboard: result.session?.dashboard || null,
+        portalSession: null,
+      };
+    },
+  });
+
+  useEffect(() => {
+    const nextDashboard = portalSessionQuery.data?.dashboard || null;
+    const nextPortalSession = portalSessionQuery.data?.portalSession || null;
+
+    if (nextPortalSession?.providerId && nextPortalSession?.token) {
+      setStoredProviderSession(nextPortalSession);
+      setPortalSession(nextPortalSession);
+    } else if (portalSessionQuery.isSuccess) {
+      setPortalSession(null);
     }
 
-    loadSession();
+    if (portalSessionQuery.isSuccess) {
+      setDashboard(nextDashboard);
+      setError('');
+      if ((providerId || token || billingState || sessionId || createdState) && typeof window !== 'undefined') {
+        window.history.replaceState({}, '', '/providers/portal');
+      }
+    }
+  }, [
+    billingState,
+    createdState,
+    portalSessionQuery.data,
+    portalSessionQuery.isSuccess,
+    providerId,
+    sessionId,
+    token,
+  ]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [providerId, token, appSession?.token, appSession?.user?.role]);
+  useEffect(() => {
+    if (!portalSessionQuery.error) {
+      return;
+    }
+
+    clearStoredProviderSession();
+    setPortalSession(null);
+    setDashboard(null);
+    setError(portalSessionQuery.error.message);
+  }, [portalSessionQuery.error]);
 
   useEffect(() => {
     const provider = dashboard?.provider;
@@ -218,6 +261,7 @@ export function ProviderPortalClient({
   const wantsEmail = ['email', 'sms_and_email'].includes(profileForm.deliveryMode);
   const notifyPhoneIsValid = countPhoneDigits(profileForm.notifyPhone) >= 10;
   const notifyEmailIsValid = !profileForm.notifyEmail || isValidEmail(profileForm.notifyEmail);
+  const loading = !appSessionReady || portalSessionQuery.isLoading;
   const profileFormReady = Boolean(
     (!wantsSms || (profileForm.notifyPhone && notifyPhoneIsValid)) &&
       (!wantsEmail || !profileForm.notifyEmail || notifyEmailIsValid),
@@ -275,6 +319,11 @@ export function ProviderPortalClient({
       );
 
       setDashboard(result.dashboard || null);
+      queryClient.setQueryData(portalSessionQueryKey, (current) => ({
+        ...(current || {}),
+        dashboard: result.dashboard || null,
+        portalSession,
+      }));
       setToast({
         tone: 'success',
         title: 'Profile updated',
@@ -312,6 +361,11 @@ export function ProviderPortalClient({
       );
 
       setDashboard(result.dashboard || null);
+      queryClient.setQueryData(portalSessionQueryKey, (current) => ({
+        ...(current || {}),
+        dashboard: result.dashboard || null,
+        portalSession,
+      }));
       setToast({
         tone: 'success',
         title: responseStatus === 'accepted' ? 'Lead accepted' : 'Lead declined',

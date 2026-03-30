@@ -1,6 +1,7 @@
 import '@workside/branding';
 
 import '../styles/globals.css';
+import { WebQueryProvider } from '../components/WebQueryProvider';
 
 export const metadata = {
   title: 'Workside Home Seller Assistant',
@@ -10,7 +11,9 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <WebQueryProvider>{children}</WebQueryProvider>
+      </body>
     </html>
   );
 }

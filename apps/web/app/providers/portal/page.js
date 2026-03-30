@@ -12,6 +12,8 @@ export default function ProviderPortalPage({ searchParams }) {
   const token = typeof searchParams?.token === 'string' ? searchParams.token : '';
   const billingState =
     typeof searchParams?.billing === 'string' ? searchParams.billing : '';
+  const sessionId =
+    typeof searchParams?.session_id === 'string' ? searchParams.session_id : '';
   const created =
     typeof searchParams?.created === 'string' ? searchParams.created : '';
 
@@ -21,6 +23,7 @@ export default function ProviderPortalPage({ searchParams }) {
         providerId={providerId}
         token={token}
         billingState={billingState}
+        sessionId={sessionId}
         createdState={created}
       />
     </AppFrame>

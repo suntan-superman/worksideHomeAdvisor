@@ -360,6 +360,24 @@ async function syncCheckoutSession(session) {
   return null;
 }
 
+export async function syncStripeCheckoutSessionById(sessionId) {
+  if (!isStripeConfigured()) {
+    throw new Error('Stripe is not configured.');
+  }
+
+  const normalizedSessionId = String(sessionId || '').trim();
+  if (!normalizedSessionId) {
+    throw new Error('Stripe checkout session id is required.');
+  }
+
+  const stripe = getStripeClient();
+  const session = await stripe.checkout.sessions.retrieve(normalizedSessionId, {
+    expand: ['subscription'],
+  });
+
+  return syncCheckoutSession(session);
+}
+
 async function syncStripeSubscription(subscription, overrides = {}) {
   const firstItem = subscription.items?.data?.[0];
   const plan = planFromMetadataOrPrice(

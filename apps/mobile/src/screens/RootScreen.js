@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import * as ImagePicker from 'expo-image-picker';
 
@@ -89,20 +90,16 @@ function getVariantSummary(variant) {
 }
 
 export function RootScreen() {
+  const queryClient = useQueryClient();
   const [authMode, setAuthMode] = useState('login');
   const [showPassword, setShowPassword] = useState(false);
   const [propertyDetailsCollapsed, setPropertyDetailsCollapsed] = useState(false);
   const [propertySection, setPropertySection] = useState('overview');
-  const [busy, setBusy] = useState(false);
+  const [busyState, setBusyState] = useState(false);
   const [status, setStatus] = useState('Sign in with the same verified seller account you use on the web.');
   const [error, setError] = useState('');
   const [session, setSession] = useState(null);
-  const [properties, setProperties] = useState([]);
   const [propertyId, setPropertyId] = useState('');
-  const [dashboard, setDashboard] = useState(null);
-  const [checklist, setChecklist] = useState(null);
-  const [gallery, setGallery] = useState([]);
-  const [mediaVariants, setMediaVariants] = useState([]);
   const [selectedVariantId, setSelectedVariantId] = useState('');
   const [selectedAssetId, setSelectedAssetId] = useState('');
   const [listingNoteDraft, setListingNoteDraft] = useState('');
@@ -115,8 +112,57 @@ export function RootScreen() {
     roomLabel: ROOM_LABEL_OPTIONS[0],
   });
 
+  const propertiesQuery = useQuery({
+    queryKey: ['mobile-properties', session?.user?.id || ''],
+    enabled: Boolean(session?.user?.id),
+    queryFn: async () => {
+      const response = await listProperties(session.user.id);
+      return response.properties || [];
+    },
+  });
+
+  const properties = propertiesQuery.data || [];
+
+  const dashboardQuery = useQuery({
+    queryKey: ['mobile-dashboard', propertyId],
+    enabled: Boolean(session?.user?.id && propertyId),
+    queryFn: async () => getDashboard(propertyId),
+  });
+
+  const checklistQuery = useQuery({
+    queryKey: ['mobile-checklist', propertyId],
+    enabled: Boolean(session?.user?.id && propertyId),
+    queryFn: async () => {
+      const response = await getChecklist(propertyId);
+      return response.checklist;
+    },
+  });
+
+  const galleryQuery = useQuery({
+    queryKey: ['mobile-gallery', propertyId],
+    enabled: Boolean(session?.user?.id && propertyId),
+    queryFn: async () => {
+      const response = await listMediaAssets(propertyId);
+      return response.assets || [];
+    },
+  });
+
+  const gallery = galleryQuery.data || [];
+  const dashboard = dashboardQuery.data || null;
+  const checklist = checklistQuery.data || null;
+
   const selectedProperty = properties.find((property) => property.id === propertyId) || null;
   const selectedAsset = gallery.find((asset) => asset.id === selectedAssetId) || gallery[0] || null;
+  const variantsQuery = useQuery({
+    queryKey: ['mobile-media-variants', selectedAsset?.id || ''],
+    enabled: Boolean(session?.user?.id && selectedAsset?.id),
+    queryFn: async () => {
+      const response = await listMediaVariants(selectedAsset.id);
+      return response.variants || [];
+    },
+  });
+
+  const mediaVariants = variantsQuery.data || [];
   const selectedVariant =
     mediaVariants.find((variant) => variant.id === selectedVariantId) ||
     mediaVariants.find((variant) => variant.isSelected) ||
@@ -148,28 +194,51 @@ export function RootScreen() {
   }, [selectedAsset?.id, selectedAsset?.listingNote]);
 
   useEffect(() => {
-    async function loadVariants() {
-      if (!selectedAsset?.id) {
-        setMediaVariants([]);
-        setSelectedVariantId('');
-        return;
-      }
-
-      try {
-        const variantsResponse = await listMediaVariants(selectedAsset.id);
-        const nextVariants = variantsResponse.variants || [];
-        setMediaVariants(nextVariants);
-        setSelectedVariantId(
-          nextVariants.find((variant) => variant.isSelected)?.id || nextVariants[0]?.id || '',
-        );
-      } catch {
-        setMediaVariants([]);
-        setSelectedVariantId('');
-      }
+    if (!session?.user?.id) {
+      setPropertyId('');
+      return;
     }
 
-    loadVariants();
-  }, [selectedAsset?.id]);
+    if (!properties.length) {
+      setPropertyId('');
+      return;
+    }
+
+    if (properties.some((property) => property.id === propertyId)) {
+      return;
+    }
+
+    setPropertyId(properties[0]?.id || '');
+    setPropertySection('overview');
+  }, [session?.user?.id, properties, propertyId]);
+
+  useEffect(() => {
+    if (!gallery.length) {
+      setSelectedAssetId('');
+      return;
+    }
+
+    if (gallery.some((asset) => asset.id === selectedAssetId)) {
+      return;
+    }
+
+    setSelectedAssetId(gallery[0]?.id || '');
+  }, [gallery, selectedAssetId]);
+
+  useEffect(() => {
+    if (!mediaVariants.length) {
+      setSelectedVariantId('');
+      return;
+    }
+
+    if (mediaVariants.some((variant) => variant.id === selectedVariantId)) {
+      return;
+    }
+
+    setSelectedVariantId(
+      mediaVariants.find((variant) => variant.isSelected)?.id || mediaVariants[0]?.id || '',
+    );
+  }, [mediaVariants, selectedVariantId]);
 
   useEffect(() => {
     let active = true;
@@ -195,6 +264,25 @@ export function RootScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    const queryError =
+      propertiesQuery.error ||
+      dashboardQuery.error ||
+      checklistQuery.error ||
+      galleryQuery.error ||
+      variantsQuery.error;
+
+    if (queryError) {
+      setError(queryError.message);
+    }
+  }, [
+    checklistQuery.error,
+    dashboardQuery.error,
+    galleryQuery.error,
+    propertiesQuery.error,
+    variantsQuery.error,
+  ]);
+
   function updateField(field, value) {
     setForm((current) => ({
       ...current,
@@ -218,68 +306,82 @@ export function RootScreen() {
     }
   }
 
-  async function loadPropertyWorkspace(userId) {
-    const propertiesResponse = await listProperties(userId);
-    const nextProperties = propertiesResponse.properties || [];
-    const nextPropertyId = nextProperties[0]?.id || '';
-    setProperties(nextProperties);
-    setPropertyId(nextPropertyId);
-
+  async function invalidatePropertyWorkspace(nextPropertyId = propertyId) {
     if (!nextPropertyId) {
-      setDashboard(null);
-      setChecklist(null);
       return;
     }
 
-    const [dashboardResponse, mediaResponse, checklistResponse] = await Promise.all([
-      getDashboard(nextPropertyId),
-      listMediaAssets(nextPropertyId),
-      getChecklist(nextPropertyId),
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['mobile-dashboard', nextPropertyId] }),
+      queryClient.invalidateQueries({ queryKey: ['mobile-checklist', nextPropertyId] }),
+      queryClient.invalidateQueries({ queryKey: ['mobile-gallery', nextPropertyId] }),
     ]);
-    setDashboard(dashboardResponse);
-    setChecklist(checklistResponse.checklist);
-    setGallery(mediaResponse.assets || []);
-    setSelectedAssetId(mediaResponse.assets?.[0]?.id || '');
-    setPropertySection('overview');
   }
 
-  async function refreshGallery(preferredAssetId = selectedAssetId) {
-    const mediaResponse = await listMediaAssets(propertyId);
-    const nextAssets = mediaResponse.assets || [];
-    setGallery(nextAssets);
-    setSelectedAssetId(preferredAssetId || nextAssets?.[0]?.id || '');
-    return nextAssets;
-  }
-
-  async function refreshVariants(assetId = selectedAsset?.id) {
+  async function invalidateAssetVariants(assetId = selectedAsset?.id) {
     if (!assetId) {
-      setMediaVariants([]);
-      setSelectedVariantId('');
-      return [];
+      return;
     }
 
-    const variantsResponse = await listMediaVariants(assetId);
-    const nextVariants = variantsResponse.variants || [];
-    setMediaVariants(nextVariants);
-    setSelectedVariantId(
-      nextVariants.find((variant) => variant.isSelected)?.id || nextVariants[0]?.id || '',
-    );
-    return nextVariants;
+    await queryClient.invalidateQueries({ queryKey: ['mobile-media-variants', assetId] });
   }
 
-  async function refreshChecklist(nextPropertyId = propertyId) {
-    if (!nextPropertyId) {
-      setChecklist(null);
-      return null;
-    }
+  const savePhotoMutation = useMutation({
+    mutationFn: async (payload) => savePhoto(propertyId, payload),
+    onSuccess: async () => {
+      await invalidatePropertyWorkspace(propertyId);
+    },
+  });
 
-    const checklistResponse = await getChecklist(nextPropertyId);
-    setChecklist(checklistResponse.checklist);
-    return checklistResponse.checklist;
-  }
+  const updateMediaAssetMutation = useMutation({
+    mutationFn: async ({ assetId, payload }) => updateMediaAsset(assetId, payload),
+  });
+
+  const updateChecklistStatusMutation = useMutation({
+    mutationFn: async ({ itemId, nextStatus }) =>
+      updateChecklistItem(itemId, {
+        status: nextStatus,
+      }),
+    onSuccess: async () => {
+      await invalidatePropertyWorkspace(propertyId);
+    },
+  });
+
+  const createChecklistItemMutation = useMutation({
+    mutationFn: async (payload) => createChecklistItem(propertyId, payload),
+    onSuccess: async () => {
+      await invalidatePropertyWorkspace(propertyId);
+    },
+  });
+
+  const createVariantMutation = useMutation({
+    mutationFn: async ({ assetId, jobType }) =>
+      createImageEnhancementJob(assetId, {
+        jobType,
+      }),
+  });
+
+  const selectVariantMutation = useMutation({
+    mutationFn: async ({ assetId, variantId }) => selectMediaVariant(assetId, variantId),
+  });
+
+  const busy =
+    busyState ||
+    savePhotoMutation.isPending ||
+    updateMediaAssetMutation.isPending ||
+    updateChecklistStatusMutation.isPending ||
+    createChecklistItemMutation.isPending ||
+    createVariantMutation.isPending ||
+    selectVariantMutation.isPending;
+  const refreshing =
+    propertiesQuery.isFetching ||
+    dashboardQuery.isFetching ||
+    checklistQuery.isFetching ||
+    galleryQuery.isFetching ||
+    variantsQuery.isFetching;
 
   async function handleLogin() {
-    setBusy(true);
+    setBusyState(true);
     setError('');
 
     try {
@@ -296,17 +398,17 @@ export function RootScreen() {
 
       setSession(result);
       await rememberEmail(form.email);
-      await loadPropertyWorkspace(result.user.id);
-      setStatus('Signed in successfully.');
+      await queryClient.invalidateQueries({ queryKey: ['mobile-properties', result.user.id] });
+      setStatus('Signed in successfully. Loading your properties...');
     } catch (requestError) {
       setError(requestError.message);
     } finally {
-      setBusy(false);
+      setBusyState(false);
     }
   }
 
   async function handleVerifyOtp() {
-    setBusy(true);
+    setBusyState(true);
     setError('');
 
     try {
@@ -316,17 +418,17 @@ export function RootScreen() {
       });
       setSession(result);
       await rememberEmail(form.email);
-      await loadPropertyWorkspace(result.user.id);
-      setStatus('Email verified. Signed in successfully.');
+      await queryClient.invalidateQueries({ queryKey: ['mobile-properties', result.user.id] });
+      setStatus('Email verified. Loading your properties...');
     } catch (requestError) {
       setError(requestError.message);
     } finally {
-      setBusy(false);
+      setBusyState(false);
     }
   }
 
   async function handleResendOtp() {
-    setBusy(true);
+    setBusyState(true);
     setError('');
 
     try {
@@ -335,47 +437,41 @@ export function RootScreen() {
     } catch (requestError) {
       setError(requestError.message);
     } finally {
-      setBusy(false);
+      setBusyState(false);
     }
   }
 
   function handleSignOut() {
+    queryClient.removeQueries({ queryKey: ['mobile-properties'] });
+    queryClient.removeQueries({ queryKey: ['mobile-dashboard'] });
+    queryClient.removeQueries({ queryKey: ['mobile-checklist'] });
+    queryClient.removeQueries({ queryKey: ['mobile-gallery'] });
+    queryClient.removeQueries({ queryKey: ['mobile-media-variants'] });
     setSession(null);
-    setProperties([]);
     setPropertyId('');
-    setDashboard(null);
-    setGallery([]);
     setSelectedAssetId('');
+    setSelectedVariantId('');
     setAuthMode('login');
     setShowPassword(false);
     setPropertySection('overview');
+    setPhotoAsset(null);
+    setListingNoteDraft('');
+    setCustomTaskTitle('');
     setError('');
     setStatus('Signed out. Sign in again to continue.');
   }
 
   async function handleSelectProperty(nextPropertyId) {
-    setBusy(true);
     setError('');
 
     try {
       setPropertyId(nextPropertyId);
       setPropertyDetailsCollapsed(false);
       setPropertySection('overview');
-      const [dashboardResponse, mediaResponse, checklistResponse] = await Promise.all([
-        getDashboard(nextPropertyId),
-        listMediaAssets(nextPropertyId),
-        getChecklist(nextPropertyId),
-      ]);
-      setDashboard(dashboardResponse);
-      setChecklist(checklistResponse.checklist);
-      setGallery(mediaResponse.assets || []);
-      setSelectedAssetId(mediaResponse.assets?.[0]?.id || '');
       const nextProperty = properties.find((property) => property.id === nextPropertyId);
       setStatus(nextProperty ? `Loaded ${nextProperty.title}.` : 'Property loaded.');
     } catch (requestError) {
       setError(requestError.message);
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -385,7 +481,7 @@ export function RootScreen() {
       return;
     }
 
-    setBusy(true);
+    setBusyState(true);
     setError('');
 
     try {
@@ -424,7 +520,7 @@ export function RootScreen() {
     } catch (requestError) {
       setError(requestError.message);
     } finally {
-      setBusy(false);
+      setBusyState(false);
     }
   }
 
@@ -433,25 +529,21 @@ export function RootScreen() {
       return;
     }
 
-    setBusy(true);
     setError('');
 
     try {
-      await savePhoto(propertyId, {
+      await savePhotoMutation.mutateAsync({
         roomLabel: form.roomLabel,
         mimeType: photoAsset.mimeType || 'image/jpeg',
         imageBase64: photoAsset.base64,
         width: photoAsset.width,
         height: photoAsset.height,
       });
-      await Promise.all([refreshGallery(), refreshChecklist()]);
       setPhotoAsset(null);
       setPropertySection('gallery');
       setStatus('Photo saved to the selected property.');
     } catch (requestError) {
       setError(requestError.message);
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -460,15 +552,20 @@ export function RootScreen() {
       return;
     }
 
-    setBusy(true);
     setError('');
 
     try {
       const nextValue = !selectedAsset.listingCandidate;
-      await updateMediaAsset(selectedAsset.id, {
-        listingCandidate: nextValue,
+      await updateMediaAssetMutation.mutateAsync({
+        assetId: selectedAsset.id,
+        payload: {
+          listingCandidate: nextValue,
+        },
       });
-      await Promise.all([refreshGallery(selectedAsset.id), refreshChecklist()]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['mobile-gallery', propertyId] }),
+        queryClient.invalidateQueries({ queryKey: ['mobile-checklist', propertyId] }),
+      ]);
       setStatus(
         nextValue
           ? 'Photo marked as a listing candidate.'
@@ -476,8 +573,6 @@ export function RootScreen() {
       );
     } catch (requestError) {
       setError(requestError.message);
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -486,38 +581,33 @@ export function RootScreen() {
       return;
     }
 
-    setBusy(true);
     setError('');
 
     try {
-      await updateMediaAsset(selectedAsset.id, {
-        listingNote: listingNoteDraft,
+      await updateMediaAssetMutation.mutateAsync({
+        assetId: selectedAsset.id,
+        payload: {
+          listingNote: listingNoteDraft,
+        },
       });
-      await refreshGallery(selectedAsset.id);
+      await queryClient.invalidateQueries({ queryKey: ['mobile-gallery', propertyId] });
       setStatus('Listing note saved to this photo.');
     } catch (requestError) {
       setError(requestError.message);
-    } finally {
-      setBusy(false);
     }
   }
 
   async function handleUpdateChecklistStatus(itemId, nextStatus) {
-    setBusy(true);
     setError('');
 
     try {
-      const response = await updateChecklistItem(itemId, {
-        status: nextStatus,
+      await updateChecklistStatusMutation.mutateAsync({
+        itemId,
+        nextStatus,
       });
-      const dashboardResponse = await getDashboard(propertyId);
-      setDashboard(dashboardResponse);
-      setChecklist(response.checklist);
       setStatus('Checklist progress saved.');
     } catch (requestError) {
       setError(requestError.message);
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -527,24 +617,18 @@ export function RootScreen() {
       return;
     }
 
-    setBusy(true);
     setError('');
 
     try {
-      const response = await createChecklistItem(propertyId, {
+      await createChecklistItemMutation.mutateAsync({
         title: customTaskTitle,
         category: 'custom',
         priority: 'medium',
       });
-      const dashboardResponse = await getDashboard(propertyId);
-      setDashboard(dashboardResponse);
-      setChecklist(response.checklist);
       setCustomTaskTitle('');
       setStatus('Custom checklist task added.');
     } catch (requestError) {
       setError(requestError.message);
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -553,14 +637,17 @@ export function RootScreen() {
       return;
     }
 
-    setBusy(true);
     setError('');
 
     try {
-      const response = await createImageEnhancementJob(selectedAsset.id, {
+      const response = await createVariantMutation.mutateAsync({
+        assetId: selectedAsset.id,
         jobType,
       });
-      await Promise.all([refreshGallery(selectedAsset.id), refreshVariants(selectedAsset.id)]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['mobile-gallery', propertyId] }),
+        invalidateAssetVariants(selectedAsset.id),
+      ]);
       setSelectedVariantId(response.variant?.id || '');
       setStatus(
         response.job?.warning ||
@@ -570,8 +657,6 @@ export function RootScreen() {
       );
     } catch (requestError) {
       setError(requestError.message);
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -580,18 +665,21 @@ export function RootScreen() {
       return;
     }
 
-    setBusy(true);
     setError('');
 
     try {
-      await selectMediaVariant(selectedAsset.id, variantId);
-      await Promise.all([refreshGallery(selectedAsset.id), refreshVariants(selectedAsset.id)]);
+      await selectVariantMutation.mutateAsync({
+        assetId: selectedAsset.id,
+        variantId,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['mobile-gallery', propertyId] }),
+        invalidateAssetVariants(selectedAsset.id),
+      ]);
       setSelectedVariantId(variantId);
       setStatus('Preferred variant selected for future flyer and report output.');
     } catch (requestError) {
       setError(requestError.message);
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -631,7 +719,11 @@ export function RootScreen() {
                   </Pressable>
                 ))
               ) : (
-                <Text style={styles.body}>No properties were found for this account yet.</Text>
+                <Text style={styles.body}>
+                  {propertiesQuery.isLoading
+                    ? 'Loading your properties...'
+                    : 'No properties were found for this account yet.'}
+                </Text>
               )}
             </View>
 
@@ -1111,7 +1203,7 @@ export function RootScreen() {
 
             {status ? <Text style={styles.status}>{status}</Text> : null}
             {error ? <Text style={styles.error}>{error}</Text> : null}
-            {busy ? <ActivityIndicator color="#d28859" style={styles.spinner} /> : null}
+            {busy || refreshing ? <ActivityIndicator color="#d28859" style={styles.spinner} /> : null}
             <Pressable onPress={handleSignOut} style={[styles.button, styles.buttonSecondary]}>
               <Text style={styles.buttonSecondaryText}>Sign out</Text>
             </Pressable>
@@ -1211,7 +1303,7 @@ export function RootScreen() {
 
           {status ? <Text style={styles.status}>{status}</Text> : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          {busy ? <ActivityIndicator color="#d28859" style={styles.spinner} /> : null}
+          {busy || refreshing ? <ActivityIndicator color="#d28859" style={styles.spinner} /> : null}
         </View>
 
         <View style={styles.authFooter}>

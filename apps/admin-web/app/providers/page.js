@@ -10,9 +10,14 @@ export default async function AdminProvidersPage() {
     getAdminProviderLeads(),
   ]);
 
-  const providers = providerPayload.providers || [];
-  const leadSummary = providerPayload.leadSummary || {};
-  const leadOpsSummary = leadPayload.summary || {};
+  const initialSnapshot = {
+    providers: providerPayload.providers || [],
+    leadSummary: providerPayload.leadSummary || {},
+    leadOpsSummary: leadPayload.summary || {},
+    leads: leadPayload.items || [],
+    providerError: providerPayload.error || '',
+    leadError: leadPayload.error || '',
+  };
 
   return (
     <AdminSection
@@ -20,14 +25,7 @@ export default async function AdminProvidersPage() {
       title="Providers"
       description="Seed and monitor the provider marketplace foundation from one place."
     >
-      <ProvidersTabbedWorkspace
-        providers={providers}
-        leadSummary={leadSummary}
-        leadOpsSummary={leadOpsSummary}
-        leads={leadPayload.items || []}
-        providerError={providerPayload.error || ''}
-        leadError={leadPayload.error || ''}
-      />
+      <ProvidersTabbedWorkspace initialSnapshot={initialSnapshot} />
     </AdminSection>
   );
 }

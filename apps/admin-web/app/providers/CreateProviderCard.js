@@ -34,7 +34,7 @@ const INITIAL_FORM = {
   planCode: 'provider_standard',
 };
 
-export function CreateProviderCard() {
+export function CreateProviderCard({ onCreated }) {
   const [form, setForm] = useState(INITIAL_FORM);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -68,8 +68,12 @@ export function CreateProviderCard() {
         throw new Error(payload.message || 'Provider creation failed.');
       }
 
-      setStatus('Provider created. Refreshing...');
-      window.location.reload();
+      setStatus('Provider created. Refreshing snapshot...');
+      if (onCreated) {
+        await onCreated();
+      } else {
+        window.location.reload();
+      }
     } catch (requestError) {
       setError(requestError.message);
       setStatus('');

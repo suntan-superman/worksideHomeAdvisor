@@ -1,5 +1,8 @@
 import { z } from 'zod';
-import { createProviderCheckoutSession } from '../billing/billing.service.js';
+import {
+  createProviderCheckoutSession,
+  syncStripeCheckoutSessionById,
+} from '../billing/billing.service.js';
 import { verifySessionToken } from '../../services/sessionService.js';
 import { signup as signupAccount } from '../auth/auth.service.js';
 import { UserModel } from '../auth/auth.model.js';
@@ -71,6 +74,10 @@ const providerBillingCheckoutSchema = z.object({
   planCode: z.string().trim().min(1).max(60),
   successUrl: z.string().url().optional(),
   cancelUrl: z.string().url().optional(),
+});
+
+const providerBillingSyncSchema = z.object({
+  sessionId: z.string().trim().min(1),
 });
 
 const providerPortalSessionSchema = z.object({
@@ -249,6 +256,16 @@ export async function providersRoutes(fastify) {
       const payload = providerBillingCheckoutSchema.parse(request.body || {});
       const result = await createProviderCheckoutSession(payload);
       return reply.code(201).send(result);
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/provider-portal/billing/sync-session', async (request, reply) => {
+    try {
+      const payload = providerBillingSyncSchema.parse(request.body || {});
+      const result = await syncStripeCheckoutSessionById(payload.sessionId);
+      return reply.send({ ok: true, result });
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }

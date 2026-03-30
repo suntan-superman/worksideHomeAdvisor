@@ -14,7 +14,7 @@ function formatResolutionLabel(status) {
   return status.replace(/_/g, ' ');
 }
 
-export function ProviderLeadOperations({ leads = [] }) {
+export function ProviderLeadOperations({ leads = [], onUpdated }) {
   const [busyLeadId, setBusyLeadId] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -35,7 +35,11 @@ export function ProviderLeadOperations({ leads = [] }) {
     }
 
     setNotice(successMessage);
-    window.location.reload();
+    if (onUpdated) {
+      await onUpdated();
+    } else {
+      window.location.reload();
+    }
   }
 
   async function handleResend(leadId) {

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatCurrency } from '@workside/utils';
 
 import { AppFrame } from '../../components/AppFrame';
@@ -13,21 +14,24 @@ import {
   getBillingPlans,
   getBillingSummary,
   getDashboard,
+  syncBillingSession,
   listProperties,
 } from '../../lib/api';
 import { getStoredSession, setStoredSession } from '../../lib/session';
 
 export default function DashboardPage() {
+  const queryClient = useQueryClient();
   const [session, setSession] = useState(null);
   const [properties, setProperties] = useState([]);
   const [selectedPropertyId, setSelectedPropertyId] = useState('');
   const [dashboard, setDashboard] = useState(null);
   const [billingPlans, setBillingPlans] = useState([]);
-  const [billingSummary, setBillingSummary] = useState(null);
   const [selectedPlanKey, setSelectedPlanKey] = useState('sample_monthly');
   const [loading, setLoading] = useState(true);
   const [actionState, setActionState] = useState('');
   const [toast, setToast] = useState(null);
+  const [billingFlowState, setBillingFlowState] = useState('');
+  const [billingSessionId, setBillingSessionId] = useState('');
   const [createForm, setCreateForm] = useState({
     title: '',
     addressLine1: '',
@@ -68,25 +72,30 @@ export default function DashboardPage() {
       return;
     }
 
-    const billingStatus = new URLSearchParams(window.location.search).get('billing');
-    if (!billingStatus) {
+    const params = new URLSearchParams(window.location.search);
+    setBillingFlowState(params.get('billing') || '');
+    setBillingSessionId(params.get('session_id') || '');
+  }, []);
+
+  useEffect(() => {
+    if (!billingFlowState) {
       return;
     }
 
-    if (billingStatus === 'success') {
+    if (billingFlowState === 'success') {
       setToast({
         tone: 'success',
         title: 'Billing completed',
         message: 'Stripe returned successfully. Refresh billing to confirm the latest access state.',
       });
-    } else if (billingStatus === 'cancelled') {
+    } else if (billingFlowState === 'cancelled') {
       setToast({
         tone: 'info',
         title: 'Checkout cancelled',
         message: 'No changes were made to the current plan.',
       });
     }
-  }, []);
+  }, [billingFlowState]);
 
   useEffect(() => {
     if (!session?.user?.id) {
@@ -122,55 +131,123 @@ export default function DashboardPage() {
     loadProperties();
   }, [session]);
 
+  const billingPlansQuery = useQuery({
+    queryKey: ['billing-plans'],
+    queryFn: async () => {
+      const planResponse = await getBillingPlans();
+      return planResponse.plans || [];
+    },
+    staleTime: 60_000,
+  });
+
+  const billingSummaryQuery = useQuery({
+    queryKey: ['billing-summary', session?.user?.id || ''],
+    enabled: Boolean(session?.user?.id),
+    queryFn: async () => getBillingSummary(session.user.id),
+    staleTime: 5_000,
+    refetchInterval: (query) => {
+      const accessStatus = query.state.data?.access?.status || '';
+      if (billingFlowState === 'success') {
+        return 5_000;
+      }
+      if (['checkout_created', 'open', 'incomplete', 'unpaid'].includes(accessStatus)) {
+        return 5_000;
+      }
+      return 20_000;
+    },
+  });
+
+  const billingSummary = billingSummaryQuery.data || null;
+
   useEffect(() => {
-    async function loadBillingState() {
-      try {
-        const planResponse = await getBillingPlans();
-        const plans = planResponse.plans || [];
-        setBillingPlans(plans);
+    if (billingPlansQuery.isSuccess) {
+      const plans = billingPlansQuery.data || [];
+      setBillingPlans(plans);
 
-        const preferredPlan =
-          plans.find((plan) => plan.planKey === 'sample_monthly' && plan.configured)?.planKey ||
-          plans.find((plan) => plan.planKey === 'sample_onboarding' && plan.configured)?.planKey ||
-          plans.find((plan) => plan.configured)?.planKey ||
-          '';
+      const preferredPlan =
+        plans.find((plan) => plan.planKey === 'sample_monthly' && plan.configured)?.planKey ||
+        plans.find((plan) => plan.planKey === 'sample_onboarding' && plan.configured)?.planKey ||
+        plans.find((plan) => plan.configured)?.planKey ||
+        '';
 
-        if (preferredPlan) {
-          setSelectedPlanKey(preferredPlan);
-        }
-      } catch (requestError) {
-        setToast({
-          tone: 'error',
-          title: 'Could not load billing plans',
-          message: requestError.message,
+      if (preferredPlan) {
+        setSelectedPlanKey((current) => {
+          const currentStillValid = plans.some((plan) => plan.planKey === current && plan.configured);
+          return currentStillValid ? current : preferredPlan;
         });
       }
     }
-
-    loadBillingState();
-  }, []);
+  }, [billingPlansQuery.data, billingPlansQuery.isSuccess]);
 
   useEffect(() => {
-    if (!session?.user?.id) {
-      setBillingSummary(null);
+    if (!billingPlansQuery.error) {
       return;
     }
 
-    async function loadBillingSummary() {
+    setToast({
+      tone: 'error',
+      title: 'Could not load billing plans',
+      message: billingPlansQuery.error.message,
+    });
+  }, [billingPlansQuery.error]);
+
+  useEffect(() => {
+    if (!billingSummaryQuery.error) {
+      return;
+    }
+
+    setToast({
+      tone: 'error',
+      title: 'Could not load billing summary',
+      message: billingSummaryQuery.error.message,
+    });
+  }, [billingSummaryQuery.error]);
+
+  useEffect(() => {
+    if (
+      billingFlowState === 'success' &&
+      ['active', 'trialing', 'past_due', 'paid'].includes(billingSummary?.access?.status || '')
+    ) {
+      setBillingFlowState('');
+    }
+  }, [billingFlowState, billingSummary?.access?.status]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncReturnedCheckout() {
+      if (!session?.user?.id || billingFlowState !== 'success' || !billingSessionId) {
+        return;
+      }
+
       try {
-        const response = await getBillingSummary(session.user.id);
-        setBillingSummary(response);
+        await syncBillingSession(billingSessionId);
+        if (cancelled) {
+          return;
+        }
+
+        await queryClient.invalidateQueries({ queryKey: ['billing-summary', session.user.id] });
+        if (typeof window !== 'undefined') {
+          window.history.replaceState({}, '', '/dashboard?billing=success');
+        }
+        setBillingSessionId('');
       } catch (requestError) {
-        setToast({
-          tone: 'error',
-          title: 'Could not load billing summary',
-          message: requestError.message,
-        });
+        if (!cancelled) {
+          setToast({
+            tone: 'error',
+            title: 'Billing sync is still pending',
+            message: requestError.message,
+          });
+        }
       }
     }
 
-    loadBillingSummary();
-  }, [session]);
+    syncReturnedCheckout();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [billingFlowState, billingSessionId, queryClient, session?.user?.id]);
 
   useEffect(() => {
     if (!selectedPropertyId) {

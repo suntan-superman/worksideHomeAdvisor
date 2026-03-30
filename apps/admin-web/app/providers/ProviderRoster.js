@@ -6,7 +6,7 @@ function formatLabel(value) {
   return String(value || '—').replace(/_/g, ' ');
 }
 
-export function ProviderRoster({ providers = [] }) {
+export function ProviderRoster({ providers = [], onUpdated }) {
   const [busyProviderId, setBusyProviderId] = useState('');
   const [error, setError] = useState('');
 
@@ -28,7 +28,11 @@ export function ProviderRoster({ providers = [] }) {
         throw new Error(body.message || 'Provider update failed.');
       }
 
-      window.location.reload();
+      if (onUpdated) {
+        await onUpdated();
+      } else {
+        window.location.reload();
+      }
     } catch (requestError) {
       setError(requestError.message);
     } finally {

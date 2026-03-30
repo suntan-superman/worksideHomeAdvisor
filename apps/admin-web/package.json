@@ -11,6 +11,7 @@
     "test": "node -e \"console.log('admin test placeholder')\""
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.95.2",
     "@workside/branding": "file:../../packages/branding",
     "next": "^15.2.0",
     "react": "19.0.0",
