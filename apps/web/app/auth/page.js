@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { AppFrame } from '../../components/AppFrame';
+import { PasswordInput } from '../../components/PasswordInput';
 import { Toast } from '../../components/Toast';
 import {
   login,
@@ -18,6 +19,10 @@ const ROLE_OPTIONS = [
   { value: 'agent', label: 'Realtor', description: 'Use agent-facing pricing and presentation workflows.' },
   { value: 'provider', label: 'Provider', description: 'Manage provider onboarding, leads, and marketplace profile.' },
 ];
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
 
 function getRoleDestination(role) {
   if (role === 'provider') {
@@ -64,6 +69,19 @@ export default function AuthPage() {
   const [showVerificationOption, setShowVerificationOption] = useState(false);
 
   const isVerificationMode = mode === 'verify';
+  const emailIsValid = isValidEmail(form.email);
+  const passwordLongEnough = form.password.length >= 8;
+  const formIsReady =
+    mode === 'signup'
+      ? Boolean(
+          form.firstName.trim() &&
+            form.lastName.trim() &&
+            emailIsValid &&
+            passwordLongEnough,
+        )
+      : mode === 'login'
+        ? Boolean(emailIsValid && form.password)
+        : Boolean(emailIsValid && form.otpCode.trim().length >= 4);
 
   function updateField(field, value) {
     setForm((current) => ({
@@ -287,17 +305,22 @@ export default function AuthPage() {
               value={form.email}
               onChange={(event) => updateField('email', event.target.value)}
             />
+            {form.email && !emailIsValid ? (
+              <span className="field-hint field-error">Enter a valid email address.</span>
+            ) : null}
           </label>
 
           {!isVerificationMode ? (
             <label>
               Password
-              <input
-                type="password"
-                placeholder="Minimum 8 characters"
+              <PasswordInput
                 value={form.password}
                 onChange={(event) => updateField('password', event.target.value)}
+                placeholder="Minimum 8 characters"
               />
+              {mode === 'signup' && form.password && !passwordLongEnough ? (
+                <span className="field-hint field-error">Use at least 8 characters.</span>
+              ) : null}
             </label>
           ) : null}
 
@@ -313,7 +336,7 @@ export default function AuthPage() {
             </label>
           ) : null}
 
-          <button type="submit" className="button-primary" disabled={loading}>
+          <button type="submit" className="button-primary" disabled={loading || !formIsReady}>
             {loading ? 'Working...' : mode === 'signup' ? 'Create account' : mode === 'login' ? 'Log in' : 'Verify email'}
           </button>
 
@@ -322,7 +345,7 @@ export default function AuthPage() {
               type="button"
               className="button-secondary"
               onClick={handleResendOtp}
-              disabled={loading || !form.email}
+              disabled={loading || !emailIsValid}
             >
               Resend code
             </button>

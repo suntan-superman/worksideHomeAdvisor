@@ -33,6 +33,28 @@ const INITIAL_PROFILE_FORM = {
   preferredContactMethod: 'sms',
 };
 
+function formatPhoneInput(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 10);
+
+  if (digits.length <= 3) {
+    return digits;
+  }
+
+  if (digits.length <= 6) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  }
+
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+function countPhoneDigits(value) {
+  return String(value || '').replace(/\D/g, '').length;
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
 function formatCategoryLabel(value) {
   return String(value || 'provider lead')
     .replace(/_/g, ' ')
@@ -193,7 +215,24 @@ export function ProviderPortalClient({
     });
   }, [dashboard]);
 
+  const wantsSms = ['sms', 'sms_and_email'].includes(profileForm.deliveryMode);
+  const wantsEmail = ['email', 'sms_and_email'].includes(profileForm.deliveryMode);
+  const notifyPhoneIsValid = countPhoneDigits(profileForm.notifyPhone) >= 10;
+  const notifyEmailIsValid = !profileForm.notifyEmail || isValidEmail(profileForm.notifyEmail);
+  const profileFormReady = Boolean(
+    (!wantsSms || (profileForm.notifyPhone && notifyPhoneIsValid)) &&
+      (!wantsEmail || !profileForm.notifyEmail || notifyEmailIsValid),
+  );
+
   function updateField(field, value) {
+    if (field === 'notifyPhone') {
+      setProfileForm((current) => ({
+        ...current,
+        [field]: formatPhoneInput(value),
+      }));
+      return;
+    }
+
     setProfileForm((current) => ({
       ...current,
       [field]: value,
@@ -563,6 +602,9 @@ export function ProviderPortalClient({
                 value={profileForm.notifyPhone}
                 onChange={(event) => updateField('notifyPhone', event.target.value)}
               />
+              {profileForm.notifyPhone && !notifyPhoneIsValid ? (
+                <span className="field-hint field-error">Enter a full 10-digit SMS number.</span>
+              ) : null}
             </label>
             <label>
               Lead email
@@ -571,6 +613,9 @@ export function ProviderPortalClient({
                 value={profileForm.notifyEmail}
                 onChange={(event) => updateField('notifyEmail', event.target.value)}
               />
+              {profileForm.notifyEmail && !notifyEmailIsValid ? (
+                <span className="field-hint field-error">Enter a valid lead email address.</span>
+              ) : null}
             </label>
           </div>
           <label>
@@ -586,7 +631,11 @@ export function ProviderPortalClient({
             </select>
           </label>
           <div className="button-stack">
-            <button type="submit" className={busy ? 'button-primary button-busy' : 'button-primary'} disabled={busy}>
+            <button
+              type="submit"
+              className={busy ? 'button-primary button-busy' : 'button-primary'}
+              disabled={busy || !profileFormReady}
+            >
               {busy ? 'Saving...' : 'Save provider profile'}
             </button>
           </div>

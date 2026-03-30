@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+import { PasswordInput } from '../../../components/PasswordInput';
 import { createProviderBillingCheckout, signupProvider } from '../../../lib/api';
 import { setStoredProviderSession } from '../../../lib/provider-session';
 import { getStoredSession } from '../../../lib/session';
@@ -96,6 +97,39 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
   }, []);
 
   useEffect(() => {
+    const sessionUser = appSession?.user;
+
+    if (!sessionUser) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      firstName: current.firstName || sessionUser.firstName || '',
+      lastName: current.lastName || sessionUser.lastName || '',
+      email: current.email || sessionUser.email || '',
+      notifyEmail: current.notifyEmail || sessionUser.email || '',
+    }));
+  }, [appSession]);
+
+  useEffect(() => {
+    if (!form.email || form.notifyEmail) {
+      return;
+    }
+
+    setForm((current) => {
+      if (!current.email || current.notifyEmail) {
+        return current;
+      }
+
+      return {
+        ...current,
+        notifyEmail: current.email,
+      };
+    });
+  }, [form.email, form.notifyEmail]);
+
+  useEffect(() => {
     if (billingState === 'success') {
       setToast({
         tone: 'success',
@@ -113,6 +147,14 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
     }
   }, [billingState, providerId]);
 
+  const signedInProvider = ['provider', 'admin', 'super_admin'].includes(appSession?.user?.role || '');
+  const businessEmailIsValid = isValidEmail(form.email);
+  const leadEmailIsValid = !form.notifyEmail || isValidEmail(form.notifyEmail);
+  const businessPhoneIsValid = countPhoneDigits(form.phone) >= 10;
+  const notifyPhoneIsValid = countPhoneDigits(form.notifyPhone) >= 10;
+  const passwordLongEnough = form.password.length >= 8;
+  const passwordsMatch = Boolean(form.password && form.password === form.confirmPassword);
+
   function updateField(field, value) {
     if (field === 'phone' || field === 'notifyPhone') {
       setForm((current) => ({ ...current, [field]: formatPhoneInput(value) }));
@@ -120,6 +162,45 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
     }
 
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function isCurrentStepReady() {
+    if (stepIndex === 0) {
+      return Boolean(
+        form.businessName.trim() &&
+          businessPhoneIsValid &&
+          businessEmailIsValid &&
+          (signedInProvider ||
+            (form.firstName.trim() &&
+              form.lastName.trim() &&
+              passwordLongEnough &&
+              passwordsMatch)),
+      );
+    }
+
+    if (stepIndex === 1) {
+      return Boolean(form.city.trim() && form.state.trim() && form.primaryZip.trim());
+    }
+
+    if (stepIndex === 2) {
+      return true;
+    }
+
+    if (stepIndex === 3) {
+      const wantsSms = ['sms', 'sms_and_email'].includes(form.deliveryMode);
+      const wantsEmail = ['email', 'sms_and_email'].includes(form.deliveryMode);
+
+      return Boolean(
+        (!wantsSms || (form.notifyPhone && notifyPhoneIsValid && form.smsOptIn)) &&
+          (!wantsEmail || !form.notifyEmail || leadEmailIsValid),
+      );
+    }
+
+    if (stepIndex === 4) {
+      return Boolean(form.planCode);
+    }
+
+    return true;
   }
 
   function validateCurrentStep() {
@@ -200,10 +281,13 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
     try {
       validateCurrentStep();
       const payload = {
+        firstName: form.firstName,
+        lastName: form.lastName,
         businessName: form.businessName,
         categoryKey: form.categoryKey,
         phone: form.phone,
         email: form.email,
+        password: form.password,
         city: form.city,
         state: form.state,
         zipCodes: [form.primaryZip, ...form.extraZips.split(',').map((value) => value.trim())].filter(Boolean),
@@ -416,7 +500,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
         <form className="form-card" onSubmit={handleSubmit}>
           {stepIndex === 0 ? (
             <>
-              {!['provider', 'admin', 'super_admin'].includes(appSession?.user?.role || '') ? (
+              {!signedInProvider ? (
                 <div className="split-fields">
                   <label>
                     First name
@@ -450,6 +534,9 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
                   placeholder="(555) 123-4567"
                   inputMode="tel"
                 />
+                {form.phone && !businessPhoneIsValid ? (
+                  <span className="field-hint field-error">Enter a full 10-digit phone number.</span>
+                ) : null}
               </label>
               <label>
                 Email
@@ -459,26 +546,33 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
                   onChange={(event) => updateField('email', event.target.value)}
                   placeholder="name@business.com"
                 />
+                {form.email && !businessEmailIsValid ? (
+                  <span className="field-hint field-error">Enter a valid business email address.</span>
+                ) : null}
               </label>
-              {!['provider', 'admin', 'super_admin'].includes(appSession?.user?.role || '') ? (
+              {!signedInProvider ? (
                 <div className="split-fields">
                   <label>
                     Password
-                    <input
-                      type="password"
+                    <PasswordInput
                       value={form.password}
                       onChange={(event) => updateField('password', event.target.value)}
                       placeholder="Minimum 8 characters"
                     />
+                    {form.password && !passwordLongEnough ? (
+                      <span className="field-hint field-error">Use at least 8 characters.</span>
+                    ) : null}
                   </label>
                   <label>
                     Confirm password
-                    <input
-                      type="password"
+                    <PasswordInput
                       value={form.confirmPassword}
                       onChange={(event) => updateField('confirmPassword', event.target.value)}
                       placeholder="Repeat password"
                     />
+                    {form.confirmPassword && !passwordsMatch ? (
+                      <span className="field-hint field-error">Passwords must match before continuing.</span>
+                    ) : null}
                   </label>
                 </div>
               ) : null}
@@ -592,6 +686,9 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
                     placeholder="(555) 123-4567"
                     inputMode="tel"
                   />
+                  {form.notifyPhone && !notifyPhoneIsValid ? (
+                    <span className="field-hint field-error">Enter a full 10-digit SMS number.</span>
+                  ) : null}
                 </label>
                 <label>
                   Lead email
@@ -601,6 +698,9 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
                     onChange={(event) => updateField('notifyEmail', event.target.value)}
                     placeholder="leads@business.com"
                   />
+                  {form.notifyEmail && !leadEmailIsValid ? (
+                    <span className="field-hint field-error">Enter a valid lead email address.</span>
+                  ) : null}
                 </label>
               </div>
               <label>
@@ -676,14 +776,18 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
               </button>
             ) : null}
             {stepIndex < STEP_TITLES.length - 1 ? (
-              <button type="button" className="button-primary" onClick={handleNext}>
+              <button type="button" className="button-primary" onClick={handleNext} disabled={!isCurrentStepReady()}>
                 Continue
               </button>
             ) : (
-              <button type="submit" className={loading ? 'button-primary button-busy' : 'button-primary'} disabled={loading}>
+              <button
+                type="submit"
+                className={loading ? 'button-primary button-busy' : 'button-primary'}
+                disabled={loading || !isCurrentStepReady()}
+              >
                 {loading
                   ? 'Submitting...'
-                  : !['provider', 'admin', 'super_admin'].includes(appSession?.user?.role || '')
+                  : !signedInProvider
                     ? 'Create account and send verification code'
                     : 'Submit and continue to billing'}
               </button>

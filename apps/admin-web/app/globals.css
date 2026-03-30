@@ -487,6 +487,80 @@ a {
   background: rgba(228, 151, 136, 0.08);
 }
 
+.providers-workspace {
+  display: grid;
+  gap: 24px;
+}
+
+.provider-tabs-shell {
+  display: grid;
+  gap: 18px;
+}
+
+.provider-tabs {
+  position: sticky;
+  top: 16px;
+  z-index: 4;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(19, 26, 29, 0.92);
+  backdrop-filter: blur(12px);
+}
+
+.provider-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.provider-tab strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.provider-tab.active {
+  border-color: rgba(217, 152, 106, 0.26);
+  background: rgba(217, 152, 106, 0.18);
+  color: var(--text);
+}
+
+.provider-tab.active strong {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.provider-tab-panel,
+.provider-tab-stack,
+.provider-tab-preview-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.provider-tab-preview-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 @media (max-width: 900px) {
   .admin-layout,
   .split-layout,
@@ -513,5 +587,13 @@ a {
   .lead-status-stack {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .provider-tabs {
+    position: static;
+  }
+
+  .provider-tab-preview-grid {
+    grid-template-columns: 1fr;
   }
 }

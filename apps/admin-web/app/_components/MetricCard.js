@@ -1,3 +1,5 @@
+'use client';
+
 export function MetricCard({ label, value, note }) {
   return (
     <article className="metric-card">
