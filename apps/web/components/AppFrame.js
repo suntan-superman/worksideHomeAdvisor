@@ -6,6 +6,9 @@ import { useRouter } from 'next/navigation';
 
 import { BRANDING } from '@workside/branding';
 import { clearStoredSession, getStoredSession } from '../lib/session';
+import { clearStoredProviderSession, getStoredProviderSession } from '../lib/provider-session';
+
+const WEB_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 function getDisplayName(user) {
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
@@ -15,10 +18,66 @@ function getDisplayName(user) {
 export function AppFrame({ children, busy = false }) {
   const router = useRouter();
   const [session, setSession] = useState(null);
+  const [providerSession, setProviderSession] = useState(null);
 
   useEffect(() => {
     setSession(getStoredSession());
+    setProviderSession(getStoredProviderSession());
   }, []);
+
+  useEffect(() => {
+    function handleStorageChange() {
+      setSession(getStoredSession());
+      setProviderSession(getStoredProviderSession());
+    }
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!session?.token && !providerSession?.token) {
+      return undefined;
+    }
+
+    let timeoutId = null;
+
+    function handleIdleTimeout() {
+      clearStoredSession();
+      clearStoredProviderSession();
+      setSession(null);
+      setProviderSession(null);
+      router.replace('/auth?timedOut=1');
+      router.refresh();
+    }
+
+    function resetTimer() {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+
+      timeoutId = window.setTimeout(handleIdleTimeout, WEB_IDLE_TIMEOUT_MS);
+    }
+
+    const events = ['mousedown', 'keydown', 'touchstart', 'scroll', 'focus'];
+    events.forEach((eventName) => {
+      window.addEventListener(eventName, resetTimer);
+    });
+
+    resetTimer();
+
+    return () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+
+      events.forEach((eventName) => {
+        window.removeEventListener(eventName, resetTimer);
+      });
+    };
+  }, [providerSession?.token, router, session?.token]);
 
   return (
     <div className={busy ? 'page-shell page-shell-busy' : 'page-shell'}>
@@ -55,7 +114,9 @@ export function AppFrame({ children, busy = false }) {
               className="nav-button"
               onClick={() => {
                 clearStoredSession();
+                clearStoredProviderSession();
                 setSession(null);
+                setProviderSession(null);
                 router.push('/');
               }}
             >

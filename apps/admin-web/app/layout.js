@@ -1,5 +1,6 @@
 import './globals.css';
 import Link from 'next/link';
+import { AdminIdleLogoutManager } from './_components/AdminIdleLogoutManager';
 import { LogoutButton } from './_components/LogoutButton';
 
 export const metadata = {
@@ -21,6 +22,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body>
+        <AdminIdleLogoutManager />
         <div className="admin-layout">
           <aside className="sidebar">
             <div className="sidebar-brand">

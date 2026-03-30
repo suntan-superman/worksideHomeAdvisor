@@ -19,6 +19,10 @@ export default function AdminLoginPage() {
 
     const params = new URLSearchParams(window.location.search);
     setNextPath(params.get('next') || '/');
+
+    if (params.get('timedOut') === '1') {
+      setStatus('You were signed out after 15 minutes of inactivity. Sign in again to continue.');
+    }
   }, []);
 
   async function handleSubmit(event) {

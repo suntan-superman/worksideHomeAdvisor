@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { AppFrame } from '../../components/AppFrame';
@@ -82,6 +82,26 @@ export default function AuthPage() {
       : mode === 'login'
         ? Boolean(emailIsValid && form.password)
         : Boolean(emailIsValid && form.otpCode.trim().length >= 4);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('timedOut') !== '1') {
+      return;
+    }
+
+    setMode('login');
+    setShowVerificationOption(false);
+    setStatus('You were signed out after 30 minutes of inactivity. Sign in again to continue.');
+    setToast({
+      tone: 'info',
+      title: 'Session timed out',
+      message: 'For security, your Workside session was closed after inactivity.',
+    });
+  }, []);
 
   function updateField(field, value) {
     setForm((current) => ({
