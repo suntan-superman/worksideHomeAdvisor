@@ -1,22 +1,29 @@
 import { AdminSection } from '../_components/AdminSection';
-import { getAdminProviderLeads, getAdminProviders } from '../../lib/admin-api';
+import {
+  getAdminProviderCategories,
+  getAdminProviderLeads,
+  getAdminProviders,
+} from '../../lib/admin-api';
 import { ProvidersTabbedWorkspace } from './ProvidersTabbedWorkspace';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminProvidersPage() {
-  const [providerPayload, leadPayload] = await Promise.all([
+  const [providerPayload, leadPayload, categoryPayload] = await Promise.all([
     getAdminProviders(),
     getAdminProviderLeads(),
+    getAdminProviderCategories(),
   ]);
 
   const initialSnapshot = {
     providers: providerPayload.providers || [],
+    categories: categoryPayload.categories || [],
     leadSummary: providerPayload.leadSummary || {},
     leadOpsSummary: leadPayload.summary || {},
     leads: leadPayload.items || [],
     providerError: providerPayload.error || '',
     leadError: leadPayload.error || '',
+    categoryError: categoryPayload.error || '',
   };
 
   return (

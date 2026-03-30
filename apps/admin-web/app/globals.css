@@ -557,6 +557,20 @@ a {
   gap: 18px;
 }
 
+.provider-category-stack,
+.provider-category-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.provider-category-card {
+  gap: 16px;
+}
+
+.provider-category-description-field {
+  grid-column: 1 / -1;
+}
+
 .provider-tab-preview-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }

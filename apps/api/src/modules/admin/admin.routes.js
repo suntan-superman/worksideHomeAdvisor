@@ -3,9 +3,11 @@ import { z } from 'zod';
 import {
   closeAdminProviderLeadAction,
   createAdminProvider,
+  createAdminProviderCategoryAction,
   getAdminBillingSnapshot,
   getAdminMediaVariantSnapshot,
   getAdminOverview,
+  getAdminProviderCategorySnapshot,
   getAdminProviderLeadSnapshot,
   getAdminProviderSnapshot,
   getAdminUsageSnapshot,
@@ -14,6 +16,7 @@ import {
   listAdminUsers,
   resendAdminProviderLeadAction,
   runAdminMediaVariantCleanup,
+  updateAdminProviderCategoryAction,
   updateAdminProviderReviewAction,
 } from './admin.service.js';
 import { requireAdminSession } from './admin-session.service.js';
@@ -30,7 +33,7 @@ const createProviderSchema = z.object({
   city: z.string().trim().min(1).max(80),
   state: z.string().trim().min(1).max(40),
   zipCodes: z.array(z.string().trim().min(3).max(12)).max(25).optional(),
-  radiusMiles: z.number().int().min(5).max(150).optional(),
+  radiusMiles: z.number().int().min(5).max(1000).optional(),
   description: z.string().trim().max(600).optional(),
   websiteUrl: z.string().trim().url().max(180).optional().or(z.literal('')),
   yearsInBusiness: z.number().int().min(0).max(80).optional(),
@@ -45,6 +48,23 @@ const createProviderSchema = z.object({
   licenseStatus: z.enum(['unverified', 'verified', 'not_required']).optional(),
   insuranceStatus: z.enum(['unverified', 'verified', 'not_required']).optional(),
   planCode: z.string().trim().max(60).optional(),
+});
+
+const createProviderCategorySchema = z.object({
+  key: z.string().trim().min(1).max(80).optional(),
+  label: z.string().trim().min(1).max(80),
+  description: z.string().trim().max(240).optional(),
+  rolloutPhase: z.number().int().min(1).max(10).optional(),
+  sortOrder: z.number().int().min(0).max(9999).optional(),
+  isActive: z.boolean().optional(),
+});
+
+const updateProviderCategorySchema = z.object({
+  label: z.string().trim().min(1).max(80).optional(),
+  description: z.string().trim().max(240).optional(),
+  rolloutPhase: z.number().int().min(1).max(10).optional(),
+  sortOrder: z.number().int().min(0).max(9999).optional(),
+  isActive: z.boolean().optional(),
 });
 
 const closeProviderLeadSchema = z.object({
@@ -148,12 +168,41 @@ export async function adminRoutes(fastify) {
     }
   });
 
+  fastify.get('/provider-categories', async (_request, reply) => {
+    try {
+      return reply.send(await getAdminProviderCategorySnapshot());
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
   fastify.post('/providers', async (request, reply) => {
     try {
       const payload = createProviderSchema.parse(request.body || {});
       return reply.code(201).send(await createAdminProvider(payload));
     } catch (error) {
       request.log.error({ err: error }, 'admin provider creation failed');
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/provider-categories', async (request, reply) => {
+    try {
+      const payload = createProviderCategorySchema.parse(request.body || {});
+      return reply.code(201).send(await createAdminProviderCategoryAction(payload));
+    } catch (error) {
+      request.log.error({ err: error }, 'admin provider category creation failed');
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.patch('/provider-categories/:categoryKey', async (request, reply) => {
+    try {
+      const params = z.object({ categoryKey: z.string().trim().min(1) }).parse(request.params);
+      const payload = updateProviderCategorySchema.parse(request.body || {});
+      return reply.send(await updateAdminProviderCategoryAction(params.categoryKey, payload));
+    } catch (error) {
+      request.log.error({ err: error, categoryKey: request.params?.categoryKey }, 'admin provider category update failed');
       return reply.code(400).send({ message: error.message });
     }
   });

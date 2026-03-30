@@ -29,28 +29,33 @@ export async function GET() {
   }
 
   try {
-    const [providerPayload, leadPayload] = await Promise.all([
+    const [providerPayload, leadPayload, categoryPayload] = await Promise.all([
       requestAdmin('/api/v1/admin/providers', session.token),
       requestAdmin('/api/v1/admin/provider-leads', session.token),
+      requestAdmin('/api/v1/admin/provider-categories', session.token),
     ]);
 
     return NextResponse.json({
       providers: providerPayload.providers || [],
+      categories: categoryPayload.categories || [],
       leadSummary: providerPayload.leadSummary || {},
       leadOpsSummary: leadPayload.summary || {},
       leads: leadPayload.items || [],
       providerError: '',
       leadError: '',
+      categoryError: '',
     });
   } catch (error) {
     return NextResponse.json(
       {
         providers: [],
+        categories: [],
         leadSummary: {},
         leadOpsSummary: {},
         leads: [],
         providerError: error.message || 'Could not load provider snapshot.',
         leadError: '',
+        categoryError: '',
       },
       { status: 500 },
     );

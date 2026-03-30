@@ -89,6 +89,10 @@ export function getAdminProviders() {
   return request('/api/v1/admin/providers');
 }
 
+export function getAdminProviderCategories() {
+  return request('/api/v1/admin/provider-categories');
+}
+
 export function getAdminProviderLeads() {
   return request('/api/v1/admin/provider-leads');
 }

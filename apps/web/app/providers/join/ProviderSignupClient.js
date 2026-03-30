@@ -5,7 +5,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { PasswordInput } from '../../../components/PasswordInput';
-import { createProviderBillingCheckout, getBillingPlans, signupProvider } from '../../../lib/api';
+import {
+  createProviderBillingCheckout,
+  getBillingPlans,
+  listProviderCategories,
+  signupProvider,
+} from '../../../lib/api';
 import { setStoredProviderSession } from '../../../lib/provider-session';
 import { getStoredSession } from '../../../lib/session';
 import { Toast } from '../../../components/Toast';
@@ -24,6 +29,9 @@ const CATEGORY_OPTIONS = [
   { value: 'real_estate_attorney', label: 'Real Estate Attorney' },
   { value: 'photographer', label: 'Photographer' },
   { value: 'cleaning_service', label: 'Cleaning Service' },
+  { value: 'termite_inspection', label: 'Termite Inspection' },
+  { value: 'notary', label: 'Notary' },
+  { value: 'nhd_report', label: 'NHD Report' },
 ];
 
 const PLAN_OPTIONS = [
@@ -158,6 +166,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
   const [appSession, setAppSession] = useState(null);
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState('');
   const [providerPlans, setProviderPlans] = useState([]);
+  const [providerCategories, setProviderCategories] = useState(CATEGORY_OPTIONS);
   const [existingEmailConflict, setExistingEmailConflict] = useState('');
   const syncedNotifyEmailRef = useRef('');
 
@@ -284,6 +293,55 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProviderCategories() {
+      try {
+        const payload = await listProviderCategories();
+        if (cancelled) {
+          return;
+        }
+
+        const categories = (payload.categories || [])
+          .filter((category) => category.isActive !== false)
+          .map((category) => ({
+            value: category.key,
+            label: category.label,
+          }));
+
+        if (categories.length) {
+          setProviderCategories(categories);
+        }
+      } catch {
+        if (!cancelled) {
+          setProviderCategories(CATEGORY_OPTIONS);
+        }
+      }
+    }
+
+    loadProviderCategories();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!providerCategories.length) {
+      return;
+    }
+
+    if (providerCategories.some((category) => category.value === form.categoryKey)) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      categoryKey: providerCategories[0]?.value || current.categoryKey,
+    }));
+  }, [form.categoryKey, providerCategories]);
 
   const signedInProvider = ['provider', 'admin', 'super_admin'].includes(appSession?.user?.role || '');
   const businessEmailIsValid = isValidEmail(form.email);
@@ -735,7 +793,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
               <label>
                 Category
                 <select className="select-input" value={form.categoryKey} onChange={(event) => updateField('categoryKey', event.target.value)}>
-                  {CATEGORY_OPTIONS.map((option) => (
+                  {providerCategories.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>

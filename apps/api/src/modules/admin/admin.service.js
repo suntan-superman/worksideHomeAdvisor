@@ -13,10 +13,13 @@ import {
 } from '../media/variant-lifecycle.service.js';
 import {
   createProviderProfile,
+  createAdminProviderCategory,
   closeAdminProviderLead,
+  listAdminProviderCategories,
   listAdminProviderLeads,
   listAdminProviders,
   resendAdminProviderLead,
+  updateAdminProviderCategory,
   updateAdminProviderReview,
 } from '../providers/providers.service.js';
 import { PricingAnalysisModel } from '../pricing/pricing.model.js';
@@ -457,6 +460,10 @@ export async function getAdminProviderSnapshot({ limit = 50 } = {}) {
   return listAdminProviders({ limit });
 }
 
+export async function getAdminProviderCategorySnapshot() {
+  return listAdminProviderCategories();
+}
+
 export async function createAdminProvider(payload) {
   const provider = await createProviderProfile(payload, {
     createdFrom: 'admin_console',
@@ -464,6 +471,14 @@ export async function createAdminProvider(payload) {
   });
 
   return { provider };
+}
+
+export async function createAdminProviderCategoryAction(payload) {
+  return createAdminProviderCategory(payload);
+}
+
+export async function updateAdminProviderCategoryAction(categoryKey, payload) {
+  return updateAdminProviderCategory(categoryKey, payload);
 }
 
 export async function getAdminProviderLeadSnapshot({ limit = 50 } = {}) {

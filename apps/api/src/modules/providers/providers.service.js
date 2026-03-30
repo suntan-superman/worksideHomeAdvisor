@@ -21,6 +21,9 @@ export const DEFAULT_PROVIDER_CATEGORIES = [
   { key: 'real_estate_attorney', label: 'Real Estate Attorneys', description: 'Contract and transaction support where legal review is needed.', rolloutPhase: 1, sortOrder: 3 },
   { key: 'photographer', label: 'Photographers', description: 'Listing photo specialists for final marketing capture.', rolloutPhase: 1, sortOrder: 4 },
   { key: 'cleaning_service', label: 'Cleaning Services', description: 'Pre-listing and showing-readiness cleaners.', rolloutPhase: 1, sortOrder: 5 },
+  { key: 'termite_inspection', label: 'Termite Inspectors', description: 'Wood destroying organism and termite inspection services.', rolloutPhase: 1, sortOrder: 6 },
+  { key: 'notary', label: 'Notaries', description: 'Mobile and in-office notarization support for transaction documents.', rolloutPhase: 1, sortOrder: 7 },
+  { key: 'nhd_report', label: 'NHD Report Providers', description: 'Natural hazard disclosure report preparation and delivery.', rolloutPhase: 1, sortOrder: 8 },
 ];
 
 function slugify(value) {
@@ -29,6 +32,10 @@ function slugify(value) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 80);
+}
+
+function buildCategoryKey(value) {
+  return slugify(value).replace(/-/g, '_').slice(0, 80);
 }
 
 function normalizeString(value) {
@@ -529,8 +536,6 @@ export async function ensureProviderCategories() {
         {
           $setOnInsert: {
             key: category.key,
-          },
-          $set: {
             label: category.label,
             description: category.description,
             rolloutPhase: category.rolloutPhase,
@@ -549,6 +554,106 @@ export async function ensureProviderCategories() {
 
 export async function listProviderCategories() {
   return ensureProviderCategories();
+}
+
+export async function listAdminProviderCategories() {
+  await ensureProviderCategories();
+
+  if (mongoose.connection.readyState !== 1) {
+    return {
+      dataSource: 'demo',
+      categories: DEFAULT_PROVIDER_CATEGORIES.map((category, index) => ({
+        id: `default-category-${index + 1}`,
+        ...category,
+        isActive: true,
+      })),
+    };
+  }
+
+  const categories = await ProviderCategoryModel.find({})
+    .sort({ sortOrder: 1, label: 1 })
+    .lean();
+
+  return {
+    dataSource: 'mongodb',
+    categories: categories.map(serializeCategory),
+  };
+}
+
+export async function createAdminProviderCategory(payload = {}) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to create provider categories.');
+  }
+
+  await ensureProviderCategories();
+
+  const label = normalizeString(payload.label).slice(0, 80);
+  if (!label) {
+    throw new Error('Category label is required.');
+  }
+
+  const key = buildCategoryKey(payload.key || label);
+  if (!key) {
+    throw new Error('Category key is required.');
+  }
+
+  const existingCategory = await ProviderCategoryModel.findOne({ key }).lean();
+  if (existingCategory) {
+    throw new Error('A provider category with that key already exists.');
+  }
+
+  const category = await ProviderCategoryModel.create({
+    key,
+    label,
+    description: normalizeString(payload.description).slice(0, 240),
+    rolloutPhase: Math.max(1, Math.min(10, Number(payload.rolloutPhase || 1))),
+    sortOrder: Number.isFinite(Number(payload.sortOrder)) ? Number(payload.sortOrder) : 999,
+    isActive: payload.isActive !== false,
+  });
+
+  return { category: serializeCategory(category.toObject()) };
+}
+
+export async function updateAdminProviderCategory(categoryKey, payload = {}) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to update provider categories.');
+  }
+
+  await ensureProviderCategories();
+
+  const key = normalizeString(categoryKey);
+  const category = await ProviderCategoryModel.findOne({ key });
+  if (!category) {
+    throw new Error('Provider category not found.');
+  }
+
+  if (payload.label !== undefined) {
+    const label = normalizeString(payload.label).slice(0, 80);
+    if (!label) {
+      throw new Error('Category label is required.');
+    }
+    category.label = label;
+  }
+
+  if (payload.description !== undefined) {
+    category.description = normalizeString(payload.description).slice(0, 240);
+  }
+
+  if (payload.sortOrder !== undefined) {
+    category.sortOrder = Number.isFinite(Number(payload.sortOrder)) ? Number(payload.sortOrder) : category.sortOrder;
+  }
+
+  if (payload.rolloutPhase !== undefined) {
+    category.rolloutPhase = Math.max(1, Math.min(10, Number(payload.rolloutPhase || 1)));
+  }
+
+  if (payload.isActive !== undefined) {
+    category.isActive = Boolean(payload.isActive);
+  }
+
+  await category.save();
+
+  return { category: serializeCategory(category.toObject()) };
 }
 
 async function resolveRequestedCategory(propertyId, { categoryKey = '', taskKey = '' } = {}) {
@@ -1167,7 +1272,7 @@ export async function listAdminProviders({ limit = 50 } = {}) {
           { $group: { _id: '$providerId', leadCount: { $sum: 1 } } },
         ])
       : [],
-    ProviderCategoryModel.find({ isActive: true }).lean(),
+    ProviderCategoryModel.find({}).lean(),
   ]);
 
   const dispatchCountByProviderId = new Map(dispatchCounts.map((entry) => [entry._id?.toString?.() || String(entry._id), Number(entry.leadCount || 0)]));

@@ -116,6 +116,10 @@ export function listProviderLeads(propertyId) {
   return request(`/api/v1/properties/${propertyId}/provider-leads`);
 }
 
+export function listProviderCategories() {
+  return request('/api/v1/provider-categories');
+}
+
 export function saveProvider(propertyId, providerId) {
   return request(`/api/v1/properties/${propertyId}/providers/${providerId}/save`, {
     method: 'POST',

@@ -6,11 +6,13 @@ import { useQuery } from '@tanstack/react-query';
 import { ClientDataTable } from './ClientDataTable';
 import { ClientMetricCard } from './ClientMetricCard';
 import { CreateProviderCard } from './CreateProviderCard';
+import { ProviderCategoryManager } from './ProviderCategoryManager';
 import { ProviderLeadOperations } from './ProviderLeadOperations';
 import { ProviderRoster } from './ProviderRoster';
 
 const TAB_OPTIONS = [
   { id: 'overview', label: 'Overview' },
+  { id: 'business-types', label: 'Business Types' },
   { id: 'create', label: 'Create' },
   { id: 'roster', label: 'Roster' },
   { id: 'lead-queue', label: 'Lead Queue' },
@@ -46,11 +48,13 @@ export function ProvidersTabbedWorkspace({
 
   const snapshot = providersSnapshotQuery.data || initialSnapshot;
   const providers = snapshot.providers || [];
+  const categories = snapshot.categories || [];
   const leadSummary = snapshot.leadSummary || {};
   const leadOpsSummary = snapshot.leadOpsSummary || {};
   const leads = snapshot.leads || [];
   const providerError = snapshot.providerError || '';
   const leadError = snapshot.leadError || '';
+  const categoryError = snapshot.categoryError || '';
 
   const rosterPreview = useMemo(() => providers.slice(0, 6), [providers]);
   const leadPreview = useMemo(() => leads.slice(0, 6), [leads]);
@@ -60,6 +64,7 @@ export function ProvidersTabbedWorkspace({
       {providersSnapshotQuery.isFetching ? <div className="notice">Refreshing provider data...</div> : null}
       {providerError ? <div className="notice error">{providerError}</div> : null}
       {leadError ? <div className="notice error">{leadError}</div> : null}
+      {categoryError ? <div className="notice error">{categoryError}</div> : null}
 
       <div className="card-grid compact">
         <ClientMetricCard label="Providers" value={providers.length} note="Current marketplace records" />
@@ -87,6 +92,7 @@ export function ProvidersTabbedWorkspace({
             >
               <span>{tab.label}</span>
               {tab.id === 'roster' ? <strong>{providers.length}</strong> : null}
+              {tab.id === 'business-types' ? <strong>{categories.length}</strong> : null}
               {tab.id === 'lead-queue' || tab.id === 'lead-ops' ? <strong>{leads.length}</strong> : null}
             </button>
           ))}
@@ -168,9 +174,29 @@ export function ProvidersTabbedWorkspace({
             </div>
           ) : null}
 
+          {activeTab === 'business-types' ? (
+            <div className="split-layout">
+              <ProviderCategoryManager
+                categories={categories}
+                onUpdated={() => providersSnapshotQuery.refetch()}
+              />
+              <div className="subpanel">
+                <h2>Business type guidance</h2>
+                <ul className="bullet-list muted">
+                  <li>These categories power provider signup, admin provider creation, and seller recommendations.</li>
+                  <li>Deactivate a type when you want to hide it from new providers without deleting historical records.</li>
+                  <li>Use clear consumer-facing labels like Notary or NHD Report so sellers understand the service instantly.</li>
+                </ul>
+              </div>
+            </div>
+          ) : null}
+
           {activeTab === 'create' ? (
             <div className="split-layout">
-              <CreateProviderCard onCreated={() => providersSnapshotQuery.refetch()} />
+              <CreateProviderCard
+                categories={categories}
+                onCreated={() => providersSnapshotQuery.refetch()}
+              />
               <div className="subpanel">
                 <h2>Seeding guidance</h2>
                 <ul className="bullet-list muted">

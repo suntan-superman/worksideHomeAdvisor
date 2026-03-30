@@ -1,13 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-const CATEGORY_OPTIONS = [
+const FALLBACK_CATEGORY_OPTIONS = [
   { value: 'inspector', label: 'Home Inspectors' },
   { value: 'title_company', label: 'Title Companies' },
   { value: 'real_estate_attorney', label: 'Real Estate Attorneys' },
   { value: 'photographer', label: 'Photographers' },
   { value: 'cleaning_service', label: 'Cleaning Services' },
+  { value: 'termite_inspection', label: 'Termite Inspectors' },
+  { value: 'notary', label: 'Notaries' },
+  { value: 'nhd_report', label: 'NHD Report Providers' },
 ];
 
 const INITIAL_FORM = {
@@ -34,10 +37,32 @@ const INITIAL_FORM = {
   planCode: 'provider_standard',
 };
 
-export function CreateProviderCard({ onCreated }) {
+export function CreateProviderCard({ categories = [], onCreated }) {
+  const categoryOptions =
+    categories.length
+      ? categories.filter((category) => category.isActive !== false).map((category) => ({
+          value: category.key,
+          label: category.label,
+        }))
+      : FALLBACK_CATEGORY_OPTIONS;
   const [form, setForm] = useState(INITIAL_FORM);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!categoryOptions.length) {
+      return;
+    }
+
+    if (categoryOptions.some((option) => option.value === form.categoryKey)) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      categoryKey: categoryOptions[0]?.value || current.categoryKey,
+    }));
+  }, [categoryOptions, form.categoryKey]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -102,7 +127,7 @@ export function CreateProviderCard({ onCreated }) {
             value={form.categoryKey}
             onChange={(event) => setForm((current) => ({ ...current, categoryKey: event.target.value }))}
           >
-            {CATEGORY_OPTIONS.map((option) => (
+            {categoryOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
