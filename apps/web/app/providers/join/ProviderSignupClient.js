@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { PasswordInput } from '../../../components/PasswordInput';
@@ -91,6 +91,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
   const [createdProvider, setCreatedProvider] = useState(null);
   const [appSession, setAppSession] = useState(null);
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState('');
+  const syncedNotifyEmailRef = useRef('');
 
   useEffect(() => {
     setAppSession(getStoredSession());
@@ -110,17 +111,23 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
       email: current.email || sessionUser.email || '',
       notifyEmail: current.notifyEmail || sessionUser.email || '',
     }));
+    syncedNotifyEmailRef.current = sessionUser.email || syncedNotifyEmailRef.current;
   }, [appSession]);
 
   useEffect(() => {
-    if (!form.email || form.notifyEmail) {
+    if (!isValidEmail(form.email)) {
       return;
     }
 
     setForm((current) => {
-      if (!current.email || current.notifyEmail) {
+      const shouldSyncNotifyEmail =
+        !current.notifyEmail || current.notifyEmail === syncedNotifyEmailRef.current;
+
+      if (!shouldSyncNotifyEmail) {
         return current;
       }
+
+      syncedNotifyEmailRef.current = current.email;
 
       return {
         ...current,

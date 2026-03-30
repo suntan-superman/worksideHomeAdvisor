@@ -414,6 +414,12 @@ select {
   flex-wrap: wrap;
 }
 
+.split-fields > label,
+.split-fields > div {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .mode-switch {
   margin-top: 18px;
 }
