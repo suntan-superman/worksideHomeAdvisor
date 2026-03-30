@@ -1,4 +1,6 @@
-export function DataTable({ columns, rows, emptyMessage = 'No rows available.' }) {
+'use client';
+
+export function ClientDataTable({ columns, rows, emptyMessage = 'No rows available.' }) {
   if (!rows?.length) {
     return <div className="empty-state">{emptyMessage}</div>;
   }

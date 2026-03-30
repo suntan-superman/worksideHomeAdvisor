@@ -1,4 +1,6 @@
-export function MetricCard({ label, value, note }) {
+'use client';
+
+export function ClientMetricCard({ label, value, note }) {
   return (
     <article className="metric-card">
       <div className="muted small-label">{label}</div>

@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from 'react';
 
-import { DataTable } from '../_components/DataTable';
-import { MetricCard } from '../_components/MetricCard';
+import { ClientDataTable } from './ClientDataTable';
+import { ClientMetricCard } from './ClientMetricCard';
 import { CreateProviderCard } from './CreateProviderCard';
 import { ProviderLeadOperations } from './ProviderLeadOperations';
 import { ProviderRoster } from './ProviderRoster';
@@ -39,16 +39,16 @@ export function ProvidersTabbedWorkspace({
       {leadError ? <div className="notice error">{leadError}</div> : null}
 
       <div className="card-grid compact">
-        <MetricCard label="Providers" value={providers.length} note="Current marketplace records" />
-        <MetricCard label="Open Leads" value={leadSummary.open || 0} note="No providers contacted yet" />
-        <MetricCard label="Routing" value={leadSummary.routing || 0} note="Queued for provider outreach" />
-        <MetricCard label="Matched" value={leadSummary.matched || 0} note="At least one provider engaged" />
+        <ClientMetricCard label="Providers" value={providers.length} note="Current marketplace records" />
+        <ClientMetricCard label="Open Leads" value={leadSummary.open || 0} note="No providers contacted yet" />
+        <ClientMetricCard label="Routing" value={leadSummary.routing || 0} note="Queued for provider outreach" />
+        <ClientMetricCard label="Matched" value={leadSummary.matched || 0} note="At least one provider engaged" />
       </div>
 
       <div className="card-grid compact">
-        <MetricCard label="Awaiting Response" value={leadOpsSummary.awaitingResponse || 0} note="Sent but not yet accepted" />
-        <MetricCard label="Failed Dispatches" value={leadOpsSummary.failedDispatches || 0} note="Need manual resend or review" />
-        <MetricCard label="Closed Leads" value={(leadOpsSummary.completed || 0) + (leadOpsSummary.cancelled || 0)} note="Completed or cancelled manually" />
+        <ClientMetricCard label="Awaiting Response" value={leadOpsSummary.awaitingResponse || 0} note="Sent but not yet accepted" />
+        <ClientMetricCard label="Failed Dispatches" value={leadOpsSummary.failedDispatches || 0} note="Need manual resend or review" />
+        <ClientMetricCard label="Closed Leads" value={(leadOpsSummary.completed || 0) + (leadOpsSummary.cancelled || 0)} note="Completed or cancelled manually" />
       </div>
 
       <div className="provider-tabs-shell">
@@ -99,7 +99,7 @@ export function ProvidersTabbedWorkspace({
                       Open roster
                     </button>
                   </div>
-                  <DataTable
+                  <ClientDataTable
                     columns={[
                       { key: 'businessName', label: 'Business' },
                       { key: 'categoryLabel', label: 'Category' },
@@ -129,7 +129,7 @@ export function ProvidersTabbedWorkspace({
                       Open queue
                     </button>
                   </div>
-                  <DataTable
+                  <ClientDataTable
                     columns={[
                       { key: 'categoryKey', label: 'Category', render: (value) => formatCategoryLabel(value) },
                       { key: 'status', label: 'Lead Status' },
@@ -162,7 +162,7 @@ export function ProvidersTabbedWorkspace({
           {activeTab === 'roster' ? <ProviderRoster providers={providers} /> : null}
 
           {activeTab === 'lead-queue' ? (
-            <DataTable
+            <ClientDataTable
               columns={[
                 { key: 'categoryKey', label: 'Category', render: (value) => formatCategoryLabel(value) },
                 { key: 'status', label: 'Lead Status' },
