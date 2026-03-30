@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { PasswordInput } from '../../../components/PasswordInput';
-import { createProviderBillingCheckout, signupProvider } from '../../../lib/api';
+import { createProviderBillingCheckout, getBillingPlans, signupProvider } from '../../../lib/api';
 import { setStoredProviderSession } from '../../../lib/provider-session';
 import { getStoredSession } from '../../../lib/session';
 import { Toast } from '../../../components/Toast';
@@ -60,6 +60,16 @@ const INITIAL_FORM = {
   planCode: '',
 };
 
+function createInitialForm(sessionUser = null) {
+  return {
+    ...INITIAL_FORM,
+    firstName: sessionUser?.firstName || '',
+    lastName: sessionUser?.lastName || '',
+    email: sessionUser?.email || '',
+    notifyEmail: sessionUser?.email || '',
+  };
+}
+
 function formatPhoneInput(value) {
   const digits = String(value || '').replace(/\D/g, '').slice(0, 10);
 
@@ -82,15 +92,31 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 }
 
+function getExistingEmailConflictMessage(message) {
+  const normalizedMessage = String(message || '').toLowerCase();
+
+  if (
+    normalizedMessage.includes('account with that email already exists') ||
+    normalizedMessage.includes('provider profile already exists for that email address')
+  ) {
+    return String(message || '').trim();
+  }
+
+  return '';
+}
+
 export function ProviderSignupClient({ billingState = '', providerId = '' }) {
   const router = useRouter();
   const [stepIndex, setStepIndex] = useState(0);
-  const [form, setForm] = useState(INITIAL_FORM);
+  const [form, setForm] = useState(createInitialForm());
   const [loading, setLoading] = useState(false);
+  const [plansLoading, setPlansLoading] = useState(false);
   const [toast, setToast] = useState(null);
   const [createdProvider, setCreatedProvider] = useState(null);
   const [appSession, setAppSession] = useState(null);
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState('');
+  const [providerPlans, setProviderPlans] = useState([]);
+  const [existingEmailConflict, setExistingEmailConflict] = useState('');
   const syncedNotifyEmailRef = useRef('');
 
   useEffect(() => {
@@ -154,6 +180,41 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
     }
   }, [billingState, providerId]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProviderPlans() {
+      setPlansLoading(true);
+
+      try {
+        const payload = await getBillingPlans();
+        if (cancelled) {
+          return;
+        }
+
+        setProviderPlans(
+          (payload.plans || []).filter((plan) =>
+            ['provider_basic', 'provider_standard', 'provider_featured'].includes(plan.planKey),
+          ),
+        );
+      } catch {
+        if (!cancelled) {
+          setProviderPlans([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setPlansLoading(false);
+        }
+      }
+    }
+
+    loadProviderPlans();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const signedInProvider = ['provider', 'admin', 'super_admin'].includes(appSession?.user?.role || '');
   const businessEmailIsValid = isValidEmail(form.email);
   const leadEmailIsValid = !form.notifyEmail || isValidEmail(form.notifyEmail);
@@ -161,14 +222,45 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
   const notifyPhoneIsValid = countPhoneDigits(form.notifyPhone) >= 10;
   const passwordLongEnough = form.password.length >= 8;
   const passwordsMatch = Boolean(form.password && form.password === form.confirmPassword);
+  const providerPlanDetails = Object.fromEntries(
+    providerPlans.map((plan) => [plan.planKey, plan]),
+  );
 
   function updateField(field, value) {
+    if (existingEmailConflict && ['email', 'firstName', 'lastName', 'businessName'].includes(field)) {
+      setExistingEmailConflict('');
+    }
+
     if (field === 'phone' || field === 'notifyPhone') {
       setForm((current) => ({ ...current, [field]: formatPhoneInput(value) }));
       return;
     }
 
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function handleReturnToStepOne() {
+    setExistingEmailConflict('');
+    setToast({
+      tone: 'info',
+      title: 'Update the email to continue',
+      message: 'Step 1 is ready so you can correct the email address or sign in with the existing provider account instead.',
+    });
+    setStepIndex(0);
+  }
+
+  function handleCancelSignup() {
+    const sessionUser = appSession?.user || null;
+    const resetForm = createInitialForm(sessionUser);
+    syncedNotifyEmailRef.current = resetForm.notifyEmail || '';
+    setExistingEmailConflict('');
+    setForm(resetForm);
+    setStepIndex(0);
+    setToast({
+      tone: 'info',
+      title: 'Signup cancelled',
+      message: 'The provider signup was cleared. You can start again whenever you are ready.',
+    });
   }
 
   function isCurrentStepReady() {
@@ -265,6 +357,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
     try {
       validateCurrentStep();
       setToast(null);
+      setExistingEmailConflict('');
       setStepIndex((current) => Math.min(current + 1, STEP_TITLES.length - 1));
     } catch (error) {
       setToast({
@@ -277,6 +370,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
 
   function handleBack() {
     setToast(null);
+    setExistingEmailConflict('');
     setStepIndex((current) => Math.max(current - 1, 0));
   }
 
@@ -284,6 +378,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
     event.preventDefault();
     setLoading(true);
     setToast(null);
+    setExistingEmailConflict('');
 
     try {
       validateCurrentStep();
@@ -368,6 +463,17 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
             : 'Your business is in the review and billing-setup queue.',
       });
     } catch (error) {
+      const conflictMessage = getExistingEmailConflictMessage(error.message);
+      if (conflictMessage) {
+        setExistingEmailConflict(conflictMessage);
+        setToast({
+          tone: 'error',
+          title: 'That provider email is already in use',
+          message: 'Choose whether you want to go back to step 1 and correct it, or cancel this signup attempt.',
+        });
+        return;
+      }
+
       setToast({
         tone: 'error',
         title: 'Could not submit provider profile',
@@ -508,6 +614,25 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
         </div>
 
         <form className="form-card" onSubmit={handleSubmit}>
+          {existingEmailConflict ? (
+            <div className="signup-decision-card signup-decision-card-warning">
+              <strong>Email already in use</strong>
+              <p>{existingEmailConflict}</p>
+              <p>
+                You can return to step 1 to use a different email address, or cancel this signup
+                attempt and start over later.
+              </p>
+              <div className="button-stack">
+                <button type="button" className="button-secondary" onClick={handleReturnToStepOne}>
+                  Back to step 1
+                </button>
+                <button type="button" className="button-primary" onClick={handleCancelSignup}>
+                  Cancel signup
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           {stepIndex === 0 ? (
             <>
               {!signedInProvider ? (
@@ -752,6 +877,14 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
                       onChange={(event) => updateField('planCode', event.target.value)}
                     />
                     <strong>{plan.label}</strong>
+                    <em className="onboarding-plan-price">
+                      {providerPlanDetails[plan.value]?.priceLabel ||
+                        (plan.value === 'provider_basic'
+                          ? 'Free'
+                          : plansLoading
+                            ? 'Loading price...'
+                            : 'Configured at checkout')}
+                    </em>
                     <span>{plan.detail}</span>
                   </label>
                 ))}

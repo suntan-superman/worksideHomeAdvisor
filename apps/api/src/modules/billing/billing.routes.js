@@ -34,7 +34,7 @@ export async function billingRoutes(fastify) {
   );
 
   fastify.get('/plans', async () => ({
-    plans: listBillingPlans(),
+    plans: await listBillingPlans(),
   }));
 
   fastify.get('/summary/:userId', async (request, reply) => {

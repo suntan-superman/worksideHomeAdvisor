@@ -157,6 +157,86 @@ export function listPlanCatalog() {
   }));
 }
 
+function formatCurrencyAmount(amount, currency = 'usd') {
+  if (typeof amount !== 'number') {
+    return '';
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: String(currency || 'usd').toUpperCase(),
+    maximumFractionDigits: 2,
+  }).format(amount / 100);
+}
+
+function buildBillingCadenceLabel(price) {
+  const interval = price?.recurring?.interval;
+  const intervalCount = Number(price?.recurring?.interval_count || 1);
+
+  if (!interval) {
+    return 'one-time';
+  }
+
+  if (intervalCount > 1) {
+    return `every ${intervalCount} ${interval}s`;
+  }
+
+  return `per ${interval}`;
+}
+
+export async function listPlanCatalogWithPricing() {
+  const plans = listPlanCatalog();
+  const stripe = getStripeClient();
+
+  if (!stripe) {
+    return plans.map((plan) => ({
+      ...plan,
+      priceAmount: null,
+      currency: null,
+      billingCadence: plan.mode === 'payment' ? 'one-time' : null,
+      priceLabel: plan.planKey === 'provider_basic' ? 'Free' : null,
+    }));
+  }
+
+  const enrichedPlans = await Promise.all(
+    plans.map(async (plan) => {
+      if (!plan.priceId) {
+        return {
+          ...plan,
+          priceAmount: null,
+          currency: null,
+          billingCadence: plan.planKey === 'provider_basic' ? 'free' : null,
+          priceLabel: plan.planKey === 'provider_basic' ? 'Free' : null,
+        };
+      }
+
+      try {
+        const price = await stripe.prices.retrieve(plan.priceId);
+        const amount = typeof price.unit_amount === 'number' ? price.unit_amount : null;
+        const cadence = buildBillingCadenceLabel(price);
+
+        return {
+          ...plan,
+          priceAmount: amount,
+          currency: price.currency || 'usd',
+          billingCadence: cadence,
+          priceLabel: amount !== null ? `${formatCurrencyAmount(amount, price.currency)} ${cadence}` : cadence,
+        };
+      } catch {
+        return {
+          ...plan,
+          priceAmount: null,
+          currency: null,
+          billingCadence: plan.mode === 'payment' ? 'one-time' : null,
+          priceLabel: plan.planKey === 'provider_basic' ? 'Free' : null,
+        };
+      }
+    }),
+  );
+
+  return enrichedPlans;
+}
+
 export function getPlanConfig(planKey) {
   const plan = PLAN_CATALOG[planKey];
   if (!plan) {

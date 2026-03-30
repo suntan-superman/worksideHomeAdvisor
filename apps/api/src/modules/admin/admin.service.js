@@ -273,7 +273,7 @@ export async function listAdminProperties({ limit = 50 } = {}) {
 }
 
 export async function getAdminBillingSnapshot() {
-  const plans = listBillingPlans();
+  const plans = await listBillingPlans();
 
   if (mongoose.connection.readyState !== 1) {
     return {

@@ -6,6 +6,7 @@ import {
   getStripeClient,
   isStripeConfigured,
   listPlanCatalog,
+  listPlanCatalogWithPricing,
   resolveBillingUrls,
 } from '../../services/stripeClient.js';
 import { UserModel } from '../auth/auth.model.js';
@@ -426,8 +427,8 @@ async function syncInvoice(invoice) {
   });
 }
 
-export function listBillingPlans() {
-  return listPlanCatalog();
+export async function listBillingPlans() {
+  return listPlanCatalogWithPricing();
 }
 
 export async function createCheckoutSession({

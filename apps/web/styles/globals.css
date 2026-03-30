@@ -461,6 +461,28 @@ select {
   border-radius: 18px;
 }
 
+.signup-decision-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+}
+
+.signup-decision-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.signup-decision-card-warning {
+  background: rgba(255, 243, 239, 0.98);
+  border-color: rgba(173, 74, 55, 0.22);
+}
+
+.signup-decision-card-warning strong {
+  color: #8a3f33;
+}
+
 .onboarding-shell {
   margin-top: 8px;
 }
@@ -489,6 +511,13 @@ select {
 .onboarding-step span,
 .onboarding-plan span {
   color: var(--muted);
+}
+
+.onboarding-plan-price {
+  color: var(--clay);
+  font-size: 0.9rem;
+  font-style: normal;
+  font-weight: 700;
 }
 
 .onboarding-step.active,
