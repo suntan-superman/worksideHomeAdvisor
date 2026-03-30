@@ -81,6 +81,7 @@ const providerPortalAccessSchema = new mongoose.Schema(
 
 const providerSchema = new mongoose.Schema(
   {
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
     businessName: { type: String, required: true, trim: true },
     slug: { type: String, required: true, trim: true, unique: true, index: true },
     categoryKey: { type: String, required: true, trim: true, index: true },

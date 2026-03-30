@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 
 import { createProviderBillingCheckout, signupProvider } from '../../../lib/api';
 import { setStoredProviderSession } from '../../../lib/provider-session';
+import { getStoredSession } from '../../../lib/session';
 import { Toast } from '../../../components/Toast';
 
 const STEP_TITLES = [
@@ -83,6 +84,11 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
   const [createdProvider, setCreatedProvider] = useState(null);
+  const [appSession, setAppSession] = useState(null);
+
+  useEffect(() => {
+    setAppSession(getStoredSession());
+  }, []);
 
   useEffect(() => {
     if (billingState === 'success') {
@@ -204,7 +210,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
         planCode: form.planCode,
       };
 
-      const result = await signupProvider(payload);
+      const result = await signupProvider(payload, appSession?.token);
       const provider = result.provider || null;
       const portalAccessToken = result.portalAccessToken || provider?.portalAccessToken || '';
       setCreatedProvider(provider);
@@ -298,6 +304,36 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
               </a>
               <Link className="button-secondary" href="/">
                 Back to homepage
+              </Link>
+            </div>
+          </div>
+        </section>
+      </>
+    );
+  }
+
+  if (
+    appSession?.user?.email &&
+    !['provider', 'admin', 'super_admin'].includes(appSession.user.role)
+  ) {
+    return (
+      <>
+        <Toast tone={toast?.tone} title={toast?.title} message={toast?.message} onClose={() => setToast(null)} />
+        <section className="content-grid onboarding-shell">
+          <div className="content-card">
+            <span className="label">Provider onboarding</span>
+            <h1>Provider accounts are separate from seller and agent accounts.</h1>
+            <p>
+              You are currently signed in as <strong>{appSession.user.email}</strong> with the role{' '}
+              <strong>{appSession.user.role}</strong>. To create or manage a provider business, use
+              a provider account instead.
+            </p>
+            <div className="button-stack">
+              <Link className="button-primary" href="/auth">
+                Open account login
+              </Link>
+              <Link className="button-secondary" href="/dashboard">
+                Return to workspace
               </Link>
             </div>
           </div>

@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { createProviderCheckoutSession } from '../billing/billing.service.js';
+import { verifySessionToken } from '../../services/sessionService.js';
 
 import {
   createProviderLeadRequest,
+  createProviderPortalSessionForUser,
   createProviderPortalSession,
   createProviderProfile,
   listProviderCategories,
@@ -96,6 +98,21 @@ function getProviderPortalToken(request) {
   return String(request.headers['x-provider-portal-token'] || '').trim();
 }
 
+function getAuthenticatedSession(request) {
+  const authorization = request.headers.authorization || '';
+  const [scheme, token] = authorization.split(' ');
+
+  if (scheme !== 'Bearer' || !token) {
+    return null;
+  }
+
+  try {
+    return verifySessionToken(token);
+  } catch {
+    return null;
+  }
+}
+
 export async function providersRoutes(fastify) {
   fastify.get('/provider-categories', async (_request, reply) => {
     try {
@@ -163,9 +180,13 @@ export async function providersRoutes(fastify) {
   fastify.post('/provider-portal/signup', async (request, reply) => {
     try {
       const payload = providerSignupSchema.parse(request.body || {});
+      const session = getAuthenticatedSession(request);
       const provider = await createProviderProfile(payload, {
         createdFrom: 'provider_portal',
         status: 'pending_billing',
+        userId: session?.sub || '',
+        userEmail: session?.email || '',
+        userRole: session?.role || '',
       });
       const { portalAccessToken = '', ...providerRecord } = provider || {};
       return reply.code(201).send({ provider: providerRecord, portalAccessToken });
@@ -186,9 +207,14 @@ export async function providersRoutes(fastify) {
 
   fastify.post('/provider-portal/session', async (request, reply) => {
     try {
+      const authSession = getAuthenticatedSession(request);
+      if (authSession?.sub) {
+        const providerSession = await createProviderPortalSessionForUser(authSession.sub);
+        return reply.send({ session: providerSession });
+      }
       const payload = providerPortalSessionSchema.parse(request.body || {});
-      const session = await createProviderPortalSession(payload);
-      return reply.send({ session });
+      const providerSession = await createProviderPortalSession(payload);
+      return reply.send({ session: providerSession });
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }

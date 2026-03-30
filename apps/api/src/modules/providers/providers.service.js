@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import { normalizePhoneNumber, notifyQueuedLeadDispatches } from '../marketplace-sms/marketplace-sms.service.js';
 import { ChecklistModel } from '../tasks/checklist.model.js';
 import { getPropertyById } from '../properties/property.service.js';
+import { UserModel } from '../auth/auth.model.js';
 import {
   LeadDispatchModel,
   LeadRequestModel,
@@ -176,6 +177,7 @@ function buildCoverageLabel(provider, property) {
 function serializeProvider(document, extras = {}) {
   return {
     id: document._id?.toString?.() || String(document._id),
+    userId: document.userId?.toString?.() || String(document.userId || ''),
     businessName: document.businessName,
     slug: document.slug,
     categoryKey: document.categoryKey,
@@ -329,6 +331,28 @@ async function authenticateProviderPortal(providerId, token) {
 
   provider.portalAccess.lastUsedAt = new Date();
   await provider.save();
+
+  return provider;
+}
+
+async function findProviderForUser(userId, email = '') {
+  if (!userId && !email) {
+    return null;
+  }
+
+  let provider = null;
+
+  if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+    provider = await ProviderModel.findOne({ userId });
+  }
+
+  if (!provider && email) {
+    provider = await ProviderModel.findOne({ email: String(email).toLowerCase().trim() });
+    if (provider && !provider.userId && userId && mongoose.Types.ObjectId.isValid(userId)) {
+      provider.userId = userId;
+      await provider.save();
+    }
+  }
 
   return provider;
 }
@@ -787,7 +811,10 @@ async function generateUniqueProviderSlug(baseName) {
   return slug;
 }
 
-export async function createProviderProfile(payload = {}, { createdFrom = 'admin', status = 'active' } = {}) {
+export async function createProviderProfile(
+  payload = {},
+  { createdFrom = 'admin', status = 'active', userId = '', userEmail = '', userRole = '' } = {},
+) {
   if (mongoose.connection.readyState !== 1) {
     throw new Error('Database connection is required to create providers.');
   }
@@ -799,6 +826,25 @@ export async function createProviderProfile(payload = {}, { createdFrom = 'admin
 
   const businessName = normalizeString(payload.businessName).slice(0, 140);
   if (!businessName) throw new Error('Business name is required.');
+
+  if (userId && userRole && !['provider', 'admin', 'super_admin'].includes(userRole)) {
+    throw new Error('Only provider or admin accounts can create provider profiles while signed in.');
+  }
+
+  if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+    const existingProviderForUser = await ProviderModel.findOne({ userId }).lean();
+    if (existingProviderForUser) {
+      throw new Error('A provider profile already exists for this account.');
+    }
+  }
+
+  const normalizedEmail = normalizeString(payload.email).toLowerCase();
+  if (normalizedEmail) {
+    const existingProviderForEmail = await ProviderModel.findOne({ email: normalizedEmail }).lean();
+    if (existingProviderForEmail && String(existingProviderForEmail.userId || '') !== String(userId || '')) {
+      throw new Error('A provider profile already exists for that email address.');
+    }
+  }
 
   const slug = await generateUniqueProviderSlug(businessName);
   const notifyPhone = normalizeString(payload.notifyPhone || payload.leadRouting?.notifyPhone || payload.phone).slice(0, 40);
@@ -814,12 +860,13 @@ export async function createProviderProfile(payload = {}, { createdFrom = 'admin
     payload.compliance?.approvalStatus ||
     (createdFrom === 'provider_portal' ? 'review' : 'approved');
   const document = await ProviderModel.create({
+    userId: userId && mongoose.Types.ObjectId.isValid(userId) ? userId : null,
     businessName,
     slug,
     categoryKey,
     description: normalizeString(payload.description).slice(0, 600),
     phone: normalizeString(payload.phone).slice(0, 40),
-    email: normalizeString(payload.email).slice(0, 120),
+    email: normalizedEmail.slice(0, 120),
     websiteUrl: normalizeString(payload.websiteUrl).slice(0, 180),
     status,
     isVerified: Boolean(payload.isVerified),
@@ -892,6 +939,39 @@ export async function createProviderPortalSession({ providerId, token }) {
   const provider = await authenticateProviderPortal(providerId, token);
   const dashboard = await buildProviderPortalDashboard(provider);
 
+  return {
+    providerId: provider._id?.toString?.() || String(provider._id),
+    dashboard,
+  };
+}
+
+export async function createProviderPortalSessionForUser(userId) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required for provider portal access.');
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error('Provider account is invalid.');
+  }
+
+  const user = await UserModel.findById(userId).lean();
+  if (!user) {
+    throw new Error('Provider account not found.');
+  }
+
+  if (!['provider', 'admin', 'super_admin'].includes(user.role)) {
+    throw new Error('Only provider accounts can access the provider portal.');
+  }
+
+  const provider = await findProviderForUser(user._id, user.email);
+  if (!provider) {
+    throw new Error('No provider profile is linked to this account yet.');
+  }
+
+  provider.portalAccess.lastUsedAt = new Date();
+  await provider.save();
+
+  const dashboard = await buildProviderPortalDashboard(provider);
   return {
     providerId: provider._id?.toString?.() || String(provider._id),
     dashboard,

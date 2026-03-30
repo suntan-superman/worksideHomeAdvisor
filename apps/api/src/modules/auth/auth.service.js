@@ -67,6 +67,7 @@ export async function signup(payload) {
     passwordHash,
     firstName: payload.firstName,
     lastName: payload.lastName,
+    role: payload.role || 'seller',
   });
 
   await storeVerificationOtp(user);

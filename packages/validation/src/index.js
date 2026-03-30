@@ -5,6 +5,7 @@ export const signupSchema = z.object({
   password: z.string().min(8),
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
+  role: z.enum(['seller', 'agent', 'provider']).optional(),
 });
 
 export const verifyOtpSchema = z.object({

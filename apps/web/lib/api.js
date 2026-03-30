@@ -122,9 +122,14 @@ export function saveProvider(propertyId, providerId) {
   });
 }
 
-export function signupProvider(payload) {
+export function signupProvider(payload, token) {
   return request('/api/v1/provider-portal/signup', {
     method: 'POST',
+    headers: token
+      ? {
+          Authorization: `Bearer ${token}`,
+        }
+      : undefined,
     body: JSON.stringify(payload),
   });
 }
@@ -136,9 +141,14 @@ export function createProviderBillingCheckout(payload) {
   });
 }
 
-export function createProviderPortalSession(payload) {
+export function createProviderPortalSession(payload, token) {
   return request('/api/v1/provider-portal/session', {
     method: 'POST',
+    headers: token
+      ? {
+          Authorization: `Bearer ${token}`,
+        }
+      : undefined,
     body: JSON.stringify(payload),
   });
 }

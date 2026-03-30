@@ -13,6 +13,40 @@ import {
 } from '../../lib/api';
 import { setStoredSession } from '../../lib/session';
 
+const ROLE_OPTIONS = [
+  { value: 'seller', label: 'Seller', description: 'Use the seller workspace and listing prep tools.' },
+  { value: 'agent', label: 'Realtor', description: 'Use agent-facing pricing and presentation workflows.' },
+  { value: 'provider', label: 'Provider', description: 'Manage provider onboarding, leads, and marketplace profile.' },
+];
+
+function getRoleDestination(role) {
+  if (role === 'provider') {
+    return '/providers/portal';
+  }
+
+  return '/dashboard';
+}
+
+function getRoleStatus(role, mode = 'login') {
+  if (mode === 'signup') {
+    if (role === 'provider') {
+      return 'Create a provider account first, then verify your email before setting up your business profile.';
+    }
+    if (role === 'agent') {
+      return 'Create a realtor account first, then verify your email to open pricing and listing workflows.';
+    }
+    return 'Create an account first, then verify your email with the OTP we send.';
+  }
+
+  if (role === 'provider') {
+    return 'Log in with your email and password to open your provider workspace.';
+  }
+  if (role === 'agent') {
+    return 'Log in with your email and password to open your agent workspace.';
+  }
+  return 'Log in with your email and password to open your seller workspace.';
+}
+
 export default function AuthPage() {
   const router = useRouter();
   const [mode, setMode] = useState('login');
@@ -22,8 +56,9 @@ export default function AuthPage() {
     firstName: '',
     lastName: '',
     otpCode: '',
+    role: 'seller',
   });
-  const [status, setStatus] = useState('Log in with your email and password to open your seller workspace.');
+  const [status, setStatus] = useState(getRoleStatus('seller', 'login'));
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showVerificationOption, setShowVerificationOption] = useState(false);
@@ -39,12 +74,12 @@ export default function AuthPage() {
 
   function switchToLogin() {
     setMode('login');
-    setStatus('Log in with your email and password to open your seller workspace.');
+    setStatus(getRoleStatus(form.role, 'login'));
   }
 
   function switchToSignup() {
     setMode('signup');
-    setStatus('Create an account first, then verify your email with the OTP we send.');
+    setStatus(getRoleStatus(form.role, 'signup'));
   }
 
   async function handlePrimaryAction(event) {
@@ -59,6 +94,7 @@ export default function AuthPage() {
           password: form.password,
           firstName: form.firstName,
           lastName: form.lastName,
+          role: form.role,
         });
         setMode('verify');
         setShowVerificationOption(true);
@@ -91,7 +127,7 @@ export default function AuthPage() {
           user: result.user,
         });
         setStatus('Login complete.');
-        router.push('/dashboard');
+        router.push(getRoleDestination(result.user?.role));
       } else {
         const result = await verifyEmailOtp({
           email: form.email,
@@ -106,9 +142,14 @@ export default function AuthPage() {
         setToast({
           tone: 'success',
           title: 'Email verified',
-          message: 'Your seller dashboard is ready.',
+          message:
+            result.user?.role === 'provider'
+              ? 'Your provider workspace is ready.'
+              : result.user?.role === 'agent'
+                ? 'Your agent workspace is ready.'
+                : 'Your seller dashboard is ready.',
         });
-        router.push('/dashboard');
+        router.push(getRoleDestination(result.user?.role));
       }
     } catch (requestError) {
       setToast({
@@ -195,6 +236,28 @@ export default function AuthPage() {
         <form className="form-card" onSubmit={handlePrimaryAction}>
           {mode === 'signup' ? (
             <>
+              <label>
+                Account type
+                <select
+                  className="select-input"
+                  value={form.role}
+                  onChange={(event) => {
+                    updateField('role', event.target.value);
+                    setStatus(getRoleStatus(event.target.value, 'signup'));
+                  }}
+                >
+                  {ROLE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="status-copy">
+                {
+                  ROLE_OPTIONS.find((option) => option.value === form.role)?.description
+                }
+              </div>
               <label>
                 First name
                 <input

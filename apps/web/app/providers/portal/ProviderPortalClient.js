@@ -13,6 +13,7 @@ import {
   getStoredProviderSession,
   setStoredProviderSession,
 } from '../../../lib/provider-session';
+import { getStoredSession } from '../../../lib/session';
 import { Toast } from '../../../components/Toast';
 
 const INITIAL_PROFILE_FORM = {
@@ -68,6 +69,11 @@ export function ProviderPortalClient({
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
   const [error, setError] = useState('');
+  const [appSession, setAppSession] = useState(null);
+
+  useEffect(() => {
+    setAppSession(getStoredSession());
+  }, []);
 
   useEffect(() => {
     if (billingState === 'success') {
@@ -103,23 +109,32 @@ export function ProviderPortalClient({
           ? { providerId, token }
           : getStoredProviderSession();
 
-      if (!incomingSession?.providerId || !incomingSession?.token) {
-        if (!cancelled) {
-          setLoading(false);
-          setPortalSession(null);
-          setDashboard(null);
-        }
-        return;
-      }
-
       try {
-        const result = await createProviderPortalSession(incomingSession);
+        let result = null;
+
+        if (appSession?.token && ['provider', 'admin', 'super_admin'].includes(appSession.user?.role)) {
+          result = await createProviderPortalSession({}, appSession.token);
+        } else if (incomingSession?.providerId && incomingSession?.token) {
+          result = await createProviderPortalSession(incomingSession);
+        } else {
+          if (!cancelled) {
+            setLoading(false);
+            setPortalSession(null);
+            setDashboard(null);
+          }
+          return;
+        }
+
         if (cancelled) {
           return;
         }
 
-        setStoredProviderSession(incomingSession);
-        setPortalSession(incomingSession);
+        if (incomingSession?.providerId && incomingSession?.token) {
+          setStoredProviderSession(incomingSession);
+          setPortalSession(incomingSession);
+        } else {
+          setPortalSession(null);
+        }
         setDashboard(result.session?.dashboard || null);
         if (providerId && token && typeof window !== 'undefined') {
           window.history.replaceState({}, '', '/providers/portal');
@@ -145,7 +160,7 @@ export function ProviderPortalClient({
     return () => {
       cancelled = true;
     };
-  }, [providerId, token]);
+  }, [providerId, token, appSession?.token, appSession?.user?.role]);
 
   useEffect(() => {
     const provider = dashboard?.provider;
@@ -306,8 +321,7 @@ export function ProviderPortalClient({
             <span className="label">Provider portal</span>
             <h1>Provider access required</h1>
             <p>
-              This portal uses a provider-specific access link from onboarding. If you just signed
-              up, reopen the provider onboarding flow or use the most recent provider portal link.
+              Sign in with a provider account, or use a provider-specific access link from onboarding.
             </p>
             {error ? <div className="error-copy">{error}</div> : null}
             <div className="button-stack">

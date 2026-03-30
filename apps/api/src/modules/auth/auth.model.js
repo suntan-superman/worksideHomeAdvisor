@@ -17,7 +17,7 @@ const userSchema = new mongoose.Schema(
     lastName: { type: String },
     role: {
       type: String,
-      enum: ['seller', 'collaborator', 'admin', 'super_admin'],
+      enum: ['seller', 'agent', 'provider', 'collaborator', 'admin', 'super_admin'],
       default: 'seller',
     },
     isDemoAccount: { type: Boolean, default: false, index: true },
