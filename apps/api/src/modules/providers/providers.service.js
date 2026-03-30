@@ -884,7 +884,7 @@ export async function createProviderProfile(
       city: normalizeString(payload.city || payload.serviceArea?.city).slice(0, 80),
       state: normalizeString(payload.state || payload.serviceArea?.state).slice(0, 40),
       zipCodes: normalizeZipList(payload.zipCodes || payload.serviceArea?.zipCodes),
-      radiusMiles: Math.max(5, Math.min(150, Number(payload.radiusMiles || payload.serviceArea?.radiusMiles || 25))),
+      radiusMiles: Math.max(5, Math.min(1000, Number(payload.radiusMiles || payload.serviceArea?.radiusMiles || 25))),
     },
     leadRouting: {
       deliveryMode: payload.deliveryMode || payload.leadRouting?.deliveryMode || 'sms_and_email',
@@ -1014,7 +1014,7 @@ export async function updateProviderPortalProfile(providerId, token, payload = {
     provider.serviceArea.zipCodes = normalizeZipList(payload.zipCodes);
   }
   if (payload.radiusMiles !== undefined) {
-    provider.serviceArea.radiusMiles = Math.max(5, Math.min(150, Number(payload.radiusMiles || 25)));
+    provider.serviceArea.radiusMiles = Math.max(5, Math.min(1000, Number(payload.radiusMiles || 25)));
   }
   if (payload.notifyPhone !== undefined) {
     const notifyPhone = normalizeString(payload.notifyPhone).slice(0, 40);

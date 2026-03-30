@@ -198,6 +198,21 @@ function resolveProviderIdFromMetadata(metadata = {}) {
   return metadata.providerId || metadata.worksideProviderId || '';
 }
 
+async function resolveStripeSubscriptionFromSessionValue(sessionSubscription) {
+  if (!sessionSubscription) {
+    return null;
+  }
+
+  if (typeof sessionSubscription === 'string') {
+    const stripe = getStripeClient();
+    return stripe.subscriptions.retrieve(sessionSubscription, {
+      expand: ['items.data.price'],
+    });
+  }
+
+  return sessionSubscription;
+}
+
 async function upsertSubscriptionRecord(query, values) {
   const document = await BillingSubscriptionModel.findOneAndUpdate(
     query,
@@ -234,10 +249,7 @@ async function syncProviderCheckoutSession(session, plan) {
   await provider.save();
 
   if (session.subscription) {
-    const stripe = getStripeClient();
-    const subscription = await stripe.subscriptions.retrieve(session.subscription, {
-      expand: ['items.data.price'],
-    });
+    const subscription = await resolveStripeSubscriptionFromSessionValue(session.subscription);
 
     return syncProviderSubscription(subscription, {
       stripeCheckoutSessionId: session.id,
@@ -346,10 +358,7 @@ async function syncCheckoutSession(session) {
   }
 
   if (session.subscription) {
-    const stripe = getStripeClient();
-    const subscription = await stripe.subscriptions.retrieve(session.subscription, {
-      expand: ['items.data.price'],
-    });
+    const subscription = await resolveStripeSubscriptionFromSessionValue(session.subscription);
 
     return syncStripeSubscription(subscription, {
       stripeCheckoutSessionId: session.id,

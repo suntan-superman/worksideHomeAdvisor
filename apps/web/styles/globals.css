@@ -406,6 +406,10 @@ select {
   color: #8a3f33;
 }
 
+.field-warning {
+  color: #8e6428;
+}
+
 .mode-switch,
 .button-stack,
 .split-fields {

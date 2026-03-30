@@ -32,6 +32,10 @@ const PLAN_OPTIONS = [
   { value: 'provider_featured', label: 'Featured', detail: 'Sponsored-style exposure once billing is active.' },
 ];
 
+const PROVIDER_SIGNUP_DRAFT_KEY = 'worksideProviderSignupDraft';
+const LARGE_RADIUS_WARNING_MILES = 150;
+const MAX_PROVIDER_RADIUS_MILES = 1000;
+
 const INITIAL_FORM = {
   firstName: '',
   lastName: '',
@@ -68,6 +72,44 @@ function createInitialForm(sessionUser = null) {
     email: sessionUser?.email || '',
     notifyEmail: sessionUser?.email || '',
   };
+}
+
+function loadProviderSignupDraft() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const rawDraft = window.localStorage.getItem(PROVIDER_SIGNUP_DRAFT_KEY);
+    if (!rawDraft) {
+      return null;
+    }
+
+    const parsedDraft = JSON.parse(rawDraft);
+    if (!parsedDraft || typeof parsedDraft !== 'object') {
+      return null;
+    }
+
+    const draftForm =
+      parsedDraft.form && typeof parsedDraft.form === 'object'
+        ? { ...INITIAL_FORM, ...parsedDraft.form }
+        : null;
+
+    return {
+      stepIndex: Number.isInteger(parsedDraft.stepIndex) ? parsedDraft.stepIndex : 0,
+      form: draftForm,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearProviderSignupDraft() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.removeItem(PROVIDER_SIGNUP_DRAFT_KEY);
 }
 
 function formatPhoneInput(value) {
@@ -124,6 +166,16 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
   }, []);
 
   useEffect(() => {
+    const draft = loadProviderSignupDraft();
+    if (!draft?.form) {
+      return;
+    }
+
+    setForm((current) => ({ ...current, ...draft.form }));
+    setStepIndex(Math.max(0, Math.min(draft.stepIndex || 0, STEP_TITLES.length - 1)));
+  }, []);
+
+  useEffect(() => {
     const sessionUser = appSession?.user;
 
     if (!sessionUser) {
@@ -161,6 +213,24 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
       };
     });
   }, [form.email, form.notifyEmail]);
+
+  useEffect(() => {
+    if (createdProvider) {
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(
+      PROVIDER_SIGNUP_DRAFT_KEY,
+      JSON.stringify({
+        stepIndex,
+        form,
+      }),
+    );
+  }, [createdProvider, form, stepIndex]);
 
   useEffect(() => {
     if (billingState === 'success') {
@@ -222,6 +292,12 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
   const notifyPhoneIsValid = countPhoneDigits(form.notifyPhone) >= 10;
   const passwordLongEnough = form.password.length >= 8;
   const passwordsMatch = Boolean(form.password && form.password === form.confirmPassword);
+  const radiusMilesNumber = Number(form.radiusMiles);
+  const radiusMilesValid =
+    Number.isFinite(radiusMilesNumber) &&
+    radiusMilesNumber >= 5 &&
+    radiusMilesNumber <= MAX_PROVIDER_RADIUS_MILES;
+  const radiusLooksLarge = radiusMilesValid && radiusMilesNumber > LARGE_RADIUS_WARNING_MILES;
   const providerPlanDetails = Object.fromEntries(
     providerPlans.map((plan) => [plan.planKey, plan]),
   );
@@ -252,6 +328,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
   function handleCancelSignup() {
     const sessionUser = appSession?.user || null;
     const resetForm = createInitialForm(sessionUser);
+    clearProviderSignupDraft();
     syncedNotifyEmailRef.current = resetForm.notifyEmail || '';
     setExistingEmailConflict('');
     setForm(resetForm);
@@ -278,7 +355,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
     }
 
     if (stepIndex === 1) {
-      return Boolean(form.city.trim() && form.state.trim() && form.primaryZip.trim());
+      return Boolean(form.city.trim() && form.state.trim() && form.primaryZip.trim() && radiusMilesValid);
     }
 
     if (stepIndex === 2) {
@@ -328,6 +405,9 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
     if (stepIndex === 1) {
       if (!form.city || !form.state || !form.primaryZip) {
         throw new Error('City, state, and a primary ZIP are required.');
+      }
+      if (!radiusMilesValid) {
+        throw new Error(`Enter a service radius between 5 and ${MAX_PROVIDER_RADIUS_MILES} miles.`);
       }
     }
 
@@ -415,6 +495,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
       const provider = result.provider || null;
       const portalAccessToken = result.portalAccessToken || provider?.portalAccessToken || '';
       const requiresOtpVerification = Boolean(result.requiresOtpVerification);
+      clearProviderSignupDraft();
       setCreatedProvider(provider);
       setPendingVerificationEmail(result.email || provider?.email || '');
 
@@ -736,10 +817,21 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
                   <input
                     type="number"
                     min="5"
-                    max="50"
+                    max={MAX_PROVIDER_RADIUS_MILES}
                     value={form.radiusMiles}
                     onChange={(event) => updateField('radiusMiles', event.target.value)}
                   />
+                  {form.radiusMiles && !radiusMilesValid ? (
+                    <span className="field-hint field-error">
+                      Enter a service radius between 5 and {MAX_PROVIDER_RADIUS_MILES} miles.
+                    </span>
+                  ) : null}
+                  {radiusLooksLarge ? (
+                    <span className="field-hint field-warning">
+                      {radiusMilesNumber} miles is larger than most local providers use, but it is allowed
+                      if you cover a wide regional or nationwide area.
+                    </span>
+                  ) : null}
                 </label>
               </div>
               <label>
