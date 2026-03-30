@@ -1,10 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 
 export default function AdminLoginPage() {
-  const router = useRouter();
   const [nextPath, setNextPath] = useState('/');
   const [email, setEmail] = useState('admin@workside.software');
   const [password, setPassword] = useState('');
@@ -65,8 +63,12 @@ export default function AdminLoginPage() {
       }
 
       setStatus(`Signed in as ${payload.user.email}. Redirecting...`);
-      router.replace(nextPath);
-      router.refresh();
+      const destination = nextPath || '/';
+
+      // Use a full navigation so middleware sees the freshly written cookie
+      // on the very first redirect after login.
+      window.location.assign(destination);
+      return;
     } catch (requestError) {
       setError(requestError.message);
     } finally {
