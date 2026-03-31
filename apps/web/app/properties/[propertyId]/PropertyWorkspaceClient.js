@@ -26,6 +26,7 @@ import {
   getLatestReport,
   getProperty,
   getReportExportUrl,
+  getWorkflow,
   listProviderLeads,
   listProviders,
   listMediaAssets,
@@ -132,6 +133,22 @@ function getVariantReviewScore(variant) {
   return Number(variant?.metadata?.review?.overallScore || 0);
 }
 
+function formatWorkflowStatus(status) {
+  if (status === 'in_progress') {
+    return 'In progress';
+  }
+  if (status === 'complete') {
+    return 'Complete';
+  }
+  if (status === 'blocked') {
+    return 'Blocked';
+  }
+  if (status === 'locked') {
+    return 'Locked';
+  }
+  return 'Available';
+}
+
 export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const queryClient = useQueryClient();
   const flyerPreviewRef = useRef(null);
@@ -172,8 +189,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [activeProviderTaskKey, setActiveProviderTaskKey] = useState('');
   const [showMoreVisionVariants, setShowMoreVisionVariants] = useState(false);
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState(null);
+  const [guidedWorkflow, setGuidedWorkflow] = useState(null);
   const [status, setStatus] = useState('Loading property workspace...');
   const [toast, setToast] = useState(null);
+  const viewerRole = useMemo(() => {
+    const session = getStoredSession();
+    return session?.user?.role === 'agent' ? 'agent' : 'seller';
+  }, []);
 
   const liveDashboardQuery = useQuery({
     queryKey: ['property-dashboard', propertyId],
@@ -217,6 +239,18 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     },
     staleTime: 5_000,
     refetchInterval: 5_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const workflowQuery = useQuery({
+    queryKey: ['property-workflow', propertyId, viewerRole],
+    enabled: Boolean(propertyId),
+    queryFn: async () => {
+      const response = await getWorkflow(propertyId, viewerRole);
+      return response.workflow;
+    },
+    staleTime: 5_000,
+    refetchInterval: 10_000,
     refetchOnWindowFocus: true,
   });
 
@@ -363,8 +397,26 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
     return { title: 'Review the latest outputs', detail: 'Both brochure and report are ready. Use Overview to compare the latest deliverables.', tab: 'overview' };
   }, [checklist?.nextTask?.detail, checklist?.nextTask?.title, latestFlyer, latestReport, listingCandidateAssets.length, mediaAssets.length, property?.status, selectedMediaAsset, selectedVariant]);
+  const workflowNextStep = guidedWorkflow?.nextStep || null;
+  const workflowPhases = guidedWorkflow?.phases || [];
+  const workflowSteps = guidedWorkflow?.steps || [];
 
   const isArchivedProperty = property?.status === 'archived';
+
+  function openWorkflowStep(step) {
+    if (!step) {
+      return;
+    }
+
+    if (step.actionHref) {
+      window.location.href = step.actionHref;
+      return;
+    }
+
+    if (step.actionTarget) {
+      setActiveTab(step.actionTarget);
+    }
+  }
 
   useEffect(() => {
     if (!liveDashboardQuery.data) {
@@ -418,6 +470,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       );
     });
   }, [liveMediaVariantsQuery.data]);
+
+  useEffect(() => {
+    if (!workflowQuery.data) {
+      return;
+    }
+
+    setGuidedWorkflow(workflowQuery.data);
+  }, [workflowQuery.data]);
 
   useEffect(() => {
     setListingNoteDraft(selectedMediaAsset?.listingNote || '');
@@ -566,6 +626,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     return checklistResponse.checklist;
   }
 
+  async function refreshWorkflow() {
+    const response = await getWorkflow(propertyId, viewerRole);
+    queryClient.setQueryData(['property-workflow', propertyId, viewerRole], response.workflow);
+    setGuidedWorkflow(response.workflow);
+    return response.workflow;
+  }
+
   async function refreshProviders(task = providerSuggestionTask) {
     if (!task?.providerCategoryKey) {
       setProviderRecommendations([]);
@@ -694,7 +761,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setToast(null);
     try {
       const analysisResponse = await analyzePricing(propertyId);
-      const [dashboardResponse, checklistResponse] = await Promise.all([refreshDashboardSnapshot(), refreshChecklist()]);
+      const [dashboardResponse, checklistResponse] = await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
       setLatestPricing(analysisResponse.analysis);
       setDashboard(dashboardResponse);
       setChecklist(checklistResponse);
@@ -721,7 +788,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         selectedPhotoAssetIds: flyerSelectedPhotoIds,
       });
       setLatestFlyer(response.flyer);
-      await Promise.all([refreshDashboardSnapshot(), refreshChecklist()]);
+      await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
       setToast({ tone: 'success', title: 'Flyer generated', message: 'A fresh flyer draft is ready below.' });
       requestAnimationFrame(() => {
         flyerPreviewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -765,7 +832,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         includedSections: reportIncludedSections,
       });
       setLatestReport(response.report);
-      await Promise.all([refreshDashboardSnapshot(), refreshChecklist()]);
+      await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
       setToast({ tone: 'success', title: 'Report generated', message: 'A fresh property report preview is ready below.' });
     } catch (requestError) {
       if (requestError.status === 402 && requestError.details?.suggestedPlan) {
@@ -803,7 +870,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setToast(null);
     try {
       await updateMediaAsset(selectedMediaAsset.id, { listingCandidate: nextValue });
-      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshDashboardSnapshot(), refreshChecklist()]);
+      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
       setToast({ tone: 'success', title: nextValue ? 'Listing candidate selected' : 'Listing candidate removed', message: nextValue ? 'This photo will now be prioritized for flyer generation.' : 'This photo will no longer be prioritized for the flyer.' });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Could not update photo', message: requestError.message });
@@ -851,7 +918,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setToast(null);
     try {
       await updateMediaAsset(selectedMediaAsset.id, { listingNote: listingNoteDraft });
-      await refreshMediaAssets(selectedMediaAsset.id);
+      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshWorkflow()]);
       setToast({ tone: 'success', title: 'Photo note saved', message: 'Your note will stay attached to this photo for listing review.' });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Could not save note', message: requestError.message });
@@ -878,7 +945,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         exact: true,
       });
       const nextAssets = await refreshMediaAssets('');
-      await Promise.all([refreshDashboardSnapshot(), refreshChecklist()]);
+      await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
       const nextSelectedAssetId = nextAssets[0]?.id || '';
       if (nextSelectedAssetId) {
         await refreshMediaVariants(nextSelectedAssetId);
@@ -924,7 +991,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         presetKey,
         roomType: selectedMediaAsset.roomLabel,
       });
-      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id)]);
+      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id), refreshWorkflow()]);
       setSelectedVariantId(response.variant?.id || '');
       setToast({
         tone: 'success',
@@ -959,7 +1026,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setToast(null);
     try {
       await selectMediaVariant(selectedMediaAsset.id, variantId);
-      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id)]);
+      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id), refreshWorkflow()]);
       setSelectedVariantId(variantId);
       setToast({ tone: 'success', title: 'Preferred variant selected', message: 'Flyer and report generation will now prefer this image variant.' });
     } catch (requestError) {
@@ -993,7 +1060,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         queryClient.setQueryData(['property-media-variants', selectedMediaAsset.id], nextVariants);
         return nextVariants;
       });
-      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id)]);
+      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id), refreshWorkflow()]);
       setToast({
         tone: 'success',
         title: 'Variant usage updated',
@@ -1018,7 +1085,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       const response = await updateChecklistItem(itemId, { status: nextStatus });
       queryClient.setQueryData(['property-checklist', propertyId], response.checklist);
       setChecklist(response.checklist);
-      await refreshDashboardSnapshot();
+      await Promise.all([refreshDashboardSnapshot(), refreshWorkflow()]);
       setToast({ tone: 'success', title: 'Checklist updated', message: 'Seller prep progress has been saved.' });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Checklist update failed', message: requestError.message });
@@ -1042,7 +1109,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       const response = await createChecklistItem(propertyId, { title: customChecklistTitle, detail: customChecklistDetail, category: 'custom', priority: 'medium' });
       queryClient.setQueryData(['property-checklist', propertyId], response.checklist);
       setChecklist(response.checklist);
-      await refreshDashboardSnapshot();
+      await Promise.all([refreshDashboardSnapshot(), refreshWorkflow()]);
       setCustomChecklistTitle('');
       setCustomChecklistDetail('');
       setToast({ tone: 'success', title: 'Task added', message: 'The custom checklist task now appears in the shared property workflow.' });
@@ -1100,6 +1167,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         maxProviders: 3,
       });
       await refreshProviderLeads();
+      await refreshWorkflow();
       setToast({
         tone: 'success',
         title: 'Lead request created',
@@ -2323,8 +2391,68 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         <section className="workspace-tab-layout">
           <div className="workspace-tab-main">{renderActiveTab()}</div>
           <aside className="workspace-quick-rail">
-            <div className="content-card workspace-quick-card"><span className="label">Readiness score</span><h2>{readinessScore}/100</h2><p>{readinessLabel}</p></div>
-            <div className="content-card workspace-quick-card"><span className="label">Next best action</span><h3>{nextBestAction.title}</h3><p>{nextBestAction.detail}</p><button type="button" className="button-primary" onClick={() => setActiveTab(nextBestAction.tab)} disabled={Boolean(status)}>Open {WORKSPACE_TABS.find((tab) => tab.id === nextBestAction.tab)?.label || 'workspace'}</button></div>
+            <div className="content-card workspace-quick-card">
+              <span className="label">Your progress</span>
+              <h2>{guidedWorkflow?.completionPercent ?? 0}% complete</h2>
+              <p>{guidedWorkflow?.currentPhaseLabel || 'Workflow'} · {guidedWorkflow?.role === 'agent' ? 'Realtor guide' : 'Seller guide'}</p>
+              <div className="mini-stats">
+                <div className="stat-card">
+                  <strong>Market-ready</strong>
+                  <span>{guidedWorkflow?.marketReadyScore ?? readinessScore}/100</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Current step</strong>
+                  <span>{workflowNextStep?.title || 'Ready to review'}</span>
+                </div>
+              </div>
+            </div>
+            <div className="content-card workspace-quick-card">
+              <span className="label">Next step</span>
+              <h3>{workflowNextStep?.title || nextBestAction.title}</h3>
+              <p>{workflowNextStep?.description || nextBestAction.detail}</p>
+              {workflowNextStep?.helperText ? (
+                <p className="workspace-control-note">{workflowNextStep.helperText}</p>
+              ) : null}
+              <button
+                type="button"
+                className="button-primary"
+                onClick={() => (workflowNextStep ? openWorkflowStep(workflowNextStep) : setActiveTab(nextBestAction.tab))}
+                disabled={Boolean(status)}
+              >
+                {workflowNextStep?.ctaLabel || `Open ${WORKSPACE_TABS.find((tab) => tab.id === nextBestAction.tab)?.label || 'workspace'}`}
+              </button>
+            </div>
+            <div className="content-card workspace-quick-card workspace-wizard-card">
+              <span className="label">Guided workflow</span>
+              <div className="workspace-phase-list">
+                {workflowPhases.map((phase) => (
+                  <div key={phase.key} className={`workspace-phase-item workspace-phase-item-${phase.status}`}>
+                    <div>
+                      <strong>{phase.label}</strong>
+                      <span>{phase.completedSteps}/{phase.totalSteps} required steps complete</span>
+                    </div>
+                    <em>{formatWorkflowStatus(phase.status)}</em>
+                  </div>
+                ))}
+              </div>
+              <div className="workspace-step-list">
+                {workflowSteps.map((step) => (
+                  <button
+                    key={step.key}
+                    type="button"
+                    className={`workspace-step-item workspace-step-item-${step.status}${workflowNextStep?.key === step.key ? ' active' : ''}`}
+                    onClick={() => openWorkflowStep(step)}
+                    disabled={Boolean(status) || (!step.actionTarget && !step.actionHref)}
+                  >
+                    <div className="workspace-step-copy">
+                      <strong>{step.title}</strong>
+                      <span>{step.description}</span>
+                    </div>
+                    <em>{formatWorkflowStatus(step.status)}</em>
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="content-card workspace-quick-card"><span className="label">Quick stats</span><ul className="plain-list"><li>{selectedComps.length} comp(s) loaded</li><li>{listingCandidateAssets.length} listing photo pick(s)</li><li>{mediaAssets.filter((asset) => asset.selectedVariant).length} preferred vision variant(s)</li><li>{checklist?.summary?.completedCount ?? 0} task(s) complete</li><li>{providerRecommendations.length} provider recommendation(s)</li></ul></div>
           </aside>
         </section>

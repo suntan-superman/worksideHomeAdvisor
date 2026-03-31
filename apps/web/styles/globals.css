@@ -1898,6 +1898,75 @@ select {
   gap: 12px;
 }
 
+.workspace-wizard-card {
+  gap: 16px;
+}
+
+.workspace-phase-list,
+.workspace-step-list {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-phase-item,
+.workspace-step-item {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(36, 40, 45, 0.08);
+  background: rgba(255, 255, 255, 0.68);
+  text-align: left;
+}
+
+.workspace-phase-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.workspace-phase-item div,
+.workspace-step-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.workspace-phase-item span,
+.workspace-step-copy span {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.workspace-phase-item em,
+.workspace-step-item em {
+  color: var(--moss);
+  font-style: normal;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.workspace-phase-item-in_progress,
+.workspace-step-item-in_progress,
+.workspace-step-item.active {
+  border-color: rgba(200, 116, 71, 0.24);
+  background: rgba(255, 246, 239, 0.94);
+}
+
+.workspace-phase-item-complete,
+.workspace-step-item-complete {
+  border-color: rgba(70, 99, 79, 0.18);
+  background: rgba(245, 250, 245, 0.92);
+}
+
+.workspace-phase-item-complete em,
+.workspace-step-item-complete em {
+  color: var(--moss);
+}
+
+.workspace-step-item-locked,
+.workspace-step-item:disabled {
+  opacity: 0.64;
+}
+
 .workspace-hero-card {
   background: linear-gradient(180deg, rgba(255, 249, 241, 0.94), rgba(255, 244, 233, 0.9)), var(--panel);
 }

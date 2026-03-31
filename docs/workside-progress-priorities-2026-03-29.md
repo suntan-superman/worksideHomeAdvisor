@@ -1,6 +1,6 @@
 # Workside Progress And Priorities
 
-Last updated: 2026-03-30
+Last updated: 2026-03-31
 
 This document is the working checkpoint after the latest implementation pass across the HomeAdvisor / Workside codebase.
 
@@ -22,6 +22,7 @@ The platform is now well beyond the scaffold stage.
 - Mobile app is working on Android and iOS
 - Auth, OTP verification, dashboard, pricing, media capture, report generation, flyer generation, checklist persistence, and listing-photo workflows are all in place
 - Vision generation is running with Replicate-backed presets and before/after review UI
+- Property workspace now includes a computed guided workflow rail with role-aware seller / realtor copy, progress, next-step guidance, and market-ready scoring
 
 ### Admin side
 
@@ -89,6 +90,8 @@ The product now has real seller, provider, and admin surfaces. The main remainin
 - [x] AI photo review
 - [x] Listing-candidate selection
 - [x] Checklist persistence and scoring
+- [x] Guided workflow state engine for property-level seller / realtor flows
+- [x] Role-aware next-step recommendations in the property workspace
 - [x] Brochure/flyer generation
 - [x] Seller report generation and export
 
@@ -186,6 +189,12 @@ These areas exist and are useful, but they are not yet “finished product” qu
 - [~] Archived properties are read-only and excluded from active counts, but broader admin/archive reporting is still light
 - [~] Seller and agent billing now behaves more like a capacity model, but per-property charging/accounting is still not a finished product
 
+### 3.7 Guided workflow rollout
+
+- [~] A property-level workflow engine now exists, but it is currently centered in the property workspace rather than across the entire product
+- [~] Seller / realtor workflow copy is now role-aware, but account setup and dashboard surfaces still need the same guided treatment
+- [~] Workflow state is computed automatically, but deeper blocker logic and more nuanced optional-step handling can still improve
+
 ---
 
 ## 4. Current Blockers Or Deliberate Pauses
@@ -237,6 +246,16 @@ These are the highest-value refinements because they affect trust, demos, and ev
 - [ ] support per-property billing / subscription visibility where needed
 - [x] make dashboard billing chooser show only plans relevant to the signed-in account type everywhere
 - [x] show active subscription count and remaining active-property capacity in seller and agent UI
+
+### 5.2b Guided workflow system expansion
+
+- [x] introduce a real computed workflow state engine for seller / realtor property flows
+- [x] surface progress, next step, and role-specific workflow copy in the property workspace
+- [ ] extend guided workflow into dashboard / onboarding so the path starts before the property workspace
+- [ ] add a mobile workflow companion layer with room-by-room progress tied directly to the same workflow state
+- [ ] add stronger blocked-state logic and dependency explanations for steps that cannot start yet
+- [ ] connect workflow steps to richer property-edit screens where “open dashboard” is still a fallback
+- [ ] decide whether optional steps should be skippable or silently auto-resolved in more cases
 
 ### 5.3 Vision quality refinement
 
@@ -346,10 +365,11 @@ If work resumes tomorrow, the most sensible order is:
 1. Complete real provider signup -> verification -> billing -> portal end-to-end validation
 2. Improve provider coverage filtering and graceful no-coverage handling
 3. Refine the seller/agent property-cap model into a true per-property billing strategy where needed
-4. Refine vision quality on the three Replicate presets
-5. Polish report/brochure premium output quality
-6. Add provider account recovery / linking tools
-7. Start real automated tests around the new flows
+4. Extend the guided workflow system into dashboard + mobile so the whole journey feels coached
+5. Refine vision quality on the three Replicate presets
+6. Polish report/brochure premium output quality
+7. Add provider account recovery / linking tools
+8. Start real automated tests around the new flows
 
 ---
 
@@ -388,6 +408,7 @@ That gives the product a stronger operational core before spending more time on 
 - The shared admin table/metric boundary issue has already been fixed
 - Provider onboarding now creates real provider auth accounts and requires email verification before billing continuation
 - Provider verification now supports self-reported trust fields, document upload, seller-facing trust display, and admin verification review
+- Property workspace now has a real role-aware guided workflow rail powered by a backend workflow endpoint
 - SMS marketplace logic exists in code, but rollout is paused intentionally
 
 ---

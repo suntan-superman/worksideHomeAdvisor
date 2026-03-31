@@ -14,6 +14,7 @@ import { providersRoutes } from './modules/providers/providers.routes.js';
 import { propertyRoutes } from './modules/properties/property.routes.js';
 import { pricingRoutes } from './modules/pricing/pricing.routes.js';
 import { tasksRoutes } from './modules/tasks/tasks.routes.js';
+import { workflowRoutes } from './modules/workflow/workflow.routes.js';
 
 export function buildApp() {
   const app = Fastify({
@@ -43,6 +44,7 @@ export function buildApp() {
   app.register(providersRoutes, { prefix: '/api/v1' });
   app.register(pricingRoutes, { prefix: '/api/v1/properties' });
   app.register(tasksRoutes, { prefix: '/api/v1' });
+  app.register(workflowRoutes, { prefix: '/api/v1/properties' });
   app.register(dashboardRoutes, { prefix: '/api/v1/properties' });
   app.register(documentsRoutes, { prefix: '/api/v1/properties' });
   app.register(aiRoutes, { prefix: '/api/v1/ai' });
