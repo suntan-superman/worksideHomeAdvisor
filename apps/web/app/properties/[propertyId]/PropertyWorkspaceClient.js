@@ -2235,11 +2235,56 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         </section>
 
         <section className="workspace-action-bar">
-          <button type="button" className="workspace-action-pill" onClick={() => setActiveTab('photos')}>Add photos</button>
-          <button type="button" className="workspace-action-pill" onClick={() => setActiveTab('photos')}>Select photos</button>
-          <button type="button" className="workspace-action-pill workspace-action-pill-primary" onClick={() => { setActiveTab('vision'); if (selectedMediaAsset) { handleGenerateVariant('enhance_listing_quality'); } }} disabled={Boolean(status) || isArchivedProperty}>Enhance</button>
-          <button type="button" className="workspace-action-pill" onClick={() => { setActiveTab('brochure'); handleGenerateFlyer(); }} disabled={Boolean(status) || isArchivedProperty}>Generate flyer</button>
-          <button type="button" className="workspace-action-pill workspace-action-pill-primary" onClick={() => { setActiveTab('report'); handleGenerateReport(); }} disabled={Boolean(status) || isArchivedProperty}>Generate report</button>
+          <div className="workspace-action-tooltip">
+            <button type="button" className="workspace-action-pill" onClick={() => setActiveTab('photos')}>
+              Add photos
+            </button>
+            <div className="workspace-action-tooltip-bubble" role="tooltip">
+              Open the Photos tab to review images captured from mobile and add them to your listing workflow.
+            </div>
+          </div>
+          <div className="workspace-action-tooltip">
+            <button type="button" className="workspace-action-pill" onClick={() => setActiveTab('photos')}>
+              Select photos
+            </button>
+            <div className="workspace-action-tooltip-bubble" role="tooltip">
+              Choose your strongest listing candidates so brochure and report outputs prioritize them automatically.
+            </div>
+          </div>
+          <div className="workspace-action-tooltip">
+            <button
+              type="button"
+              className="workspace-action-pill workspace-action-pill-accent"
+              onClick={() => { setActiveTab('vision'); if (selectedMediaAsset) { handleGenerateVariant('enhance_listing_quality'); } }}
+              disabled={Boolean(status) || isArchivedProperty}
+            >
+              Enhance
+            </button>
+            <div className="workspace-action-tooltip-bubble" role="tooltip">
+              Generate an improved version of the currently selected photo to test cleaner, brighter marketing-ready presentation.
+            </div>
+          </div>
+          <div className="workspace-action-tooltip">
+            <button type="button" className="workspace-action-pill" onClick={() => { setActiveTab('brochure'); handleGenerateFlyer(); }} disabled={Boolean(status) || isArchivedProperty}>
+              Generate flyer
+            </button>
+            <div className="workspace-action-tooltip-bubble" role="tooltip">
+              Build a one-page marketing flyer using current pricing, selected photos, and your brochure copy settings.
+            </div>
+          </div>
+          <div className="workspace-action-tooltip">
+            <button
+              type="button"
+              className="workspace-action-pill workspace-action-pill-primary"
+              onClick={() => { setActiveTab('report'); handleGenerateReport(); }}
+              disabled={Boolean(status) || isArchivedProperty}
+            >
+              Generate report
+            </button>
+            <div className="workspace-action-tooltip-bubble" role="tooltip">
+              Create the full seller report with pricing analysis, checklist progress, selected photos, and marketing guidance.
+            </div>
+          </div>
         </section>
 
         <section className="workspace-tab-bar" aria-label="Workspace tabs">

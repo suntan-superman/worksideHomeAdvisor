@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import sharp from 'sharp';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { formatCurrency } from '@workside/utils';
 
@@ -341,12 +342,30 @@ async function fetchPdfImage(pdfDoc, imageUrl) {
 
     const bytes = new Uint8Array(await response.arrayBuffer());
     const contentType = response.headers.get('content-type') || '';
+    const isPng =
+      contentType.includes('png') ||
+      imageUrl.toLowerCase().includes('.png') ||
+      (bytes[0] === 0x89 &&
+        bytes[1] === 0x50 &&
+        bytes[2] === 0x4e &&
+        bytes[3] === 0x47);
+    const isJpeg =
+      contentType.includes('jpeg') ||
+      contentType.includes('jpg') ||
+      imageUrl.toLowerCase().includes('.jpg') ||
+      imageUrl.toLowerCase().includes('.jpeg') ||
+      (bytes[0] === 0xff && bytes[1] === 0xd8);
 
-    if (contentType.includes('png') || imageUrl.toLowerCase().includes('.png')) {
+    if (isPng) {
       return pdfDoc.embedPng(bytes);
     }
 
-    return pdfDoc.embedJpg(bytes);
+    if (isJpeg) {
+      return pdfDoc.embedJpg(bytes);
+    }
+
+    const convertedBytes = await sharp(bytes).png().toBuffer();
+    return pdfDoc.embedPng(convertedBytes);
   } catch {
     return null;
   }
