@@ -40,6 +40,60 @@ const PLAN_OPTIONS = [
   { value: 'provider_featured', label: 'Featured', detail: 'Sponsored-style exposure once billing is active.' },
 ];
 
+const US_STATE_OPTIONS = [
+  { value: 'AL', label: 'Alabama' },
+  { value: 'AK', label: 'Alaska' },
+  { value: 'AZ', label: 'Arizona' },
+  { value: 'AR', label: 'Arkansas' },
+  { value: 'CA', label: 'California' },
+  { value: 'CO', label: 'Colorado' },
+  { value: 'CT', label: 'Connecticut' },
+  { value: 'DE', label: 'Delaware' },
+  { value: 'DC', label: 'District of Columbia' },
+  { value: 'FL', label: 'Florida' },
+  { value: 'GA', label: 'Georgia' },
+  { value: 'HI', label: 'Hawaii' },
+  { value: 'ID', label: 'Idaho' },
+  { value: 'IL', label: 'Illinois' },
+  { value: 'IN', label: 'Indiana' },
+  { value: 'IA', label: 'Iowa' },
+  { value: 'KS', label: 'Kansas' },
+  { value: 'KY', label: 'Kentucky' },
+  { value: 'LA', label: 'Louisiana' },
+  { value: 'ME', label: 'Maine' },
+  { value: 'MD', label: 'Maryland' },
+  { value: 'MA', label: 'Massachusetts' },
+  { value: 'MI', label: 'Michigan' },
+  { value: 'MN', label: 'Minnesota' },
+  { value: 'MS', label: 'Mississippi' },
+  { value: 'MO', label: 'Missouri' },
+  { value: 'MT', label: 'Montana' },
+  { value: 'NE', label: 'Nebraska' },
+  { value: 'NV', label: 'Nevada' },
+  { value: 'NH', label: 'New Hampshire' },
+  { value: 'NJ', label: 'New Jersey' },
+  { value: 'NM', label: 'New Mexico' },
+  { value: 'NY', label: 'New York' },
+  { value: 'NC', label: 'North Carolina' },
+  { value: 'ND', label: 'North Dakota' },
+  { value: 'OH', label: 'Ohio' },
+  { value: 'OK', label: 'Oklahoma' },
+  { value: 'OR', label: 'Oregon' },
+  { value: 'PA', label: 'Pennsylvania' },
+  { value: 'RI', label: 'Rhode Island' },
+  { value: 'SC', label: 'South Carolina' },
+  { value: 'SD', label: 'South Dakota' },
+  { value: 'TN', label: 'Tennessee' },
+  { value: 'TX', label: 'Texas' },
+  { value: 'UT', label: 'Utah' },
+  { value: 'VT', label: 'Vermont' },
+  { value: 'VA', label: 'Virginia' },
+  { value: 'WA', label: 'Washington' },
+  { value: 'WV', label: 'West Virginia' },
+  { value: 'WI', label: 'Wisconsin' },
+  { value: 'WY', label: 'Wyoming' },
+];
+
 const PROVIDER_SIGNUP_DRAFT_KEY = 'worksideProviderSignupDraft';
 const LARGE_RADIUS_WARNING_MILES = 150;
 const MAX_PROVIDER_RADIUS_MILES = 1000;
@@ -64,6 +118,14 @@ const INITIAL_FORM = {
   turnaroundLabel: '24-48 hours',
   pricingSummary: '',
   serviceHighlights: '',
+  hasInsurance: false,
+  insuranceCarrier: '',
+  insurancePolicyNumber: '',
+  insuranceExpirationDate: '',
+  hasLicense: false,
+  licenseNumber: '',
+  licenseState: '',
+  hasBond: false,
   deliveryMode: 'sms_and_email',
   notifyPhone: '',
   notifyEmail: '',
@@ -140,6 +202,16 @@ function countPhoneDigits(value) {
 
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
+function isValidUsState(value) {
+  return US_STATE_OPTIONS.some((option) => option.value === String(value || '').trim().toUpperCase());
+}
+
+function sortCategoryOptions(options = []) {
+  return [...options].sort((left, right) =>
+    String(left?.label || '').localeCompare(String(right?.label || '')),
+  );
 }
 
 function getExistingEmailConflictMessage(message) {
@@ -312,11 +384,11 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
           }));
 
         if (categories.length) {
-          setProviderCategories(categories);
+          setProviderCategories(sortCategoryOptions(categories));
         }
       } catch {
         if (!cancelled) {
-          setProviderCategories(CATEGORY_OPTIONS);
+          setProviderCategories(sortCategoryOptions(CATEGORY_OPTIONS));
         }
       }
     }
@@ -350,6 +422,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
   const notifyPhoneIsValid = countPhoneDigits(form.notifyPhone) >= 10;
   const passwordLongEnough = form.password.length >= 8;
   const passwordsMatch = Boolean(form.password && form.password === form.confirmPassword);
+  const stateCodeIsValid = isValidUsState(form.state);
   const radiusMilesNumber = Number(form.radiusMiles);
   const radiusMilesValid =
     Number.isFinite(radiusMilesNumber) &&
@@ -413,7 +486,7 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
     }
 
     if (stepIndex === 1) {
-      return Boolean(form.city.trim() && form.state.trim() && form.primaryZip.trim() && radiusMilesValid);
+      return Boolean(form.city.trim() && stateCodeIsValid && form.primaryZip.trim() && radiusMilesValid);
     }
 
     if (stepIndex === 2) {
@@ -463,6 +536,9 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
     if (stepIndex === 1) {
       if (!form.city || !form.state || !form.primaryZip) {
         throw new Error('City, state, and a primary ZIP are required.');
+      }
+      if (!stateCodeIsValid) {
+        throw new Error('Choose a valid U.S. state before continuing.');
       }
       if (!radiusMilesValid) {
         throw new Error(`Enter a service radius between 5 and ${MAX_PROVIDER_RADIUS_MILES} miles.`);
@@ -541,6 +617,14 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
           .split(',')
           .map((value) => value.trim())
           .filter(Boolean),
+        hasInsurance: form.hasInsurance,
+        insuranceCarrier: form.insuranceCarrier,
+        insurancePolicyNumber: form.insurancePolicyNumber,
+        insuranceExpirationDate: form.insuranceExpirationDate,
+        hasLicense: form.hasLicense,
+        licenseNumber: form.licenseNumber,
+        licenseState: form.licenseState,
+        hasBond: form.hasBond,
         deliveryMode: form.deliveryMode,
         notifyPhone: form.notifyPhone,
         notifyEmail: form.notifyEmail || form.email,
@@ -862,7 +946,18 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
                 </label>
                 <label>
                   State
-                  <input value={form.state} onChange={(event) => updateField('state', event.target.value)} />
+                  <select
+                    className="select-input"
+                    value={form.state}
+                    onChange={(event) => updateField('state', event.target.value)}
+                  >
+                    <option value="">Select a state</option>
+                    {US_STATE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </div>
               <div className="split-fields">
@@ -949,6 +1044,92 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
                   placeholder="Licensed, Weekend availability, Luxury listings"
                 />
               </label>
+              <div className="verification-check-grid">
+                <label className="consent-check compact-check">
+                  <input
+                    type="checkbox"
+                    checked={form.hasInsurance}
+                    onChange={(event) => updateField('hasInsurance', event.target.checked)}
+                  />
+                  <span>Insured</span>
+                </label>
+                <label className="consent-check compact-check">
+                  <input
+                    type="checkbox"
+                    checked={form.hasLicense}
+                    onChange={(event) => updateField('hasLicense', event.target.checked)}
+                  />
+                  <span>Licensed</span>
+                </label>
+                <label className="consent-check compact-check">
+                  <input
+                    type="checkbox"
+                    checked={form.hasBond}
+                    onChange={(event) => updateField('hasBond', event.target.checked)}
+                  />
+                  <span>Bonded</span>
+                </label>
+              </div>
+              {form.hasInsurance ? (
+                <div className="split-fields">
+                  <label>
+                    Insurance carrier
+                    <input
+                      value={form.insuranceCarrier}
+                      onChange={(event) => updateField('insuranceCarrier', event.target.value)}
+                      placeholder="State Farm, Next Insurance"
+                    />
+                  </label>
+                  <label>
+                    Policy number
+                    <input
+                      value={form.insurancePolicyNumber}
+                      onChange={(event) => updateField('insurancePolicyNumber', event.target.value)}
+                      placeholder="Optional"
+                    />
+                  </label>
+                </div>
+              ) : null}
+              {form.hasInsurance ? (
+                <label>
+                  Insurance expiration
+                  <input
+                    type="date"
+                    value={form.insuranceExpirationDate}
+                    onChange={(event) => updateField('insuranceExpirationDate', event.target.value)}
+                  />
+                </label>
+              ) : null}
+              {form.hasLicense ? (
+                <div className="split-fields">
+                  <label>
+                    License number
+                    <input
+                      value={form.licenseNumber}
+                      onChange={(event) => updateField('licenseNumber', event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    License state
+                    <select
+                      className="select-input"
+                      value={form.licenseState}
+                      onChange={(event) => updateField('licenseState', event.target.value)}
+                    >
+                      <option value="">Select a state</option>
+                      {US_STATE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              ) : null}
+              <div className="legal-notice">
+                Tell sellers what you can stand behind today. You can upload insurance and license documents
+                in the provider portal after signup to upgrade your trust profile and submit for review.
+              </div>
             </>
           ) : null}
 

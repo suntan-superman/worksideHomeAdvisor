@@ -70,6 +70,79 @@ const providerComplianceSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const providerVerificationDocumentSchema = new mongoose.Schema(
+  {
+    storageProvider: { type: String, default: '' },
+    storageKey: { type: String, default: '' },
+    fileName: { type: String, default: '' },
+    mimeType: { type: String, default: '' },
+    byteSize: { type: Number, default: 0 },
+    uploadedAt: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
+const providerVerificationInsuranceSchema = new mongoose.Schema(
+  {
+    hasInsurance: { type: Boolean, default: false },
+    carrier: { type: String, default: '' },
+    policyNumber: { type: String, default: '' },
+    expirationDate: { type: Date, default: null },
+    certificateDocument: { type: providerVerificationDocumentSchema, default: {} },
+  },
+  { _id: false },
+);
+
+const providerVerificationLicenseSchema = new mongoose.Schema(
+  {
+    hasLicense: { type: Boolean, default: false },
+    licenseNumber: { type: String, default: '' },
+    state: { type: String, default: '' },
+    document: { type: providerVerificationDocumentSchema, default: {} },
+  },
+  { _id: false },
+);
+
+const providerVerificationBondingSchema = new mongoose.Schema(
+  {
+    hasBond: { type: Boolean, default: false },
+  },
+  { _id: false },
+);
+
+const providerVerificationReviewSchema = new mongoose.Schema(
+  {
+    level: {
+      type: String,
+      enum: ['self_reported', 'details_provided', 'verified'],
+      default: 'self_reported',
+      index: true,
+    },
+    reviewStatus: {
+      type: String,
+      enum: ['none', 'submitted', 'verified', 'rejected'],
+      default: 'none',
+      index: true,
+    },
+    submittedAt: { type: Date, default: null },
+    verifiedAt: { type: Date, default: null },
+    reviewedAt: { type: Date, default: null },
+    reviewedBy: { type: String, default: '' },
+    reviewNotes: { type: String, default: '' },
+  },
+  { _id: false },
+);
+
+const providerVerificationSchema = new mongoose.Schema(
+  {
+    insurance: { type: providerVerificationInsuranceSchema, default: {} },
+    license: { type: providerVerificationLicenseSchema, default: {} },
+    bonding: { type: providerVerificationBondingSchema, default: {} },
+    review: { type: providerVerificationReviewSchema, default: {} },
+  },
+  { _id: false },
+);
+
 const providerPortalAccessSchema = new mongoose.Schema(
   {
     tokenHash: { type: String, default: '' },
@@ -107,6 +180,7 @@ const providerSchema = new mongoose.Schema(
     leadRouting: { type: leadRoutingSchema, default: {} },
     subscription: { type: providerSubscriptionSchema, default: {} },
     compliance: { type: providerComplianceSchema, default: {} },
+    verification: { type: providerVerificationSchema, default: {} },
     portalAccess: { type: providerPortalAccessSchema, default: {} },
     onboardingSource: { type: String, default: 'admin' },
     outreachSource: { type: String, default: 'manual' },
@@ -133,6 +207,11 @@ const providerCategorySchema = new mongoose.Schema(
     rolloutPhase: { type: Number, default: 1 },
     isActive: { type: Boolean, default: true },
     sortOrder: { type: Number, default: 0 },
+    verificationRequirements: {
+      licenseRecommended: { type: Boolean, default: false },
+      insuranceRecommended: { type: Boolean, default: false },
+      bondRecommended: { type: Boolean, default: false },
+    },
   },
   {
     timestamps: true,

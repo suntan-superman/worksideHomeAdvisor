@@ -1855,8 +1855,17 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     <span>{provider.turnaroundLabel || 'Turnaround not listed'}</span>
                     <span>{provider.pricingSummary || 'Pricing summary not listed'}</span>
                     <span>
+                      {provider.verification?.review?.level === 'verified'
+                        ? 'Verified credentials'
+                        : provider.verification?.review?.level === 'details_provided'
+                          ? 'Trust details provided'
+                          : 'Self-reported trust profile'}
+                    </span>
+                    <span>
                       {provider.compliance?.licenseStatus === 'verified'
                         ? 'License verified'
+                        : provider.verification?.license?.hasLicense
+                          ? 'License self-reported'
                         : provider.compliance?.licenseStatus === 'not_required'
                           ? 'License not required'
                           : 'License unverified'}
@@ -1864,6 +1873,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     <span>
                       {provider.compliance?.insuranceStatus === 'verified'
                         ? 'Insurance verified'
+                        : provider.verification?.insurance?.hasInsurance
+                          ? 'Insurance self-reported'
                         : provider.compliance?.insuranceStatus === 'not_required'
                           ? 'Insurance not required'
                           : 'Insurance unverified'}
@@ -1901,6 +1912,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           {providerSource ? (
             <p className="workspace-control-note">
               {providerSource.internalProviders || 0} internal provider match(es). Google fallback is not enabled in this slice yet.
+            </p>
+          ) : null}
+          {providerRecommendations.length ? (
+            <p className="workspace-control-note provider-disclaimer">
+              {providerRecommendations[0]?.verification?.disclaimer ||
+                'Provider credentials are self-reported or verified where indicated. Workside does not guarantee accuracy.'}
             </p>
           ) : null}
           {providerLeads.length ? (

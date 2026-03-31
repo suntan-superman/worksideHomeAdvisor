@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 
 import { normalizePhoneNumber, notifyQueuedLeadDispatches } from '../marketplace-sms/marketplace-sms.service.js';
+import { env } from '../../config/env.js';
+import { readStoredAsset, saveProviderDocumentBuffer } from '../../services/storageService.js';
 import { ChecklistModel } from '../tasks/checklist.model.js';
 import { getPropertyById } from '../properties/property.service.js';
 import { UserModel } from '../auth/auth.model.js';
@@ -16,15 +18,79 @@ import {
 import { ProviderCategoryModel, ProviderModel } from './provider.model.js';
 
 export const DEFAULT_PROVIDER_CATEGORIES = [
-  { key: 'inspector', label: 'Home Inspectors', description: 'Pre-listing and pre-sale property inspections.', rolloutPhase: 1, sortOrder: 1 },
-  { key: 'title_company', label: 'Title Companies', description: 'Title and escrow partners for closing support.', rolloutPhase: 1, sortOrder: 2 },
-  { key: 'real_estate_attorney', label: 'Real Estate Attorneys', description: 'Contract and transaction support where legal review is needed.', rolloutPhase: 1, sortOrder: 3 },
-  { key: 'photographer', label: 'Photographers', description: 'Listing photo specialists for final marketing capture.', rolloutPhase: 1, sortOrder: 4 },
-  { key: 'cleaning_service', label: 'Cleaning Services', description: 'Pre-listing and showing-readiness cleaners.', rolloutPhase: 1, sortOrder: 5 },
-  { key: 'termite_inspection', label: 'Termite Inspectors', description: 'Wood destroying organism and termite inspection services.', rolloutPhase: 1, sortOrder: 6 },
-  { key: 'notary', label: 'Notaries', description: 'Mobile and in-office notarization support for transaction documents.', rolloutPhase: 1, sortOrder: 7 },
-  { key: 'nhd_report', label: 'NHD Report Providers', description: 'Natural hazard disclosure report preparation and delivery.', rolloutPhase: 1, sortOrder: 8 },
+  {
+    key: 'inspector',
+    label: 'Home Inspectors',
+    description: 'Pre-listing and pre-sale property inspections.',
+    rolloutPhase: 1,
+    sortOrder: 1,
+    verificationRequirements: { licenseRecommended: true, insuranceRecommended: true, bondRecommended: false },
+  },
+  {
+    key: 'title_company',
+    label: 'Title Companies',
+    description: 'Title and escrow partners for closing support.',
+    rolloutPhase: 1,
+    sortOrder: 2,
+    verificationRequirements: { licenseRecommended: false, insuranceRecommended: true, bondRecommended: false },
+  },
+  {
+    key: 'real_estate_attorney',
+    label: 'Real Estate Attorneys',
+    description: 'Contract and transaction support where legal review is needed.',
+    rolloutPhase: 1,
+    sortOrder: 3,
+    verificationRequirements: { licenseRecommended: true, insuranceRecommended: true, bondRecommended: false },
+  },
+  {
+    key: 'photographer',
+    label: 'Photographers',
+    description: 'Listing photo specialists for final marketing capture.',
+    rolloutPhase: 1,
+    sortOrder: 4,
+    verificationRequirements: { licenseRecommended: false, insuranceRecommended: true, bondRecommended: false },
+  },
+  {
+    key: 'cleaning_service',
+    label: 'Cleaning Services',
+    description: 'Pre-listing and showing-readiness cleaners.',
+    rolloutPhase: 1,
+    sortOrder: 5,
+    verificationRequirements: { licenseRecommended: false, insuranceRecommended: true, bondRecommended: true },
+  },
+  {
+    key: 'termite_inspection',
+    label: 'Termite Inspectors',
+    description: 'Wood destroying organism and termite inspection services.',
+    rolloutPhase: 1,
+    sortOrder: 6,
+    verificationRequirements: { licenseRecommended: true, insuranceRecommended: true, bondRecommended: false },
+  },
+  {
+    key: 'notary',
+    label: 'Notaries',
+    description: 'Mobile and in-office notarization support for transaction documents.',
+    rolloutPhase: 1,
+    sortOrder: 7,
+    verificationRequirements: { licenseRecommended: true, insuranceRecommended: true, bondRecommended: true },
+  },
+  {
+    key: 'nhd_report',
+    label: 'NHD Report Providers',
+    description: 'Natural hazard disclosure report preparation and delivery.',
+    rolloutPhase: 1,
+    sortOrder: 8,
+    verificationRequirements: { licenseRecommended: false, insuranceRecommended: true, bondRecommended: false },
+  },
 ];
+
+const PROVIDER_VERIFICATION_DISCLAIMER =
+  'Provider credentials are self-reported or verified where indicated. Workside does not guarantee accuracy.';
+
+const VERIFIED_DOCUMENT_TYPES = {
+  insurance_certificate: 'insurance',
+  license_document: 'license',
+};
 
 function slugify(value) {
   return String(value || '')
@@ -57,12 +123,108 @@ function normalizeStringList(value, { limit = 6, maxLength = 60 } = {}) {
     : [];
 }
 
+function normalizeBoolean(value, fallback = false) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', 'yes', '1'].includes(normalized)) return true;
+    if (['false', 'no', '0'].includes(normalized)) return false;
+  }
+
+  return Boolean(value);
+}
+
+function normalizeDate(value) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function hashProviderPortalToken(token) {
   return crypto.createHash('sha256').update(String(token || '')).digest('hex');
 }
 
 function createProviderPortalToken() {
   return crypto.randomBytes(24).toString('hex');
+}
+
+function buildVerificationRequirements(categoryDocument = null) {
+  return {
+    licenseRecommended: Boolean(categoryDocument?.verificationRequirements?.licenseRecommended),
+    insuranceRecommended: Boolean(categoryDocument?.verificationRequirements?.insuranceRecommended),
+    bondRecommended: Boolean(categoryDocument?.verificationRequirements?.bondRecommended),
+  };
+}
+
+function getVerificationDocumentDownloadUrl(providerId, documentType) {
+  return `${env.PUBLIC_API_URL}/api/v1/provider-portal/providers/${providerId}/verification-documents/${documentType}/file`;
+}
+
+function serializeVerificationDocument(document, providerId, documentType) {
+  if (!document?.storageKey) {
+    return null;
+  }
+
+  return {
+    storageProvider: document.storageProvider || 'local',
+    storageKey: document.storageKey,
+    fileName: document.fileName || '',
+    mimeType: document.mimeType || 'application/octet-stream',
+    byteSize: Number(document.byteSize || 0),
+    uploadedAt: document.uploadedAt || null,
+    documentType,
+    downloadUrl: getVerificationDocumentDownloadUrl(providerId, documentType),
+  };
+}
+
+function buildVerificationLevel(verification = {}, isVerified = false) {
+  if (isVerified || verification?.review?.reviewStatus === 'verified') {
+    return 'verified';
+  }
+
+  const hasDetails = Boolean(
+    (verification.insurance?.hasInsurance &&
+      (verification.insurance?.carrier ||
+        verification.insurance?.policyNumber ||
+        verification.insurance?.expirationDate)) ||
+      (verification.license?.hasLicense &&
+        (verification.license?.licenseNumber || verification.license?.state)) ||
+      verification.insurance?.certificateDocument?.storageKey ||
+      verification.license?.document?.storageKey,
+  );
+
+  return hasDetails ? 'details_provided' : 'self_reported';
+}
+
+function buildVerificationBadges(provider) {
+  const badges = [];
+  if (provider.verification?.review?.level === 'verified' || provider.isVerified) {
+    badges.push('Verified Credentials');
+  }
+  if (provider.verification?.insurance?.hasInsurance) {
+    badges.push(
+      provider.compliance?.insuranceStatus === 'verified' ? 'Insurance Verified' : 'Self-Reported Insurance',
+    );
+  }
+  if (provider.verification?.license?.hasLicense) {
+    badges.push(
+      provider.compliance?.licenseStatus === 'verified' ? 'License Verified' : 'Self-Reported License',
+    );
+  }
+  if (provider.verification?.bonding?.hasBond) {
+    badges.push('Self-Reported Bonded');
+  }
+  return badges;
 }
 
 function serializeCategory(document) {
@@ -78,7 +240,121 @@ function serializeCategory(document) {
     rolloutPhase: Number(document.rolloutPhase || 1),
     isActive: Boolean(document.isActive),
     sortOrder: Number(document.sortOrder || 0),
+    verificationRequirements: buildVerificationRequirements(document),
   };
+}
+
+function buildVerificationProfile(providerDocument, categoryDocument = null) {
+  const providerId = providerDocument._id?.toString?.() || String(providerDocument._id || '');
+  const level = buildVerificationLevel(providerDocument.verification, providerDocument.isVerified);
+  const reviewStatus =
+    providerDocument.verification?.review?.reviewStatus ||
+    (level === 'verified' ? 'verified' : 'none');
+
+  return {
+    insurance: {
+      hasInsurance: Boolean(providerDocument.verification?.insurance?.hasInsurance),
+      carrier: providerDocument.verification?.insurance?.carrier || '',
+      policyNumber: providerDocument.verification?.insurance?.policyNumber || '',
+      expirationDate: providerDocument.verification?.insurance?.expirationDate || null,
+      certificateDocument: serializeVerificationDocument(
+        providerDocument.verification?.insurance?.certificateDocument,
+        providerId,
+        'insurance_certificate',
+      ),
+    },
+    license: {
+      hasLicense: Boolean(providerDocument.verification?.license?.hasLicense),
+      licenseNumber: providerDocument.verification?.license?.licenseNumber || '',
+      state: providerDocument.verification?.license?.state || '',
+      document: serializeVerificationDocument(
+        providerDocument.verification?.license?.document,
+        providerId,
+        'license_document',
+      ),
+    },
+    bonding: {
+      hasBond: Boolean(providerDocument.verification?.bonding?.hasBond),
+    },
+    review: {
+      level,
+      reviewStatus,
+      submittedAt: providerDocument.verification?.review?.submittedAt || null,
+      verifiedAt: providerDocument.verification?.review?.verifiedAt || null,
+      reviewedAt: providerDocument.verification?.review?.reviewedAt || null,
+      reviewedBy: providerDocument.verification?.review?.reviewedBy || '',
+      reviewNotes: providerDocument.verification?.review?.reviewNotes || '',
+    },
+    requirements: buildVerificationRequirements(categoryDocument),
+    disclaimer: PROVIDER_VERIFICATION_DISCLAIMER,
+    badges: buildVerificationBadges(providerDocument),
+  };
+}
+
+function getProviderVerificationDocument(providerDocument, documentType) {
+  if (documentType === 'insurance_certificate') {
+    return providerDocument.verification?.insurance?.certificateDocument || null;
+  }
+
+  if (documentType === 'license_document') {
+    return providerDocument.verification?.license?.document || null;
+  }
+
+  return null;
+}
+
+function applyProviderVerification(providerDocument, payload = {}) {
+  providerDocument.verification = providerDocument.verification || {};
+  providerDocument.verification.insurance = providerDocument.verification.insurance || {};
+  providerDocument.verification.license = providerDocument.verification.license || {};
+  providerDocument.verification.bonding = providerDocument.verification.bonding || {};
+  providerDocument.verification.review = providerDocument.verification.review || {};
+
+  if (payload.hasInsurance !== undefined) {
+    providerDocument.verification.insurance.hasInsurance = normalizeBoolean(payload.hasInsurance);
+  }
+  if (payload.insuranceCarrier !== undefined) {
+    providerDocument.verification.insurance.carrier = normalizeString(payload.insuranceCarrier).slice(0, 120);
+  }
+  if (payload.insurancePolicyNumber !== undefined) {
+    providerDocument.verification.insurance.policyNumber = normalizeString(payload.insurancePolicyNumber).slice(0, 80);
+  }
+  if (payload.insuranceExpirationDate !== undefined) {
+    providerDocument.verification.insurance.expirationDate = normalizeDate(payload.insuranceExpirationDate);
+  }
+  if (payload.hasLicense !== undefined) {
+    providerDocument.verification.license.hasLicense = normalizeBoolean(payload.hasLicense);
+  }
+  if (payload.licenseNumber !== undefined) {
+    providerDocument.verification.license.licenseNumber = normalizeString(payload.licenseNumber).slice(0, 80);
+  }
+  if (payload.licenseState !== undefined) {
+    providerDocument.verification.license.state = normalizeString(payload.licenseState).toUpperCase().slice(0, 8);
+  }
+  if (payload.hasBond !== undefined) {
+    providerDocument.verification.bonding.hasBond = normalizeBoolean(payload.hasBond);
+  }
+
+  const nextLevel = buildVerificationLevel(providerDocument.verification, providerDocument.isVerified);
+  providerDocument.verification.review.level = nextLevel;
+
+  if (providerDocument.isVerified) {
+    providerDocument.verification.review.reviewStatus = 'verified';
+    providerDocument.verification.review.verifiedAt =
+      providerDocument.verification.review.verifiedAt || new Date();
+  } else if (
+    providerDocument.verification.insurance?.certificateDocument?.storageKey ||
+    providerDocument.verification.license?.document?.storageKey
+  ) {
+    providerDocument.verification.review.reviewStatus =
+      providerDocument.verification.review.reviewStatus === 'rejected'
+        ? 'rejected'
+        : 'submitted';
+    providerDocument.verification.review.submittedAt =
+      providerDocument.verification.review.submittedAt || new Date();
+  } else if (providerDocument.verification.review.reviewStatus !== 'rejected') {
+    providerDocument.verification.review.reviewStatus = 'none';
+  }
 }
 
 function buildResponseSpeedScore(averageResponseMinutes) {
@@ -139,15 +415,35 @@ function buildProviderRankScore(provider, property, analytics) {
   const distanceScore = buildCoverageScore(provider, property);
   const subscriptionBoostScore = buildSubscriptionBoostScore(provider);
   const freshnessScore = buildFreshnessScore(provider);
+  const verificationLevel = buildVerificationLevel(provider.verification, provider.isVerified);
+  const verificationScore =
+    verificationLevel === 'verified' || provider.isVerified
+      ? 100
+      : verificationLevel === 'details_provided'
+        ? 72
+        : 45;
+  const profileCompletenessScore =
+    Math.min(
+      100,
+      [
+        provider.description,
+        provider.pricingSummary,
+        provider.turnaroundLabel,
+        provider.websiteUrl,
+        ...(provider.serviceHighlights || []),
+      ].filter(Boolean).length * 20,
+    ) || 40;
 
   return {
     overallScore: Math.round(
-      qualityScore * 0.35 +
-        responseSpeedScore * 0.2 +
+      qualityScore * 0.3 +
+        responseSpeedScore * 0.18 +
         leadAcceptanceScore * 0.15 +
         distanceScore * 0.1 +
         subscriptionBoostScore * 0.1 +
-        freshnessScore * 0.1,
+        freshnessScore * 0.07 +
+        verificationScore * 0.07 +
+        profileCompletenessScore * 0.03,
     ),
     breakdown: {
       qualityScore,
@@ -156,20 +452,24 @@ function buildProviderRankScore(provider, property, analytics) {
       distanceScore,
       subscriptionBoostScore,
       freshnessScore,
+      verificationScore,
+      profileCompletenessScore,
     },
   };
 }
 
 function buildRankingBadges(provider, scoreBreakdown, rankIndex) {
   const badges = [];
+  const verificationLevel = buildVerificationLevel(provider.verification, provider.isVerified);
   if (rankIndex === 0) badges.push('Top Pick');
   if (provider.compliance?.approvalStatus === 'approved') badges.push('Approved');
-  if (provider.isVerified) badges.push('Verified');
+  if (verificationLevel === 'verified' || provider.isVerified) badges.push('Verified');
   if (provider.compliance?.licenseStatus === 'verified') badges.push('Licensed');
   if (provider.compliance?.insuranceStatus === 'verified') badges.push('Insured');
   if (provider.isSponsored) badges.push('Sponsored');
   if (scoreBreakdown.responseSpeedScore >= 74) badges.push('Fast Response');
   if (scoreBreakdown.distanceScore >= 100) badges.push('ZIP Match');
+  if (scoreBreakdown.verificationScore >= 72) badges.push('Trust Details Added');
   return badges;
 }
 
@@ -182,6 +482,10 @@ function buildCoverageLabel(provider, property) {
 }
 
 function serializeProvider(document, extras = {}) {
+  const { categoryDocument, ...restExtras } = extras;
+  const category = categoryDocument || null;
+  const verification = buildVerificationProfile(document, category);
+
   return {
     id: document._id?.toString?.() || String(document._id),
     userId: document.userId?.toString?.() || String(document.userId || ''),
@@ -224,9 +528,10 @@ function serializeProvider(document, extras = {}) {
       reviewedAt: document.compliance?.reviewedAt || null,
       reviewedBy: document.compliance?.reviewedBy || '',
     },
+    verification,
     createdAt: document.createdAt || null,
     updatedAt: document.updatedAt || null,
-    ...extras,
+    ...restExtras,
   };
 }
 
@@ -366,12 +671,13 @@ async function findProviderForUser(userId, email = '') {
 
 async function buildProviderPortalDashboard(providerDocument) {
   const providerId = providerDocument._id;
-  const [dispatches, analytics] = await Promise.all([
+  const [dispatches, analytics, category] = await Promise.all([
     LeadDispatchModel.find({ providerId }).sort({ createdAt: -1 }).limit(30).lean(),
     ProviderAnalyticsModel.findOne({
       providerId,
       monthKey: new Date().toISOString().slice(0, 7),
     }).lean(),
+    ProviderCategoryModel.findOne({ key: providerDocument.categoryKey }).lean(),
   ]);
 
   const leadRequestIds = [...new Set(dispatches.map((dispatch) => dispatch.leadRequestId?.toString?.() || String(dispatch.leadRequestId)))];
@@ -384,6 +690,8 @@ async function buildProviderPortalDashboard(providerDocument) {
 
   return {
     provider: serializeProvider(providerDocument.toObject ? providerDocument.toObject() : providerDocument, {
+      categoryLabel: category?.label || providerDocument.categoryKey,
+      categoryDocument: category || null,
       portalAccess: {
         issuedAt: providerDocument.portalAccess?.issuedAt || null,
         lastUsedAt: providerDocument.portalAccess?.lastUsedAt || null,
@@ -541,6 +849,7 @@ export async function ensureProviderCategories() {
             rolloutPhase: category.rolloutPhase,
             sortOrder: category.sortOrder,
             isActive: true,
+            verificationRequirements: buildVerificationRequirements(category),
           },
         },
         { upsert: true },
@@ -609,6 +918,7 @@ export async function createAdminProviderCategory(payload = {}) {
     rolloutPhase: Math.max(1, Math.min(10, Number(payload.rolloutPhase || 1))),
     sortOrder: Number.isFinite(Number(payload.sortOrder)) ? Number(payload.sortOrder) : 999,
     isActive: payload.isActive !== false,
+    verificationRequirements: buildVerificationRequirements(payload),
   });
 
   return { category: serializeCategory(category.toObject()) };
@@ -649,6 +959,12 @@ export async function updateAdminProviderCategory(categoryKey, payload = {}) {
 
   if (payload.isActive !== undefined) {
     category.isActive = Boolean(payload.isActive);
+  }
+  if (payload.verificationRequirements) {
+    category.verificationRequirements = {
+      ...buildVerificationRequirements(category),
+      ...buildVerificationRequirements(payload.verificationRequirements),
+    };
   }
 
   await category.save();
@@ -712,6 +1028,7 @@ export async function listProvidersForProperty(propertyId, { categoryKey = '', l
   }
 
   const categories = await listProviderCategories();
+  const categoryByKey = new Map(categories.map((category) => [category.key, category]));
   const resolvedCategoryKey = await resolveRequestedCategory(propertyId, { categoryKey, taskKey });
 
   if (mongoose.connection.readyState !== 1) {
@@ -765,6 +1082,7 @@ export async function listProvidersForProperty(propertyId, { categoryKey = '', l
     items: rankedProviders.map(({ provider, analytics, rank }, index) =>
       serializeProvider(provider, {
         saved: savedProviderIds.has(provider._id?.toString?.() || String(provider._id)),
+        categoryDocument: categoryByKey.get(provider.categoryKey) || null,
         city: provider.serviceArea?.city || '',
         state: provider.serviceArea?.state || '',
         coverageLabel: buildCoverageLabel(provider, property),
@@ -964,7 +1282,7 @@ export async function createProviderProfile(
     payload.approvalStatus ||
     payload.compliance?.approvalStatus ||
     (createdFrom === 'provider_portal' ? 'review' : 'approved');
-  const document = await ProviderModel.create({
+  const document = new ProviderModel({
     userId: userId && mongoose.Types.ObjectId.isValid(userId) ? userId : null,
     businessName,
     slug,
@@ -1014,6 +1332,7 @@ export async function createProviderProfile(
       reviewedAt: approvalStatus === 'approved' ? new Date() : null,
       reviewedBy: normalizeString(payload.reviewedBy || '').slice(0, 80),
     },
+    verification: {},
     portalAccess:
       createdFrom === 'provider_portal'
         ? {
@@ -1030,8 +1349,24 @@ export async function createProviderProfile(
     internalNotes: normalizeString(payload.internalNotes).slice(0, 600),
   });
 
+  applyProviderVerification(document, payload);
+
+  if (document.isVerified || payload.reviewStatus === 'verified') {
+    document.verification.review.reviewStatus = 'verified';
+    document.verification.review.verifiedAt = new Date();
+    document.compliance.licenseStatus = document.verification.license?.hasLicense
+      ? 'verified'
+      : document.compliance.licenseStatus;
+    document.compliance.insuranceStatus = document.verification.insurance?.hasInsurance
+      ? 'verified'
+      : document.compliance.insuranceStatus;
+  }
+
+  await document.save();
+
   return serializeProvider(document.toObject(), {
     categoryLabel: category.label,
+    categoryDocument: category,
     ...(portalAccessToken ? { portalAccessToken } : {}),
   });
 }
@@ -1093,6 +1428,16 @@ export async function updateProviderPortalProfile(providerId, token, payload = {
   }
 
   const provider = await authenticateProviderPortal(providerId, token);
+  const touchedVerificationField = [
+    'hasInsurance',
+    'insuranceCarrier',
+    'insurancePolicyNumber',
+    'insuranceExpirationDate',
+    'hasLicense',
+    'licenseNumber',
+    'licenseState',
+    'hasBond',
+  ].some((field) => payload[field] !== undefined);
 
   if (payload.description !== undefined) {
     provider.description = normalizeString(payload.description).slice(0, 600);
@@ -1135,10 +1480,158 @@ export async function updateProviderPortalProfile(providerId, token, payload = {
   if (payload.preferredContactMethod !== undefined) {
     provider.leadRouting.preferredContactMethod = payload.preferredContactMethod;
   }
+  if (touchedVerificationField && provider.verification?.review?.reviewStatus === 'verified') {
+    provider.isVerified = false;
+    provider.verification.review.reviewStatus = 'submitted';
+    provider.verification.review.verifiedAt = null;
+    if (provider.verification.license?.hasLicense) {
+      provider.compliance.licenseStatus = 'unverified';
+    }
+    if (provider.verification.insurance?.hasInsurance) {
+      provider.compliance.insuranceStatus = 'unverified';
+    }
+  }
+
+  if (touchedVerificationField) {
+    applyProviderVerification(provider, payload);
+  }
 
   await provider.save();
   const dashboard = await buildProviderPortalDashboard(provider);
   return { dashboard };
+}
+
+export async function uploadProviderVerificationDocument(providerId, token, payload = {}) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required for provider verification uploads.');
+  }
+
+  const provider = await authenticateProviderPortal(providerId, token);
+  const documentType = VERIFIED_DOCUMENT_TYPES[payload.documentType] ? payload.documentType : '';
+  if (!documentType) {
+    throw new Error('Unsupported provider verification document type.');
+  }
+
+  const buffer = Buffer.from(String(payload.fileBase64 || ''), 'base64');
+  if (!buffer.byteLength) {
+    throw new Error('Verification document upload was empty.');
+  }
+
+  const savedDocument = await saveProviderDocumentBuffer({
+    providerId: provider._id?.toString?.() || String(provider._id),
+    documentType,
+    mimeType: payload.mimeType,
+    buffer,
+  });
+
+  const nextDocument = {
+    ...savedDocument,
+    fileName: normalizeString(payload.fileName).slice(0, 180),
+    mimeType: payload.mimeType,
+    uploadedAt: new Date(),
+  };
+
+  if (documentType === 'insurance_certificate') {
+    provider.verification.insurance.certificateDocument = nextDocument;
+    provider.verification.insurance.hasInsurance = true;
+  }
+
+  if (documentType === 'license_document') {
+    provider.verification.license.document = nextDocument;
+    provider.verification.license.hasLicense = true;
+  }
+
+  provider.isVerified = false;
+  provider.verification.review.reviewStatus = 'submitted';
+  provider.verification.review.submittedAt = new Date();
+  provider.verification.review.reviewNotes = '';
+  provider.verification.review.verifiedAt = null;
+  applyProviderVerification(provider, {});
+
+  if (provider.verification.license?.hasLicense) {
+    provider.compliance.licenseStatus = 'unverified';
+  }
+  if (provider.verification.insurance?.hasInsurance) {
+    provider.compliance.insuranceStatus = 'unverified';
+  }
+
+  await provider.save();
+  const dashboard = await buildProviderPortalDashboard(provider);
+  return { dashboard };
+}
+
+export async function submitProviderVerification(providerId, token) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required for provider verification submission.');
+  }
+
+  const provider = await authenticateProviderPortal(providerId, token);
+  const hasDetails =
+    provider.verification?.insurance?.carrier ||
+    provider.verification?.insurance?.policyNumber ||
+    provider.verification?.insurance?.expirationDate ||
+    provider.verification?.license?.licenseNumber ||
+    provider.verification?.license?.state ||
+    provider.verification?.insurance?.certificateDocument?.storageKey ||
+    provider.verification?.license?.document?.storageKey;
+
+  if (!hasDetails) {
+    throw new Error('Add verification details or upload at least one document before submitting for review.');
+  }
+
+  provider.verification.review.reviewStatus = 'submitted';
+  provider.verification.review.submittedAt = new Date();
+  provider.verification.review.reviewNotes = '';
+  provider.isVerified = false;
+  applyProviderVerification(provider, {});
+
+  await provider.save();
+  const dashboard = await buildProviderPortalDashboard(provider);
+  return { dashboard };
+}
+
+export async function getProviderVerificationDocumentFile(
+  providerId,
+  { token = '', session = null, documentType = '' } = {},
+) {
+  if (!VERIFIED_DOCUMENT_TYPES[documentType]) {
+    throw new Error('Unsupported provider verification document type.');
+  }
+
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required for provider verification documents.');
+  }
+
+  const provider = await ProviderModel.findById(providerId);
+  if (!provider) {
+    throw new Error('Provider not found.');
+  }
+
+  const isAdminSession = ['admin', 'super_admin'].includes(session?.role || '');
+  const isProviderSession =
+    session?.sub &&
+    String(provider.userId || '') === String(session.sub) &&
+    ['provider', 'admin', 'super_admin'].includes(session.role || '');
+
+  if (!isAdminSession && !isProviderSession) {
+    await authenticateProviderPortal(providerId, token);
+  }
+
+  const document = getProviderVerificationDocument(provider, documentType);
+  if (!document?.storageKey) {
+    throw new Error('Verification document not found.');
+  }
+
+  const stored = await readStoredAsset({
+    storageProvider: document.storageProvider,
+    storageKey: document.storageKey,
+  });
+
+  return {
+    buffer: stored.buffer,
+    mimeType: document.mimeType || 'application/octet-stream',
+    fileName: document.fileName || `${documentType}.bin`,
+  };
 }
 
 export async function respondToProviderPortalLead(dispatchId, { providerId, token, responseStatus, note = '' }) {
@@ -1205,10 +1698,53 @@ export async function updateAdminProviderReview(providerId, payload = {}) {
     throw new Error('Provider not found.');
   }
 
+  provider.verification = provider.verification || {};
+  provider.verification.review = provider.verification.review || {};
+  provider.verification.insurance = provider.verification.insurance || {};
+  provider.verification.license = provider.verification.license || {};
+
   if (payload.approvalStatus) {
     provider.compliance.approvalStatus = payload.approvalStatus;
     provider.compliance.reviewedAt = new Date();
     provider.compliance.reviewedBy = normalizeString(payload.reviewedBy || 'admin_console').slice(0, 80);
+  }
+
+  if (payload.reviewNotes !== undefined) {
+    provider.verification.review.reviewNotes = normalizeString(payload.reviewNotes).slice(0, 600);
+  }
+
+  if (payload.reviewStatus) {
+    provider.verification.review.reviewStatus = payload.reviewStatus;
+    provider.verification.review.reviewedAt = new Date();
+    provider.verification.review.reviewedBy = normalizeString(payload.reviewedBy || 'admin_console').slice(0, 80);
+
+    if (payload.reviewStatus === 'submitted') {
+      provider.verification.review.submittedAt = provider.verification.review.submittedAt || new Date();
+      provider.isVerified = false;
+    }
+
+    if (payload.reviewStatus === 'verified') {
+      provider.verification.review.verifiedAt = new Date();
+      provider.verification.review.level = 'verified';
+      provider.isVerified = true;
+      if (provider.verification.insurance?.hasInsurance) {
+        provider.compliance.insuranceStatus = 'verified';
+      }
+      if (provider.verification.license?.hasLicense) {
+        provider.compliance.licenseStatus = 'verified';
+      }
+    }
+
+    if (payload.reviewStatus === 'rejected') {
+      provider.isVerified = false;
+      provider.verification.review.verifiedAt = null;
+      if (provider.verification.insurance?.hasInsurance) {
+        provider.compliance.insuranceStatus = 'unverified';
+      }
+      if (provider.verification.license?.hasLicense) {
+        provider.compliance.licenseStatus = 'unverified';
+      }
+    }
   }
 
   if (payload.licenseStatus) {
@@ -1228,6 +1764,11 @@ export async function updateAdminProviderReview(providerId, payload = {}) {
 
   if (payload.isVerified !== undefined) {
     provider.isVerified = Boolean(payload.isVerified);
+    if (provider.isVerified) {
+      provider.verification.review.reviewStatus = 'verified';
+      provider.verification.review.level = 'verified';
+      provider.verification.review.verifiedAt = provider.verification.review.verifiedAt || new Date();
+    }
   }
 
   if (payload.turnaroundLabel !== undefined) {
@@ -1243,7 +1784,13 @@ export async function updateAdminProviderReview(providerId, payload = {}) {
   }
 
   await provider.save();
-  return { provider: serializeProvider(provider.toObject()) };
+  const category = await ProviderCategoryModel.findOne({ key: provider.categoryKey }).lean();
+  return {
+    provider: serializeProvider(provider.toObject(), {
+      categoryLabel: category?.label || provider.categoryKey,
+      categoryDocument: category || null,
+    }),
+  };
 }
 
 export async function listAdminProviders({ limit = 50 } = {}) {
@@ -1284,6 +1831,7 @@ export async function listAdminProviders({ limit = 50 } = {}) {
     providers: providers.map((provider) =>
       serializeProvider(provider, {
         categoryLabel: categoryByKey.get(provider.categoryKey)?.label || provider.categoryKey,
+        categoryDocument: categoryByKey.get(provider.categoryKey) || null,
         leadCount: dispatchCountByProviderId.get(provider._id?.toString?.() || String(provider._id)) || 0,
       }),
     ),

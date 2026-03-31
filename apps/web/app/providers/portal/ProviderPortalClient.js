@@ -7,8 +7,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createProviderBillingCheckout,
   createProviderPortalSession,
+  downloadProviderVerificationDocument,
   respondToProviderPortalLead,
+  submitProviderVerification,
   syncProviderBillingSession,
+  uploadProviderVerificationDocument,
   updateProviderPortalProfile,
 } from '../../../lib/api';
 import {
@@ -33,7 +36,22 @@ const INITIAL_PROFILE_FORM = {
   notifyPhone: '',
   notifyEmail: '',
   preferredContactMethod: 'sms',
+  hasInsurance: false,
+  insuranceCarrier: '',
+  insurancePolicyNumber: '',
+  insuranceExpirationDate: '',
+  hasLicense: false,
+  licenseNumber: '',
+  licenseState: '',
+  hasBond: false,
 };
+
+const US_STATE_OPTIONS = [
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN',
+  'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH',
+  'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT',
+  'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+];
 
 function formatPhoneInput(value) {
   const digits = String(value || '').replace(/\D/g, '').slice(0, 10);
@@ -69,6 +87,12 @@ function formatPlanLabel(value) {
     .replace(/_/g, ' ');
 }
 
+function formatVerificationLabel(value) {
+  return String(value || 'none')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 function formatDate(value) {
   if (!value) {
     return 'Not yet';
@@ -79,6 +103,16 @@ function formatDate(value) {
   } catch {
     return 'Not yet';
   }
+}
+
+async function fileToBase64(file) {
+  const buffer = await file.arrayBuffer();
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  for (let index = 0; index < bytes.byteLength; index += 1) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+  return window.btoa(binary);
 }
 
 export function ProviderPortalClient({
@@ -97,6 +131,7 @@ export function ProviderPortalClient({
   const [error, setError] = useState('');
   const [appSession, setAppSession] = useState(null);
   const [appSessionReady, setAppSessionReady] = useState(false);
+  const [uploadingDocumentType, setUploadingDocumentType] = useState('');
   const portalSessionQueryKey = [
     'provider-portal-session',
     providerId,
@@ -254,6 +289,16 @@ export function ProviderPortalClient({
       notifyPhone: provider.leadRouting?.notifyPhone || '',
       notifyEmail: provider.leadRouting?.notifyEmail || '',
       preferredContactMethod: provider.leadRouting?.preferredContactMethod || 'sms',
+      hasInsurance: Boolean(provider.verification?.insurance?.hasInsurance),
+      insuranceCarrier: provider.verification?.insurance?.carrier || '',
+      insurancePolicyNumber: provider.verification?.insurance?.policyNumber || '',
+      insuranceExpirationDate: provider.verification?.insurance?.expirationDate
+        ? new Date(provider.verification.insurance.expirationDate).toISOString().slice(0, 10)
+        : '',
+      hasLicense: Boolean(provider.verification?.license?.hasLicense),
+      licenseNumber: provider.verification?.license?.licenseNumber || '',
+      licenseState: provider.verification?.license?.state || '',
+      hasBond: Boolean(provider.verification?.bonding?.hasBond),
     });
   }, [dashboard]);
 
@@ -314,6 +359,14 @@ export function ProviderPortalClient({
           notifyPhone: profileForm.notifyPhone,
           notifyEmail: profileForm.notifyEmail,
           preferredContactMethod: profileForm.preferredContactMethod,
+          hasInsurance: profileForm.hasInsurance,
+          insuranceCarrier: profileForm.insuranceCarrier,
+          insurancePolicyNumber: profileForm.insurancePolicyNumber,
+          insuranceExpirationDate: profileForm.insuranceExpirationDate || undefined,
+          hasLicense: profileForm.hasLicense,
+          licenseNumber: profileForm.licenseNumber,
+          licenseState: profileForm.licenseState,
+          hasBond: profileForm.hasBond,
         },
         portalSession.token,
       );
@@ -378,6 +431,110 @@ export function ProviderPortalClient({
       setToast({
         tone: 'error',
         title: 'Could not update provider lead',
+        message: requestError.message,
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleUploadVerificationDocument(documentType, file) {
+    if (!portalSession?.providerId || !portalSession?.token || !file) {
+      return;
+    }
+
+    setUploadingDocumentType(documentType);
+    setError('');
+
+    try {
+      const fileBase64 = await fileToBase64(file);
+      const result = await uploadProviderVerificationDocument(
+        portalSession.providerId,
+        {
+          documentType,
+          fileName: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          fileBase64,
+        },
+        portalSession.token,
+      );
+
+      setDashboard(result.dashboard || null);
+      queryClient.setQueryData(portalSessionQueryKey, (current) => ({
+        ...(current || {}),
+        dashboard: result.dashboard || null,
+        portalSession,
+      }));
+      setToast({
+        tone: 'success',
+        title: 'Verification document uploaded',
+        message: 'Your verification file has been saved and is ready for review.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not upload verification document',
+        message: requestError.message,
+      });
+    } finally {
+      setUploadingDocumentType('');
+    }
+  }
+
+  async function handleDownloadVerificationDocument(documentType) {
+    if (!portalSession?.providerId || !portalSession?.token) {
+      return;
+    }
+
+    try {
+      const file = await downloadProviderVerificationDocument(
+        portalSession.providerId,
+        documentType,
+        portalSession.token,
+      );
+      const objectUrl = window.URL.createObjectURL(file.blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = file.fileName;
+      anchor.rel = 'noreferrer';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not download verification document',
+        message: requestError.message,
+      });
+    }
+  }
+
+  async function handleSubmitVerification() {
+    if (!portalSession?.providerId || !portalSession?.token) {
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+
+    try {
+      const result = await submitProviderVerification(portalSession.providerId, portalSession.token);
+      setDashboard(result.dashboard || null);
+      queryClient.setQueryData(portalSessionQueryKey, (current) => ({
+        ...(current || {}),
+        dashboard: result.dashboard || null,
+        portalSession,
+      }));
+      setToast({
+        tone: 'success',
+        title: 'Verification submitted',
+        message: 'Your verification details are now marked for admin review.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not submit verification',
         message: requestError.message,
       });
     } finally {
@@ -464,6 +621,7 @@ export function ProviderPortalClient({
   const provider = dashboard.provider;
   const summary = dashboard.summary || {};
   const leads = dashboard.leads || [];
+  const verification = provider.verification || {};
   const billingNeedsAction =
     provider.subscription?.planCode &&
     provider.subscription?.planCode !== 'provider_basic' &&
@@ -498,6 +656,10 @@ export function ProviderPortalClient({
               <strong>Status</strong>
               <span>{provider.status || 'pending'}</span>
             </div>
+            <div className="stat-card">
+              <strong>Verification</strong>
+              <span>{formatVerificationLabel(verification.review?.level || 'self_reported')}</span>
+            </div>
           </div>
 
           <div className="provider-portal-meta">
@@ -516,6 +678,11 @@ export function ProviderPortalClient({
             {billingNeedsAction ? (
               <button type="button" className="button-primary" onClick={handleContinueBilling} disabled={busy}>
                 Continue billing setup
+              </button>
+            ) : null}
+            {verification.review?.level !== 'verified' ? (
+              <button type="button" className="button-secondary" onClick={handleSubmitVerification} disabled={busy}>
+                Submit verification for review
               </button>
             ) : null}
             <Link href="/providers/join" className="button-secondary">
@@ -598,7 +765,18 @@ export function ProviderPortalClient({
             </label>
             <label>
               State
-              <input value={profileForm.state} onChange={(event) => updateField('state', event.target.value)} />
+              <select
+                className="select-input"
+                value={profileForm.state}
+                onChange={(event) => updateField('state', event.target.value)}
+              >
+                <option value="">Select a state</option>
+                {US_STATE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
           <div className="split-fields">
@@ -615,7 +793,7 @@ export function ProviderPortalClient({
               <input
                 type="number"
                 min="5"
-                max="150"
+                max="1000"
                 value={profileForm.radiusMiles}
                 onChange={(event) => updateField('radiusMiles', event.target.value)}
               />
@@ -668,6 +846,178 @@ export function ProviderPortalClient({
               <option value="phone">Phone</option>
             </select>
           </label>
+          <div className="verification-panel">
+            <div className="verification-panel-header">
+              <div>
+                <span className="label">Verification</span>
+                <h3>Trust profile</h3>
+              </div>
+              <span className="checklist-chip checklist-chip-medium">
+                {formatVerificationLabel(verification.review?.reviewStatus || 'none')}
+              </span>
+            </div>
+            <p className="workspace-control-note">
+              {verification.disclaimer ||
+                'Provider credentials are self-reported or verified where indicated. Workside does not guarantee accuracy.'}
+            </p>
+            {verification.review?.reviewNotes ? (
+              <div className="legal-notice">
+                Admin review note: {verification.review.reviewNotes}
+              </div>
+            ) : null}
+            <div className="verification-check-grid">
+              <label className="consent-check compact-check">
+                <input
+                  type="checkbox"
+                  checked={profileForm.hasInsurance}
+                  onChange={(event) => updateField('hasInsurance', event.target.checked)}
+                />
+                <span>Insured</span>
+              </label>
+              <label className="consent-check compact-check">
+                <input
+                  type="checkbox"
+                  checked={profileForm.hasLicense}
+                  onChange={(event) => updateField('hasLicense', event.target.checked)}
+                />
+                <span>Licensed</span>
+              </label>
+              <label className="consent-check compact-check">
+                <input
+                  type="checkbox"
+                  checked={profileForm.hasBond}
+                  onChange={(event) => updateField('hasBond', event.target.checked)}
+                />
+                <span>Bonded</span>
+              </label>
+            </div>
+            {profileForm.hasInsurance ? (
+              <>
+                <div className="split-fields">
+                  <label>
+                    Insurance carrier
+                    <input
+                      value={profileForm.insuranceCarrier}
+                      onChange={(event) => updateField('insuranceCarrier', event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Policy number
+                    <input
+                      value={profileForm.insurancePolicyNumber}
+                      onChange={(event) => updateField('insurancePolicyNumber', event.target.value)}
+                    />
+                  </label>
+                </div>
+                <label>
+                  Insurance expiration
+                  <input
+                    type="date"
+                    value={profileForm.insuranceExpirationDate}
+                    onChange={(event) => updateField('insuranceExpirationDate', event.target.value)}
+                  />
+                </label>
+              </>
+            ) : null}
+            {profileForm.hasLicense ? (
+              <div className="split-fields">
+                <label>
+                  License number
+                  <input
+                    value={profileForm.licenseNumber}
+                    onChange={(event) => updateField('licenseNumber', event.target.value)}
+                  />
+                </label>
+                <label>
+                  License state
+                  <select
+                    className="select-input"
+                    value={profileForm.licenseState}
+                    onChange={(event) => updateField('licenseState', event.target.value)}
+                  >
+                    <option value="">Select a state</option>
+                    {US_STATE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : null}
+            <div className="provider-doc-grid">
+              <div className="provider-doc-card">
+                <strong>Insurance certificate</strong>
+                <span>
+                  {verification.insurance?.certificateDocument?.fileName || 'No insurance document uploaded yet'}
+                </span>
+                {verification.insurance?.certificateDocument?.uploadedAt ? (
+                  <span>Uploaded {formatDate(verification.insurance.certificateDocument.uploadedAt)}</span>
+                ) : null}
+                <div className="provider-doc-actions">
+                  <label className="button-secondary provider-upload-button">
+                    {uploadingDocumentType === 'insurance_certificate' ? 'Uploading...' : 'Upload file'}
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,.webp"
+                      hidden
+                      disabled={uploadingDocumentType === 'insurance_certificate'}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) {
+                          handleUploadVerificationDocument('insurance_certificate', file);
+                        }
+                        event.target.value = '';
+                      }}
+                    />
+                  </label>
+                  {verification.insurance?.certificateDocument ? (
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => handleDownloadVerificationDocument('insurance_certificate')}
+                    >
+                      View file
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <div className="provider-doc-card">
+                <strong>License document</strong>
+                <span>{verification.license?.document?.fileName || 'No license document uploaded yet'}</span>
+                {verification.license?.document?.uploadedAt ? (
+                  <span>Uploaded {formatDate(verification.license.document.uploadedAt)}</span>
+                ) : null}
+                <div className="provider-doc-actions">
+                  <label className="button-secondary provider-upload-button">
+                    {uploadingDocumentType === 'license_document' ? 'Uploading...' : 'Upload file'}
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,.webp"
+                      hidden
+                      disabled={uploadingDocumentType === 'license_document'}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) {
+                          handleUploadVerificationDocument('license_document', file);
+                        }
+                        event.target.value = '';
+                      }}
+                    />
+                  </label>
+                  {verification.license?.document ? (
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => handleDownloadVerificationDocument('license_document')}
+                    >
+                      View file
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
           <div className="button-stack">
             <button
               type="submit"

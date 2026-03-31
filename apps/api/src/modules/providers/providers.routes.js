@@ -13,13 +13,29 @@ import {
   createProviderPortalSessionForUser,
   createProviderPortalSession,
   createProviderProfile,
+  getProviderVerificationDocumentFile,
   listProviderCategories,
   listProviderLeadsForProperty,
   listProvidersForProperty,
   respondToProviderPortalLead,
   saveProviderForProperty,
+  submitProviderVerification,
+  uploadProviderVerificationDocument,
   updateProviderPortalProfile,
 } from './providers.service.js';
+
+const US_STATE_CODES = [
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN',
+  'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH',
+  'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT',
+  'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+];
+
+const stateCodeSchema = z
+  .string()
+  .trim()
+  .transform((value) => value.toUpperCase())
+  .pipe(z.enum(US_STATE_CODES));
 
 const propertyParamsSchema = z.object({
   propertyId: z.string().min(1),
@@ -52,7 +68,7 @@ const providerSignupSchema = z.object({
   phone: z.string().trim().min(7).max(40),
   password: z.string().min(8).max(120).optional(),
   city: z.string().trim().min(1).max(80),
-  state: z.string().trim().min(1).max(40),
+  state: stateCodeSchema,
   zipCodes: z.array(z.string().trim().min(3).max(12)).max(25).optional(),
   radiusMiles: z.number().int().min(5).max(1000).optional(),
   description: z.string().trim().max(600).optional(),
@@ -61,6 +77,14 @@ const providerSignupSchema = z.object({
   turnaroundLabel: z.string().trim().max(80).optional(),
   pricingSummary: z.string().trim().max(140).optional(),
   serviceHighlights: z.array(z.string().trim().min(1).max(60)).max(6).optional(),
+  hasInsurance: z.boolean().optional(),
+  insuranceCarrier: z.string().trim().max(120).optional(),
+  insurancePolicyNumber: z.string().trim().max(80).optional(),
+  insuranceExpirationDate: z.string().trim().max(40).optional(),
+  hasLicense: z.boolean().optional(),
+  licenseNumber: z.string().trim().max(80).optional(),
+  licenseState: stateCodeSchema.optional(),
+  hasBond: z.boolean().optional(),
   deliveryMode: z.enum(['sms', 'email', 'sms_and_email']).optional(),
   notifyPhone: z.string().trim().max(40).optional(),
   notifyEmail: z.string().trim().email().max(120).optional(),
@@ -92,13 +116,28 @@ const providerPortalProfileSchema = z.object({
   pricingSummary: z.string().trim().max(140).optional(),
   serviceHighlights: z.array(z.string().trim().min(1).max(60)).max(6).optional(),
   city: z.string().trim().max(80).optional(),
-  state: z.string().trim().max(40).optional(),
+  state: stateCodeSchema.optional(),
   zipCodes: z.array(z.string().trim().min(3).max(12)).max(25).optional(),
   radiusMiles: z.number().int().min(5).max(1000).optional(),
+  hasInsurance: z.boolean().optional(),
+  insuranceCarrier: z.string().trim().max(120).optional(),
+  insurancePolicyNumber: z.string().trim().max(80).optional(),
+  insuranceExpirationDate: z.string().trim().max(40).optional(),
+  hasLicense: z.boolean().optional(),
+  licenseNumber: z.string().trim().max(80).optional(),
+  licenseState: stateCodeSchema.optional(),
+  hasBond: z.boolean().optional(),
   deliveryMode: z.enum(['sms', 'email', 'sms_and_email']).optional(),
   notifyPhone: z.string().trim().max(40).optional(),
   notifyEmail: z.string().trim().email().max(120).optional(),
   preferredContactMethod: z.enum(['sms', 'email', 'phone']).optional(),
+});
+
+const providerVerificationDocumentUploadSchema = z.object({
+  documentType: z.enum(['insurance_certificate', 'license_document']),
+  fileName: z.string().trim().min(1).max(180),
+  mimeType: z.enum(['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp']),
+  fileBase64: z.string().min(20),
 });
 
 const providerPortalRespondSchema = z.object({
@@ -297,6 +336,59 @@ export async function providersRoutes(fastify) {
       return reply.code(400).send({ message: error.message });
     }
   });
+
+  fastify.post('/provider-portal/providers/:providerId/verification-documents', async (request, reply) => {
+    try {
+      const { providerId } = providerParamsSchema.parse(request.params);
+      const payload = providerVerificationDocumentUploadSchema.parse(request.body || {});
+      const token = getProviderPortalToken(request);
+      const result = await uploadProviderVerificationDocument(providerId, token, payload);
+      return reply.code(201).send(result);
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/provider-portal/providers/:providerId/verification/submit', async (request, reply) => {
+    try {
+      const { providerId } = providerParamsSchema.parse(request.params);
+      const token = getProviderPortalToken(request);
+      const result = await submitProviderVerification(providerId, token);
+      return reply.send(result);
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.get(
+    '/provider-portal/providers/:providerId/verification-documents/:documentType/file',
+    async (request, reply) => {
+      try {
+        const params = z
+          .object({
+            providerId: z.string().min(1),
+            documentType: z.enum(['insurance_certificate', 'license_document']),
+          })
+          .parse(request.params);
+        const token = getProviderPortalToken(request);
+        const session = getAuthenticatedSession(request);
+        const file = await getProviderVerificationDocumentFile(params.providerId, {
+          token,
+          session,
+          documentType: params.documentType,
+        });
+        reply.header('Content-Type', file.mimeType);
+        reply.header('Content-Disposition', `inline; filename="${file.fileName}"`);
+        return reply.send(file.buffer);
+      } catch (error) {
+        const statusCode =
+          error.message === 'Provider not found.' || error.message === 'Verification document not found.'
+            ? 404
+            : 400;
+        return reply.code(statusCode).send({ message: error.message });
+      }
+    },
+  );
 
   fastify.patch('/provider-portal/dispatches/:providerId/:dispatchId/respond', async (request, reply) => {
     try {

@@ -113,7 +113,7 @@ export function ProviderCategoryManager({ categories = [], onUpdated }) {
 
   return (
     <div className="provider-category-stack">
-      <form className="subpanel" onSubmit={handleCreate}>
+      <form className="subpanel provider-category-form" onSubmit={handleCreate}>
         <h2>Add business type</h2>
         <p className="muted">
           Add new provider categories for the signup flow and admin provider tools.
@@ -158,14 +158,17 @@ export function ProviderCategoryManager({ categories = [], onUpdated }) {
             />
           </label>
         </div>
-        <div className="check-row">
-          <label>
+        <div className="provider-category-toggle-row">
+          <label className="provider-category-toggle">
             <input
               type="checkbox"
               checked={createForm.isActive}
               onChange={(event) => setCreateForm((current) => ({ ...current, isActive: event.target.checked }))}
             />
-            Active in provider signup
+            <span>
+              <strong>Show in provider signup</strong>
+              <em>New providers will be able to pick this business type during onboarding.</em>
+            </span>
           </label>
         </div>
         {error ? <div className="notice error">{error}</div> : null}
@@ -188,7 +191,7 @@ export function ProviderCategoryManager({ categories = [], onUpdated }) {
               </span>
             </div>
 
-            <div className="form-grid">
+            <div className="form-grid provider-category-fields">
               <label>
                 Label
                 <input
@@ -227,14 +230,17 @@ export function ProviderCategoryManager({ categories = [], onUpdated }) {
               </label>
             </div>
 
-            <div className="check-row">
-              <label>
+            <div className="provider-category-toggle-row">
+              <label className="provider-category-toggle">
                 <input
                   type="checkbox"
                   checked={row.isActive}
                   onChange={(event) => updateRow(row.key, 'isActive', event.target.checked)}
                 />
-                Show in provider signup
+                <span>
+                  <strong>Show in provider signup</strong>
+                  <em>Hide this type from new providers without removing historical records.</em>
+                </span>
               </label>
             </div>
 

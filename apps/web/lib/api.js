@@ -174,6 +174,50 @@ export function updateProviderPortalProfile(providerId, payload, token) {
   });
 }
 
+export function uploadProviderVerificationDocument(providerId, payload, token) {
+  return request(`/api/v1/provider-portal/providers/${providerId}/verification-documents`, {
+    method: 'POST',
+    headers: {
+      'x-provider-portal-token': token,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function submitProviderVerification(providerId, token) {
+  return request(`/api/v1/provider-portal/providers/${providerId}/verification/submit`, {
+    method: 'POST',
+    headers: {
+      'x-provider-portal-token': token,
+    },
+  });
+}
+
+export async function downloadProviderVerificationDocument(providerId, documentType, token) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/provider-portal/providers/${providerId}/verification-documents/${documentType}/file`,
+    {
+      headers: {
+        'x-provider-portal-token': token,
+      },
+      cache: 'no-store',
+    },
+  );
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(formatApiErrorMessage(data.message || data.error || 'Request failed.'));
+  }
+
+  const disposition = response.headers.get('content-disposition') || '';
+  const fileNameMatch = disposition.match(/filename="([^"]+)"/i);
+
+  return {
+    blob: await response.blob(),
+    fileName: fileNameMatch?.[1] || `${documentType}.bin`,
+  };
+}
+
 export function respondToProviderPortalLead(providerId, dispatchId, payload, token) {
   return request(`/api/v1/provider-portal/dispatches/${providerId}/${dispatchId}/respond`, {
     method: 'PATCH',

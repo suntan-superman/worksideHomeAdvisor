@@ -75,7 +75,7 @@ export function ProviderRoster({ providers = [], onUpdated }) {
           <div className="lead-meta-grid">
             <div>
               <strong>Verification</strong>
-              <span>{provider.isVerified ? 'Verified' : 'Not verified'}</span>
+              <span>{formatLabel(provider.verification?.review?.level || 'self_reported')}</span>
             </div>
             <div>
               <strong>License</strong>
@@ -91,6 +91,67 @@ export function ProviderRoster({ providers = [], onUpdated }) {
             </div>
           </div>
 
+          <div className="lead-meta-grid">
+            <div>
+              <strong>Review status</strong>
+              <span>{formatLabel(provider.verification?.review?.reviewStatus || 'none')}</span>
+            </div>
+            <div>
+              <strong>Bonding</strong>
+              <span>{provider.verification?.bonding?.hasBond ? 'Self-reported bonded' : 'Not reported'}</span>
+            </div>
+            <div>
+              <strong>Insurance doc</strong>
+              <span>{provider.verification?.insurance?.certificateDocument ? 'Uploaded' : 'Not uploaded'}</span>
+            </div>
+            <div>
+              <strong>License doc</strong>
+              <span>{provider.verification?.license?.document ? 'Uploaded' : 'Not uploaded'}</span>
+            </div>
+          </div>
+
+          {(provider.verification?.insurance?.carrier ||
+            provider.verification?.license?.licenseNumber ||
+            provider.verification?.review?.reviewNotes) ? (
+            <div className="lead-message-block">
+              <strong>Verification notes</strong>
+              <p>
+                {provider.verification?.insurance?.carrier
+                  ? `Insurance carrier: ${provider.verification.insurance.carrier}. `
+                  : ''}
+                {provider.verification?.license?.licenseNumber
+                  ? `License number: ${provider.verification.license.licenseNumber}. `
+                  : ''}
+                {provider.verification?.review?.reviewNotes || 'No admin review notes yet.'}
+              </p>
+            </div>
+          ) : null}
+
+          {(provider.verification?.insurance?.certificateDocument || provider.verification?.license?.document) ? (
+            <div className="lead-action-row">
+              {provider.verification?.insurance?.certificateDocument ? (
+                <a
+                  className="admin-button admin-button-secondary"
+                  href={`/api/admin/providers/${provider.id}/verification-documents/insurance_certificate`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  View insurance doc
+                </a>
+              ) : null}
+              {provider.verification?.license?.document ? (
+                <a
+                  className="admin-button admin-button-secondary"
+                  href={`/api/admin/providers/${provider.id}/verification-documents/license_document`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  View license doc
+                </a>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="lead-message-block">
             <strong>Pricing summary</strong>
             <p>{provider.pricingSummary || 'No pricing summary provided yet.'}</p>
@@ -105,7 +166,6 @@ export function ProviderRoster({ providers = [], onUpdated }) {
                 applyReview(provider.id, {
                   approvalStatus: 'approved',
                   status: 'active',
-                  isVerified: true,
                   reviewedBy: 'admin_console',
                 })
               }
@@ -114,16 +174,47 @@ export function ProviderRoster({ providers = [], onUpdated }) {
             </button>
             <button
               type="button"
+              className="admin-button"
+              disabled={busyProviderId === provider.id}
+              onClick={() =>
+                applyReview(provider.id, {
+                  reviewStatus: 'verified',
+                  approvalStatus: 'approved',
+                  status: 'active',
+                  isVerified: true,
+                  reviewedBy: 'admin_console',
+                })
+              }
+            >
+              Verify documents
+            </button>
+            <button
+              type="button"
               className="admin-button admin-button-secondary"
               disabled={busyProviderId === provider.id}
               onClick={() =>
                 applyReview(provider.id, {
                   approvalStatus: 'review',
+                  reviewStatus: 'submitted',
                   reviewedBy: 'admin_console',
                 })
               }
             >
               Send to review
+            </button>
+            <button
+              type="button"
+              className="admin-button admin-button-secondary"
+              disabled={busyProviderId === provider.id}
+              onClick={() =>
+                applyReview(provider.id, {
+                  reviewStatus: 'rejected',
+                  isVerified: false,
+                  reviewedBy: 'admin_console',
+                })
+              }
+            >
+              Reject verification
             </button>
             <button
               type="button"

@@ -1523,6 +1523,10 @@ select {
   gap: 10px;
 }
 
+.provider-disclaimer {
+  margin-top: 8px;
+}
+
 .provider-portal-shell {
   margin-top: 18px;
 }
@@ -1553,6 +1557,74 @@ select {
 
 .provider-portal-stats {
   margin-top: 24px;
+}
+
+.verification-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.verification-panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.verification-panel-header h3,
+.provider-doc-card strong {
+  margin: 0;
+  color: var(--ink);
+}
+
+.verification-check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.compact-check {
+  min-height: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.compact-check span {
+  font-weight: 600;
+}
+
+.provider-doc-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.provider-doc-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--muted);
+}
+
+.provider-doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.provider-upload-button {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
 }
 
 @media (max-width: 900px) {

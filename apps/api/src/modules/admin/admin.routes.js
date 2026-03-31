@@ -75,6 +75,8 @@ const updateProviderReviewSchema = z.object({
   approvalStatus: z.enum(['draft', 'review', 'approved', 'rejected']).optional(),
   licenseStatus: z.enum(['unverified', 'verified', 'not_required']).optional(),
   insuranceStatus: z.enum(['unverified', 'verified', 'not_required']).optional(),
+  reviewStatus: z.enum(['none', 'submitted', 'verified', 'rejected']).optional(),
+  reviewNotes: z.string().trim().max(600).optional(),
   status: z.enum(['active', 'paused', 'pending', 'pending_billing', 'suspended']).optional(),
   isVerified: z.boolean().optional(),
   turnaroundLabel: z.string().trim().max(80).optional(),

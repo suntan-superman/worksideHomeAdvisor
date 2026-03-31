@@ -18,6 +18,7 @@ function getStorageDir() {
 
 function extensionFromMimeType(mimeType) {
   const map = {
+    'application/pdf': 'pdf',
     'image/jpeg': 'jpg',
     'image/jpg': 'jpg',
     'image/png': 'png',
@@ -85,6 +86,39 @@ async function saveImageBufferToLocal({
   };
 }
 
+function getProviderDocumentKey({ providerId, documentType, mimeType }) {
+  const extension = extensionFromMimeType(mimeType);
+
+  return [
+    'provider-documents',
+    sanitizePathSegment(providerId),
+    `${sanitizePathSegment(documentType)}-${randomUUID()}.${extension}`,
+  ]
+    .filter(Boolean)
+    .join('/');
+}
+
+async function saveProviderDocumentBufferToLocal({
+  providerId,
+  documentType,
+  mimeType,
+  buffer,
+}) {
+  const storageDir = getStorageDir();
+  const relativePath = getProviderDocumentKey({ providerId, documentType, mimeType });
+  const absolutePath = path.join(storageDir, relativePath);
+
+  await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+  await fs.writeFile(absolutePath, buffer);
+
+  return {
+    storageProvider: 'local',
+    storageKey: relativePath.replace(/\\/g, '/'),
+    absolutePath,
+    byteSize: buffer.byteLength,
+  };
+}
+
 async function saveImageBufferToGcs({
   propertyId,
   mimeType,
@@ -100,6 +134,30 @@ async function saveImageBufferToGcs({
     contentType: mimeType,
     metadata: {
       cacheControl: 'public, max-age=31536000, immutable',
+    },
+  });
+
+  return {
+    storageProvider: 'gcs',
+    storageKey: objectKey,
+    byteSize: buffer.byteLength,
+  };
+}
+
+async function saveProviderDocumentBufferToGcs({
+  providerId,
+  documentType,
+  mimeType,
+  buffer,
+}) {
+  const objectKey = getProviderDocumentKey({ providerId, documentType, mimeType });
+  const file = getBucket().file(objectKey);
+
+  await file.save(buffer, {
+    resumable: false,
+    contentType: mimeType,
+    metadata: {
+      cacheControl: 'private, max-age=0, no-store',
     },
   });
 
@@ -149,6 +207,29 @@ export async function saveBinaryBuffer({
     propertyId,
     mimeType,
     imageBuffer: buffer,
+  });
+}
+
+export async function saveProviderDocumentBuffer({
+  providerId,
+  documentType,
+  mimeType,
+  buffer,
+}) {
+  if (env.STORAGE_PROVIDER === 'gcs') {
+    return saveProviderDocumentBufferToGcs({
+      providerId,
+      documentType,
+      mimeType,
+      buffer,
+    });
+  }
+
+  return saveProviderDocumentBufferToLocal({
+    providerId,
+    documentType,
+    mimeType,
+    buffer,
   });
 }
 

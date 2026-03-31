@@ -13,6 +13,12 @@ const FALLBACK_CATEGORY_OPTIONS = [
   { value: 'nhd_report', label: 'NHD Report Providers' },
 ];
 
+function sortCategoryOptions(options = []) {
+  return [...options].sort((left, right) =>
+    String(left?.label || '').localeCompare(String(right?.label || '')),
+  );
+}
+
 const INITIAL_FORM = {
   businessName: '',
   categoryKey: 'photographer',
@@ -39,12 +45,14 @@ const INITIAL_FORM = {
 
 export function CreateProviderCard({ categories = [], onCreated }) {
   const categoryOptions =
-    categories.length
+    sortCategoryOptions(
+      categories.length
       ? categories.filter((category) => category.isActive !== false).map((category) => ({
           value: category.key,
           label: category.label,
         }))
-      : FALLBACK_CATEGORY_OPTIONS;
+      : FALLBACK_CATEGORY_OPTIONS,
+    );
   const [form, setForm] = useState(INITIAL_FORM);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');

@@ -1,6 +1,6 @@
 # Workside Progress And Priorities
 
-Last updated: 2026-03-29
+Last updated: 2026-03-30
 
 This document is the working checkpoint after the latest implementation pass across the HomeAdvisor / Workside codebase.
 
@@ -37,6 +37,7 @@ The platform is now well beyond the scaffold stage.
 - Provider billing hookup exists
 - Provider portal exists
 - Provider lead operations exist in admin
+- Provider verification tiers, trust fields, and document upload now exist
 
 ### Infrastructure side
 
@@ -112,6 +113,12 @@ The product now has real seller, provider, and admin surfaces. The main remainin
 - [x] Provider billing checkout flow
 - [x] Provider portal
 - [x] Provider lead accept/decline in portal
+- [x] Self-reported provider verification fields
+- [x] Provider verification details in onboarding and portal
+- [x] Provider insurance and license document upload
+- [x] Provider verification submission for admin review
+- [x] Seller-facing provider trust badges and disclaimer
+- [x] Admin document access and verification actions
 
 ### 2.6 Admin and ops
 
@@ -159,6 +166,7 @@ These areas exist and are useful, but they are not yet “finished product” qu
 - [~] Provider marketplace foundation is real, but provider ranking and coverage fallback are still early
 - [~] Provider portal exists, but account-management maturity is still limited
 - [~] Provider onboarding is much better now, but billing + verification UX can still be polished
+- [~] Verification is now real, but admin automation and expiry workflows are still early
 
 ### 3.4 Admin UX
 
@@ -206,6 +214,7 @@ These are the highest-value refinements because they affect trust, demos, and ev
 - [ ] add admin tooling to link older seeded providers to real provider accounts
 - [ ] add cleaner “already have a provider account?” path inside onboarding
 - [ ] tighten provider-only account management boundaries further
+- [ ] add provider email change / re-verification flow if account email needs to be corrected later
 
 ### 5.2 Provider billing validation
 
@@ -234,7 +243,11 @@ These are the highest-value refinements because they affect trust, demos, and ev
 ### 5.5 Provider profile maturity
 
 - [ ] richer service-area editing
-- [ ] richer licensing / insurance review history
+- [ ] richer licensing / insurance / bonding review history
+- [ ] add credential expiration alerts and admin follow-up queues
+- [ ] add per-business-type verification requirement editing in admin
+- [ ] add provider-side ability to replace or remove outdated uploaded documents cleanly
+- [ ] add optional carrier, policy, and license audit fields for verified providers
 - [ ] better featured / sponsored management
 - [ ] better provider quality scoring inputs
 
@@ -279,6 +292,7 @@ These are the highest-value refinements because they affect trust, demos, and ev
 - [ ] better structured logs for provider, billing, and vision flows
 - [ ] clearer usage / failure diagnostics in admin
 - [ ] better worker-backed processing story for long-running document/vision jobs
+- [ ] add admin notifications/tasks when a provider submits verification
 
 ---
 
@@ -306,8 +320,8 @@ These are the highest-value refinements because they affect trust, demos, and ev
 If work resumes tomorrow, the most sensible order is:
 
 1. Complete real provider signup -> verification -> billing -> portal end-to-end validation
-2. Refine vision quality on the three Replicate presets
-3. Improve provider coverage filtering and graceful no-coverage handling
+2. Improve provider coverage filtering and graceful no-coverage handling
+3. Refine vision quality on the three Replicate presets
 4. Polish report/brochure premium output quality
 5. Add provider account recovery / linking tools
 6. Start real automated tests around the new flows
@@ -348,6 +362,7 @@ That gives the product a stronger operational core before spending more time on 
 - Admin providers page was recently converted to tabs
 - The shared admin table/metric boundary issue has already been fixed
 - Provider onboarding now creates real provider auth accounts and requires email verification before billing continuation
+- Provider verification now supports self-reported trust fields, document upload, seller-facing trust display, and admin verification review
 - SMS marketplace logic exists in code, but rollout is paused intentionally
 
 ---
