@@ -15,6 +15,7 @@ import {
 } from './media-ai.service.js';
 import {
   createMediaAssetAndAnalysis,
+  deleteMediaAsset,
   getMediaAssetById,
   listMediaAssets,
   updateMediaAsset,
@@ -130,6 +131,17 @@ export async function mediaRoutes(fastify) {
       const payload = updateMediaAssetSchema.parse(request.body);
       const asset = await updateMediaAsset(assetId, payload);
       return reply.send({ asset });
+    } catch (error) {
+      const statusCode = error.message === 'Media asset not found.' ? 404 : 400;
+      return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
+  fastify.delete('/media/assets/:assetId', async (request, reply) => {
+    try {
+      const { assetId } = assetParamsSchema.parse(request.params);
+      const result = await deleteMediaAsset(assetId);
+      return reply.send(result);
     } catch (error) {
       const statusCode = error.message === 'Media asset not found.' ? 404 : 400;
       return reply.code(statusCode).send({ message: error.message });

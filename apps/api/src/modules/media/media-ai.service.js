@@ -330,6 +330,10 @@ function getProviderSourceUrl(output) {
     return output;
   }
 
+  if (typeof output?.url === 'string') {
+    return output.url;
+  }
+
   if (typeof output?.url === 'function') {
     return output.url();
   }
@@ -415,12 +419,16 @@ async function convertReplicateOutputToBuffer(output) {
     throw new Error('Replicate returned an empty output.');
   }
 
-  if (typeof output.arrayBuffer === 'function') {
-    return Buffer.from(await output.arrayBuffer());
-  }
-
   if (Buffer.isBuffer(output)) {
     return output;
+  }
+
+  if (output instanceof Uint8Array) {
+    return Buffer.from(output);
+  }
+
+  if (output instanceof ArrayBuffer) {
+    return Buffer.from(output);
   }
 
   if (typeof output === 'string') {
@@ -429,6 +437,37 @@ async function convertReplicateOutputToBuffer(output) {
       throw new Error(`Could not download generated variant from provider (${response.status}).`);
     }
     return Buffer.from(await response.arrayBuffer());
+  }
+
+  if (typeof output?.arrayBuffer === 'function') {
+    return Buffer.from(await output.arrayBuffer());
+  }
+
+  if (typeof output?.blob === 'function') {
+    const blob = await output.blob();
+    if (blob && typeof blob.arrayBuffer === 'function') {
+      return Buffer.from(await blob.arrayBuffer());
+    }
+  }
+
+  if (typeof output?.url === 'function' || typeof output?.url === 'string') {
+    const url = getProviderSourceUrl(output);
+    if (url) {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Could not download generated variant from provider (${response.status}).`);
+      }
+      return Buffer.from(await response.arrayBuffer());
+    }
+  }
+
+  if (typeof output?.getReader === 'function') {
+    const response = new Response(output);
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  if (output?.data) {
+    return convertReplicateOutputToBuffer(output.data);
   }
 
   throw new Error('Unsupported Replicate output format.');

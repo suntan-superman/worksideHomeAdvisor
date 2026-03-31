@@ -1,8 +1,14 @@
 import mongoose from 'mongoose';
 
 import { analyzePropertyPhoto } from '../../services/photoAnalysisService.js';
-import { buildMediaAssetUrl, buildMediaVariantUrl, saveImageBuffer } from '../../services/storageService.js';
+import {
+  buildMediaAssetUrl,
+  buildMediaVariantUrl,
+  deleteStoredAsset,
+  saveImageBuffer,
+} from '../../services/storageService.js';
 import { assertPropertyEditableById, getPropertyById } from '../properties/property.service.js';
+import { ImageJobModel } from './image-job.model.js';
 import { MediaAssetModel } from './media.model.js';
 import { MediaVariantModel } from './media-variant.model.js';
 
@@ -176,4 +182,56 @@ export async function getMediaAssetById(assetId) {
     ? await MediaVariantModel.findOne({ mediaId: asset._id, isSelected: true }).lean()
     : null;
   return serializeMediaAsset(asset, selectedVariant);
+}
+
+export async function deleteMediaAsset(assetId) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to delete media assets.');
+  }
+
+  const asset = await MediaAssetModel.findById(assetId);
+  if (!asset) {
+    throw new Error('Media asset not found.');
+  }
+
+  await assertPropertyEditableById(asset.propertyId);
+
+  const variants = await MediaVariantModel.find({ mediaId: asset._id }).lean();
+  const variantIds = variants.map((variant) => variant._id);
+  const visionJobIds = [
+    ...new Set(
+      variants
+        .map((variant) => variant.visionJobId?.toString?.() || String(variant.visionJobId || ''))
+        .filter(Boolean),
+    ),
+  ];
+
+  await Promise.all([
+    deleteStoredAsset({
+      storageProvider: asset.storageProvider,
+      storageKey: asset.storageKey,
+    }),
+    ...variants.map((variant) =>
+      deleteStoredAsset({
+        storageProvider: variant.storageProvider,
+        storageKey: variant.storageKey,
+      }),
+    ),
+  ]);
+
+  if (variantIds.length) {
+    await MediaVariantModel.deleteMany({ _id: { $in: variantIds } });
+  }
+
+  if (visionJobIds.length) {
+    await ImageJobModel.deleteMany({ _id: { $in: visionJobIds } });
+  }
+
+  await MediaAssetModel.deleteOne({ _id: asset._id });
+
+  return {
+    deleted: true,
+    assetId,
+    propertyId: asset.propertyId?.toString?.() || String(asset.propertyId),
+  };
 }

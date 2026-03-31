@@ -46,10 +46,8 @@ export async function runReplicateInpainting({
   });
 
   if (!Array.isArray(output)) {
-    return output ? [typeof output === 'string' ? output : output?.url?.() || String(output)] : [];
+    return output ? [output] : [];
   }
 
-  return output
-    .map((item) => (typeof item === 'string' ? item : item?.url?.() || String(item)))
-    .filter(Boolean);
+  return output.filter(Boolean);
 }

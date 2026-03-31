@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   KeyboardAvoidingView,
   Linking,
@@ -326,6 +327,29 @@ export function RootScreen() {
     await queryClient.invalidateQueries({ queryKey: ['mobile-media-variants', assetId] });
   }
 
+  async function persistCapturedPhoto(asset = photoAsset) {
+    if (!propertyId || !asset?.base64) {
+      return;
+    }
+
+    setError('');
+
+    try {
+      await savePhotoMutation.mutateAsync({
+        roomLabel: form.roomLabel,
+        mimeType: asset.mimeType || 'image/jpeg',
+        imageBase64: asset.base64,
+        width: asset.width,
+        height: asset.height,
+      });
+      setPhotoAsset(null);
+      setPropertySection('gallery');
+      setStatus('Photo saved to the selected property.');
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  }
+
   const savePhotoMutation = useMutation({
     mutationFn: async (payload) => savePhoto(propertyId, payload),
     onSuccess: async () => {
@@ -515,8 +539,34 @@ export function RootScreen() {
         return;
       }
 
-      setPhotoAsset(result.assets[0]);
+      const capturedAsset = result.assets[0];
+      setPhotoAsset(capturedAsset);
       setStatus('Photo ready. Save it to the property when you are ready.');
+
+      Alert.alert(
+        mode === 'camera' ? 'Save this photo?' : 'Use this photo?',
+        `Add this ${form.roomLabel.toLowerCase()} photo to the selected property?`,
+        [
+          {
+            text: 'Discard',
+            style: 'destructive',
+            onPress: () => {
+              setPhotoAsset(null);
+              setStatus('Photo discarded.');
+            },
+          },
+          {
+            text: 'Keep reviewing',
+            style: 'cancel',
+          },
+          {
+            text: 'Save',
+            onPress: () => {
+              persistCapturedPhoto(capturedAsset);
+            },
+          },
+        ],
+      );
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -525,26 +575,7 @@ export function RootScreen() {
   }
 
   async function handleSavePhoto() {
-    if (!propertyId || !photoAsset?.base64) {
-      return;
-    }
-
-    setError('');
-
-    try {
-      await savePhotoMutation.mutateAsync({
-        roomLabel: form.roomLabel,
-        mimeType: photoAsset.mimeType || 'image/jpeg',
-        imageBase64: photoAsset.base64,
-        width: photoAsset.width,
-        height: photoAsset.height,
-      });
-      setPhotoAsset(null);
-      setPropertySection('gallery');
-      setStatus('Photo saved to the selected property.');
-    } catch (requestError) {
-      setError(requestError.message);
-    }
+    await persistCapturedPhoto(photoAsset);
   }
 
   async function handleToggleListingCandidate() {

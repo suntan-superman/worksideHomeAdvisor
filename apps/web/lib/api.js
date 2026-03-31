@@ -304,6 +304,12 @@ export function updateMediaAsset(assetId, payload) {
   });
 }
 
+export function deleteMediaAsset(assetId) {
+  return request(`/api/v1/media/assets/${assetId}`, {
+    method: 'DELETE',
+  });
+}
+
 export function analyzePricing(propertyId) {
   return request(`/api/v1/properties/${propertyId}/pricing/analyze`, {
     method: 'POST',

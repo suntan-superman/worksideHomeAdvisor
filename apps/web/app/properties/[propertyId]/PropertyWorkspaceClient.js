@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 import { formatCurrency } from '@workside/utils';
 
@@ -14,6 +15,7 @@ import {
   createChecklistItem,
   createImageEnhancementJob,
   createProviderLead,
+  deleteMediaAsset as deleteMediaAssetRequest,
   generateFlyer,
   generateReport,
   getChecklist,
@@ -131,6 +133,7 @@ function getVariantReviewScore(variant) {
 }
 
 export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
+  const queryClient = useQueryClient();
   const flyerPreviewRef = useRef(null);
   const visionCompareRef = useRef(null);
   const visionGalleryRef = useRef(null);
@@ -170,6 +173,51 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [showMoreVisionVariants, setShowMoreVisionVariants] = useState(false);
   const [status, setStatus] = useState('Loading property workspace...');
   const [toast, setToast] = useState(null);
+
+  const liveDashboardQuery = useQuery({
+    queryKey: ['property-dashboard', propertyId],
+    enabled: Boolean(propertyId),
+    queryFn: async () => getDashboard(propertyId),
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const liveChecklistQuery = useQuery({
+    queryKey: ['property-checklist', propertyId],
+    enabled: Boolean(propertyId),
+    queryFn: async () => {
+      const response = await getChecklist(propertyId);
+      return response.checklist;
+    },
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const liveMediaAssetsQuery = useQuery({
+    queryKey: ['property-media-assets', propertyId],
+    enabled: Boolean(propertyId),
+    queryFn: async () => {
+      const response = await listMediaAssets(propertyId);
+      return response.assets || [];
+    },
+    staleTime: 5_000,
+    refetchInterval: 5_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const liveMediaVariantsQuery = useQuery({
+    queryKey: ['property-media-variants', selectedMediaAssetId || ''],
+    enabled: Boolean(selectedMediaAssetId),
+    queryFn: async () => {
+      const response = await listMediaVariants(selectedMediaAssetId);
+      return response.variants || [];
+    },
+    staleTime: 5_000,
+    refetchInterval: 5_000,
+    refetchOnWindowFocus: true,
+  });
 
   const selectedMediaAsset = useMemo(
     () => mediaAssets.find((asset) => asset.id === selectedMediaAssetId) || mediaAssets[0] || null,
@@ -318,6 +366,59 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const isArchivedProperty = property?.status === 'archived';
 
   useEffect(() => {
+    if (!liveDashboardQuery.data) {
+      return;
+    }
+
+    setDashboard(liveDashboardQuery.data);
+    if (liveDashboardQuery.data?.property) {
+      setProperty(liveDashboardQuery.data.property);
+    }
+  }, [liveDashboardQuery.data]);
+
+  useEffect(() => {
+    if (!liveChecklistQuery.data) {
+      return;
+    }
+
+    setChecklist(liveChecklistQuery.data);
+  }, [liveChecklistQuery.data]);
+
+  useEffect(() => {
+    if (!liveMediaAssetsQuery.data) {
+      return;
+    }
+
+    const nextAssets = liveMediaAssetsQuery.data || [];
+    setMediaAssets(nextAssets);
+    setSelectedMediaAssetId((current) => {
+      if (nextAssets.some((asset) => asset.id === current)) {
+        return current;
+      }
+      return nextAssets[0]?.id || '';
+    });
+  }, [liveMediaAssetsQuery.data]);
+
+  useEffect(() => {
+    if (!liveMediaVariantsQuery.data) {
+      return;
+    }
+
+    const nextVariants = liveMediaVariantsQuery.data || [];
+    setMediaVariants(nextVariants);
+    setSelectedVariantId((current) => {
+      if (nextVariants.some((variant) => variant.id === current)) {
+        return current;
+      }
+      return (
+        nextVariants.find((variant) => variant.isSelected)?.id ||
+        nextVariants[0]?.id ||
+        ''
+      );
+    });
+  }, [liveMediaVariantsQuery.data]);
+
+  useEffect(() => {
     setListingNoteDraft(selectedMediaAsset?.listingNote || '');
   }, [selectedMediaAsset?.id, selectedMediaAsset?.listingNote]);
 
@@ -406,19 +507,27 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   async function refreshMediaAssets(preferredAssetId = selectedMediaAssetId) {
     const mediaResponse = await listMediaAssets(propertyId);
     const nextAssets = mediaResponse.assets || [];
+    queryClient.setQueryData(['property-media-assets', propertyId], nextAssets);
     setMediaAssets(nextAssets);
-    setSelectedMediaAssetId(preferredAssetId || nextAssets?.[0]?.id || '');
+    setSelectedMediaAssetId(() => {
+      if (preferredAssetId && nextAssets.some((asset) => asset.id === preferredAssetId)) {
+        return preferredAssetId;
+      }
+      return nextAssets[0]?.id || '';
+    });
     return nextAssets;
   }
 
   async function refreshMediaVariants(assetId = selectedMediaAssetId) {
     if (!assetId) {
+      queryClient.setQueryData(['property-media-variants', ''], []);
       setMediaVariants([]);
       setSelectedVariantId('');
       return [];
     }
     const variantsResponse = await listMediaVariants(assetId);
     const nextVariants = variantsResponse.variants || [];
+    queryClient.setQueryData(['property-media-variants', assetId], nextVariants);
     setMediaVariants(nextVariants);
     setSelectedVariantId(nextVariants.find((variant) => variant.isSelected)?.id || nextVariants[0]?.id || '');
     return nextVariants;
@@ -426,6 +535,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   async function refreshDashboardSnapshot() {
     const dashboardResponse = await getDashboard(propertyId);
+    queryClient.setQueryData(['property-dashboard', propertyId], dashboardResponse);
     setDashboard(dashboardResponse);
     if (dashboardResponse?.property) {
       setProperty(dashboardResponse.property);
@@ -435,6 +545,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   async function refreshChecklist() {
     const checklistResponse = await getChecklist(propertyId);
+    queryClient.setQueryData(['property-checklist', propertyId], checklistResponse.checklist);
     setChecklist(checklistResponse.checklist);
     return checklistResponse.checklist;
   }
@@ -733,6 +844,53 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
   }
 
+  async function handleDeleteSelectedPhoto() {
+    if (blockArchivedMutation()) {
+      return;
+    }
+    if (!selectedMediaAsset) {
+      return;
+    }
+
+    const assetToDelete = selectedMediaAsset;
+    const confirmed = window.confirm(
+      `Delete "${assetToDelete.roomLabel || 'this photo'}"? This also removes any generated variants tied to it.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setStatus('Deleting photo...');
+    setToast(null);
+    try {
+      await deleteMediaAssetRequest(assetToDelete.id);
+      queryClient.removeQueries({
+        queryKey: ['property-media-variants', assetToDelete.id],
+        exact: true,
+      });
+      const nextAssets = await refreshMediaAssets('');
+      await Promise.all([refreshDashboardSnapshot(), refreshChecklist()]);
+      const nextSelectedAssetId = nextAssets[0]?.id || '';
+      if (nextSelectedAssetId) {
+        await refreshMediaVariants(nextSelectedAssetId);
+      } else {
+        queryClient.setQueryData(['property-media-variants', assetToDelete.id], []);
+        setMediaVariants([]);
+        setSelectedVariantId('');
+      }
+      setToast({
+        tone: 'success',
+        title: 'Photo deleted',
+        message: 'The photo and any generated variants were removed from this property.',
+      });
+    } catch (requestError) {
+      setToast({ tone: 'error', title: 'Could not delete photo', message: requestError.message });
+    } finally {
+      setStatus('');
+    }
+  }
+
   async function handleGenerateVariant(presetKey = activeVisionPresetKey) {
     if (blockArchivedMutation()) {
       return;
@@ -819,12 +977,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         field,
         value,
       );
-      setMediaVariants((current) =>
-        current.map((variant) =>
+      setMediaVariants((current) => {
+        const nextVariants = current.map((variant) =>
           variant.id === response.variant.id ? response.variant : variant,
-        ),
-      );
-      await refreshMediaAssets(selectedMediaAsset.id);
+        );
+        queryClient.setQueryData(['property-media-variants', selectedMediaAsset.id], nextVariants);
+        return nextVariants;
+      });
+      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id)]);
       setToast({
         tone: 'success',
         title: 'Variant usage updated',
@@ -847,6 +1007,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setToast(null);
     try {
       const response = await updateChecklistItem(itemId, { status: nextStatus });
+      queryClient.setQueryData(['property-checklist', propertyId], response.checklist);
       setChecklist(response.checklist);
       await refreshDashboardSnapshot();
       setToast({ tone: 'success', title: 'Checklist updated', message: 'Seller prep progress has been saved.' });
@@ -870,6 +1031,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setToast(null);
     try {
       const response = await createChecklistItem(propertyId, { title: customChecklistTitle, detail: customChecklistDetail, category: 'custom', priority: 'medium' });
+      queryClient.setQueryData(['property-checklist', propertyId], response.checklist);
       setChecklist(response.checklist);
       await refreshDashboardSnapshot();
       setCustomChecklistTitle('');
@@ -1150,6 +1312,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </button>
               <button type="button" className="button-secondary" onClick={() => { setActiveTab('vision'); handleGenerateVariant('declutter_light'); }} disabled={Boolean(status) || isArchivedProperty}>
                 Declutter
+              </button>
+              <button type="button" className="button-secondary button-danger" onClick={handleDeleteSelectedPhoto} disabled={Boolean(status) || isArchivedProperty}>
+                Delete photo
               </button>
             </div>
             <label className="property-media-note-field">

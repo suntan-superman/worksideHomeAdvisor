@@ -132,4 +132,10 @@ export function updateMediaAsset(assetId, payload) {
   });
 }
 
+export function deleteMediaAsset(assetId) {
+  return request(`/api/v1/media/assets/${assetId}`, {
+    method: 'DELETE',
+  });
+}
+
 export { API_URL };
