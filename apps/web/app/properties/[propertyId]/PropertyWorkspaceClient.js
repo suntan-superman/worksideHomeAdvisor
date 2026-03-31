@@ -2236,7 +2236,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
         <section className="workspace-action-bar">
           <div className="workspace-action-tooltip">
-            <button type="button" className="workspace-action-pill" onClick={() => setActiveTab('photos')}>
+            <button
+              type="button"
+              className="workspace-action-pill"
+              onClick={() => setActiveTab('photos')}
+              title="Open the Photos tab to review images captured from mobile and add them to your listing workflow."
+            >
               Add photos
             </button>
             <div className="workspace-action-tooltip-bubble" role="tooltip">
@@ -2244,7 +2249,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             </div>
           </div>
           <div className="workspace-action-tooltip">
-            <button type="button" className="workspace-action-pill" onClick={() => setActiveTab('photos')}>
+            <button
+              type="button"
+              className="workspace-action-pill"
+              onClick={() => setActiveTab('photos')}
+              title="Choose your strongest listing candidates so brochure and report outputs prioritize them automatically."
+            >
               Select photos
             </button>
             <div className="workspace-action-tooltip-bubble" role="tooltip">
@@ -2257,6 +2267,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               className="workspace-action-pill workspace-action-pill-accent"
               onClick={() => { setActiveTab('vision'); if (selectedMediaAsset) { handleGenerateVariant('enhance_listing_quality'); } }}
               disabled={Boolean(status) || isArchivedProperty}
+              title="Generate an improved version of the currently selected photo to test cleaner, brighter marketing-ready presentation."
             >
               Enhance
             </button>
@@ -2265,7 +2276,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             </div>
           </div>
           <div className="workspace-action-tooltip">
-            <button type="button" className="workspace-action-pill" onClick={() => { setActiveTab('brochure'); handleGenerateFlyer(); }} disabled={Boolean(status) || isArchivedProperty}>
+            <button
+              type="button"
+              className="workspace-action-pill"
+              onClick={() => { setActiveTab('brochure'); handleGenerateFlyer(); }}
+              disabled={Boolean(status) || isArchivedProperty}
+              title="Build a one-page marketing flyer using current pricing, selected photos, and your brochure copy settings."
+            >
               Generate flyer
             </button>
             <div className="workspace-action-tooltip-bubble" role="tooltip">
@@ -2278,6 +2295,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               className="workspace-action-pill workspace-action-pill-primary"
               onClick={() => { setActiveTab('report'); handleGenerateReport(); }}
               disabled={Boolean(status) || isArchivedProperty}
+              title="Create the full seller report with pricing analysis, checklist progress, selected photos, and marketing guidance."
             >
               Generate report
             </button>
