@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import { analyzePropertyPhoto } from '../../services/photoAnalysisService.js';
 import { readStoredAsset } from '../../services/storageService.js';
-import { getPropertyById } from '../properties/property.service.js';
+import { assertPropertyEditableById, getPropertyById } from '../properties/property.service.js';
 import {
   createImageEnhancementJob,
   getVisionPresetCatalog,
@@ -139,6 +139,11 @@ export async function mediaRoutes(fastify) {
   fastify.post('/media/assets/:assetId/enhance', async (request, reply) => {
     try {
       const { assetId } = assetParamsSchema.parse(request.params);
+      const asset = await getMediaAssetById(assetId);
+      if (!asset) {
+        return reply.code(404).send({ message: 'Media asset not found.' });
+      }
+      await assertPropertyEditableById(asset.propertyId);
       const payload = imageJobRequestSchema.parse(request.body ?? {});
       const result = await createImageEnhancementJob({
         assetId,
@@ -156,6 +161,11 @@ export async function mediaRoutes(fastify) {
   fastify.post('/media/assets/:assetId/vision/enhance', async (request, reply) => {
     try {
       const { assetId } = assetParamsSchema.parse(request.params);
+      const asset = await getMediaAssetById(assetId);
+      if (!asset) {
+        return reply.code(404).send({ message: 'Media asset not found.' });
+      }
+      await assertPropertyEditableById(asset.propertyId);
       const payload = imageJobRequestSchema.parse(request.body ?? {});
       const result = await createImageEnhancementJob({
         assetId,
@@ -194,6 +204,11 @@ export async function mediaRoutes(fastify) {
     try {
       const { assetId } = assetParamsSchema.parse(request.params);
       const { variantId } = variantParamsSchema.parse(request.params);
+      const asset = await getMediaAssetById(assetId);
+      if (!asset) {
+        return reply.code(404).send({ message: 'Media asset not found.' });
+      }
+      await assertPropertyEditableById(asset.propertyId);
       const variant = await selectMediaVariant(assetId, variantId);
       return reply.send({ variant });
     } catch (error) {
@@ -206,6 +221,11 @@ export async function mediaRoutes(fastify) {
     try {
       const { assetId } = assetParamsSchema.parse(request.params);
       const { variantId } = variantParamsSchema.parse(request.params);
+      const asset = await getMediaAssetById(assetId);
+      if (!asset) {
+        return reply.code(404).send({ message: 'Media asset not found.' });
+      }
+      await assertPropertyEditableById(asset.propertyId);
       const payload = variantUsageSchema.parse(request.body ?? {});
       const variant = await updateMediaVariantUsage(assetId, variantId, {
         useInBrochure: payload.value,
@@ -221,6 +241,11 @@ export async function mediaRoutes(fastify) {
     try {
       const { assetId } = assetParamsSchema.parse(request.params);
       const { variantId } = variantParamsSchema.parse(request.params);
+      const asset = await getMediaAssetById(assetId);
+      if (!asset) {
+        return reply.code(404).send({ message: 'Media asset not found.' });
+      }
+      await assertPropertyEditableById(asset.propertyId);
       const payload = variantUsageSchema.parse(request.body ?? {});
       const variant = await updateMediaVariantUsage(assetId, variantId, {
         useInReport: payload.value,

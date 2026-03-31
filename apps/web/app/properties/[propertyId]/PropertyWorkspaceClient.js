@@ -291,6 +291,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     [latestFlyer, latestReport],
   );
   const nextBestAction = useMemo(() => {
+    if (property?.status === 'archived') {
+      return { title: 'Restore this property from the dashboard', detail: 'Archived properties stay viewable, but edits and new outputs are blocked until the property is restored.', tab: 'overview' };
+    }
     if (!mediaAssets.length) {
       return { title: 'Review the photo set', detail: 'Use the Photos tab to work from the shared mobile gallery and start building listing picks.', tab: 'photos' };
     }
@@ -310,7 +313,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       return { title: checklist.nextTask.title, detail: checklist.nextTask.detail || 'Keep the checklist moving with the next prep step.', tab: 'checklist' };
     }
     return { title: 'Review the latest outputs', detail: 'Both brochure and report are ready. Use Overview to compare the latest deliverables.', tab: 'overview' };
-  }, [checklist?.nextTask?.detail, checklist?.nextTask?.title, latestFlyer, latestReport, listingCandidateAssets.length, mediaAssets.length, selectedMediaAsset, selectedVariant]);
+  }, [checklist?.nextTask?.detail, checklist?.nextTask?.title, latestFlyer, latestReport, listingCandidateAssets.length, mediaAssets.length, property?.status, selectedMediaAsset, selectedVariant]);
+
+  const isArchivedProperty = property?.status === 'archived';
 
   useEffect(() => {
     setListingNoteDraft(selectedMediaAsset?.listingNote || '');
@@ -541,7 +546,23 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     loadWorkspace();
   }, [propertyId]);
 
+  function blockArchivedMutation() {
+    if (!isArchivedProperty) {
+      return false;
+    }
+
+    setToast({
+      tone: 'error',
+      title: 'Property is archived',
+      message: 'Restore this property from the dashboard before making new changes.',
+    });
+    return true;
+  }
+
   async function handleAnalyzePricing() {
+    if (blockArchivedMutation()) {
+      return;
+    }
     setStatus('Refreshing RentCast + AI pricing analysis...');
     setToast(null);
     try {
@@ -559,6 +580,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   async function handleGenerateFlyer() {
+    if (blockArchivedMutation()) {
+      return;
+    }
     setStatus(`Generating ${flyerType} flyer...`);
     setToast(null);
     try {
@@ -600,6 +624,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   async function handleGenerateReport() {
+    if (blockArchivedMutation()) {
+      return;
+    }
     setStatus('Generating seller intelligence report...');
     setToast(null);
     try {
@@ -638,6 +665,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   async function handleToggleListingCandidate() {
+    if (blockArchivedMutation()) {
+      return;
+    }
     if (!selectedMediaAsset) {
       return;
     }
@@ -684,6 +714,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   async function handleSaveListingNote() {
+    if (blockArchivedMutation()) {
+      return;
+    }
     if (!selectedMediaAsset) {
       return;
     }
@@ -701,6 +734,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   async function handleGenerateVariant(presetKey = activeVisionPresetKey) {
+    if (blockArchivedMutation()) {
+      return;
+    }
     if (!selectedMediaAsset) {
       return;
     }
@@ -746,6 +782,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   async function handleSelectVariant(variantId) {
+    if (blockArchivedMutation()) {
+      return;
+    }
     if (!selectedMediaAsset) {
       return;
     }
@@ -764,6 +803,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   async function handleSetVariantUsage(field, value) {
+    if (blockArchivedMutation()) {
+      return;
+    }
     if (!selectedMediaAsset || !selectedVariant) {
       return;
     }
@@ -798,6 +840,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   async function handleSetChecklistItemStatus(itemId, nextStatus) {
+    if (blockArchivedMutation()) {
+      return;
+    }
     setStatus(nextStatus === 'done' ? 'Marking checklist item done...' : 'Updating checklist item...');
     setToast(null);
     try {
@@ -814,6 +859,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   async function handleCreateChecklistTask(event) {
     event.preventDefault();
+    if (blockArchivedMutation()) {
+      return;
+    }
     if (!customChecklistTitle.trim()) {
       setToast({ tone: 'error', title: 'Task title required', message: 'Add a short title before creating a custom checklist task.' });
       return;
@@ -835,6 +883,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   async function handleSaveProvider(providerId) {
+    if (blockArchivedMutation()) {
+      return;
+    }
     setStatus('Saving provider...');
     setToast(null);
     try {
@@ -857,6 +908,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   async function handleRequestProviderLead(provider) {
+    if (blockArchivedMutation()) {
+      return;
+    }
     if (!providerSuggestionTask) {
       return;
     }
@@ -1088,13 +1142,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </div>
             ) : null}
             <div className="workspace-action-column">
-              <button type="button" className={selectedMediaAsset.listingCandidate ? 'button-secondary' : 'button-primary'} onClick={handleToggleListingCandidate} disabled={Boolean(status)}>
+              <button type="button" className={selectedMediaAsset.listingCandidate ? 'button-secondary' : 'button-primary'} onClick={handleToggleListingCandidate} disabled={Boolean(status) || isArchivedProperty}>
                 {selectedMediaAsset.listingCandidate ? 'Remove from listing picks' : 'Mark as listing candidate'}
               </button>
-              <button type="button" className="button-secondary" onClick={() => { setActiveTab('vision'); handleGenerateVariant('enhance_listing_quality'); }} disabled={Boolean(status)}>
+              <button type="button" className="button-secondary" onClick={() => { setActiveTab('vision'); handleGenerateVariant('enhance_listing_quality'); }} disabled={Boolean(status) || isArchivedProperty}>
                 Enhance
               </button>
-              <button type="button" className="button-secondary" onClick={() => { setActiveTab('vision'); handleGenerateVariant('declutter_light'); }} disabled={Boolean(status)}>
+              <button type="button" className="button-secondary" onClick={() => { setActiveTab('vision'); handleGenerateVariant('declutter_light'); }} disabled={Boolean(status) || isArchivedProperty}>
                 Declutter
               </button>
             </div>
@@ -1102,7 +1156,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               Listing note
               <textarea value={listingNoteDraft} onChange={(event) => setListingNoteDraft(event.target.value)} maxLength={280} placeholder="Why this photo is strong, what it should lead with, or where it belongs in the story." />
             </label>
-            <button type="button" className="button-secondary" onClick={handleSaveListingNote} disabled={Boolean(status)}>
+            <button type="button" className="button-secondary" onClick={handleSaveListingNote} disabled={Boolean(status) || isArchivedProperty}>
               Save photo note
             </button>
           </div>
@@ -1251,7 +1305,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 </div>
               </div>
               <div className="workspace-action-column">
-                <button type="button" className="button-primary" onClick={() => handleGenerateVariant(activeVisionPresetKey)} disabled={Boolean(status)}>
+                <button type="button" className="button-primary" onClick={() => handleGenerateVariant(activeVisionPresetKey)} disabled={Boolean(status) || isArchivedProperty}>
                   Generate {activeVisionPreset?.displayName || 'enhancement'}
                 </button>
               </div>
@@ -1334,7 +1388,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               ) : null}
               {selectedVariant ? (
                 <div className="workspace-action-column">
-                  <button type="button" className="button-secondary" onClick={() => handleSelectVariant(selectedVariant.id)} disabled={Boolean(status) || selectedVariant.isSelected}>
+                  <button type="button" className="button-secondary" onClick={() => handleSelectVariant(selectedVariant.id)} disabled={Boolean(status) || isArchivedProperty || selectedVariant.isSelected}>
                     {selectedVariant.isSelected ? 'Preferred variant selected' : 'Set as preferred variant'}
                   </button>
                   <div className="checklist-action-row">
@@ -1342,7 +1396,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       type="button"
                       className={selectedVariant.useInBrochure ? 'checklist-action-chip active' : 'checklist-action-chip'}
                       onClick={() => handleSetVariantUsage('brochure', !selectedVariant.useInBrochure)}
-                      disabled={Boolean(status)}
+                      disabled={Boolean(status) || isArchivedProperty}
                     >
                       {selectedVariant.useInBrochure ? 'In brochure' : 'Use in brochure'}
                     </button>
@@ -1350,7 +1404,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       type="button"
                       className={selectedVariant.useInReport ? 'checklist-action-chip active' : 'checklist-action-chip'}
                       onClick={() => handleSetVariantUsage('report', !selectedVariant.useInReport)}
-                      disabled={Boolean(status)}
+                      disabled={Boolean(status) || isArchivedProperty}
                     >
                       {selectedVariant.useInReport ? 'In report' : 'Use in report'}
                     </button>
@@ -1463,7 +1517,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             </p>
           </div>
           <div className="button-stack flyer-generator-actions">
-            <button type="button" className={status.includes('Generating') ? 'button-primary button-busy' : 'button-primary'} onClick={handleGenerateFlyer} disabled={Boolean(status)}>
+            <button type="button" className={status.includes('Generating') ? 'button-primary button-busy' : 'button-primary'} onClick={handleGenerateFlyer} disabled={Boolean(status) || isArchivedProperty}>
               {status.includes('Generating') ? 'Generating flyer...' : 'Generate flyer'}
             </button>
             <button type="button" className="button-secondary" onClick={handleDownloadFlyerPdf} disabled={Boolean(status)}>Download PDF</button>
@@ -1539,7 +1593,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           <h2>Seller intelligence report</h2>
           <p>Make the report feel premium by combining pricing, comps, photos, checklist progress, and marketing guidance into one place.</p>
           <div className="workspace-action-column">
-            <button type="button" className={status.includes('report') ? 'button-primary button-busy' : 'button-primary'} onClick={handleGenerateReport} disabled={Boolean(status)}>
+            <button type="button" className={status.includes('report') ? 'button-primary button-busy' : 'button-primary'} onClick={handleGenerateReport} disabled={Boolean(status) || isArchivedProperty}>
               {status.includes('report') ? 'Generating report...' : 'Generate report'}
             </button>
             <button type="button" className="button-secondary" onClick={handleDownloadReportPdf} disabled={Boolean(status)}>Download report PDF</button>
@@ -1800,7 +1854,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       ) : null}
                       <div className="checklist-action-row">
                         {['todo', 'in_progress', 'done'].map((nextStatus) => (
-                          <button key={`${item.id}-${nextStatus}`} type="button" className={item.status === nextStatus ? 'checklist-action-chip active' : 'checklist-action-chip'} onClick={() => handleSetChecklistItemStatus(item.id, nextStatus)} disabled={Boolean(status)}>{formatChecklistStatus(nextStatus)}</button>
+                          <button key={`${item.id}-${nextStatus}`} type="button" className={item.status === nextStatus ? 'checklist-action-chip active' : 'checklist-action-chip'} onClick={() => handleSetChecklistItemStatus(item.id, nextStatus)} disabled={Boolean(status) || isArchivedProperty}>{formatChecklistStatus(nextStatus)}</button>
                         ))}
                       </div>
                     </article>
@@ -1829,7 +1883,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           <span className="label">Add custom task</span>
           <input type="text" value={customChecklistTitle} onChange={(event) => setCustomChecklistTitle(event.target.value)} placeholder="Example: book pre-listing cleaner" maxLength={80} />
           <input type="text" value={customChecklistDetail} onChange={(event) => setCustomChecklistDetail(event.target.value)} placeholder="Optional context or reminder" maxLength={180} />
-          <button type="submit" className="button-secondary" disabled={Boolean(status)}>Save task</button>
+          <button type="submit" className="button-secondary" disabled={Boolean(status) || isArchivedProperty}>Save task</button>
         </form>
 
         <div className="content-card workspace-side-panel">
@@ -1889,10 +1943,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     ))}
                   </div>
                   <div className="provider-card-actions">
-                    <button type="button" className="button-secondary" onClick={() => handleSaveProvider(provider.id)} disabled={Boolean(status) || provider.saved}>
+                    <button type="button" className="button-secondary" onClick={() => handleSaveProvider(provider.id)} disabled={Boolean(status) || isArchivedProperty || provider.saved}>
                       {provider.saved ? 'Saved' : 'Save provider'}
                     </button>
-                    <button type="button" className="button-primary" onClick={() => handleRequestProviderLead(provider)} disabled={Boolean(status)}>
+                    <button type="button" className="button-primary" onClick={() => handleRequestProviderLead(provider)} disabled={Boolean(status) || isArchivedProperty}>
                       Request contact
                     </button>
                     {provider.websiteUrl ? (
@@ -1961,12 +2015,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               <span>{latestPricing ? `${formatCurrency(latestPricing.recommendedListLow)} to ${formatCurrency(latestPricing.recommendedListHigh)}` : 'Pricing pending'}</span>
               <span>{readinessScore}/100 readiness</span>
               <span>{mediaAssets.length} photo{mediaAssets.length === 1 ? '' : 's'}</span>
+              {isArchivedProperty ? <span>Archived · read-only</span> : null}
             </div>
           </div>
 
           <div className="workspace-page-header-actions">
-            <button type="button" className={status.includes('Refreshing') ? 'button-primary button-busy' : 'button-primary'} onClick={handleAnalyzePricing} disabled={Boolean(status)}>{status.includes('Refreshing') ? 'Refreshing analysis...' : 'Refresh pricing'}</button>
-            <button type="button" className={status.includes('report') ? 'button-secondary button-busy' : 'button-secondary'} onClick={() => { setActiveTab('report'); handleGenerateReport(); }} disabled={Boolean(status)}>{status.includes('report') ? 'Generating report...' : 'Generate report'}</button>
+            <button type="button" className={status.includes('Refreshing') ? 'button-primary button-busy' : 'button-primary'} onClick={handleAnalyzePricing} disabled={Boolean(status) || isArchivedProperty}>{status.includes('Refreshing') ? 'Refreshing analysis...' : 'Refresh pricing'}</button>
+            <button type="button" className={status.includes('report') ? 'button-secondary button-busy' : 'button-secondary'} onClick={() => { setActiveTab('report'); handleGenerateReport(); }} disabled={Boolean(status) || isArchivedProperty}>{status.includes('report') ? 'Generating report...' : 'Generate report'}</button>
             <Link href="/dashboard" className="button-secondary inline-button">Back to dashboard</Link>
           </div>
         </section>
@@ -1974,9 +2029,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         <section className="workspace-action-bar">
           <button type="button" className="workspace-action-pill" onClick={() => setActiveTab('photos')}>Add photos</button>
           <button type="button" className="workspace-action-pill" onClick={() => setActiveTab('photos')}>Select photos</button>
-          <button type="button" className="workspace-action-pill workspace-action-pill-primary" onClick={() => { setActiveTab('vision'); if (selectedMediaAsset) { handleGenerateVariant('enhance_listing_quality'); } }} disabled={Boolean(status)}>Enhance</button>
-          <button type="button" className="workspace-action-pill" onClick={() => { setActiveTab('brochure'); handleGenerateFlyer(); }} disabled={Boolean(status)}>Generate flyer</button>
-          <button type="button" className="workspace-action-pill workspace-action-pill-primary" onClick={() => { setActiveTab('report'); handleGenerateReport(); }} disabled={Boolean(status)}>Generate report</button>
+          <button type="button" className="workspace-action-pill workspace-action-pill-primary" onClick={() => { setActiveTab('vision'); if (selectedMediaAsset) { handleGenerateVariant('enhance_listing_quality'); } }} disabled={Boolean(status) || isArchivedProperty}>Enhance</button>
+          <button type="button" className="workspace-action-pill" onClick={() => { setActiveTab('brochure'); handleGenerateFlyer(); }} disabled={Boolean(status) || isArchivedProperty}>Generate flyer</button>
+          <button type="button" className="workspace-action-pill workspace-action-pill-primary" onClick={() => { setActiveTab('report'); handleGenerateReport(); }} disabled={Boolean(status) || isArchivedProperty}>Generate report</button>
         </section>
 
         <section className="workspace-tab-bar" aria-label="Workspace tabs">
@@ -1984,6 +2039,15 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         </section>
 
         {status ? <p className="status-copy">{status}</p> : null}
+        {isArchivedProperty ? (
+          <section className="workspace-archive-banner">
+            <strong>Archived property</strong>
+            <p>
+              This workspace remains viewable, but new pricing runs, media updates, checklist edits, provider actions,
+              and fresh brochure/report generation are disabled until the property is restored from the dashboard.
+            </p>
+          </section>
+        ) : null}
 
         <section className="workspace-tab-layout">
           <div className="workspace-tab-main">{renderActiveTab()}</div>

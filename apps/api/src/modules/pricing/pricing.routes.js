@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { getPropertyById } from '../properties/property.service.js';
+import { assertPropertyEditableById, getPropertyById } from '../properties/property.service.js';
 import {
   enforceAnalysisRequest,
   finalizeCachedAnalysisReturn,
@@ -17,7 +17,7 @@ export async function pricingRoutes(fastify) {
   fastify.post('/:propertyId/pricing/analyze', async (request, reply) => {
     try {
       const { propertyId } = paramsSchema.parse(request.params);
-      const property = await getPropertyById(propertyId);
+      const property = await assertPropertyEditableById(propertyId);
       if (!property) {
         return reply.code(404).send({ message: 'Property not found.' });
       }

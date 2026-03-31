@@ -5,7 +5,11 @@ import { FlyerModel } from '../documents/flyer.model.js';
 import { ReportModel } from '../documents/report.model.js';
 import { listMediaAssets } from '../media/media.service.js';
 import { getLatestPricingAnalysis } from '../pricing/pricing.service.js';
-import { setPropertyReadinessScore, getPropertyById } from '../properties/property.service.js';
+import {
+  assertPropertyEditableById,
+  getPropertyById,
+  setPropertyReadinessScore,
+} from '../properties/property.service.js';
 import { ChecklistModel } from './checklist.model.js';
 
 const CORE_ROOM_LABELS = ['Living room', 'Kitchen', 'Primary bedroom', 'Bathroom', 'Exterior'];
@@ -404,7 +408,7 @@ export async function createChecklistItem(propertyId, payload) {
     throw new Error('Database connection is required to create checklist items.');
   }
 
-  const property = await getPropertyById(propertyId);
+  const property = await assertPropertyEditableById(propertyId);
   if (!property) {
     throw new Error('Property not found.');
   }
@@ -446,6 +450,8 @@ export async function updateChecklistItem(itemId, updates) {
   if (!item) {
     throw new Error('Checklist item not found.');
   }
+
+  await assertPropertyEditableById(checklist.propertyId);
 
   if (typeof updates.status === 'string') {
     item.status = updates.status;

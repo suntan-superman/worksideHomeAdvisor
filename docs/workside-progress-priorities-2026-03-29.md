@@ -81,6 +81,8 @@ The product now has real seller, provider, and admin surfaces. The main remainin
 ### 2.3 Seller workflow
 
 - [x] Property creation and selection
+- [x] Active-property limits tied to seller / agent billing access
+- [x] Property archive / restore with read-only archived state
 - [x] Pricing analysis
 - [x] Comp display and map
 - [x] Media upload and storage
@@ -178,6 +180,12 @@ These areas exist and are useful, but they are not yet “finished product” qu
 - [ ] Real automated tests are still mostly missing
 - [ ] Worker services are still lightweight placeholders compared with the full future architecture
 
+### 3.6 Property lifecycle and billing model
+
+- [~] Active-property limits now exist, but the actual commercial plan strategy still needs refinement
+- [~] Archived properties are read-only and excluded from active counts, but broader admin/archive reporting is still light
+- [~] Seller and agent billing now behaves more like a capacity model, but per-property charging/accounting is still not a finished product
+
 ---
 
 ## 4. Current Blockers Or Deliberate Pauses
@@ -221,6 +229,14 @@ These are the highest-value refinements because they affect trust, demos, and ev
 - [ ] complete live end-to-end provider signup -> verify -> billing -> portal test with Stripe
 - [ ] confirm webhook updates for provider subscription states in production
 - [ ] verify featured placement behavior against provider Stripe plans
+
+### 5.2a Seller and agent billing / property-cap model
+
+- [x] define how seller plans map to active property count limits
+- [x] define how agent plans map to active property count limits
+- [ ] support per-property billing / subscription visibility where needed
+- [x] make dashboard billing chooser show only plans relevant to the signed-in account type everywhere
+- [x] show active subscription count and remaining active-property capacity in seller and agent UI
 
 ### 5.3 Vision quality refinement
 
@@ -277,6 +293,14 @@ These are the highest-value refinements because they affect trust, demos, and ev
 - [ ] refine listing-photo candidate review and ordering UX
 - [ ] improve cross-device media management polish
 
+### 5.8a Property lifecycle
+
+- [x] add property archive state and archive / restore actions
+- [x] prevent editing on archived properties while still allowing read-only access
+- [x] exclude archived properties from active-property billing counts
+- [ ] add admin visibility into active vs archived properties
+- [ ] decide whether archived properties retain exports/media permanently or move to cold storage later
+
 ---
 
 ## Priority 3: Usage, Safeguards, And Trust
@@ -321,10 +345,11 @@ If work resumes tomorrow, the most sensible order is:
 
 1. Complete real provider signup -> verification -> billing -> portal end-to-end validation
 2. Improve provider coverage filtering and graceful no-coverage handling
-3. Refine vision quality on the three Replicate presets
-4. Polish report/brochure premium output quality
-5. Add provider account recovery / linking tools
-6. Start real automated tests around the new flows
+3. Refine the seller/agent property-cap model into a true per-property billing strategy where needed
+4. Refine vision quality on the three Replicate presets
+5. Polish report/brochure premium output quality
+6. Add provider account recovery / linking tools
+7. Start real automated tests around the new flows
 
 ---
 

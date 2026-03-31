@@ -2,7 +2,13 @@ import { propertySchema } from '@workside/validation';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 
-import { createProperty, getPropertyById, listProperties } from './property.service.js';
+import {
+  archiveProperty,
+  createProperty,
+  getPropertyById,
+  listProperties,
+  restoreProperty,
+} from './property.service.js';
 
 const querySchema = z.object({
   ownerUserId: z.string().optional(),
@@ -47,6 +53,40 @@ export async function propertyRoutes(fastify) {
       return reply.send({ property });
     } catch (error) {
       return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.patch('/:propertyId/archive', async (request, reply) => {
+    try {
+      const { propertyId } = paramsSchema.parse(request.params);
+      const actorUserId = String(request.headers['x-user-id'] || '');
+      const property = await archiveProperty(propertyId, actorUserId);
+      return reply.send({ property });
+    } catch (error) {
+      const statusCode =
+        error.message === 'Property not found.'
+          ? 404
+          : error.message.includes('permission')
+            ? 403
+            : 400;
+      return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
+  fastify.patch('/:propertyId/restore', async (request, reply) => {
+    try {
+      const { propertyId } = paramsSchema.parse(request.params);
+      const actorUserId = String(request.headers['x-user-id'] || '');
+      const property = await restoreProperty(propertyId, actorUserId);
+      return reply.send({ property });
+    } catch (error) {
+      const statusCode =
+        error.message === 'Property not found.'
+          ? 404
+          : error.message.includes('permission')
+            ? 403
+            : 400;
+      return reply.code(statusCode).send({ message: error.message });
     }
   });
 }

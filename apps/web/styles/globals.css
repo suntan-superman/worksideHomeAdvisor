@@ -1759,6 +1759,24 @@ select {
   top: 182px;
 }
 
+.workspace-archive-banner {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(173, 74, 55, 0.22);
+  background: rgba(255, 243, 239, 0.94);
+}
+
+.workspace-archive-banner strong {
+  color: #8a3f33;
+}
+
+.workspace-archive-banner p {
+  margin: 0;
+  color: var(--muted);
+}
+
 .workspace-action-pill,
 .workspace-tab {
   flex: 0 0 auto;

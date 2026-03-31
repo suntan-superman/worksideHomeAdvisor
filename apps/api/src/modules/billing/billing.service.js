@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 
 import { env } from '../../config/env.js';
 import {
+  getPlanActivePropertyLimit,
   getPlanConfig,
   getStripeClient,
   isStripeConfigured,
@@ -12,6 +13,7 @@ import {
 import { UserModel } from '../auth/auth.model.js';
 import { BillingSubscriptionModel } from './billing.model.js';
 import { ProviderModel } from '../providers/provider.model.js';
+import { PropertyModel } from '../properties/property.model.js';
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing', 'past_due', 'paid']);
 const BASE_FREE_FEATURES = ['pricing.preview', 'photo.capture.basic'];
@@ -36,6 +38,10 @@ const DEMO_FEATURES = [
   'reports.client_ready',
   'team.multi_user',
 ];
+const DEFAULT_ACTIVE_PROPERTY_LIMIT_BY_AUDIENCE = {
+  seller: 1,
+  agent: 1,
+};
 
 function toDateFromUnixTimestamp(value) {
   return value ? new Date(value * 1000) : null;
@@ -90,6 +96,47 @@ function buildFreeSummary(userId) {
       features: BASE_FREE_FEATURES,
     },
     subscription: null,
+  };
+}
+
+function resolveActivePropertyLimit(access = {}) {
+  if (!access || access.planKey === 'admin_bypass' || access.planKey === 'demo_bypass') {
+    return null;
+  }
+
+  if (access.planKey === 'free') {
+    return DEFAULT_ACTIVE_PROPERTY_LIMIT_BY_AUDIENCE[access.audience] ?? 1;
+  }
+
+  return getPlanActivePropertyLimit(access.planKey);
+}
+
+async function buildPropertyCapacitySummary(userId, access = {}) {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return {
+      activeCount: 0,
+      archivedCount: 0,
+      activeLimit: resolveActivePropertyLimit(access),
+      remainingActiveSlots: resolveActivePropertyLimit(access),
+      canCreateActiveProperty: true,
+    };
+  }
+
+  const [activeCount, archivedCount] = await Promise.all([
+    PropertyModel.countDocuments({ ownerUserId: userId, status: { $ne: 'archived' } }),
+    PropertyModel.countDocuments({ ownerUserId: userId, status: 'archived' }),
+  ]);
+
+  const activeLimit = resolveActivePropertyLimit(access);
+  const remainingActiveSlots =
+    activeLimit === null ? null : Math.max(0, activeLimit - activeCount);
+
+  return {
+    activeCount,
+    archivedCount,
+    activeLimit,
+    remainingActiveSlots,
+    canCreateActiveProperty: activeLimit === null || activeCount < activeLimit,
   };
 }
 
@@ -695,30 +742,34 @@ export async function getBillingSummary(userId) {
   }
 
   if (user.isBillingBypass || user.role === 'admin' || user.role === 'super_admin') {
+    const access = {
+      audience: 'internal',
+      planKey: 'admin_bypass',
+      status: 'active',
+      features: ADMIN_FEATURES,
+    };
     return {
       userId,
       isStripeConfigured: isStripeConfigured(),
-      access: {
-        audience: 'internal',
-        planKey: 'admin_bypass',
-        status: 'active',
-        features: ADMIN_FEATURES,
-      },
+      access,
       subscription: null,
+      propertyCapacity: await buildPropertyCapacitySummary(userId, access),
     };
   }
 
   if (user.isDemoAccount) {
+    const access = {
+      audience: 'demo',
+      planKey: 'demo_bypass',
+      status: 'active',
+      features: DEMO_FEATURES,
+    };
     return {
       userId,
       isStripeConfigured: isStripeConfigured(),
-      access: {
-        audience: 'demo',
-        planKey: 'demo_bypass',
-        status: 'active',
-        features: DEMO_FEATURES,
-      },
+      access,
       subscription: null,
+      propertyCapacity: await buildPropertyCapacitySummary(userId, access),
     };
   }
 
@@ -730,23 +781,35 @@ export async function getBillingSummary(userId) {
     .lean();
 
   if (!activeSubscription) {
-    return buildFreeSummary(userId);
+    const freeSummary = buildFreeSummary(userId);
+    return {
+      ...freeSummary,
+      propertyCapacity: await buildPropertyCapacitySummary(userId, freeSummary.access),
+    };
   }
 
   const subscription = serializeSubscription(activeSubscription);
   const features = [...new Set([...BASE_FREE_FEATURES, ...(subscription.features || [])])];
 
+  const access = {
+    audience: subscription.audience,
+    planKey: subscription.planKey,
+    status: subscription.status,
+    features,
+  };
+
   return {
     userId,
     isStripeConfigured: isStripeConfigured(),
-    access: {
-      audience: subscription.audience,
-      planKey: subscription.planKey,
-      status: subscription.status,
-      features,
-    },
+    access,
     subscription,
+    propertyCapacity: await buildPropertyCapacitySummary(userId, access),
   };
+}
+
+export async function getPropertyCapacitySummary(userId) {
+  const summary = await getBillingSummary(userId);
+  return summary.propertyCapacity;
 }
 
 export async function handleStripeWebhook(rawBody, signature) {

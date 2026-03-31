@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 
 import { analyzePropertyPhoto } from '../../services/photoAnalysisService.js';
 import { buildMediaAssetUrl, buildMediaVariantUrl, saveImageBuffer } from '../../services/storageService.js';
-import { getPropertyById } from '../properties/property.service.js';
+import { assertPropertyEditableById, getPropertyById } from '../properties/property.service.js';
 import { MediaAssetModel } from './media.model.js';
 import { MediaVariantModel } from './media-variant.model.js';
 
@@ -97,7 +97,7 @@ export async function createMediaAssetAndAnalysis({
     throw new Error('Database connection is required to save media assets.');
   }
 
-  const property = await getPropertyById(propertyId);
+  const property = await assertPropertyEditableById(propertyId);
   if (!property) {
     throw new Error('Property not found.');
   }
@@ -147,6 +147,8 @@ export async function updateMediaAsset(assetId, updates) {
   if (!asset) {
     throw new Error('Media asset not found.');
   }
+
+  await assertPropertyEditableById(asset.propertyId);
 
   if (typeof updates.roomLabel === 'string') {
     asset.roomLabel = updates.roomLabel.trim() || asset.roomLabel;

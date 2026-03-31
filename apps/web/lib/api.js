@@ -82,6 +82,24 @@ export function getProperty(propertyId) {
   return request(`/api/v1/properties/${propertyId}`);
 }
 
+export function archiveProperty(propertyId, ownerUserId) {
+  return request(`/api/v1/properties/${propertyId}/archive`, {
+    method: 'PATCH',
+    headers: {
+      'x-user-id': ownerUserId,
+    },
+  });
+}
+
+export function restoreProperty(propertyId, ownerUserId) {
+  return request(`/api/v1/properties/${propertyId}/restore`, {
+    method: 'PATCH',
+    headers: {
+      'x-user-id': ownerUserId,
+    },
+  });
+}
+
 export function getDashboard(propertyId) {
   return request(`/api/v1/properties/${propertyId}/dashboard`);
 }

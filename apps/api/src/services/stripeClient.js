@@ -10,6 +10,7 @@ const PLAN_CATALOG = {
     planKey: 'seller_unlock',
     mode: 'payment',
     audience: 'seller',
+    activePropertyLimit: 1,
     displayName: 'Seller Unlock',
     description: 'Unlock flyer generation, exports, and richer seller-ready outputs.',
     priceEnvKey: 'STRIPE_PRICE_ID_SELLER_UNLOCK',
@@ -20,6 +21,7 @@ const PLAN_CATALOG = {
     planKey: 'seller_pro',
     mode: 'subscription',
     audience: 'seller',
+    activePropertyLimit: 3,
     displayName: 'Seller Pro',
     description: 'Ongoing seller access for deeper pricing, exports, and AI guidance.',
     priceEnvKey: 'STRIPE_PRICE_ID_SELLER_PRO',
@@ -30,6 +32,7 @@ const PLAN_CATALOG = {
     planKey: 'agent_starter',
     mode: 'subscription',
     audience: 'agent',
+    activePropertyLimit: 5,
     displayName: 'Agent Starter',
     description: 'Presentation-ready pricing and listing-prep workflows for agents.',
     priceEnvKey: 'STRIPE_PRICE_ID_AGENT_STARTER',
@@ -47,6 +50,7 @@ const PLAN_CATALOG = {
     planKey: 'agent_pro',
     mode: 'subscription',
     audience: 'agent',
+    activePropertyLimit: 15,
     displayName: 'Agent Pro',
     description: 'Generate pricing, comps, and listing presentations in minutes.',
     priceEnvKey: 'STRIPE_PRICE_ID_AGENT_PRO',
@@ -65,6 +69,7 @@ const PLAN_CATALOG = {
     planKey: 'agent_team',
     mode: 'subscription',
     audience: 'agent',
+    activePropertyLimit: 50,
     displayName: 'Agent Team',
     description: 'Team-oriented access for higher-volume listing workflows.',
     priceEnvKey: 'STRIPE_PRICE_ID_AGENT_TEAM',
@@ -84,6 +89,7 @@ const PLAN_CATALOG = {
     planKey: 'provider_standard',
     mode: 'subscription',
     audience: 'provider',
+    activePropertyLimit: null,
     displayName: 'Provider Standard',
     description: 'Receive marketplace leads with stronger placement and operational tools.',
     priceEnvKey: 'STRIPE_PRICE_ID_PROVIDER_STANDARD',
@@ -94,6 +100,7 @@ const PLAN_CATALOG = {
     planKey: 'provider_featured',
     mode: 'subscription',
     audience: 'provider',
+    activePropertyLimit: null,
     displayName: 'Provider Featured',
     description: 'Featured provider placement with sponsored-style marketplace visibility.',
     priceEnvKey: 'STRIPE_PRICE_ID_PROVIDER_FEATURED',
@@ -109,6 +116,7 @@ const PLAN_CATALOG = {
     planKey: 'sample_onboarding',
     mode: 'payment',
     audience: 'demo',
+    activePropertyLimit: null,
     displayName: 'Sample Onboarding Fee',
     description: 'Low-cost one-time Stripe flow for demos and live billing tests.',
     priceEnvKey: 'STRIPE_PRICE_ID_SAMPLE_ONBOARDING',
@@ -119,6 +127,7 @@ const PLAN_CATALOG = {
     planKey: 'sample_monthly',
     mode: 'subscription',
     audience: 'demo',
+    activePropertyLimit: null,
     displayName: 'Sample Monthly Fee',
     description: 'Low-cost recurring Stripe flow for demos and live subscription tests.',
     priceEnvKey: 'STRIPE_PRICE_ID_SAMPLE_MONTHLY',
@@ -252,6 +261,10 @@ export function getPlanConfig(planKey) {
     ...plan,
     priceId,
   };
+}
+
+export function getPlanActivePropertyLimit(planKey) {
+  return PLAN_CATALOG[planKey]?.activePropertyLimit ?? null;
 }
 
 export function resolveBillingUrls(overrides = {}) {

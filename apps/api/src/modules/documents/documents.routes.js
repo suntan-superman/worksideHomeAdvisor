@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { getPropertyById } from '../properties/property.service.js';
+import { assertPropertyEditableById, getPropertyById } from '../properties/property.service.js';
 import {
   enforceAnalysisRequest,
   finalizeCachedAnalysisReturn,
@@ -48,7 +48,7 @@ export async function documentsRoutes(fastify) {
   fastify.post('/:propertyId/flyer/generate', async (request, reply) => {
     try {
       const payload = flyerRequestSchema.parse(request.body || {});
-      const property = await getPropertyById(request.params.propertyId);
+      const property = await assertPropertyEditableById(request.params.propertyId);
       if (!property) {
         return reply.code(404).send({ message: 'Property not found.' });
       }
@@ -174,7 +174,7 @@ export async function documentsRoutes(fastify) {
   fastify.post('/:propertyId/report/generate', async (request, reply) => {
     try {
       const payload = reportRequestSchema.parse(request.body || {});
-      const property = await getPropertyById(request.params.propertyId);
+      const property = await assertPropertyEditableById(request.params.propertyId);
       if (!property) {
         return reply.code(404).send({ message: 'Property not found.' });
       }

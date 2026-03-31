@@ -9,15 +9,52 @@ import { AppFrame } from '../../components/AppFrame';
 import { Toast } from '../../components/Toast';
 import {
   analyzePricing,
+  archiveProperty as archivePropertyRequest,
   createBillingCheckoutSession,
   createProperty,
   getBillingPlans,
   getBillingSummary,
   getDashboard,
+  restoreProperty as restorePropertyRequest,
   syncBillingSession,
   listProperties,
 } from '../../lib/api';
 import { getStoredSession, setStoredSession } from '../../lib/session';
+
+function formatAudienceLabel(value) {
+  return String(value || '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function getAllowedBillingAudiences(user) {
+  const audiences = [];
+  const role = user?.role || 'seller';
+
+  if (role === 'agent') {
+    audiences.push('agent');
+  } else {
+    audiences.push('seller');
+  }
+
+  if (user?.isDemoAccount) {
+    audiences.push('demo');
+  }
+
+  return audiences;
+}
+
+function getPreferredPlanOrder(user) {
+  if (user?.isDemoAccount) {
+    return ['sample_monthly', 'sample_onboarding'];
+  }
+
+  if (user?.role === 'agent') {
+    return ['agent_starter', 'agent_pro', 'agent_team'];
+  }
+
+  return ['seller_pro', 'seller_unlock'];
+}
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
@@ -44,14 +81,24 @@ export default function DashboardPage() {
     squareFeet: 2460,
   });
 
-  const configuredPlans = useMemo(
-    () => (billingPlans || []).filter((plan) => plan.configured),
-    [billingPlans],
-  );
+  const configuredPlans = useMemo(() => {
+    const allowedAudiences = getAllowedBillingAudiences(session?.user || null);
+    return (billingPlans || []).filter(
+      (plan) => plan.configured && allowedAudiences.includes(plan.audience),
+    );
+  }, [billingPlans, session?.user]);
 
   const selectedProperty = useMemo(
     () => properties.find((property) => property.id === selectedPropertyId) || null,
     [properties, selectedPropertyId],
+  );
+  const activeProperties = useMemo(
+    () => properties.filter((property) => property.status !== 'archived'),
+    [properties],
+  );
+  const archivedProperties = useMemo(
+    () => properties.filter((property) => property.status === 'archived'),
+    [properties],
   );
 
   const selectedBillingPlan = useMemo(
@@ -158,26 +205,36 @@ export default function DashboardPage() {
   });
 
   const billingSummary = billingSummaryQuery.data || null;
+  const propertyCapacity = billingSummary?.propertyCapacity || null;
+  const selectedPropertyArchived = selectedProperty?.status === 'archived';
 
   useEffect(() => {
     if (billingPlansQuery.isSuccess) {
       const plans = billingPlansQuery.data || [];
       setBillingPlans(plans);
+      const allowedAudiences = getAllowedBillingAudiences(session?.user || null);
+      const filteredPlans = plans.filter(
+        (plan) => plan.configured && allowedAudiences.includes(plan.audience),
+      );
+      const preferredOrder = getPreferredPlanOrder(session?.user || null);
 
       const preferredPlan =
-        plans.find((plan) => plan.planKey === 'sample_monthly' && plan.configured)?.planKey ||
-        plans.find((plan) => plan.planKey === 'sample_onboarding' && plan.configured)?.planKey ||
-        plans.find((plan) => plan.configured)?.planKey ||
+        preferredOrder.find((planKey) =>
+          filteredPlans.some((plan) => plan.planKey === planKey),
+        ) ||
+        filteredPlans[0]?.planKey ||
         '';
 
       if (preferredPlan) {
         setSelectedPlanKey((current) => {
-          const currentStillValid = plans.some((plan) => plan.planKey === current && plan.configured);
+          const currentStillValid = filteredPlans.some((plan) => plan.planKey === current);
           return currentStillValid ? current : preferredPlan;
         });
+      } else {
+        setSelectedPlanKey('');
       }
     }
-  }, [billingPlansQuery.data, billingPlansQuery.isSuccess]);
+  }, [billingPlansQuery.data, billingPlansQuery.isSuccess, session?.user]);
 
   useEffect(() => {
     if (!billingPlansQuery.error) {
@@ -282,6 +339,9 @@ export default function DashboardPage() {
 
   async function handleCreateProperty(event) {
     event.preventDefault();
+    if (!session?.user?.id) {
+      return;
+    }
     setActionState('Creating property workspace...');
     setToast(null);
 
@@ -300,10 +360,81 @@ export default function DashboardPage() {
         title: 'Property created',
         message: `${response.property.title} is ready for pricing and photo review.`,
       });
+      await queryClient.invalidateQueries({ queryKey: ['billing-summary', session.user.id] });
     } catch (requestError) {
       setToast({
         tone: 'error',
         title: 'Could not create property',
+        message: requestError.message,
+      });
+    } finally {
+      setActionState('');
+    }
+  }
+
+  async function handleArchiveSelectedProperty() {
+    if (!selectedPropertyId || !session?.user?.id) {
+      return;
+    }
+
+    setActionState('Archiving property...');
+    setToast(null);
+
+    try {
+      const response = await archivePropertyRequest(selectedPropertyId, session.user.id);
+      setProperties((current) =>
+        current.map((property) =>
+          property.id === selectedPropertyId ? response.property : property,
+        ),
+      );
+      setDashboard((current) =>
+        current ? { ...current, property: response.property } : current,
+      );
+      await queryClient.invalidateQueries({ queryKey: ['billing-summary', session.user.id] });
+      setToast({
+        tone: 'success',
+        title: 'Property archived',
+        message: 'This workspace is now read-only and no longer counts toward your active-property limit.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not archive property',
+        message: requestError.message,
+      });
+    } finally {
+      setActionState('');
+    }
+  }
+
+  async function handleRestoreSelectedProperty() {
+    if (!selectedPropertyId || !session?.user?.id) {
+      return;
+    }
+
+    setActionState('Restoring property...');
+    setToast(null);
+
+    try {
+      const response = await restorePropertyRequest(selectedPropertyId, session.user.id);
+      setProperties((current) =>
+        current.map((property) =>
+          property.id === selectedPropertyId ? response.property : property,
+        ),
+      );
+      setDashboard((current) =>
+        current ? { ...current, property: response.property } : current,
+      );
+      await queryClient.invalidateQueries({ queryKey: ['billing-summary', session.user.id] });
+      setToast({
+        tone: 'success',
+        title: 'Property restored',
+        message: 'This workspace is active again and can be edited normally.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not restore property',
         message: requestError.message,
       });
     } finally {
@@ -424,10 +555,41 @@ export default function DashboardPage() {
                 {properties.map((property) => (
                   <option key={property.id} value={property.id}>
                     {property.title} · {property.city}, {property.state}
+                    {property.status === 'archived' ? ' [Archived]' : ''}
                   </option>
                 ))}
               </select>
-              <p>{loading ? 'Loading properties...' : `${properties.length} property workspace(s) found.`}</p>
+              <p>
+                {loading
+                  ? 'Loading properties...'
+                  : `${activeProperties.length} active · ${archivedProperties.length} archived workspace(s).`}
+              </p>
+              {propertyCapacity ? (
+                <p>
+                  {propertyCapacity.activeLimit === null
+                    ? `${propertyCapacity.activeCount} active property workspace(s).`
+                    : `${propertyCapacity.activeCount} of ${propertyCapacity.activeLimit} active property slot(s) in use.`}
+                </p>
+              ) : null}
+              {selectedProperty ? (
+                <div className="button-stack">
+                  <span className="billing-pill">
+                    {selectedPropertyArchived ? 'Archived · read-only' : 'Active · editable'}
+                  </span>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={
+                      selectedPropertyArchived
+                        ? handleRestoreSelectedProperty
+                        : handleArchiveSelectedProperty
+                    }
+                    disabled={Boolean(actionState)}
+                  >
+                    {selectedPropertyArchived ? 'Restore property' : 'Archive property'}
+                  </button>
+                </div>
+              ) : null}
             </article>
 
             <article className="feature-card">
@@ -439,7 +601,7 @@ export default function DashboardPage() {
                     actionState.includes('pricing') ? 'button-primary button-busy' : 'button-primary'
                   }
                   onClick={handleAnalyzePricing}
-                  disabled={!selectedPropertyId || Boolean(actionState)}
+                  disabled={!selectedPropertyId || selectedPropertyArchived || Boolean(actionState)}
                 >
                   {actionState.includes('pricing') ? 'Running analysis...' : 'Run pricing analysis'}
                 </button>
@@ -460,6 +622,8 @@ export default function DashboardPage() {
                   ? 'Free access'
                   : billingSummary?.access?.planKey === 'admin_bypass'
                     ? 'Admin access'
+                    : billingSummary?.access?.planKey === 'demo_bypass'
+                      ? 'Demo access'
                     : billingSummary?.subscription?.planKey || 'No active plan'}
               </h3>
               <p>
@@ -467,6 +631,13 @@ export default function DashboardPage() {
                   ? `Current status: ${billingSummary.access.status}.`
                   : 'Load a session to see the current billing state.'}
               </p>
+              {propertyCapacity ? (
+                <p>
+                  {propertyCapacity.activeLimit === null
+                    ? `Active properties: ${propertyCapacity.activeCount}.`
+                    : `${propertyCapacity.remainingActiveSlots} active slot(s) remaining out of ${propertyCapacity.activeLimit}.`}
+                </p>
+              ) : null}
               <div className="tag-row">
                 {(billingSummary?.access?.features || []).slice(0, 4).map((feature) => (
                   <span key={feature}>{feature}</span>
@@ -494,9 +665,11 @@ export default function DashboardPage() {
               </p>
               {selectedBillingPlan ? (
                 <div className="billing-plan-meta">
-                  <span className="billing-pill">{selectedBillingPlan.mode}</span>
-                  <span className="billing-pill">{selectedBillingPlan.audience}</span>
-                  <span className="billing-pill">{selectedBillingPlan.planKey}</span>
+                  <span className="billing-pill">
+                    {selectedBillingPlan.mode === 'subscription' ? 'Recurring plan' : 'One-time fee'}
+                  </span>
+                  <span className="billing-pill">{formatAudienceLabel(selectedBillingPlan.audience)}</span>
+                  <span className="billing-pill">{selectedBillingPlan.priceLabel || selectedBillingPlan.planKey}</span>
                 </div>
               ) : null}
               <div className="button-stack">
@@ -526,6 +699,14 @@ export default function DashboardPage() {
           <section className="content-grid dashboard-content-grid">
             <form className="form-card" onSubmit={handleCreateProperty}>
               <span className="label">Create property</span>
+              {propertyCapacity && !propertyCapacity.canCreateActiveProperty ? (
+                <div className="signup-decision-card signup-decision-card-warning">
+                  <strong>Active-property limit reached</strong>
+                  <p>
+                    Archive an existing property or upgrade the current plan before creating another active workspace.
+                  </p>
+                </div>
+              ) : null}
               <label>
                 Title
                 <input
@@ -625,13 +806,25 @@ export default function DashboardPage() {
                   }
                 />
               </label>
-              <button type="submit" className="button-primary" disabled={Boolean(actionState)}>
+              <button
+                type="submit"
+                className="button-primary"
+                disabled={Boolean(actionState) || (propertyCapacity ? !propertyCapacity.canCreateActiveProperty : false)}
+              >
                 Create property
               </button>
             </form>
 
             <div className="content-card">
               <span className="label">Live dashboard snapshot</span>
+              {selectedPropertyArchived ? (
+                <div className="signup-decision-card signup-decision-card-warning">
+                  <strong>Archived property</strong>
+                  <p>
+                    This workspace stays viewable, but new pricing runs and edits are blocked until it is restored.
+                  </p>
+                </div>
+              ) : null}
               {dashboard?.pricing ? (
                 <>
                   <h2>{dashboard.property.title}</h2>

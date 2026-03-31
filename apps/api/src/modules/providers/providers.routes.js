@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { assertPropertyEditableById } from '../properties/property.service.js';
 import {
   createProviderCheckoutSession,
   syncStripeCheckoutSessionById,
@@ -194,6 +195,7 @@ export async function providersRoutes(fastify) {
   fastify.post('/properties/:propertyId/provider-leads', async (request, reply) => {
     try {
       const { propertyId } = propertyParamsSchema.parse(request.params);
+      await assertPropertyEditableById(propertyId);
       const payload = createLeadSchema.parse(request.body || {});
       const lead = await createProviderLeadRequest(propertyId, payload);
       return reply.code(201).send({ lead });
@@ -217,6 +219,7 @@ export async function providersRoutes(fastify) {
   fastify.post('/properties/:propertyId/providers/:providerId/save', async (request, reply) => {
     try {
       const { propertyId } = propertyParamsSchema.parse(request.params);
+      await assertPropertyEditableById(propertyId);
       const { providerId } = providerParamsSchema.parse(request.params);
       const result = await saveProviderForProperty(propertyId, providerId);
       return reply.code(201).send(result);
