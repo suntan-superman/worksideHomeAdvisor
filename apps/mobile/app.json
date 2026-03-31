@@ -8,7 +8,8 @@
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true, 
+      "bundleIdentifier": "software.workside.homeseller"
     },
     "android": {
       "package": "software.workside.homeseller"

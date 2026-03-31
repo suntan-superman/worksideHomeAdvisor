@@ -150,3 +150,21 @@ gcloud config get-value project
 gcloud config set project worksidehomeadvisor
 //////////////////////////////////////////////////////////
 
+For mac build:
+# root
+git fetch origin
+git reset --hard origin/main
+git clean -fd
+npm install
+
+# mobile
+cd apps/mobile
+rm -rf ios android
+npx expo prebuild --clean
+cd ios
+pod install
+cd .. 
+
+then open Xcode here:
+open ios/*.xcworkspace
+/////////////////////////////////////////////////////////////

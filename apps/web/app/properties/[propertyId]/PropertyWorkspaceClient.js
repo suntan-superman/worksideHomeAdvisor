@@ -171,6 +171,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [providerSource, setProviderSource] = useState(null);
   const [activeProviderTaskKey, setActiveProviderTaskKey] = useState('');
   const [showMoreVisionVariants, setShowMoreVisionVariants] = useState(false);
+  const [pendingDeleteAsset, setPendingDeleteAsset] = useState(null);
   const [status, setStatus] = useState('Loading property workspace...');
   const [toast, setToast] = useState(null);
 
@@ -440,6 +441,21 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   useEffect(() => {
     setShowMoreVisionVariants(false);
   }, [selectedMediaAsset?.id]);
+
+  useEffect(() => {
+    if (!pendingDeleteAsset) {
+      return undefined;
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        setPendingDeleteAsset(null);
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [pendingDeleteAsset]);
 
   useEffect(() => {
     const fallbackPhotoIds = brochurePhotoPool.slice(0, 4).map((asset) => asset.id);
@@ -851,15 +867,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (!selectedMediaAsset) {
       return;
     }
-
-    const assetToDelete = selectedMediaAsset;
-    const confirmed = window.confirm(
-      `Delete "${assetToDelete.roomLabel || 'this photo'}"? This also removes any generated variants tied to it.`,
-    );
-
-    if (!confirmed) {
-      return;
-    }
+    const assetToDelete = pendingDeleteAsset || selectedMediaAsset;
 
     setStatus('Deleting photo...');
     setToast(null);
@@ -884,6 +892,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         title: 'Photo deleted',
         message: 'The photo and any generated variants were removed from this property.',
       });
+      setPendingDeleteAsset(null);
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Could not delete photo', message: requestError.message });
     } finally {
@@ -1313,7 +1322,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               <button type="button" className="button-secondary" onClick={() => { setActiveTab('vision'); handleGenerateVariant('declutter_light'); }} disabled={Boolean(status) || isArchivedProperty}>
                 Declutter
               </button>
-              <button type="button" className="button-secondary button-danger" onClick={handleDeleteSelectedPhoto} disabled={Boolean(status) || isArchivedProperty}>
+              <button type="button" className="button-secondary button-danger" onClick={() => setPendingDeleteAsset(selectedMediaAsset)} disabled={Boolean(status) || isArchivedProperty}>
                 Delete photo
               </button>
             </div>
@@ -2169,6 +2178,40 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   return (
     <AppFrame busy={Boolean(status)}>
       <Toast tone={toast?.tone} title={toast?.title} message={toast?.message} onClose={() => setToast(null)} />
+      {pendingDeleteAsset ? (
+        <div className="workspace-modal-backdrop" role="presentation" onClick={() => setPendingDeleteAsset(null)}>
+          <div
+            className="workspace-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-photo-title"
+            aria-describedby="delete-photo-description"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="label">Delete photo</span>
+            <h2 id="delete-photo-title">Remove {pendingDeleteAsset.roomLabel || 'this photo'}?</h2>
+            <p id="delete-photo-description">
+              This will permanently remove the photo from the property gallery and also delete any generated vision variants tied to it.
+            </p>
+            <div className="workspace-modal-preview-row">
+              <img src={pendingDeleteAsset.imageUrl} alt={pendingDeleteAsset.roomLabel || 'Selected property photo'} className="workspace-modal-preview-image" />
+              <div className="workspace-modal-preview-copy">
+                <strong>{pendingDeleteAsset.roomLabel || 'Property photo'}</strong>
+                <span>{pendingDeleteAsset.listingCandidate ? 'Currently marked as a listing candidate.' : 'This photo is part of the shared property gallery.'}</span>
+                <span>{pendingDeleteAsset.selectedVariant ? 'A preferred vision variant is attached and will also be removed.' : 'No preferred vision variant is attached.'}</span>
+              </div>
+            </div>
+            <div className="workspace-modal-actions">
+              <button type="button" className="button-secondary" onClick={() => setPendingDeleteAsset(null)} disabled={Boolean(status)}>
+                Keep photo
+              </button>
+              <button type="button" className="button-secondary button-danger" onClick={handleDeleteSelectedPhoto} disabled={Boolean(status)}>
+                {status === 'Deleting photo...' ? 'Deleting...' : 'Delete photo'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <section className="workspace-shell">
         <section className="workspace-page-header">

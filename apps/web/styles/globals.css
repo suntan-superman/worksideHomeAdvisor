@@ -2092,6 +2092,76 @@ select {
   padding: 20px;
 }
 
+.workspace-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(24, 24, 20, 0.42);
+  backdrop-filter: blur(10px);
+}
+
+.workspace-modal-card {
+  width: min(640px, 100%);
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border-radius: 28px;
+  border: 1px solid rgba(36, 40, 45, 0.1);
+  background: linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(255, 247, 238, 0.96));
+  box-shadow: 0 32px 80px rgba(36, 40, 45, 0.2);
+}
+
+.workspace-modal-card h2 {
+  margin: 0;
+}
+
+.workspace-modal-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.workspace-modal-preview-row {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.workspace-modal-preview-image {
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+  border-radius: 20px;
+  border: 1px solid rgba(36, 40, 45, 0.08);
+}
+
+.workspace-modal-preview-copy {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(36, 40, 45, 0.08);
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.workspace-modal-preview-copy strong {
+  font-size: 1.02rem;
+}
+
+.workspace-modal-preview-copy span {
+  color: var(--muted);
+}
+
+.workspace-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 1100px) {
   .workspace-tab-layout,
   .workspace-two-column,
@@ -2106,6 +2176,14 @@ select {
   .workspace-quick-rail,
   .photo-detail-panel {
     position: static;
+  }
+
+  .workspace-modal-preview-row {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-modal-preview-image {
+    height: 200px;
   }
 }
 
