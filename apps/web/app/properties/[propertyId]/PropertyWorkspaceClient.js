@@ -2322,93 +2322,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           </div>
         </section>
 
-        <section className="workspace-action-bar">
-          <div className="workspace-action-tooltip">
-            <button
-              type="button"
-              className="workspace-action-pill"
-              onClick={() => setActiveTab('photos')}
-              title="Open the Photos tab to review images captured from mobile and add them to your listing workflow."
-            >
-              Add photos
-            </button>
-            <div className="workspace-action-tooltip-bubble" role="tooltip">
-              Open the Photos tab to review images captured from mobile and add them to your listing workflow.
-            </div>
-          </div>
-          <div className="workspace-action-tooltip">
-            <button
-              type="button"
-              className="workspace-action-pill"
-              onClick={() => setActiveTab('photos')}
-              title="Choose your strongest listing candidates so brochure and report outputs prioritize them automatically."
-            >
-              Select photos
-            </button>
-            <div className="workspace-action-tooltip-bubble" role="tooltip">
-              Choose your strongest listing candidates so brochure and report outputs prioritize them automatically.
-            </div>
-          </div>
-          <div className="workspace-action-tooltip">
-            <button
-              type="button"
-              className="workspace-action-pill workspace-action-pill-accent"
-              onClick={() => { setActiveTab('vision'); if (selectedMediaAsset) { handleGenerateVariant('enhance_listing_quality'); } }}
-              disabled={Boolean(status) || isArchivedProperty}
-              title="Generate an improved version of the currently selected photo to test cleaner, brighter marketing-ready presentation."
-            >
-              Enhance
-            </button>
-            <div className="workspace-action-tooltip-bubble" role="tooltip">
-              Generate an improved version of the currently selected photo to test cleaner, brighter marketing-ready presentation.
-            </div>
-          </div>
-          <div className="workspace-action-tooltip">
-            <button
-              type="button"
-              className="workspace-action-pill"
-              onClick={() => { setActiveTab('brochure'); handleGenerateFlyer(); }}
-              disabled={Boolean(status) || isArchivedProperty}
-              title="Build a one-page marketing flyer using current pricing, selected photos, and your brochure copy settings."
-            >
-              Generate flyer
-            </button>
-            <div className="workspace-action-tooltip-bubble" role="tooltip">
-              Build a one-page marketing flyer using current pricing, selected photos, and your brochure copy settings.
-            </div>
-          </div>
-          <div className="workspace-action-tooltip">
-            <button
-              type="button"
-              className="workspace-action-pill workspace-action-pill-primary"
-              onClick={() => { setActiveTab('report'); handleGenerateReport(); }}
-              disabled={Boolean(status) || isArchivedProperty}
-              title="Create the full seller report with pricing analysis, checklist progress, selected photos, and marketing guidance."
-            >
-              Generate report
-            </button>
-            <div className="workspace-action-tooltip-bubble" role="tooltip">
-              Create the full seller report with pricing analysis, checklist progress, selected photos, and marketing guidance.
-            </div>
-          </div>
-        </section>
-
-        <section className="workspace-tab-bar" aria-label="Workspace tabs">
-          {WORKSPACE_TABS.map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'workspace-tab active' : 'workspace-tab'} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
-        </section>
-
-        {status ? <p className="status-copy">{status}</p> : null}
-        {isArchivedProperty ? (
-          <section className="workspace-archive-banner">
-            <strong>Archived property</strong>
-            <p>
-              This workspace remains viewable, but new pricing runs, media updates, checklist edits, provider actions,
-              and fresh brochure/report generation are disabled until the property is restored from the dashboard.
-            </p>
-          </section>
-        ) : null}
-
-        <section className="workspace-tab-layout">
+        <section className="workspace-body-layout">
           <aside className="workspace-workflow-nav">
             <div className="content-card workspace-workflow-card">
               <span className="label">Workflow navigator</span>
@@ -2479,26 +2393,116 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </div>
             </div>
           </aside>
-          <div className="workspace-tab-main">{renderActiveTab()}</div>
-          <aside className="workspace-quick-rail">
-            <div className="content-card workspace-quick-card">
-              <span className="label">Next step</span>
-              <h3>{workflowNextStep?.title || nextBestAction.title}</h3>
-              <p>{workflowNextStep?.description || nextBestAction.detail}</p>
-              {workflowNextStep?.helperText ? (
-                <p className="workspace-control-note">{workflowNextStep.helperText}</p>
-              ) : null}
-              <button
-                type="button"
-                className="button-primary"
-                onClick={() => (workflowNextStep ? openWorkflowStep(workflowNextStep) : setActiveTab(nextBestAction.tab))}
-                disabled={Boolean(status)}
-              >
-                {workflowNextStep?.ctaLabel || `Open ${WORKSPACE_TABS.find((tab) => tab.id === nextBestAction.tab)?.label || 'workspace'}`}
-              </button>
-            </div>
-            <div className="content-card workspace-quick-card"><span className="label">Quick stats</span><ul className="plain-list"><li>{selectedComps.length} comp(s) loaded</li><li>{listingCandidateAssets.length} listing photo pick(s)</li><li>{mediaAssets.filter((asset) => asset.selectedVariant).length} preferred vision variant(s)</li><li>{checklist?.summary?.completedCount ?? 0} task(s) complete</li><li>{providerRecommendations.length} provider recommendation(s)</li></ul></div>
-          </aside>
+          <div className="workspace-body-main">
+            <section className="workspace-action-bar">
+              <div className="workspace-action-tooltip">
+                <button
+                  type="button"
+                  className="workspace-action-pill"
+                  onClick={() => setActiveTab('photos')}
+                  title="Open the Photos tab to review images captured from mobile and add them to your listing workflow."
+                >
+                  Add photos
+                </button>
+                <div className="workspace-action-tooltip-bubble" role="tooltip">
+                  Open the Photos tab to review images captured from mobile and add them to your listing workflow.
+                </div>
+              </div>
+              <div className="workspace-action-tooltip">
+                <button
+                  type="button"
+                  className="workspace-action-pill"
+                  onClick={() => setActiveTab('photos')}
+                  title="Choose your strongest listing candidates so brochure and report outputs prioritize them automatically."
+                >
+                  Select photos
+                </button>
+                <div className="workspace-action-tooltip-bubble" role="tooltip">
+                  Choose your strongest listing candidates so brochure and report outputs prioritize them automatically.
+                </div>
+              </div>
+              <div className="workspace-action-tooltip">
+                <button
+                  type="button"
+                  className="workspace-action-pill workspace-action-pill-accent"
+                  onClick={() => { setActiveTab('vision'); if (selectedMediaAsset) { handleGenerateVariant('enhance_listing_quality'); } }}
+                  disabled={Boolean(status) || isArchivedProperty}
+                  title="Generate an improved version of the currently selected photo to test cleaner, brighter marketing-ready presentation."
+                >
+                  Enhance
+                </button>
+                <div className="workspace-action-tooltip-bubble" role="tooltip">
+                  Generate an improved version of the currently selected photo to test cleaner, brighter marketing-ready presentation.
+                </div>
+              </div>
+              <div className="workspace-action-tooltip">
+                <button
+                  type="button"
+                  className="workspace-action-pill"
+                  onClick={() => { setActiveTab('brochure'); handleGenerateFlyer(); }}
+                  disabled={Boolean(status) || isArchivedProperty}
+                  title="Build a one-page marketing flyer using current pricing, selected photos, and your brochure copy settings."
+                >
+                  Generate flyer
+                </button>
+                <div className="workspace-action-tooltip-bubble" role="tooltip">
+                  Build a one-page marketing flyer using current pricing, selected photos, and your brochure copy settings.
+                </div>
+              </div>
+              <div className="workspace-action-tooltip">
+                <button
+                  type="button"
+                  className="workspace-action-pill workspace-action-pill-primary"
+                  onClick={() => { setActiveTab('report'); handleGenerateReport(); }}
+                  disabled={Boolean(status) || isArchivedProperty}
+                  title="Create the full seller report with pricing analysis, checklist progress, selected photos, and marketing guidance."
+                >
+                  Generate report
+                </button>
+                <div className="workspace-action-tooltip-bubble" role="tooltip">
+                  Create the full seller report with pricing analysis, checklist progress, selected photos, and marketing guidance.
+                </div>
+              </div>
+            </section>
+
+            <section className="workspace-tab-bar" aria-label="Workspace tabs">
+              {WORKSPACE_TABS.map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'workspace-tab active' : 'workspace-tab'} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
+            </section>
+
+            {status ? <p className="status-copy">{status}</p> : null}
+            {isArchivedProperty ? (
+              <section className="workspace-archive-banner">
+                <strong>Archived property</strong>
+                <p>
+                  This workspace remains viewable, but new pricing runs, media updates, checklist edits, provider actions,
+                  and fresh brochure/report generation are disabled until the property is restored from the dashboard.
+                </p>
+              </section>
+            ) : null}
+
+            <section className="workspace-content-layout">
+              <div className="workspace-tab-main">{renderActiveTab()}</div>
+              <aside className="workspace-quick-rail">
+                <div className="content-card workspace-quick-card">
+                  <span className="label">Next step</span>
+                  <h3>{workflowNextStep?.title || nextBestAction.title}</h3>
+                  <p>{workflowNextStep?.description || nextBestAction.detail}</p>
+                  {workflowNextStep?.helperText ? (
+                    <p className="workspace-control-note">{workflowNextStep.helperText}</p>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={() => (workflowNextStep ? openWorkflowStep(workflowNextStep) : setActiveTab(nextBestAction.tab))}
+                    disabled={Boolean(status)}
+                  >
+                    {workflowNextStep?.ctaLabel || `Open ${WORKSPACE_TABS.find((tab) => tab.id === nextBestAction.tab)?.label || 'workspace'}`}
+                  </button>
+                </div>
+                <div className="content-card workspace-quick-card"><span className="label">Quick stats</span><ul className="plain-list"><li>{selectedComps.length} comp(s) loaded</li><li>{listingCandidateAssets.length} listing photo pick(s)</li><li>{mediaAssets.filter((asset) => asset.selectedVariant).length} preferred vision variant(s)</li><li>{checklist?.summary?.completedCount ?? 0} task(s) complete</li><li>{providerRecommendations.length} provider recommendation(s)</li></ul></div>
+              </aside>
+            </section>
+          </div>
         </section>
       </section>
     </AppFrame>
