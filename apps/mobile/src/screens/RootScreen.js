@@ -23,6 +23,7 @@ import {
   createImageEnhancementJob,
   getChecklist,
   getDashboard,
+  getWorkflow,
   listMediaAssets,
   listMediaVariants,
   listProperties,
@@ -90,6 +91,22 @@ function getVariantSummary(variant) {
   );
 }
 
+function formatWorkflowStatus(status) {
+  if (status === 'in_progress') {
+    return 'In progress';
+  }
+  if (status === 'complete') {
+    return 'Complete';
+  }
+  if (status === 'blocked') {
+    return 'Blocked';
+  }
+  if (status === 'locked') {
+    return 'Locked';
+  }
+  return 'Available';
+}
+
 export function RootScreen() {
   const queryClient = useQueryClient();
   const [authMode, setAuthMode] = useState('login');
@@ -151,8 +168,18 @@ export function RootScreen() {
   const gallery = galleryQuery.data || [];
   const dashboard = dashboardQuery.data || null;
   const checklist = checklistQuery.data || null;
+  const viewerRole = session?.user?.role === 'agent' ? 'agent' : 'seller';
 
   const selectedProperty = properties.find((property) => property.id === propertyId) || null;
+  const workflowQuery = useQuery({
+    queryKey: ['mobile-workflow', propertyId, viewerRole],
+    enabled: Boolean(session?.user?.id && propertyId),
+    queryFn: async () => {
+      const response = await getWorkflow(propertyId, viewerRole);
+      return response.workflow;
+    },
+  });
+  const workflow = workflowQuery.data || null;
   const selectedAsset = gallery.find((asset) => asset.id === selectedAssetId) || gallery[0] || null;
   const variantsQuery = useQuery({
     queryKey: ['mobile-media-variants', selectedAsset?.id || ''],
@@ -271,6 +298,7 @@ export function RootScreen() {
       dashboardQuery.error ||
       checklistQuery.error ||
       galleryQuery.error ||
+      workflowQuery.error ||
       variantsQuery.error;
 
     if (queryError) {
@@ -281,6 +309,7 @@ export function RootScreen() {
     dashboardQuery.error,
     galleryQuery.error,
     propertiesQuery.error,
+    workflowQuery.error,
     variantsQuery.error,
   ]);
 
@@ -316,6 +345,7 @@ export function RootScreen() {
       queryClient.invalidateQueries({ queryKey: ['mobile-dashboard', nextPropertyId] }),
       queryClient.invalidateQueries({ queryKey: ['mobile-checklist', nextPropertyId] }),
       queryClient.invalidateQueries({ queryKey: ['mobile-gallery', nextPropertyId] }),
+      queryClient.invalidateQueries({ queryKey: ['mobile-workflow', nextPropertyId, viewerRole] }),
     ]);
   }
 
@@ -470,6 +500,7 @@ export function RootScreen() {
     queryClient.removeQueries({ queryKey: ['mobile-dashboard'] });
     queryClient.removeQueries({ queryKey: ['mobile-checklist'] });
     queryClient.removeQueries({ queryKey: ['mobile-gallery'] });
+    queryClient.removeQueries({ queryKey: ['mobile-workflow'] });
     queryClient.removeQueries({ queryKey: ['mobile-media-variants'] });
     setSession(null);
     setPropertyId('');
@@ -593,10 +624,7 @@ export function RootScreen() {
           listingCandidate: nextValue,
         },
       });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['mobile-gallery', propertyId] }),
-        queryClient.invalidateQueries({ queryKey: ['mobile-checklist', propertyId] }),
-      ]);
+      await invalidatePropertyWorkspace(propertyId);
       setStatus(
         nextValue
           ? 'Photo marked as a listing candidate.'
@@ -621,7 +649,7 @@ export function RootScreen() {
           listingNote: listingNoteDraft,
         },
       });
-      await queryClient.invalidateQueries({ queryKey: ['mobile-gallery', propertyId] });
+      await invalidatePropertyWorkspace(propertyId);
       setStatus('Listing note saved to this photo.');
     } catch (requestError) {
       setError(requestError.message);
@@ -676,7 +704,7 @@ export function RootScreen() {
         jobType,
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['mobile-gallery', propertyId] }),
+        invalidatePropertyWorkspace(propertyId),
         invalidateAssetVariants(selectedAsset.id),
       ]);
       setSelectedVariantId(response.variant?.id || '');
@@ -704,7 +732,7 @@ export function RootScreen() {
         variantId,
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['mobile-gallery', propertyId] }),
+        invalidatePropertyWorkspace(propertyId),
         invalidateAssetVariants(selectedAsset.id),
       ]);
       setSelectedVariantId(variantId);
@@ -785,6 +813,46 @@ export function RootScreen() {
 
                 {!propertyDetailsCollapsed ? (
                   <>
+                    {workflow ? (
+                      <View style={styles.workflowGuideCard}>
+                        <Text style={styles.label}>Your progress</Text>
+                        <Text style={styles.taskSummaryValue}>{workflow.completionPercent}% complete</Text>
+                        <Text style={styles.taskSummaryText}>
+                          {workflow.currentPhaseLabel} · {viewerRole === 'agent' ? 'Realtor guide' : 'Seller guide'}
+                        </Text>
+                        <Text style={styles.taskSummaryText}>
+                          Market-ready {workflow.marketReadyScore}/100
+                        </Text>
+                        {workflow.nextStep ? (
+                          <View style={styles.workflowNextCard}>
+                            <Text style={styles.workflowNextLabel}>Next step</Text>
+                            <Text style={styles.taskTitle}>{workflow.nextStep.title}</Text>
+                            <Text style={styles.taskDetail}>{workflow.nextStep.description}</Text>
+                            {workflow.nextStep.helperText ? (
+                              <Text style={styles.workflowHelperText}>{workflow.nextStep.helperText}</Text>
+                            ) : null}
+                          </View>
+                        ) : null}
+                        <View style={styles.workflowPhaseRow}>
+                          {(workflow.phases || []).map((phase) => (
+                            <View key={phase.key} style={[
+                              styles.workflowPhaseChip,
+                              phase.status === 'complete'
+                                ? styles.workflowPhaseChipComplete
+                                : phase.status === 'in_progress'
+                                  ? styles.workflowPhaseChipActive
+                                  : null,
+                            ]}>
+                              <Text style={styles.workflowPhaseChipLabel}>{phase.label}</Text>
+                              <Text style={styles.workflowPhaseChipMeta}>
+                                {phase.completedSteps}/{phase.totalSteps}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    ) : null}
+
                     <View style={styles.sectionChipRow}>
                       {[
                         ['overview', 'Overview'],
@@ -842,8 +910,18 @@ export function RootScreen() {
                       <View style={styles.captureCard}>
                         <Text style={styles.label}>Photo capture</Text>
                         <Text style={styles.body}>
-                          Capture or select the next room photo and save it to this property.
+                          {workflow?.nextStep?.key === 'capture_photos'
+                            ? workflow.nextStep.description
+                            : 'Capture or select the next room photo and save it to this property.'}
                         </Text>
+                        <View style={styles.taskSummaryCard}>
+                          <Text style={styles.taskSummaryText}>
+                            {workflow?.metrics?.roomCoverageCount ?? roomCoverage.filter((item) => item.captured).length} of {ROOM_LABEL_OPTIONS.length} core rooms complete
+                          </Text>
+                          <Text style={styles.taskSummaryText}>
+                            {workflow?.nextStep?.helperText || 'Stand in the corner. Keep the camera level.'}
+                          </Text>
+                        </View>
 
                         <View style={styles.roomChipRow}>
                           {ROOM_LABEL_OPTIONS.map((room) => (
@@ -1569,6 +1647,66 @@ const styles = StyleSheet.create({
     backgroundColor: '#31404d',
     borderWidth: 1,
     borderColor: '#425563',
+  },
+  workflowGuideCard: {
+    gap: 10,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  workflowNextCard: {
+    gap: 6,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: '#31404d',
+    borderWidth: 1,
+    borderColor: '#425563',
+  },
+  workflowNextLabel: {
+    color: '#93a982',
+    fontSize: 11,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    fontWeight: '700',
+  },
+  workflowHelperText: {
+    color: '#93a982',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  workflowPhaseRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  workflowPhaseChip: {
+    gap: 2,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: '#1f2a33',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  workflowPhaseChipActive: {
+    backgroundColor: '#3f3429',
+    borderColor: '#d28859',
+  },
+  workflowPhaseChipComplete: {
+    backgroundColor: '#22342d',
+    borderColor: '#4f6b5b',
+  },
+  workflowPhaseChipLabel: {
+    color: '#f8f1e6',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  workflowPhaseChipMeta: {
+    color: '#b9af9f',
+    fontSize: 12,
   },
   sectionChipRow: {
     flexDirection: 'row',

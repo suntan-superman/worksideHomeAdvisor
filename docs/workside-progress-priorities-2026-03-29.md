@@ -22,7 +22,7 @@ The platform is now well beyond the scaffold stage.
 - Mobile app is working on Android and iOS
 - Auth, OTP verification, dashboard, pricing, media capture, report generation, flyer generation, checklist persistence, and listing-photo workflows are all in place
 - Vision generation is running with Replicate-backed presets and before/after review UI
-- Property workspace now includes a computed guided workflow rail with role-aware seller / realtor copy, progress, next-step guidance, and market-ready scoring
+- Property workspace, seller dashboard, and mobile workspace now include a computed guided workflow layer with role-aware seller / realtor copy, progress, next-step guidance, and market-ready scoring
 
 ### Admin side
 
@@ -191,8 +191,8 @@ These areas exist and are useful, but they are not yet “finished product” qu
 
 ### 3.7 Guided workflow rollout
 
-- [~] A property-level workflow engine now exists, but it is currently centered in the property workspace rather than across the entire product
-- [~] Seller / realtor workflow copy is now role-aware, but account setup and dashboard surfaces still need the same guided treatment
+- [~] A property-level workflow engine now exists across property workspace, dashboard, and mobile, but account setup / onboarding still needs the same guided treatment
+- [x] Seller / realtor workflow copy is now role-aware in the property workspace, dashboard, and mobile workspace
 - [~] Workflow state is computed automatically, but deeper blocker logic and more nuanced optional-step handling can still improve
 
 ---
@@ -251,8 +251,9 @@ These are the highest-value refinements because they affect trust, demos, and ev
 
 - [x] introduce a real computed workflow state engine for seller / realtor property flows
 - [x] surface progress, next step, and role-specific workflow copy in the property workspace
-- [ ] extend guided workflow into dashboard / onboarding so the path starts before the property workspace
-- [ ] add a mobile workflow companion layer with room-by-room progress tied directly to the same workflow state
+- [x] extend guided workflow into the seller / realtor dashboard
+- [x] add a mobile workflow companion layer with room-by-room progress tied directly to the same workflow state
+- [ ] extend guided workflow into auth / onboarding so the path starts before the first property is created
 - [ ] add stronger blocked-state logic and dependency explanations for steps that cannot start yet
 - [ ] connect workflow steps to richer property-edit screens where “open dashboard” is still a fallback
 - [ ] decide whether optional steps should be skippable or silently auto-resolved in more cases
@@ -365,7 +366,7 @@ If work resumes tomorrow, the most sensible order is:
 1. Complete real provider signup -> verification -> billing -> portal end-to-end validation
 2. Improve provider coverage filtering and graceful no-coverage handling
 3. Refine the seller/agent property-cap model into a true per-property billing strategy where needed
-4. Extend the guided workflow system into dashboard + mobile so the whole journey feels coached
+4. Extend the guided workflow system into auth / onboarding so the whole journey starts coached
 5. Refine vision quality on the three Replicate presets
 6. Polish report/brochure premium output quality
 7. Add provider account recovery / linking tools

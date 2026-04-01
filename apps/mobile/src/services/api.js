@@ -83,6 +83,11 @@ export function getChecklist(propertyId) {
   return request(`/api/v1/properties/${propertyId}/checklist`);
 }
 
+export function getWorkflow(propertyId, role = 'seller') {
+  const search = role ? `?role=${encodeURIComponent(role)}` : '';
+  return request(`/api/v1/properties/${propertyId}/workflow${search}`);
+}
+
 export function createChecklistItem(propertyId, payload) {
   return request(`/api/v1/properties/${propertyId}/checklist/items`, {
     method: 'POST',

@@ -15,6 +15,7 @@ import {
   getBillingPlans,
   getBillingSummary,
   getDashboard,
+  getWorkflow,
   restoreProperty as restorePropertyRequest,
   syncBillingSession,
   listProperties,
@@ -80,6 +81,7 @@ export default function DashboardPage() {
     bathrooms: 3,
     squareFeet: 2460,
   });
+  const viewerRole = session?.user?.role === 'agent' ? 'agent' : 'seller';
 
   const configuredPlans = useMemo(() => {
     const allowedAudiences = getAllowedBillingAudiences(session?.user || null);
@@ -108,6 +110,17 @@ export default function DashboardPage() {
       null,
     [configuredPlans, selectedPlanKey],
   );
+  const workflowQuery = useQuery({
+    queryKey: ['dashboard-workflow', selectedPropertyId, viewerRole],
+    enabled: Boolean(selectedPropertyId),
+    queryFn: async () => {
+      const response = await getWorkflow(selectedPropertyId, viewerRole);
+      return response.workflow;
+    },
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+  });
+  const workflow = workflowQuery.data || null;
 
   useEffect(() => {
     const stored = getStoredSession();
@@ -361,6 +374,7 @@ export default function DashboardPage() {
         message: `${response.property.title} is ready for pricing and photo review.`,
       });
       await queryClient.invalidateQueries({ queryKey: ['billing-summary', session.user.id] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard-workflow'] });
     } catch (requestError) {
       setToast({
         tone: 'error',
@@ -391,6 +405,7 @@ export default function DashboardPage() {
         current ? { ...current, property: response.property } : current,
       );
       await queryClient.invalidateQueries({ queryKey: ['billing-summary', session.user.id] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard-workflow', selectedPropertyId, viewerRole] });
       setToast({
         tone: 'success',
         title: 'Property archived',
@@ -426,6 +441,7 @@ export default function DashboardPage() {
         current ? { ...current, property: response.property } : current,
       );
       await queryClient.invalidateQueries({ queryKey: ['billing-summary', session.user.id] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard-workflow', selectedPropertyId, viewerRole] });
       setToast({
         tone: 'success',
         title: 'Property restored',
@@ -454,6 +470,7 @@ export default function DashboardPage() {
       await analyzePricing(selectedPropertyId);
       const response = await getDashboard(selectedPropertyId);
       setDashboard(response);
+      await queryClient.invalidateQueries({ queryKey: ['dashboard-workflow', selectedPropertyId, viewerRole] });
       setToast({
         tone: 'success',
         title: 'Pricing refreshed',
@@ -512,11 +529,10 @@ export default function DashboardPage() {
       />
       <section className="dashboard-header">
         <div>
-          <span className="label">Seller dashboard</span>
+          <span className="label">{viewerRole === 'agent' ? 'Realtor dashboard' : 'Seller dashboard'}</span>
           <h1>{dashboard?.property?.title || selectedProperty?.title || 'Your property workspace'}</h1>
           <p>
-            Live data now comes from MongoDB, RentCast, and OpenAI. Use this
-            page to create properties and run fresh pricing analyses.
+            Use this page to manage properties, understand progress, and follow the next guided step toward market-ready materials.
           </p>
         </div>
         <div className="score-badge">
@@ -693,6 +709,55 @@ export default function DashboardPage() {
               </p>
             </article>
           </section>
+
+          {selectedPropertyId ? (
+            <section className="dashboard-grid">
+              <article className="feature-card">
+                <span className="label">Your progress</span>
+                <h3>{workflow?.completionPercent ?? 0}% complete</h3>
+                <p>
+                  {workflow?.currentPhaseLabel || 'Workflow'} · {viewerRole === 'agent' ? 'Realtor guide' : 'Seller guide'}
+                </p>
+                <div className="mini-stats">
+                  <div className="stat-card">
+                    <strong>Market-ready</strong>
+                    <span>{workflow?.marketReadyScore ?? dashboard?.property?.readinessScore ?? 0}/100</span>
+                  </div>
+                  <div className="stat-card">
+                    <strong>Current step</strong>
+                    <span>{workflow?.nextStep?.title || 'Choose a property to begin'}</span>
+                  </div>
+                </div>
+              </article>
+
+              <article className="feature-card">
+                <span className="label">Next step</span>
+                <h3>{workflow?.nextStep?.title || 'Add your property'}</h3>
+                <p>{workflow?.nextStep?.description || 'Create or select a property to begin the guided workflow.'}</p>
+                {workflow?.nextStep?.helperText ? <p>{workflow.nextStep.helperText}</p> : null}
+                {selectedPropertyId ? (
+                  <Link
+                    className="button-primary inline-button"
+                    href={`/properties/${selectedPropertyId}`}
+                  >
+                    {workflow?.nextStep?.ctaLabel || 'Open property workspace'}
+                  </Link>
+                ) : null}
+              </article>
+
+              <article className="feature-card">
+                <span className="label">Workflow phases</span>
+                <div className="workflow-phase-list">
+                  {(workflow?.phases || []).map((phase) => (
+                    <div key={phase.key} className={`workflow-phase-item workflow-phase-item-${phase.status}`}>
+                      <strong>{phase.label}</strong>
+                      <span>{phase.completedSteps}/{phase.totalSteps} complete</span>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            </section>
+          ) : null}
 
           {actionState ? <p className="status-copy">{actionState}</p> : null}
 
