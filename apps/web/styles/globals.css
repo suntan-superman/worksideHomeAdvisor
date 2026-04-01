@@ -1488,10 +1488,10 @@ select {
 }
 
 .checklist-provider-inline {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: stretch;
   padding: 12px 14px;
   border-radius: 16px;
   border: 1px solid rgba(170, 92, 60, 0.16);
@@ -1505,16 +1505,15 @@ select {
 }
 
 .checklist-provider-inline span {
+  display: block;
   color: var(--muted);
   line-height: 1.55;
 }
 
 .checklist-provider-inline .button-secondary {
-  justify-self: start;
-  align-self: start;
+  align-self: stretch;
+  justify-content: center;
   white-space: nowrap;
-  width: fit-content;
-  max-width: 100%;
 }
 
 .provider-card-list,
@@ -1530,6 +1529,10 @@ select {
   border-radius: 18px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.78);
+}
+
+.provider-card-external {
+  border-style: dashed;
 }
 
 .provider-card-header {
@@ -1571,6 +1574,10 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.provider-card-actions > * {
+  flex: 0 0 auto;
 }
 
 .provider-disclaimer {

@@ -58,6 +58,7 @@ const createLeadSchema = z.object({
   sourceRefId: z.string().trim().min(1).optional(),
   message: z.string().trim().max(280).optional(),
   maxProviders: z.number().int().min(1).max(5).optional(),
+  deliveryMode: z.enum(['email', 'sms', 'sms_and_email']).optional(),
 });
 
 const providerSignupSchema = z.object({

@@ -7,7 +7,7 @@ import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slide
 import { formatCurrency } from '@workside/utils';
 
 import { AppFrame } from '../../../components/AppFrame';
-import { PropertyLocationMap } from '../../../components/PropertyLocationMap';
+import { PropertyLocationMap, loadGoogleMapsApi } from '../../../components/PropertyLocationMap';
 import { Toast } from '../../../components/Toast';
 import {
   analyzePricing,
@@ -185,12 +185,71 @@ function formatWorkflowStatus(status) {
   return 'Available';
 }
 
+function buildProviderFallbackQuery(task, property) {
+  const categoryLabel = task?.providerCategoryLabel || task?.title || 'home services';
+  const locationLabel = [property?.city, property?.state, property?.zip].filter(Boolean).join(', ');
+  return [categoryLabel, 'near', locationLabel || property?.addressLine1 || 'this property']
+    .filter(Boolean)
+    .join(' ');
+}
+
+function searchGooglePlaces(service, request) {
+  return new Promise((resolve, reject) => {
+    service.textSearch(request, (results, status) => {
+      if (status === 'OK' || status === 'ZERO_RESULTS') {
+        resolve(results || []);
+        return;
+      }
+
+      reject(new Error(`Google provider search failed: ${status}`));
+    });
+  });
+}
+
+function getGooglePlaceDetails(service, maps, placeId) {
+  return new Promise((resolve) => {
+    if (!placeId || !maps?.places?.PlacesServiceStatus) {
+      resolve(null);
+      return;
+    }
+
+    service.getDetails(
+      {
+        placeId,
+        fields: ['formatted_phone_number', 'website', 'url', 'name', 'formatted_address'],
+      },
+      (place, status) => {
+        if (status === maps.places.PlacesServiceStatus.OK && place) {
+          resolve(place);
+          return;
+        }
+
+        resolve(null);
+      },
+    );
+  });
+}
+
+function buildGooglePlaceMapUrl(place) {
+  if (place?.url) {
+    return place.url;
+  }
+
+  const label = [place?.name, place?.formatted_address].filter(Boolean).join(', ');
+  if (!label) {
+    return '';
+  }
+
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(label)}`;
+}
+
 export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const queryClient = useQueryClient();
   const flyerPreviewRef = useRef(null);
   const visionCompareRef = useRef(null);
   const visionGalleryRef = useRef(null);
   const workspaceBodyMainRef = useRef(null);
+  const providerSuggestionsRef = useRef(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [property, setProperty] = useState(null);
   const [dashboard, setDashboard] = useState(null);
@@ -223,9 +282,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [customChecklistTitle, setCustomChecklistTitle] = useState('');
   const [customChecklistDetail, setCustomChecklistDetail] = useState('');
   const [providerRecommendations, setProviderRecommendations] = useState([]);
+  const [externalProviderRecommendations, setExternalProviderRecommendations] = useState([]);
   const [providerLeads, setProviderLeads] = useState([]);
   const [providerSource, setProviderSource] = useState(null);
   const [activeProviderTaskKey, setActiveProviderTaskKey] = useState('');
+  const [providerSearchStatus, setProviderSearchStatus] = useState('');
   const [showMoreVisionVariants, setShowMoreVisionVariants] = useState(false);
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState(null);
   const [showExpandedMap, setShowExpandedMap] = useState(false);
@@ -233,6 +294,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [workflowPreviewStepKey, setWorkflowPreviewStepKey] = useState('');
   const [checklistSummaryMode, setChecklistSummaryMode] = useState('open');
   const [pendingWorkspaceScrollTarget, setPendingWorkspaceScrollTarget] = useState('');
+  const [pendingChecklistFocusTarget, setPendingChecklistFocusTarget] = useState('');
   const [status, setStatus] = useState('Loading property workspace...');
   const [toast, setToast] = useState(null);
   const viewerRole = useMemo(() => {
@@ -607,6 +669,22 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }, [activeTab, pendingWorkspaceScrollTarget]);
 
   useEffect(() => {
+    if (activeTab !== 'checklist' || pendingChecklistFocusTarget !== 'providers') {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        providerSuggestionsRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
+        setPendingChecklistFocusTarget('');
+      });
+    });
+  }, [activeTab, activeProviderTaskKey, pendingChecklistFocusTarget]);
+
+  useEffect(() => {
     setListingNoteDraft(selectedMediaAsset?.listingNote || '');
   }, [selectedMediaAsset?.id, selectedMediaAsset?.listingNote]);
 
@@ -781,9 +859,65 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     return response.workflow;
   }
 
+  async function searchGoogleFallbackProviders(task = providerSuggestionTask) {
+    if (!mapsApiKey || !task?.providerCategoryKey || !property) {
+      setExternalProviderRecommendations([]);
+      return [];
+    }
+
+    try {
+      setProviderSearchStatus('Searching Google for nearby providers...');
+      const maps = await loadGoogleMapsApi(mapsApiKey);
+      if (!maps.places && typeof maps.importLibrary === 'function') {
+        await maps.importLibrary('places');
+      }
+      if (!maps.places) {
+        setExternalProviderRecommendations([]);
+        return [];
+      }
+      const placesService = new maps.places.PlacesService(document.createElement('div'));
+      const textQuery = buildProviderFallbackQuery(task, property);
+      const placeResults = await searchGooglePlaces(placesService, { query: textQuery });
+
+      const detailedResults = await Promise.all(
+        placeResults.slice(0, 5).map(async (place) => {
+          const detail = await getGooglePlaceDetails(placesService, maps, place.place_id);
+          return {
+            id: `google-${place.place_id || place.name}`,
+            businessName: place.name || 'Google result',
+            categoryKey: task.providerCategoryKey,
+            description:
+              place.formatted_address ||
+              detail?.formatted_address ||
+              `Google Maps result for ${task.providerCategoryLabel || 'provider search'}.`,
+            coverageLabel: 'Google Maps result',
+            city: property.city || '',
+            state: property.state || '',
+            rating: Number(place.rating || 0),
+            reviewCount: Number(place.user_ratings_total || 0),
+            websiteUrl: detail?.website || '',
+            mapsUrl: buildGooglePlaceMapUrl(detail || place),
+            phone: detail?.formatted_phone_number || '',
+            isExternalFallback: true,
+            externalSource: 'google_maps',
+          };
+        }),
+      );
+
+      setExternalProviderRecommendations(detailedResults);
+      return detailedResults;
+    } catch {
+      setExternalProviderRecommendations([]);
+      return [];
+    } finally {
+      setProviderSearchStatus('');
+    }
+  }
+
   async function refreshProviders(task = providerSuggestionTask) {
     if (!task?.providerCategoryKey) {
       setProviderRecommendations([]);
+      setExternalProviderRecommendations([]);
       setProviderSource(null);
       return [];
     }
@@ -793,9 +927,22 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       limit: 4,
     });
     const nextProviders = response.providers?.items || [];
+    const fallbackProviders = nextProviders.length ? [] : await searchGoogleFallbackProviders(task);
     setProviderRecommendations(nextProviders);
-    setProviderSource(response.providers?.source || null);
+    setProviderSource({
+      ...(response.providers?.source || {}),
+      externalProviders: fallbackProviders.length,
+      googleFallbackEnabled: Boolean(mapsApiKey),
+    });
     return nextProviders;
+  }
+
+  function focusProviderSuggestions(taskKey = '') {
+    if (taskKey) {
+      setActiveProviderTaskKey(taskKey);
+    }
+    setActiveTab('checklist');
+    setPendingChecklistFocusTarget('providers');
   }
 
   async function refreshProviderLeads() {
@@ -821,7 +968,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   useEffect(() => {
     refreshProviders(providerSuggestionTask).catch(() => {
       setProviderRecommendations([]);
+      setExternalProviderRecommendations([]);
       setProviderSource(null);
+      setProviderSearchStatus('');
     });
   }, [propertyId, providerSuggestionTask?.id, providerSuggestionTask?.providerCategoryKey]);
 
@@ -1362,6 +1511,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         categoryKey: provider.categoryKey,
         source: 'checklist_task',
         sourceRefId: providerSuggestionTask.systemKey || providerSuggestionTask.id,
+        deliveryMode: 'email',
         message:
           providerSuggestionTask.providerPrompt ||
           providerSuggestionTask.detail ||
@@ -1373,7 +1523,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setToast({
         tone: 'success',
         title: 'Lead request created',
-        message: `The ${provider.categoryKey.replace(/_/g, ' ')} request is now queued for provider routing.`,
+        message: `The ${provider.categoryKey.replace(/_/g, ' ')} request is now queued for provider email outreach.`,
       });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Could not request provider', message: requestError.message });
@@ -2419,7 +2569,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                           <button
                             type="button"
                             className="button-secondary"
-                            onClick={() => setActiveProviderTaskKey(item.id)}
+                            onClick={() => focusProviderSuggestions(item.id)}
                           >
                             Show providers
                           </button>
@@ -2494,13 +2644,16 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           <button type="submit" className="button-secondary" disabled={Boolean(status) || isArchivedProperty}>Save task</button>
         </form>
 
-        <div className="content-card workspace-side-panel">
+        <div ref={providerSuggestionsRef} className="content-card workspace-side-panel">
           <span className="label">Provider suggestions</span>
           <h2>{providerSuggestionTask?.providerCategoryLabel || 'No provider-linked task yet'}</h2>
           <p>
             {providerSuggestionTask?.providerPrompt ||
               'Provider recommendations appear here when a checklist task has a linked marketplace category.'}
           </p>
+          {providerSearchStatus ? (
+            <p className="workspace-control-note">{providerSearchStatus}</p>
+          ) : null}
           {providerRecommendations.length ? (
             <div className="provider-card-list">
               {providerRecommendations.map((provider) => (
@@ -2555,8 +2708,43 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       {provider.saved ? 'Saved' : 'Save provider'}
                     </button>
                     <button type="button" className="button-primary" onClick={() => handleRequestProviderLead(provider)} disabled={Boolean(status) || isArchivedProperty}>
-                      Request contact
+                      Request by email
                     </button>
+                    {provider.websiteUrl ? (
+                      <a href={provider.websiteUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button">
+                        Visit website
+                      </a>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : externalProviderRecommendations.length ? (
+            <div className="provider-card-list">
+              {externalProviderRecommendations.map((provider) => (
+                <article key={provider.id} className="provider-card provider-card-external">
+                  <div className="provider-card-header">
+                    <div>
+                      <strong>{provider.businessName}</strong>
+                      <span>{provider.description}</span>
+                    </div>
+                    <span className="checklist-chip checklist-chip-medium">Google result</span>
+                  </div>
+                  <div className="provider-quality-row">
+                    {provider.rating ? (
+                      <span>
+                        {provider.rating.toFixed(1)} stars{provider.reviewCount ? ` · ${provider.reviewCount} reviews` : ''}
+                      </span>
+                    ) : null}
+                    {provider.phone ? <span>{provider.phone}</span> : null}
+                    <span>External discovery</span>
+                  </div>
+                  <div className="provider-card-actions">
+                    {provider.mapsUrl ? (
+                      <a href={provider.mapsUrl} target="_blank" rel="noreferrer" className="button-primary inline-button">
+                        Open in Maps
+                      </a>
+                    ) : null}
                     {provider.websiteUrl ? (
                       <a href={provider.websiteUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button">
                         Visit website
@@ -2568,12 +2756,17 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             </div>
           ) : providerSuggestionTask ? (
             <p className="workspace-control-note">
-              No active providers are available for this category yet. The discovery endpoint is live, but the marketplace still needs provider data or Google fallback to broaden coverage.
+              No active marketplace providers are available for this category yet. Add providers in Workside or enable browser Google Maps fallback to broaden coverage.
             </p>
           ) : null}
           {providerSource ? (
             <p className="workspace-control-note">
-              {providerSource.internalProviders || 0} internal provider match(es). Google fallback is not enabled in this slice yet.
+              {providerSource.internalProviders || 0} internal provider match(es)
+              {providerSource.externalProviders
+                ? ` · ${providerSource.externalProviders} Google fallback result(s)`
+                : providerSource.googleFallbackEnabled
+                  ? ' · Google fallback ready if marketplace coverage is thin.'
+                  : ' · Google fallback unavailable for this browser session.'}
             </p>
           ) : null}
           {providerRecommendations.length ? (

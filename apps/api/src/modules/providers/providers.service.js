@@ -1167,7 +1167,9 @@ export async function createProviderLeadRequest(propertyId, payload = {}) {
       })),
     );
 
-    await notifyQueuedLeadDispatches(leadRequest._id);
+    await notifyQueuedLeadDispatches(leadRequest._id, console, {
+      deliveryMode: payload.deliveryMode || 'email',
+    });
   }
 
   return {
@@ -1209,6 +1211,8 @@ export async function listProviderLeadsForProperty(propertyId) {
       deliveryChannels: dispatch.deliveryChannels || [],
       responseStatus: dispatch.responseStatus || null,
       sentAt: dispatch.sentAt || null,
+      emailSentAt: dispatch.emailSentAt || null,
+      emailError: dispatch.emailError || '',
       respondedAt: dispatch.respondedAt || null,
     });
   }

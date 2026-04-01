@@ -15,7 +15,7 @@ function buildAddressQuery(property) {
     .join(', ');
 }
 
-function loadGoogleMapsApi(apiKey) {
+export function loadGoogleMapsApi(apiKey) {
   if (!apiKey) {
     return Promise.reject(new Error('Missing Google Maps browser key.'));
   }
@@ -39,7 +39,7 @@ function loadGoogleMapsApi(apiKey) {
     }
 
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly&libraries=places`;
     script.async = true;
     script.defer = true;
     script.dataset.worksideGoogleMaps = 'true';

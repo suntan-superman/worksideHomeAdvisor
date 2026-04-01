@@ -72,6 +72,8 @@ const leadDispatchSchema = new mongoose.Schema(
     },
     deliveryChannels: { type: [String], default: ['dashboard'] },
     sentAt: { type: Date, default: null },
+    emailSentAt: { type: Date, default: null },
+    emailError: { type: String, default: '' },
     smsSentAt: { type: Date, default: null },
     smsMessageSid: { type: String, default: '' },
     smsError: { type: String, default: '' },

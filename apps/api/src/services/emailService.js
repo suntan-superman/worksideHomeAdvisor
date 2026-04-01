@@ -333,3 +333,92 @@ export async function sendWelcomeEmail({ to, firstName, role = 'seller' }) {
     });
   }
 }
+
+function buildProviderLeadHtml({
+  providerName = 'there',
+  categoryLabel = 'service provider',
+  propertyAddress = '',
+  message = '',
+  portalUrl = '',
+}) {
+  const safeProviderName = escapeHtml(providerName);
+  const safeCategoryLabel = escapeHtml(categoryLabel);
+  const safePropertyAddress = escapeHtml(propertyAddress || 'the requested property');
+  const safeMessage = escapeHtml(message || '');
+
+  return renderEmailShell({
+    eyebrow: 'New provider lead',
+    title: `A seller needs ${safeCategoryLabel.toLowerCase()} support.`,
+    intro: `Hi ${safeProviderName}, a Workside user requested help for ${safePropertyAddress}.`,
+    bodyHtml: `
+      <div style="margin: 0 0 22px; padding: 22px; border-radius: 22px; background: #f6efe8; border: 1px solid #ead9cb;">
+        <div style="font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.ink}; font-size: 16px; font-weight: 700; margin-bottom: 8px;">
+          Property
+        </div>
+        <div style="font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.slate}; font-size: 15px; line-height: 1.7;">
+          ${safePropertyAddress}
+        </div>
+      </div>
+      ${
+        safeMessage
+          ? `
+      <div style="margin: 0 0 22px; padding: 22px; border-radius: 22px; background: #fff8f2; border: 1px solid #f1d1be;">
+        <div style="font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.ink}; font-size: 16px; font-weight: 700; margin-bottom: 8px;">
+          Seller request
+        </div>
+        <div style="font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.slate}; font-size: 15px; line-height: 1.7;">
+          ${safeMessage}
+        </div>
+      </div>`
+          : ''
+      }
+      <div style="margin: 0 0 18px;">
+        ${
+          portalUrl
+            ? renderButton('Open provider portal', portalUrl)
+            : renderButton('Reply by email', `mailto:${escapeHtml(BRANDING.supportEmail)}`)
+        }
+      </div>
+      <p style="margin: 0; font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.slate}; font-size: 15px; line-height: 1.7;">
+        You can reply to this email if you would like Workside to connect you with the customer by email while SMS approval is still pending.
+      </p>
+    `.trim(),
+    footerNote: `${BRANDING.footerCopy} ${BRANDING.supportEmail}`,
+  });
+}
+
+export async function sendProviderLeadEmail({
+  to,
+  providerName,
+  categoryLabel,
+  propertyAddress,
+  message = '',
+  portalUrl = '',
+}) {
+  await deliverEmail({
+    to,
+    subject: `New Workside lead: ${categoryLabel || 'Provider request'}`,
+    text: [
+      'New Workside provider lead',
+      '',
+      `A seller requested ${categoryLabel || 'service'} support for:`,
+      propertyAddress || 'Property address not provided',
+      '',
+      message ? `Seller request: ${message}` : '',
+      portalUrl ? `Open provider portal: ${portalUrl}` : '',
+      '',
+      `Reply to this email or contact ${BRANDING.supportEmail} for help.`,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    html: buildProviderLeadHtml({
+      providerName,
+      categoryLabel,
+      propertyAddress,
+      message,
+      portalUrl,
+    }),
+    logLabel: 'Provider lead email',
+    logMeta: { categoryLabel, propertyAddress },
+  });
+}

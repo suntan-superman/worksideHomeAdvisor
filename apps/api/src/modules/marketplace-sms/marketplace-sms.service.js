@@ -8,6 +8,7 @@ import {
 } from '../providers/provider-leads.model.js';
 import { ProviderModel } from '../providers/provider.model.js';
 import { parseProviderReply } from './provider-reply-parser.service.js';
+import { sendProviderLeadEmail } from '../../services/emailService.js';
 
 const TEMPLATE_BY_CATEGORY = {
   inspector: 'New Workside lead: Home inspection request near {{zip}}. Reply YES to accept or NO to decline.',
@@ -36,6 +37,14 @@ function isSmsEnabledForProvider(provider) {
     provider?.leadRouting?.smsOptOut !== true &&
     ['sms', 'sms_and_email'].includes(provider?.leadRouting?.deliveryMode || 'sms_and_email') &&
     normalizePhoneNumber(provider?.leadRouting?.notifyPhone || provider?.phone)
+  );
+}
+
+function isEmailEnabledForProvider(provider) {
+  return (
+    provider?.status === 'active' &&
+    ['email', 'sms_and_email'].includes(provider?.leadRouting?.deliveryMode || 'sms_and_email') &&
+    String(provider?.leadRouting?.notifyEmail || provider?.email || '').trim()
   );
 }
 
@@ -182,7 +191,45 @@ async function sendProviderReplyMessage(provider, type, context = {}) {
   return response;
 }
 
-export async function notifyQueuedLeadDispatches(leadRequestId, logger = console) {
+async function sendLeadEmail({ provider, leadRequest }) {
+  const to = String(provider?.leadRouting?.notifyEmail || provider?.email || '').trim();
+  if (!to) {
+    return null;
+  }
+
+  await sendProviderLeadEmail({
+    to,
+    providerName: provider.businessName || 'there',
+    categoryLabel: String(leadRequest?.categoryKey || 'service').replace(/_/g, ' '),
+    propertyAddress:
+      leadRequest?.propertySnapshot?.address ||
+      [
+        leadRequest?.propertySnapshot?.city,
+        leadRequest?.propertySnapshot?.state,
+        leadRequest?.propertySnapshot?.zip,
+      ]
+        .filter(Boolean)
+        .join(', '),
+    message: leadRequest?.message || '',
+    portalUrl: `${env.PUBLIC_WEB_URL}/providers/portal`,
+  });
+
+  return { ok: true };
+}
+
+function shouldAttemptEmail(provider, requestedDeliveryMode = 'email') {
+  return ['email', 'sms_and_email'].includes(requestedDeliveryMode) && isEmailEnabledForProvider(provider);
+}
+
+function shouldAttemptSms(provider, requestedDeliveryMode = 'email') {
+  return ['sms', 'sms_and_email'].includes(requestedDeliveryMode) && isSmsEnabledForProvider(provider) && isTwilioConfigured();
+}
+
+export async function notifyQueuedLeadDispatches(
+  leadRequestId,
+  logger = console,
+  { deliveryMode = 'email' } = {},
+) {
   const leadRequest = await LeadRequestModel.findById(leadRequestId).lean();
   if (!leadRequest) {
     throw new Error('Lead request not found.');
@@ -204,22 +251,52 @@ export async function notifyQueuedLeadDispatches(leadRequestId, logger = console
 
   for (const dispatch of dispatches) {
     const provider = providerById.get(String(dispatch.providerId));
-    if (!provider || !isSmsEnabledForProvider(provider) || !isTwilioConfigured()) {
+    if (!provider) {
       skippedCount += 1;
       continue;
     }
 
-    const toPhone = normalizePhoneNumber(provider.leadRouting.notifyPhone || provider.phone);
-    const body = buildLeadSmsBody({ leadRequest });
-
     try {
-      const response = await sendTwilioMessage({ to: toPhone, body });
+      const deliveryChannels = [];
+      const sentAt = new Date();
+
+      if (shouldAttemptEmail(provider, deliveryMode)) {
+        await sendLeadEmail({ provider, leadRequest });
+        deliveryChannels.push('email');
+        dispatch.emailSentAt = sentAt;
+        dispatch.emailError = '';
+      }
+
+      if (shouldAttemptSms(provider, deliveryMode)) {
+        const toPhone = normalizePhoneNumber(provider.leadRouting.notifyPhone || provider.phone);
+        const body = buildLeadSmsBody({ leadRequest });
+        const response = await sendTwilioMessage({ to: toPhone, body });
+        deliveryChannels.push('sms');
+        dispatch.smsSentAt = sentAt;
+        dispatch.smsMessageSid = response.sid || '';
+        dispatch.smsError = '';
+
+        await logProviderSms({
+          providerId: provider._id,
+          leadRequestId: leadRequest._id,
+          leadDispatchId: dispatch._id,
+          direction: 'outbound',
+          messageType: 'lead',
+          toPhone,
+          body,
+          twilioMessageSid: response.sid || '',
+          deliveryStatus: response.status || '',
+        });
+      }
+
+      if (!deliveryChannels.length) {
+        skippedCount += 1;
+        continue;
+      }
+
       dispatch.status = 'sent';
-      dispatch.deliveryChannels = ['sms'];
-      dispatch.sentAt = new Date();
-      dispatch.smsSentAt = new Date();
-      dispatch.smsMessageSid = response.sid || '';
-      dispatch.smsError = '';
+      dispatch.deliveryChannels = deliveryChannels;
+      dispatch.sentAt = sentAt;
       await dispatch.save();
 
       if (!provider.firstLeadSentAt) {
@@ -231,24 +308,13 @@ export async function notifyQueuedLeadDispatches(leadRequestId, logger = console
         record.leadCount += 1;
       });
 
-      await logProviderSms({
-        providerId: provider._id,
-        leadRequestId: leadRequest._id,
-        leadDispatchId: dispatch._id,
-        direction: 'outbound',
-        messageType: 'lead',
-        toPhone,
-        body,
-        twilioMessageSid: response.sid || '',
-        deliveryStatus: response.status || '',
-      });
-
       sentCount += 1;
     } catch (error) {
       dispatch.status = 'failed';
+      dispatch.emailError = error.message;
       dispatch.smsError = error.message;
       await dispatch.save();
-      logger?.error?.({ err: error, providerId: String(provider._id), leadRequestId: String(leadRequest._id) }, 'provider lead sms failed');
+      logger?.error?.({ err: error, providerId: String(provider._id), leadRequestId: String(leadRequest._id) }, 'provider lead delivery failed');
       failedCount += 1;
     }
   }
