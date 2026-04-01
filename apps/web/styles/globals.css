@@ -2265,6 +2265,20 @@ select {
   color: var(--muted);
 }
 
+.pricing-decision-card {
+  gap: 16px;
+}
+
+.pricing-decision-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pricing-decision-actions {
+  align-content: start;
+}
+
 .checklist-summary-card {
   gap: 12px;
 }

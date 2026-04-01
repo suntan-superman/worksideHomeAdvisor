@@ -23,6 +23,8 @@ export async function dashboardRoutes(fastify) {
                 mid: latestPricing.recommendedListMid,
                 high: latestPricing.recommendedListHigh,
                 confidence: latestPricing.confidenceScore,
+                selected: property.selectedListPrice ?? null,
+                selectedSource: property.selectedListPriceSource || '',
               }
             : null,
           pricingSummary: latestPricing?.summary || '',

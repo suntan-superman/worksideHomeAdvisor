@@ -8,6 +8,7 @@ import {
   getPropertyById,
   listProperties,
   restoreProperty,
+  updatePropertyPricingDecision,
 } from './property.service.js';
 
 const querySchema = z.object({
@@ -16,6 +17,13 @@ const querySchema = z.object({
 
 const paramsSchema = z.object({
   propertyId: z.string().min(1),
+});
+
+const pricingDecisionSchema = z.object({
+  selectedListPrice: z.number().int().positive().nullable(),
+  selectedListPriceSource: z
+    .enum(['recommended_low', 'recommended_mid', 'recommended_high', 'custom'])
+    .optional(),
 });
 
 export async function propertyRoutes(fastify) {
@@ -53,6 +61,24 @@ export async function propertyRoutes(fastify) {
       return reply.send({ property });
     } catch (error) {
       return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.patch('/:propertyId/pricing-decision', async (request, reply) => {
+    try {
+      const { propertyId } = paramsSchema.parse(request.params);
+      const payload = pricingDecisionSchema.parse(request.body ?? {});
+      const actorUserId = String(request.headers['x-user-id'] || '');
+      const property = await updatePropertyPricingDecision(propertyId, payload, actorUserId);
+      return reply.send({ property });
+    } catch (error) {
+      const statusCode =
+        error.message === 'Property not found.'
+          ? 404
+          : error.message.includes('permission')
+            ? 403
+            : 400;
+      return reply.code(statusCode).send({ message: error.message });
     }
   });
 

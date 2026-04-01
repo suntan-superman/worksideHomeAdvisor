@@ -82,6 +82,16 @@ export function getProperty(propertyId) {
   return request(`/api/v1/properties/${propertyId}`);
 }
 
+export function setPropertyPricingDecision(propertyId, payload, ownerUserId) {
+  return request(`/api/v1/properties/${propertyId}/pricing-decision`, {
+    method: 'PATCH',
+    headers: {
+      'x-user-id': ownerUserId,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
 export function archiveProperty(propertyId, ownerUserId) {
   return request(`/api/v1/properties/${propertyId}/archive`, {
     method: 'PATCH',

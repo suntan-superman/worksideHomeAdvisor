@@ -242,12 +242,17 @@ function buildListingDescriptions({ property, marketingGuidance, pricing, readin
   const shortDescription =
     marketingGuidance?.shortDescription ||
     `${property.title} combines livability, presentation upside, and a clearer path to market.`;
+  const chosenPriceText = property?.selectedListPrice
+    ? `Selected list price is ${formatCurrency(property.selectedListPrice)}.`
+    : pricing?.recommendedListMid
+      ? `Positioned around ${formatCurrency(pricing.recommendedListMid)}.`
+      : 'Pricing guidance is included in this report.';
 
   return {
     shortDescription,
     longDescription: [
       shortDescription,
-      pricing?.recommendedListMid ? `Positioned around ${formatCurrency(pricing.recommendedListMid)}.` : 'Pricing guidance is included in this report.',
+      chosenPriceText,
       `${readinessSummary.label} with an overall readiness score of ${readinessSummary.overallScore}/100.`,
       `Highlight ${(marketingGuidance?.featureHighlights || []).slice(0, 3).join(', ') || 'the strongest presentation features'} in listing materials.`,
     ].join(' '),
@@ -271,9 +276,11 @@ function normalizeReportCustomizations(customizations = {}) {
 function buildExecutiveSummary({ property, pricing, photoSummary, checklist, readinessSummary, strongestOpportunity, biggestRisk }) {
   return [
     `${property.title} is currently rated ${readinessSummary.label.toLowerCase()} at ${readinessSummary.overallScore}/100.`,
-    pricing?.recommendedListMid
-      ? `Pricing centers around ${formatCurrency(pricing.recommendedListMid)} with ${Math.round((pricing.confidenceScore || 0) * 100)}% confidence.`
-      : 'Pricing still needs a fresh analysis.',
+    property?.selectedListPrice
+      ? `Selected list price is ${formatCurrency(property.selectedListPrice)}. Recommended pricing confidence remains ${Math.round((pricing?.confidenceScore || 0) * 100)}%.`
+      : pricing?.recommendedListMid
+        ? `Pricing centers around ${formatCurrency(pricing.recommendedListMid)} with ${Math.round((pricing.confidenceScore || 0) * 100)}% confidence.`
+        : 'Pricing still needs a fresh analysis.',
     photoSummary.summary,
     checklist?.summary?.totalCount
       ? `${checklist.summary.completedCount} of ${checklist.summary.totalCount} checklist items are complete.`
@@ -415,6 +422,8 @@ function buildReportPayload({
       }),
     pricingSummary: includedSectionSet.has('pricing_analysis')
       ? {
+          selectedListPrice: property?.selectedListPrice || null,
+          selectedListPriceSource: property?.selectedListPriceSource || '',
           low: pricing?.recommendedListLow || null,
           mid: pricing?.recommendedListMid || null,
           high: pricing?.recommendedListHigh || null,

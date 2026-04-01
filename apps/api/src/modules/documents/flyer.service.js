@@ -89,9 +89,13 @@ function chooseFlyerPhotos(
     });
 }
 
-function buildPriceText(pricing, flyerType) {
+function buildPriceText(property, pricing, flyerType) {
   if (flyerType === 'rental') {
     return 'Contact for rental pricing';
+  }
+
+  if (property?.selectedListPrice) {
+    return formatCurrency(property.selectedListPrice);
   }
 
   if (!pricing?.recommendedListLow || !pricing?.recommendedListHigh) {
@@ -109,7 +113,7 @@ function buildFallbackFlyer({ property, pricing, flyerType, selectedPhotos }) {
       flyerType === 'rental'
         ? 'A move-in-ready rental opportunity with strong everyday livability.'
         : 'A seller-ready home with pricing, presentation, and prep guidance already in motion.',
-    priceText: buildPriceText(pricing, flyerType),
+    priceText: buildPriceText(property, pricing, flyerType),
     locationLine: `${property.addressLine1}, ${property.city}, ${property.state} ${property.zip}`,
     summary:
       flyerType === 'rental'
@@ -226,7 +230,7 @@ export async function generatePropertyFlyer({
           normalizedCustomizations.subheadline ||
           marketing.shortDescription ||
           fallbackFlyer.subheadline,
-        priceText: buildPriceText(pricing, flyerType),
+        priceText: buildPriceText(property, pricing, flyerType),
         locationLine: fallbackFlyer.locationLine,
         summary:
           normalizedCustomizations.summary ||

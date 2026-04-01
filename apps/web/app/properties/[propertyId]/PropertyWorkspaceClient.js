@@ -34,6 +34,7 @@ import {
   listVisionPresets,
   saveProvider,
   selectMediaVariant,
+  setPropertyPricingDecision,
   setMediaVariantUsage,
   updateChecklistItem,
   updateMediaAsset,
@@ -216,6 +217,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [reportIncludedSections, setReportIncludedSections] = useState(
     REPORT_SECTION_OPTIONS.map((section) => section.id),
   );
+  const [selectedListPriceDraft, setSelectedListPriceDraft] = useState('');
+  const [selectedListPriceSourceDraft, setSelectedListPriceSourceDraft] = useState('recommended_mid');
   const [listingNoteDraft, setListingNoteDraft] = useState('');
   const [customChecklistTitle, setCustomChecklistTitle] = useState('');
   const [customChecklistDetail, setCustomChecklistDetail] = useState('');
@@ -373,6 +376,29 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
     return 'Needs Work';
   }, [latestReport?.payload?.readinessSummary?.label, readinessScore]);
+  const pricingQuickPickOptions = useMemo(
+    () =>
+      latestPricing
+        ? [
+            {
+              key: 'recommended_low',
+              label: 'Low',
+              value: latestPricing.recommendedListLow,
+            },
+            {
+              key: 'recommended_mid',
+              label: 'Mid',
+              value: latestPricing.recommendedListMid,
+            },
+            {
+              key: 'recommended_high',
+              label: 'High',
+              value: latestPricing.recommendedListHigh,
+            },
+          ].filter((option) => Number(option.value) > 0)
+        : [],
+    [latestPricing],
+  );
   const checklistGroups = useMemo(() => {
     const groups = new Map();
     for (const item of checklist?.items || []) {
@@ -583,6 +609,27 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   useEffect(() => {
     setListingNoteDraft(selectedMediaAsset?.listingNote || '');
   }, [selectedMediaAsset?.id, selectedMediaAsset?.listingNote]);
+
+  useEffect(() => {
+    if (property?.selectedListPrice) {
+      setSelectedListPriceDraft(String(property.selectedListPrice));
+      setSelectedListPriceSourceDraft(property.selectedListPriceSource || 'custom');
+      return;
+    }
+
+    if (latestPricing?.recommendedListMid) {
+      setSelectedListPriceDraft(String(latestPricing.recommendedListMid));
+      setSelectedListPriceSourceDraft('recommended_mid');
+      return;
+    }
+
+    setSelectedListPriceDraft('');
+    setSelectedListPriceSourceDraft('recommended_mid');
+  }, [
+    property?.selectedListPrice,
+    property?.selectedListPriceSource,
+    latestPricing?.recommendedListMid,
+  ]);
 
   useEffect(() => {
     const nextSession = { ...(getStoredSession() || {}), lastPropertyId: propertyId };
@@ -869,6 +916,60 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setToast({ tone: 'success', title: 'Pricing refreshed', message: 'The latest analysis and comp set are ready.' });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Pricing refresh failed', message: requestError.message });
+    } finally {
+      setStatus('');
+    }
+  }
+
+  async function handleSaveSelectedListPrice() {
+    if (blockArchivedMutation()) {
+      return;
+    }
+
+    const session = getStoredSession();
+    if (!session?.user?.id) {
+      setToast({
+        tone: 'error',
+        title: 'Sign in required',
+        message: 'Sign in again before saving a selected list price.',
+      });
+      return;
+    }
+
+    const parsedPrice = Number(selectedListPriceDraft);
+    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+      setToast({
+        tone: 'error',
+        title: 'Enter a valid price',
+        message: 'Choose one of the suggested prices or enter a custom list price.',
+      });
+      return;
+    }
+
+    setStatus('Saving selected list price...');
+    setToast(null);
+    try {
+      const response = await setPropertyPricingDecision(
+        propertyId,
+        {
+          selectedListPrice: Math.round(parsedPrice),
+          selectedListPriceSource: selectedListPriceSourceDraft || 'custom',
+        },
+        session.user.id,
+      );
+      setProperty(response.property);
+      await Promise.all([refreshDashboardSnapshot(), refreshWorkflow()]);
+      setToast({
+        tone: 'success',
+        title: 'List price saved',
+        message: 'Your chosen list price will be used the next time you generate brochure and report materials.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not save list price',
+        message: requestError.message,
+      });
     } finally {
       setStatus('');
     }
@@ -1309,6 +1410,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             <span>{latestPricing ? `${formatCurrency(latestPricing.recommendedListLow)} to ${formatCurrency(latestPricing.recommendedListHigh)}` : 'Run pricing analysis'}</span>
           </div>
           <div className="stat-card">
+            <strong>Chosen list price</strong>
+            <span>{property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set yet'}</span>
+          </div>
+          <div className="stat-card">
             <strong>Confidence</strong>
             <span>{latestPricing?.confidenceScore ? `${Math.round(latestPricing.confidenceScore * 100)}%` : 'Pending'}</span>
           </div>
@@ -1414,6 +1519,105 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             ) : (
               <p>No comps are stored yet. Refresh pricing to build the comp set.</p>
             )}
+          </div>
+        </div>
+      </div>
+
+      <div className="content-card">
+        <span className="label">Selected list price</span>
+        <h2>Choose the price you want to market</h2>
+        <p>
+          The pricing analysis gives you a suggested range. This is where you confirm the actual list
+          price that should carry into future brochure and report generation.
+        </p>
+        <div className="mini-stats">
+          <div className="stat-card">
+            <strong>Suggested range</strong>
+            <span>
+              {latestPricing
+                ? `${formatCurrency(latestPricing.recommendedListLow)} to ${formatCurrency(
+                    latestPricing.recommendedListHigh,
+                  )}`
+                : 'Run pricing first'}
+            </span>
+          </div>
+          <div className="stat-card">
+            <strong>Recommended midpoint</strong>
+            <span>
+              {latestPricing?.recommendedListMid
+                ? formatCurrency(latestPricing.recommendedListMid)
+                : 'Not available yet'}
+            </span>
+          </div>
+          <div className="stat-card">
+            <strong>Chosen list price</strong>
+            <span>
+              {property?.selectedListPrice
+                ? formatCurrency(property.selectedListPrice)
+                : 'Not set yet'}
+            </span>
+          </div>
+        </div>
+        <div className="workspace-inner-card pricing-decision-card">
+          <span className="label">Quick picks</span>
+          <div className="pricing-decision-chip-row">
+            {pricingQuickPickOptions.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                className={
+                  selectedListPriceSourceDraft === option.key
+                    ? 'checklist-action-chip active'
+                    : 'checklist-action-chip'
+                }
+                onClick={() => {
+                  setSelectedListPriceDraft(String(option.value));
+                  setSelectedListPriceSourceDraft(option.key);
+                }}
+              >
+                {option.label}: {formatCurrency(option.value)}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={
+                selectedListPriceSourceDraft === 'custom'
+                  ? 'checklist-action-chip active'
+                  : 'checklist-action-chip'
+              }
+              onClick={() => setSelectedListPriceSourceDraft('custom')}
+            >
+              Custom
+            </button>
+          </div>
+          <div className="brochure-control-grid brochure-control-grid-form">
+            <label className="workspace-control-field">
+              <span>Chosen list price</span>
+              <input
+                type="number"
+                min="1"
+                step="1000"
+                value={selectedListPriceDraft}
+                onChange={(event) => {
+                  setSelectedListPriceDraft(event.target.value);
+                  setSelectedListPriceSourceDraft('custom');
+                }}
+                placeholder="389000"
+              />
+            </label>
+            <div className="workspace-action-column pricing-decision-actions">
+              <button
+                type="button"
+                className="button-primary"
+                onClick={handleSaveSelectedListPrice}
+                disabled={Boolean(status) || !selectedListPriceDraft || isArchivedProperty}
+              >
+                Save chosen price
+              </button>
+              <p className="workspace-control-note">
+                This does not change the suggested range. It stores the price you intend to use.
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -2084,6 +2288,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             </div>
             <div className="mini-stats">
               <div className="stat-card"><strong>Price band</strong><span>{latestReport.pricingSummary?.low ? `${formatCurrency(latestReport.pricingSummary.low)} to ${formatCurrency(latestReport.pricingSummary.high)}` : 'Pricing pending'}</span></div>
+              <div className="stat-card"><strong>Chosen list price</strong><span>{latestReport.pricingSummary?.selectedListPrice ? formatCurrency(latestReport.pricingSummary.selectedListPrice) : property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set yet'}</span></div>
               <div className="stat-card"><strong>Readiness</strong><span>{latestReport.payload?.readinessSummary?.overallScore ? `${latestReport.payload.readinessSummary.overallScore}/100` : 'Not included'}</span></div>
             </div>
             {latestReport.freshness?.isStale ? <div className="report-preview-section"><strong>Refresh recommended</strong><ul className="plain-list">{(latestReport.freshness.staleReasons || []).map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
@@ -2492,12 +2697,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             <span className="label">Property workspace</span>
             <h1>{property?.title || 'Property'}</h1>
             <p className="workspace-address-line">{[property?.addressLine1, property?.city, property?.state, property?.zip].filter(Boolean).join(', ')}</p>
-            <div className="tag-row">
-              <span>{latestPricing ? `${formatCurrency(latestPricing.recommendedListLow)} to ${formatCurrency(latestPricing.recommendedListHigh)}` : 'Pricing pending'}</span>
-              <span>{readinessScore}/100 readiness</span>
-              <span>{mediaAssets.length} photo{mediaAssets.length === 1 ? '' : 's'}</span>
-              {isArchivedProperty ? <span>Archived · read-only</span> : null}
-            </div>
+          <div className="tag-row">
+            <span>{latestPricing ? `${formatCurrency(latestPricing.recommendedListLow)} to ${formatCurrency(latestPricing.recommendedListHigh)}` : 'Pricing pending'}</span>
+            {property?.selectedListPrice ? <span>Chosen {formatCurrency(property.selectedListPrice)}</span> : null}
+            <span>{readinessScore}/100 readiness</span>
+            <span>{mediaAssets.length} photo{mediaAssets.length === 1 ? '' : 's'}</span>
+            {isArchivedProperty ? <span>Archived · read-only</span> : null}
+          </div>
           </div>
 
           <div className="workspace-page-header-actions">

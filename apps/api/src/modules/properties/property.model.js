@@ -27,6 +27,13 @@ const propertySchema = new mongoose.Schema(
     squareFeet: { type: Number },
     lotSizeSqFt: { type: Number },
     yearBuilt: { type: Number },
+    selectedListPrice: { type: Number, default: null },
+    selectedListPriceSource: {
+      type: String,
+      enum: ['recommended_low', 'recommended_mid', 'recommended_high', 'custom', ''],
+      default: '',
+    },
+    selectedListPriceUpdatedAt: { type: Date, default: null },
     status: {
       type: String,
       enum: ['active', 'archived'],

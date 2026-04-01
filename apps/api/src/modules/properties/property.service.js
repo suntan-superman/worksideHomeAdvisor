@@ -39,6 +39,9 @@ export function serializeProperty(document) {
     squareFeet: document.squareFeet,
     lotSizeSqFt: document.lotSizeSqFt,
     yearBuilt: document.yearBuilt,
+    selectedListPrice: document.selectedListPrice ?? null,
+    selectedListPriceSource: document.selectedListPriceSource || '',
+    selectedListPriceUpdatedAt: document.selectedListPriceUpdatedAt || null,
     status: document.status || PROPERTY_STATUS.ACTIVE,
     isArchived: Boolean(isPropertyArchived(document)),
     archivedAt: document.archivedAt || null,
@@ -177,4 +180,37 @@ export async function setPropertyReadinessScore(propertyId, readinessScore) {
   ).lean();
 
   return serializeProperty(property);
+}
+
+export async function updatePropertyPricingDecision(
+  propertyId,
+  { selectedListPrice = null, selectedListPriceSource = '' },
+  actorUserId = '',
+) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to update property pricing decisions.');
+  }
+
+  const property = await PropertyModel.findById(propertyId);
+  if (!property) {
+    throw new Error('Property not found.');
+  }
+
+  if (actorUserId && String(property.ownerUserId) !== String(actorUserId)) {
+    throw new Error('You do not have permission to update this property.');
+  }
+
+  if (isPropertyArchived(property)) {
+    throw new Error(ARCHIVED_PROPERTY_MESSAGE);
+  }
+
+  property.selectedListPrice =
+    selectedListPrice === null || selectedListPrice === undefined
+      ? null
+      : Math.round(Number(selectedListPrice));
+  property.selectedListPriceSource = selectedListPrice ? String(selectedListPriceSource || 'custom') : '';
+  property.selectedListPriceUpdatedAt = selectedListPrice ? new Date() : null;
+  await property.save();
+
+  return serializeProperty(property.toObject());
 }
