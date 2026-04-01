@@ -1513,6 +1513,8 @@ select {
   justify-self: start;
   align-self: start;
   white-space: nowrap;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .provider-card-list,
@@ -2553,6 +2555,17 @@ select {
     grid-column: auto;
     position: static;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1500px) {
+  .workspace-two-column,
+  .brochure-control-grid,
+  .report-outline-grid,
+  .report-preview-grid,
+  .brochure-preview-sections,
+  .brochure-photo-plan {
+    grid-template-columns: 1fr;
   }
 }
 

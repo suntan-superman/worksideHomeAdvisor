@@ -231,6 +231,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [guidedWorkflow, setGuidedWorkflow] = useState(null);
   const [workflowPreviewStepKey, setWorkflowPreviewStepKey] = useState('');
   const [checklistSummaryMode, setChecklistSummaryMode] = useState('open');
+  const [pendingWorkspaceScrollTarget, setPendingWorkspaceScrollTarget] = useState('');
   const [status, setStatus] = useState('Loading property workspace...');
   const [toast, setToast] = useState(null);
   const viewerRole = useMemo(() => {
@@ -476,13 +477,17 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   function scrollElementIntoView(elementRef) {
-    if (!elementRef?.current) {
+    if (!elementRef?.current || typeof window === 'undefined') {
       return;
     }
 
-    elementRef.current.scrollIntoView({
+    const stickyOffset = 104;
+    const top =
+      elementRef.current.getBoundingClientRect().top + window.scrollY - stickyOffset;
+
+    window.scrollTo({
+      top: Math.max(0, top),
       behavior: 'smooth',
-      block: 'start',
     });
   }
 
@@ -493,29 +498,21 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     if (step.actionHref) {
       setActiveTab('overview');
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          scrollWorkspaceBodyToTop();
-        });
-      });
+      setPendingWorkspaceScrollTarget('top');
       return;
     }
 
     if (step.actionTarget) {
       setActiveTab(step.actionTarget);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (step.key === 'providers') {
-            scrollElementIntoView(providerSuggestionsRef);
-            return;
-          }
-          if (step.key === 'prep_checklist') {
-            scrollElementIntoView(checklistWorkflowRef);
-            return;
-          }
-          scrollWorkspaceBodyToTop();
-        });
-      });
+      if (step.key === 'providers') {
+        setPendingWorkspaceScrollTarget('providers');
+        return;
+      }
+      if (step.key === 'prep_checklist') {
+        setPendingWorkspaceScrollTarget('checklist');
+        return;
+      }
+      setPendingWorkspaceScrollTarget('top');
     }
   }
 
@@ -594,6 +591,25 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       return workflowNextStep?.key || workflowSteps[0]?.key || '';
     });
   }, [workflowNextStep?.key, workflowSteps]);
+
+  useEffect(() => {
+    if (!pendingWorkspaceScrollTarget) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (pendingWorkspaceScrollTarget === 'providers') {
+          scrollElementIntoView(providerSuggestionsRef);
+        } else if (pendingWorkspaceScrollTarget === 'checklist') {
+          scrollElementIntoView(checklistWorkflowRef);
+        } else {
+          scrollWorkspaceBodyToTop();
+        }
+        setPendingWorkspaceScrollTarget('');
+      });
+    });
+  }, [activeTab, pendingWorkspaceScrollTarget]);
 
   useEffect(() => {
     setListingNoteDraft(selectedMediaAsset?.listingNote || '');
