@@ -1470,9 +1470,9 @@ select {
 
 .checklist-provider-inline {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  align-items: center;
+  align-items: start;
   padding: 12px 14px;
   border-radius: 16px;
   border: 1px solid rgba(170, 92, 60, 0.16);
@@ -1487,6 +1487,13 @@ select {
 
 .checklist-provider-inline span {
   color: var(--muted);
+  line-height: 1.55;
+}
+
+.checklist-provider-inline .button-secondary {
+  justify-self: start;
+  align-self: start;
+  white-space: nowrap;
 }
 
 .provider-card-list,
