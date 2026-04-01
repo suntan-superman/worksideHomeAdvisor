@@ -93,6 +93,35 @@ function buildAddressQuery(property) {
     .join(', ');
 }
 
+function buildGoogleMapsRouteUrl(property, comps = []) {
+  const propertyAddress = buildAddressQuery(property);
+  const compAddresses = (comps || [])
+    .map((comp) => comp?.address)
+    .filter(Boolean)
+    .slice(0, 8);
+
+  if (!propertyAddress) {
+    return null;
+  }
+
+  if (!compAddresses.length) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(propertyAddress)}`;
+  }
+
+  const [destination, ...waypoints] = compAddresses;
+  const url = new URL('https://www.google.com/maps/dir/');
+  url.searchParams.set('api', '1');
+  url.searchParams.set('origin', propertyAddress);
+  url.searchParams.set('destination', destination);
+  url.searchParams.set('travelmode', 'driving');
+
+  if (waypoints.length) {
+    url.searchParams.set('waypoints', waypoints.join('|'));
+  }
+
+  return url.toString();
+}
+
 function formatChecklistStatus(status) {
   if (status === 'in_progress') {
     return 'In progress';
@@ -196,6 +225,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [activeProviderTaskKey, setActiveProviderTaskKey] = useState('');
   const [showMoreVisionVariants, setShowMoreVisionVariants] = useState(false);
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState(null);
+  const [showExpandedMap, setShowExpandedMap] = useState(false);
   const [guidedWorkflow, setGuidedWorkflow] = useState(null);
   const [workflowPreviewStepKey, setWorkflowPreviewStepKey] = useState('');
   const [status, setStatus] = useState('Loading property workspace...');
@@ -1247,7 +1277,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   const addressQuery = buildAddressQuery(property);
-  const googleMapsUrl = addressQuery ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addressQuery)}` : null;
+  const googleMapsUrl = useMemo(
+    () => buildGoogleMapsRouteUrl(property, selectedComps),
+    [property, selectedComps],
+  );
 
   const renderOverviewTab = () => (
     <div className="workspace-tab-stack">
@@ -1312,16 +1345,28 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               <h2>Neighborhood context</h2>
               <p>Review the home and nearby comps side by side instead of in a long stack.</p>
             </div>
-            {googleMapsUrl ? (
-              <a
-                href={googleMapsUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="button-secondary inline-button button-no-wrap property-map-link"
-                title="Open this property and its surrounding area in Google Maps."
-              >
-                View in Maps
-              </a>
+            {addressQuery ? (
+              <div className="property-map-actions">
+                <button
+                  type="button"
+                  className="button-secondary inline-button button-no-wrap property-map-link"
+                  onClick={() => setShowExpandedMap(true)}
+                  title="Open a larger in-app map with the property and selected comps."
+                >
+                  Expand map
+                </button>
+                {googleMapsUrl ? (
+                  <a
+                    href={googleMapsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="button-secondary inline-button button-no-wrap property-map-link"
+                    title="Open the subject property and selected comps in Google Maps."
+                  >
+                    View comps in Maps
+                  </a>
+                ) : null}
+              </div>
             ) : null}
           </div>
           {addressQuery ? (
@@ -2339,6 +2384,54 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 {status === 'Deleting photo...' ? 'Deleting...' : 'Delete photo'}
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+      {showExpandedMap ? (
+        <div className="workspace-modal-backdrop" role="presentation" onClick={() => setShowExpandedMap(false)}>
+          <div
+            className="workspace-modal-card workspace-map-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="expanded-map-title"
+            aria-describedby="expanded-map-description"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="workspace-map-modal-header">
+              <div>
+                <span className="label">Expanded map</span>
+                <h2 id="expanded-map-title">Neighborhood context</h2>
+                <p id="expanded-map-description">
+                  Review the subject property and nearby comps in a larger map view without leaving the workspace.
+                </p>
+              </div>
+              <div className="workspace-modal-actions">
+                {googleMapsUrl ? (
+                  <a
+                    href={googleMapsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="button-secondary inline-button"
+                  >
+                    View comps in Maps
+                  </a>
+                ) : null}
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => setShowExpandedMap(false)}
+                >
+                  Close map
+                </button>
+              </div>
+            </div>
+            <PropertyLocationMap
+              property={property}
+              comps={selectedComps}
+              mapsApiKey={mapsApiKey}
+              googleMapsUrl={googleMapsUrl}
+              frameClassName="property-map-frame-expanded"
+            />
           </div>
         </div>
       ) : null}

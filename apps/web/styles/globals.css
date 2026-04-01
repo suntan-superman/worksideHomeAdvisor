@@ -1015,6 +1015,13 @@ select {
   flex: 0 0 auto;
 }
 
+.property-map-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .property-map-frame {
   overflow: hidden;
   min-height: 320px;
@@ -2437,6 +2444,23 @@ select {
   flex-wrap: wrap;
 }
 
+.workspace-map-modal-card {
+  width: min(1100px, 100%);
+  gap: 20px;
+}
+
+.workspace-map-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.property-map-frame-expanded {
+  min-height: 560px;
+}
+
 @media (max-width: 1100px) {
   .workspace-body-layout,
   .workspace-content-layout,
@@ -2461,6 +2485,10 @@ select {
 
   .workspace-modal-preview-image {
     height: 200px;
+  }
+
+  .property-map-actions {
+    justify-content: flex-start;
   }
 }
 
@@ -2500,5 +2528,9 @@ select {
   .workspace-action-tooltip:hover .workspace-action-tooltip-bubble,
   .workspace-action-tooltip:focus-within .workspace-action-tooltip-bubble {
     transform: translateY(0);
+  }
+
+  .property-map-frame-expanded {
+    min-height: 420px;
   }
 }

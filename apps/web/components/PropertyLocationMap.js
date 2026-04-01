@@ -88,7 +88,13 @@ function formatCompSummary(comp) {
   return parts.join(' • ');
 }
 
-export function PropertyLocationMap({ property, comps = [], mapsApiKey = '', googleMapsUrl = '' }) {
+export function PropertyLocationMap({
+  property,
+  comps = [],
+  mapsApiKey = '',
+  googleMapsUrl = '',
+  frameClassName = '',
+}) {
   const mapRef = useRef(null);
   const [mapError, setMapError] = useState('');
 
@@ -223,7 +229,10 @@ export function PropertyLocationMap({ property, comps = [], mapsApiKey = '', goo
 
   return (
     <div className="property-map-shell">
-      <div ref={mapRef} className="property-map-frame property-map-frame-js" />
+      <div
+        ref={mapRef}
+        className={`property-map-frame property-map-frame-js${frameClassName ? ` ${frameClassName}` : ''}`}
+      />
       {mapError ? (
         <div className="property-map-fallback">
           <p>{mapError}</p>
@@ -234,7 +243,7 @@ export function PropertyLocationMap({ property, comps = [], mapsApiKey = '', goo
               rel="noreferrer"
               className="button-secondary inline-button"
             >
-              Open in Google Maps
+              View comps in Maps
             </a>
           ) : null}
         </div>
