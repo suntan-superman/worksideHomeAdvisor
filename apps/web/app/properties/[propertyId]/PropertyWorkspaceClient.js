@@ -154,6 +154,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const flyerPreviewRef = useRef(null);
   const visionCompareRef = useRef(null);
   const visionGalleryRef = useRef(null);
+  const workspaceBodyMainRef = useRef(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [property, setProperty] = useState(null);
   const [dashboard, setDashboard] = useState(null);
@@ -420,6 +421,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     if (step.actionTarget) {
       setActiveTab(step.actionTarget);
+      requestAnimationFrame(() => {
+        workspaceBodyMainRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
+      });
     }
   }
 
@@ -2385,7 +2392,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </div>
             </div>
           </aside>
-          <div className="workspace-body-main">
+          <div ref={workspaceBodyMainRef} className="workspace-body-main">
             <section className="workspace-action-bar">
               <div className="workspace-action-tooltip">
                 <button
