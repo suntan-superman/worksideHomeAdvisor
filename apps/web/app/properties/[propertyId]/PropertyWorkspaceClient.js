@@ -190,6 +190,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [showMoreVisionVariants, setShowMoreVisionVariants] = useState(false);
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState(null);
   const [guidedWorkflow, setGuidedWorkflow] = useState(null);
+  const [workflowPreviewStepKey, setWorkflowPreviewStepKey] = useState('');
   const [status, setStatus] = useState('Loading property workspace...');
   const [toast, setToast] = useState(null);
   const viewerRole = useMemo(() => {
@@ -400,6 +401,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const workflowNextStep = guidedWorkflow?.nextStep || null;
   const workflowPhases = guidedWorkflow?.phases || [];
   const workflowSteps = guidedWorkflow?.steps || [];
+  const workflowPreviewStep =
+    workflowSteps.find((step) => step.key === workflowPreviewStepKey) ||
+    workflowNextStep ||
+    workflowSteps[0] ||
+    null;
 
   const isArchivedProperty = property?.status === 'archived';
 
@@ -478,6 +484,21 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     setGuidedWorkflow(workflowQuery.data);
   }, [workflowQuery.data]);
+
+  useEffect(() => {
+    if (!workflowSteps.length) {
+      setWorkflowPreviewStepKey('');
+      return;
+    }
+
+    setWorkflowPreviewStepKey((current) => {
+      if (current && workflowSteps.some((step) => step.key === current)) {
+        return current;
+      }
+
+      return workflowNextStep?.key || workflowSteps[0]?.key || '';
+    });
+  }, [workflowNextStep?.key, workflowSteps]);
 
   useEffect(() => {
     setListingNoteDraft(selectedMediaAsset?.listingNote || '');
@@ -2389,41 +2410,51 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         ) : null}
 
         <section className="workspace-tab-layout">
-          <div className="workspace-tab-main">{renderActiveTab()}</div>
-          <aside className="workspace-quick-rail">
-            <div className="content-card workspace-quick-card">
-              <span className="label">Your progress</span>
+          <aside className="workspace-workflow-nav">
+            <div className="content-card workspace-workflow-card">
+              <span className="label">Workflow navigator</span>
               <h2>{guidedWorkflow?.completionPercent ?? 0}% complete</h2>
-              <p>{guidedWorkflow?.currentPhaseLabel || 'Workflow'} · {guidedWorkflow?.role === 'agent' ? 'Realtor guide' : 'Seller guide'}</p>
+              <p>
+                {guidedWorkflow?.currentPhaseLabel || 'Workflow'} ·{' '}
+                {guidedWorkflow?.role === 'agent' ? 'Realtor guide' : 'Seller guide'}
+              </p>
               <div className="mini-stats">
                 <div className="stat-card">
                   <strong>Market-ready</strong>
                   <span>{guidedWorkflow?.marketReadyScore ?? readinessScore}/100</span>
                 </div>
                 <div className="stat-card">
-                  <strong>Current step</strong>
-                  <span>{workflowNextStep?.title || 'Ready to review'}</span>
+                  <strong>Active step</strong>
+                  <span>{workflowPreviewStep?.title || workflowNextStep?.title || 'Ready to review'}</span>
                 </div>
               </div>
             </div>
-            <div className="content-card workspace-quick-card">
-              <span className="label">Next step</span>
-              <h3>{workflowNextStep?.title || nextBestAction.title}</h3>
-              <p>{workflowNextStep?.description || nextBestAction.detail}</p>
-              {workflowNextStep?.helperText ? (
-                <p className="workspace-control-note">{workflowNextStep.helperText}</p>
+            <div className="content-card workspace-workflow-card workspace-workflow-detail-card">
+              <span className="label">Step details</span>
+              <h3>{workflowPreviewStep?.title || 'Choose a workflow step'}</h3>
+              <p>{workflowPreviewStep?.description || 'Hover over a workflow step to see what it includes.'}</p>
+              {workflowPreviewStep?.helperText ? (
+                <p className="workspace-control-note">{workflowPreviewStep.helperText}</p>
+              ) : null}
+              {workflowPreviewStep ? (
+                <div className="workspace-workflow-detail-meta">
+                  <span className={`workspace-workflow-status workspace-workflow-status-${workflowPreviewStep.status}`}>
+                    {formatWorkflowStatus(workflowPreviewStep.status)}
+                  </span>
+                  <span>{workflowPreviewStep.actionTarget ? `Opens ${WORKSPACE_TABS.find((tab) => tab.id === workflowPreviewStep.actionTarget)?.label || 'workspace'}` : 'Guided step'}</span>
+                </div>
               ) : null}
               <button
                 type="button"
                 className="button-primary"
-                onClick={() => (workflowNextStep ? openWorkflowStep(workflowNextStep) : setActiveTab(nextBestAction.tab))}
-                disabled={Boolean(status)}
+                onClick={() => workflowPreviewStep && openWorkflowStep(workflowPreviewStep)}
+                disabled={Boolean(status) || !workflowPreviewStep || (!workflowPreviewStep.actionTarget && !workflowPreviewStep.actionHref)}
               >
-                {workflowNextStep?.ctaLabel || `Open ${WORKSPACE_TABS.find((tab) => tab.id === nextBestAction.tab)?.label || 'workspace'}`}
+                {workflowPreviewStep?.ctaLabel || 'Open step'}
               </button>
             </div>
-            <div className="content-card workspace-quick-card workspace-wizard-card">
-              <span className="label">Guided workflow</span>
+            <div className="content-card workspace-workflow-card workspace-wizard-card">
+              <span className="label">Workflow phases</span>
               <div className="workspace-phase-list">
                 {workflowPhases.map((phase) => (
                   <div key={phase.key} className={`workspace-phase-item workspace-phase-item-${phase.status}`}>
@@ -2440,8 +2471,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   <button
                     key={step.key}
                     type="button"
-                    className={`workspace-step-item workspace-step-item-${step.status}${workflowNextStep?.key === step.key ? ' active' : ''}`}
-                    onClick={() => openWorkflowStep(step)}
+                    className={`workspace-step-item workspace-step-item-${step.status}${workflowNextStep?.key === step.key ? ' active' : ''}${workflowPreviewStep?.key === step.key ? ' preview' : ''}`}
+                    onClick={() => {
+                      setWorkflowPreviewStepKey(step.key);
+                      openWorkflowStep(step);
+                    }}
+                    onMouseEnter={() => setWorkflowPreviewStepKey(step.key)}
+                    onFocus={() => setWorkflowPreviewStepKey(step.key)}
                     disabled={Boolean(status) || (!step.actionTarget && !step.actionHref)}
                   >
                     <div className="workspace-step-copy">
@@ -2452,6 +2488,25 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   </button>
                 ))}
               </div>
+            </div>
+          </aside>
+          <div className="workspace-tab-main">{renderActiveTab()}</div>
+          <aside className="workspace-quick-rail">
+            <div className="content-card workspace-quick-card">
+              <span className="label">Next step</span>
+              <h3>{workflowNextStep?.title || nextBestAction.title}</h3>
+              <p>{workflowNextStep?.description || nextBestAction.detail}</p>
+              {workflowNextStep?.helperText ? (
+                <p className="workspace-control-note">{workflowNextStep.helperText}</p>
+              ) : null}
+              <button
+                type="button"
+                className="button-primary"
+                onClick={() => (workflowNextStep ? openWorkflowStep(workflowNextStep) : setActiveTab(nextBestAction.tab))}
+                disabled={Boolean(status)}
+              >
+                {workflowNextStep?.ctaLabel || `Open ${WORKSPACE_TABS.find((tab) => tab.id === nextBestAction.tab)?.label || 'workspace'}`}
+              </button>
             </div>
             <div className="content-card workspace-quick-card"><span className="label">Quick stats</span><ul className="plain-list"><li>{selectedComps.length} comp(s) loaded</li><li>{listingCandidateAssets.length} listing photo pick(s)</li><li>{mediaAssets.filter((asset) => asset.selectedVariant).length} preferred vision variant(s)</li><li>{checklist?.summary?.completedCount ?? 0} task(s) complete</li><li>{providerRecommendations.length} provider recommendation(s)</li></ul></div>
           </aside>

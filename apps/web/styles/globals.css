@@ -1866,9 +1866,16 @@ select {
 
 .workspace-tab-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: 300px minmax(0, 1fr) 300px;
   gap: 24px;
   align-items: start;
+}
+
+.workspace-workflow-nav {
+  position: sticky;
+  top: 252px;
+  display: grid;
+  gap: 18px;
 }
 
 .workspace-tab-main,
@@ -1891,11 +1898,50 @@ select {
   gap: 18px;
 }
 
+.workspace-workflow-card,
 .workspace-quick-card,
 .workspace-side-panel,
 .workspace-inner-card {
   display: grid;
   gap: 12px;
+}
+
+.workspace-workflow-detail-card {
+  gap: 14px;
+}
+
+.workspace-workflow-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.workspace-workflow-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.38rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(36, 40, 45, 0.08);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.workspace-workflow-status-in_progress {
+  color: var(--clay);
+  background: rgba(255, 246, 239, 0.94);
+}
+
+.workspace-workflow-status-complete {
+  color: var(--moss);
+  background: rgba(245, 250, 245, 0.92);
+}
+
+.workspace-workflow-status-locked,
+.workspace-workflow-status-blocked {
+  color: var(--muted);
 }
 
 .workspace-wizard-card {
@@ -1946,7 +1992,8 @@ select {
 
 .workspace-phase-item-in_progress,
 .workspace-step-item-in_progress,
-.workspace-step-item.active {
+.workspace-step-item.active,
+.workspace-step-item.preview {
   border-color: rgba(200, 116, 71, 0.24);
   background: rgba(255, 246, 239, 0.94);
 }
@@ -1965,6 +2012,19 @@ select {
 .workspace-step-item-locked,
 .workspace-step-item:disabled {
   opacity: 0.64;
+}
+
+.workspace-step-item:not(:disabled) {
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.workspace-step-item:not(:disabled):hover,
+.workspace-step-item:not(:disabled):focus-visible {
+  border-color: rgba(200, 116, 71, 0.24);
+  background: rgba(255, 246, 239, 0.94);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(83, 67, 52, 0.08);
 }
 
 .workflow-phase-list {
@@ -2319,6 +2379,7 @@ select {
   }
 
   .workspace-quick-rail,
+  .workspace-workflow-nav,
   .photo-detail-panel {
     position: static;
   }
