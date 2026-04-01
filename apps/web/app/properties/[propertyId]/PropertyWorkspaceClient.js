@@ -1530,8 +1530,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           The pricing analysis gives you a suggested range. This is where you confirm the actual list
           price that should carry into future brochure and report generation.
         </p>
-        <div className="mini-stats">
-          <div className="stat-card">
+        <div className="pricing-summary-grid">
+          <div className="stat-card pricing-summary-stat">
             <strong>Suggested range</strong>
             <span>
               {latestPricing
@@ -1541,7 +1541,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 : 'Run pricing first'}
             </span>
           </div>
-          <div className="stat-card">
+          <div className="stat-card pricing-summary-stat">
             <strong>Recommended midpoint</strong>
             <span>
               {latestPricing?.recommendedListMid
@@ -1549,7 +1549,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 : 'Not available yet'}
             </span>
           </div>
-          <div className="stat-card">
+          <div className="stat-card pricing-summary-stat">
             <strong>Chosen list price</strong>
             <span>
               {property?.selectedListPrice
@@ -1559,63 +1559,67 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           </div>
         </div>
         <div className="workspace-inner-card pricing-decision-card">
-          <span className="label">Quick picks</span>
-          <div className="pricing-decision-chip-row">
-            {pricingQuickPickOptions.map((option) => (
+          <div className="pricing-decision-layout">
+            <div className="pricing-decision-copy">
+              <span className="label">Quick picks</span>
+              <h3>Choose a starting point</h3>
+              <p>Pick one of the recommendations or enter your own custom price.</p>
+              <div className="pricing-decision-chip-row">
+                {pricingQuickPickOptions.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    className={
+                      selectedListPriceSourceDraft === option.key
+                        ? 'checklist-action-chip active'
+                        : 'checklist-action-chip'
+                    }
+                    onClick={() => {
+                      setSelectedListPriceDraft(String(option.value));
+                      setSelectedListPriceSourceDraft(option.key);
+                    }}
+                  >
+                    {option.label}: {formatCurrency(option.value)}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className={
+                    selectedListPriceSourceDraft === 'custom'
+                      ? 'checklist-action-chip active'
+                      : 'checklist-action-chip'
+                  }
+                  onClick={() => setSelectedListPriceSourceDraft('custom')}
+                >
+                  Custom
+                </button>
+              </div>
+            </div>
+            <div className="pricing-decision-form">
+              <label className="workspace-control-field workspace-control-field-full">
+                <span>Chosen list price</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1000"
+                  value={selectedListPriceDraft}
+                  onChange={(event) => {
+                    setSelectedListPriceDraft(event.target.value);
+                    setSelectedListPriceSourceDraft('custom');
+                  }}
+                  placeholder="389000"
+                />
+              </label>
               <button
-                key={option.key}
                 type="button"
-                className={
-                  selectedListPriceSourceDraft === option.key
-                    ? 'checklist-action-chip active'
-                    : 'checklist-action-chip'
-                }
-                onClick={() => {
-                  setSelectedListPriceDraft(String(option.value));
-                  setSelectedListPriceSourceDraft(option.key);
-                }}
-              >
-                {option.label}: {formatCurrency(option.value)}
-              </button>
-            ))}
-            <button
-              type="button"
-              className={
-                selectedListPriceSourceDraft === 'custom'
-                  ? 'checklist-action-chip active'
-                  : 'checklist-action-chip'
-              }
-              onClick={() => setSelectedListPriceSourceDraft('custom')}
-            >
-              Custom
-            </button>
-          </div>
-          <div className="brochure-control-grid brochure-control-grid-form">
-            <label className="workspace-control-field">
-              <span>Chosen list price</span>
-              <input
-                type="number"
-                min="1"
-                step="1000"
-                value={selectedListPriceDraft}
-                onChange={(event) => {
-                  setSelectedListPriceDraft(event.target.value);
-                  setSelectedListPriceSourceDraft('custom');
-                }}
-                placeholder="389000"
-              />
-            </label>
-            <div className="workspace-action-column pricing-decision-actions">
-              <button
-                type="button"
-                className="button-primary"
+                className="button-primary pricing-save-button"
                 onClick={handleSaveSelectedListPrice}
                 disabled={Boolean(status) || !selectedListPriceDraft || isArchivedProperty}
               >
                 Save chosen price
               </button>
               <p className="workspace-control-note">
-                This does not change the suggested range. It stores the price you intend to use.
+                This does not change the suggested range. It stores the price you intend to use in future materials.
               </p>
             </div>
           </div>
