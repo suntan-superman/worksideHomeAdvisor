@@ -497,6 +497,18 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     return tasksWithProviders.find((item) => item.status !== 'done') || tasksWithProviders[0];
   }, [activeProviderTaskKey, checklist?.items]);
+  const providerGoogleSearchUrl = useMemo(() => {
+    if (!providerSuggestionTask) {
+      return '';
+    }
+
+    const query = buildProviderFallbackQuery(providerSuggestionTask, property);
+    if (!query) {
+      return '';
+    }
+
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  }, [property, providerSuggestionTask]);
   const recentOutputs = useMemo(
     () =>
       [
@@ -927,7 +939,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       limit: 4,
     });
     const nextProviders = response.providers?.items || [];
-    const fallbackProviders = nextProviders.length ? [] : await searchGoogleFallbackProviders(task);
+    const externalResultsFromApi = response.providers?.externalItems || [];
+    const fallbackProviders =
+      nextProviders.length || externalResultsFromApi.length
+        ? externalResultsFromApi
+        : await searchGoogleFallbackProviders(task);
     setProviderRecommendations(nextProviders);
     setProviderSource({
       ...(response.providers?.source || {}),
@@ -2768,6 +2784,18 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   ? ' · Google fallback ready if marketplace coverage is thin.'
                   : ' · Google fallback unavailable for this browser session.'}
             </p>
+          ) : null}
+          {!providerRecommendations.length && !externalProviderRecommendations.length && providerGoogleSearchUrl ? (
+            <div className="provider-card-actions">
+              <a
+                href={providerGoogleSearchUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="button-secondary inline-button"
+              >
+                Search Google Maps
+              </a>
+            </div>
           ) : null}
           {providerRecommendations.length ? (
             <p className="workspace-control-note provider-disclaimer">

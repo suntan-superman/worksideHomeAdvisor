@@ -58,6 +58,7 @@ const envSchema = z.object({
   MARKET_DATA_API_KEY: z.string().optional(),
   RENTCAST_API_KEY: z.string().optional(),
   RENTCAST_BASE_URL: z.string().url().default('https://api.rentcast.io/v1'),
+  GOOGLE_MAPS_API_KEY: z.string().optional(),
   STORAGE_PROVIDER: z.enum(['local', 'gcs']).default('local'),
   STORAGE_LOCAL_DIR: z.string().optional(),
   GCS_PROJECT_ID: z.string().optional(),
@@ -74,6 +75,11 @@ export const env = envSchema.parse({
   REPLICATE_API_KEY: stripSecret(process.env.REPLICATE_API_KEY),
   REPLICATE_API_TOKEN: stripSecret(
     process.env.REPLICATE_API_TOKEN || process.env.REPLICATE_API_KEY,
+  ),
+  GOOGLE_MAPS_API_KEY: stripSecret(
+    process.env.GOOGLE_MAPS_API_KEY ||
+      process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
+      process.env.REACT_APP_GOOGLE_MAPS_API_KEY,
   ),
   SENDGRID_API_KEY: stripSecret(process.env.SENDGRID_API_KEY),
   STRIPE_SECRET_KEY: stripSecret(process.env.STRIPE_SECRET_KEY),

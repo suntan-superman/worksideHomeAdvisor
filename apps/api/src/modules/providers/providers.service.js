@@ -92,6 +92,17 @@ const VERIFIED_DOCUMENT_TYPES = {
   license_document: 'license',
 };
 
+const GOOGLE_PLACES_QUERY_BY_CATEGORY = {
+  inspector: 'home inspector',
+  title_company: 'title company',
+  real_estate_attorney: 'real estate attorney',
+  photographer: 'real estate photographer',
+  cleaning_service: 'house cleaning service',
+  termite_inspection: 'termite inspection',
+  notary: 'mobile notary',
+  nhd_report: 'natural hazard disclosure report provider',
+};
+
 function slugify(value) {
   return String(value || '')
     .toLowerCase()
@@ -479,6 +490,130 @@ function buildCoverageLabel(provider, property) {
   if (propertyZip && zipCodes.includes(propertyZip)) return 'Covers this ZIP';
   if (normalizeString(provider.serviceArea?.city).toLowerCase() === normalizeString(property?.city).toLowerCase()) return `Serves ${property.city}`;
   return `${provider.serviceArea?.radiusMiles || 25} mile service radius`;
+}
+
+function buildGoogleProviderQuery(categoryKey, property) {
+  const serviceQuery = GOOGLE_PLACES_QUERY_BY_CATEGORY[categoryKey] || categoryKey.replace(/_/g, ' ');
+  const locationQuery = [
+    property?.addressLine1,
+    property?.city,
+    property?.state,
+    property?.zip,
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  return [serviceQuery, 'near', locationQuery].filter(Boolean).join(' ');
+}
+
+function buildExternalProviderFallbackItem(place = {}, categoryKey = '', property = {}) {
+  const displayName =
+    place.displayName?.text ||
+    place.name ||
+    'Google result';
+  const address = place.formattedAddress || '';
+  const primaryType = place.primaryTypeDisplayName?.text || 'Google Maps result';
+
+  return {
+    id: `google-${place.id || slugify(`${displayName}-${address}`)}`,
+    userId: '',
+    businessName: displayName,
+    slug: slugify(displayName),
+    categoryKey,
+    description: address || `${primaryType} near ${property.city || property.state || 'the property'}.`,
+    phone: place.nationalPhoneNumber || '',
+    email: '',
+    websiteUrl: place.websiteUri || '',
+    mapsUrl: place.googleMapsUri || '',
+    status: 'external',
+    isVerified: false,
+    isSponsored: false,
+    qualityScore: 0,
+    averageResponseMinutes: 0,
+    yearsInBusiness: null,
+    turnaroundLabel: '',
+    pricingSummary: '',
+    serviceHighlights: primaryType ? [primaryType] : [],
+    serviceArea: {
+      city: property.city || '',
+      state: property.state || '',
+      zipCodes: property.zip ? [property.zip] : [],
+      radiusMiles: 0,
+    },
+    leadRouting: {
+      deliveryMode: 'email',
+      notifyPhone: '',
+      notifyEmail: '',
+      preferredContactMethod: 'email',
+    },
+    subscription: {
+      planCode: 'external_fallback',
+      status: 'external',
+    },
+    compliance: {
+      approvalStatus: 'draft',
+      licenseStatus: 'unverified',
+      insuranceStatus: 'unverified',
+      reviewedAt: null,
+      reviewedBy: '',
+    },
+    verification: {
+      review: {
+        level: 'self_reported',
+      },
+      disclaimer: PROVIDER_VERIFICATION_DISCLAIMER,
+    },
+    coverageLabel: 'Google Maps result',
+    rankingBadges: ['Google result'],
+    rating: Number(place.rating || 0),
+    reviewCount: Number(place.userRatingCount || 0),
+    externalSource: 'google_places',
+    isExternalFallback: true,
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+async function searchGoogleFallbackProviders(property, { categoryKey = '', limit = 5 } = {}) {
+  if (!env.GOOGLE_MAPS_API_KEY || !property || !categoryKey) {
+    return [];
+  }
+
+  const textQuery = buildGoogleProviderQuery(categoryKey, property);
+  if (!textQuery) {
+    return [];
+  }
+
+  try {
+    const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': env.GOOGLE_MAPS_API_KEY,
+        'X-Goog-FieldMask':
+          'places.id,places.displayName,places.formattedAddress,places.googleMapsUri,places.websiteUri,places.nationalPhoneNumber,places.rating,places.userRatingCount,places.primaryTypeDisplayName',
+      },
+      body: JSON.stringify({
+        textQuery,
+        maxResultCount: Math.max(1, Math.min(Number(limit || 5), 5)),
+        languageCode: 'en',
+        regionCode: 'US',
+      }),
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    return Array.isArray(payload.places)
+      ? payload.places
+          .slice(0, Math.max(1, Math.min(Number(limit || 5), 5)))
+          .map((place) => buildExternalProviderFallbackItem(place, categoryKey, property))
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function serializeProvider(document, extras = {}) {
@@ -1076,6 +1211,13 @@ export async function listProvidersForProperty(propertyId, { categoryKey = '', l
     })
     .slice(0, Math.max(1, Number(limit || 3)));
 
+  const externalItems = rankedProviders.length
+    ? []
+    : await searchGoogleFallbackProviders(property, {
+        categoryKey: resolvedCategoryKey,
+        limit: Math.max(1, Math.min(Number(limit || 5), 5)),
+      });
+
   return {
     categories,
     categoryKey: resolvedCategoryKey || '',
@@ -1097,7 +1239,12 @@ export async function listProvidersForProperty(propertyId, { categoryKey = '', l
           : null,
       }),
     ),
-    source: { internalProviders: providers.length, googleFallbackEnabled: false },
+    externalItems,
+    source: {
+      internalProviders: providers.length,
+      externalProviders: externalItems.length,
+      googleFallbackEnabled: Boolean(env.GOOGLE_MAPS_API_KEY),
+    },
   };
 }
 
