@@ -190,8 +190,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const visionCompareRef = useRef(null);
   const visionGalleryRef = useRef(null);
   const workspaceBodyMainRef = useRef(null);
-  const checklistWorkflowRef = useRef(null);
-  const providerSuggestionsRef = useRef(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [property, setProperty] = useState(null);
   const [dashboard, setDashboard] = useState(null);
@@ -476,21 +474,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     });
   }
 
-  function scrollElementIntoView(elementRef) {
-    if (!elementRef?.current || typeof window === 'undefined') {
-      return;
-    }
-
-    const stickyOffset = 104;
-    const top =
-      elementRef.current.getBoundingClientRect().top + window.scrollY - stickyOffset;
-
-    window.scrollTo({
-      top: Math.max(0, top),
-      behavior: 'smooth',
-    });
-  }
-
   function openWorkflowStep(step) {
     if (!step || (!step.actionTarget && !step.actionHref)) {
       return;
@@ -504,14 +487,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     if (step.actionTarget) {
       setActiveTab(step.actionTarget);
-      if (step.key === 'providers') {
-        setPendingWorkspaceScrollTarget('providers');
-        return;
-      }
-      if (step.key === 'prep_checklist') {
-        setPendingWorkspaceScrollTarget('checklist');
-        return;
-      }
       setPendingWorkspaceScrollTarget('top');
     }
   }
@@ -599,13 +574,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        if (pendingWorkspaceScrollTarget === 'providers') {
-          scrollElementIntoView(providerSuggestionsRef);
-        } else if (pendingWorkspaceScrollTarget === 'checklist') {
-          scrollElementIntoView(checklistWorkflowRef);
-        } else {
-          scrollWorkspaceBodyToTop();
-        }
+        scrollWorkspaceBodyToTop();
         setPendingWorkspaceScrollTarget('');
       });
     });
@@ -2210,7 +2179,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   const renderChecklistTab = () => (
     <div className="workspace-two-column">
-      <div ref={checklistWorkflowRef} className="content-card checklist-card">
+      <div className="content-card checklist-card">
         <div className="section-header-tight">
           <div>
             <span className="label">Checklist workflow</span>
@@ -2316,7 +2285,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           <button type="submit" className="button-secondary" disabled={Boolean(status) || isArchivedProperty}>Save task</button>
         </form>
 
-        <div ref={providerSuggestionsRef} className="content-card workspace-side-panel">
+        <div className="content-card workspace-side-panel">
           <span className="label">Provider suggestions</span>
           <h2>{providerSuggestionTask?.providerCategoryLabel || 'No provider-linked task yet'}</h2>
           <p>
