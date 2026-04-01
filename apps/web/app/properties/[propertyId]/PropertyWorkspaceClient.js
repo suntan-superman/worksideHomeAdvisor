@@ -2443,13 +2443,20 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     onMouseEnter={() => setWorkflowPreviewStepKey(step.key)}
                     onFocus={() => setWorkflowPreviewStepKey(step.key)}
                     aria-disabled={Boolean(status) || (!step.actionTarget && !step.actionHref)}
-                    title={`${step.title}: ${step.description}${step.helperText ? ` ${step.helperText}` : ''}${step.actionTarget ? ` Opens ${WORKSPACE_TABS.find((tab) => tab.id === step.actionTarget)?.label || 'workspace'}.` : ''}`}
                   >
                     <div className="workspace-step-copy">
                       <strong>{step.title}</strong>
                       <span>{step.actionTarget ? WORKSPACE_TABS.find((tab) => tab.id === step.actionTarget)?.label || 'Workspace' : 'Not ready yet'}</span>
                     </div>
                     <em className={`workspace-workflow-status workspace-workflow-status-${step.status}`}>{formatWorkflowStatus(step.status)}</em>
+                    <span className="workspace-step-tooltip" role="tooltip">
+                      <strong>{step.title}</strong>
+                      <span>{step.description}</span>
+                      {step.helperText ? <span>{step.helperText}</span> : null}
+                      {step.actionTarget ? (
+                        <span>Opens {WORKSPACE_TABS.find((tab) => tab.id === step.actionTarget)?.label || 'workspace'}.</span>
+                      ) : null}
+                    </span>
                   </button>
                 ))}
               </div>

@@ -42,8 +42,9 @@ const ROLE_STEP_COPY = {
     property_details: {
       title: 'Add property details',
       description: 'These details help us prepare your home.',
-      ctaLabel: 'Open dashboard',
-      actionHref: '/dashboard',
+      ctaLabel: 'Review details',
+      actionTarget: 'overview',
+      helperText: 'Confirm the address and core property facts before moving into pricing and photos.',
     },
     pricing_review: {
       title: 'Review pricing',
@@ -124,8 +125,9 @@ const ROLE_STEP_COPY = {
     property_details: {
       title: 'Enter property details',
       description: 'This powers pricing and materials.',
-      ctaLabel: 'Open dashboard',
-      actionHref: '/dashboard',
+      ctaLabel: 'Review details',
+      actionTarget: 'overview',
+      helperText: 'Confirm the address and core listing facts before moving into pricing and marketing materials.',
     },
     pricing_review: {
       title: 'Review comps',
