@@ -50,6 +50,12 @@ const WORKSPACE_TABS = [
   { id: 'checklist', label: 'Checklist' },
 ];
 
+const PROPERTY_WORKSPACE_HIDDEN_WORKFLOW_STEPS = new Set([
+  'account_created',
+  'profile_complete',
+  'property_added',
+]);
+
 const REPORT_SECTION_OPTIONS = [
   { id: 'executive_summary', label: 'Executive Summary' },
   { id: 'pricing_analysis', label: 'Pricing Analysis' },
@@ -400,10 +406,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     return { title: 'Review the latest outputs', detail: 'Both brochure and report are ready. Use Overview to compare the latest deliverables.', tab: 'overview' };
   }, [checklist?.nextTask?.detail, checklist?.nextTask?.title, latestFlyer, latestReport, listingCandidateAssets.length, mediaAssets.length, property?.status, selectedMediaAsset, selectedVariant]);
   const workflowNextStep = guidedWorkflow?.nextStep || null;
-  const workflowSteps = guidedWorkflow?.steps || [];
+  const workflowSteps = (guidedWorkflow?.steps || []).filter(
+    (step) => !PROPERTY_WORKSPACE_HIDDEN_WORKFLOW_STEPS.has(step.key),
+  );
   const workflowPreviewStep =
     workflowSteps.find((step) => step.key === workflowPreviewStepKey) ||
-    workflowNextStep ||
+    (workflowNextStep && !PROPERTY_WORKSPACE_HIDDEN_WORKFLOW_STEPS.has(workflowNextStep.key)
+      ? workflowNextStep
+      : null) ||
     workflowSteps[0] ||
     null;
 
@@ -430,7 +440,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
 
     if (step.actionHref) {
-      window.location.href = step.actionHref;
+      setActiveTab('overview');
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          scrollWorkspaceBodyToTop();
+        });
+      });
       return;
     }
 
