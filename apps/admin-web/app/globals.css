@@ -337,6 +337,81 @@ a {
   opacity: 0.7;
 }
 
+.admin-button-success {
+  background: rgba(109, 183, 135, 0.22);
+  border-color: rgba(109, 183, 135, 0.38);
+  color: #dff4e5;
+  cursor: default;
+}
+
+.admin-button-success:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.admin-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(9, 13, 16, 0.6);
+  backdrop-filter: blur(8px);
+}
+
+.admin-dialog-card {
+  width: min(560px, 100%);
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(28, 34, 39, 0.98), rgba(21, 27, 31, 0.98));
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.35);
+}
+
+.admin-dialog-card h2 {
+  margin: 0;
+  font-size: 1.75rem;
+}
+
+.admin-dialog-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.admin-dialog-meta {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.admin-dialog-meta > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.admin-dialog-meta strong {
+  color: var(--text);
+}
+
+.admin-dialog-meta span {
+  color: var(--muted);
+}
+
+.admin-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .variant-cleanup-card {
   display: grid;
   gap: 16px;

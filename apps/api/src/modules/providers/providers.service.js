@@ -1175,15 +1175,23 @@ export async function listProvidersForProperty(propertyId, { categoryKey = '', l
     };
   }
 
-  const query = { status: 'active' };
+  const query = {};
   if (resolvedCategoryKey) {
     query.categoryKey = resolvedCategoryKey;
   }
 
-  const providers = filterProvidersForProperty(
+  const matchedProviders = filterProvidersForProperty(
     await ProviderModel.find(query).sort({ isSponsored: -1, qualityScore: -1, updatedAt: -1 }).lean(),
     property,
   );
+  const providers = matchedProviders.filter((provider) => provider.status === 'active');
+  const unavailableProviders = matchedProviders.filter((provider) => provider.status !== 'active');
+  const unavailableStatusCounts = unavailableProviders.reduce((summary, provider) => {
+    const key = normalizeString(provider.status) || 'unavailable';
+    summary[key] = Number(summary[key] || 0) + 1;
+    return summary;
+  }, {});
+
   const analyticsByProviderId = await getProviderAnalyticsMap(providers.map((provider) => provider._id));
   const savedProviderIds = new Set(
     (
@@ -1242,8 +1250,12 @@ export async function listProvidersForProperty(propertyId, { categoryKey = '', l
     externalItems,
     source: {
       internalProviders: providers.length,
+      totalCategoryProviders: matchedProviders.length,
+      unavailableProviders: unavailableProviders.length,
+      unavailableStatusCounts,
       externalProviders: externalItems.length,
       googleFallbackEnabled: Boolean(env.GOOGLE_MAPS_API_KEY),
+      categoryLabel: categoryByKey.get(resolvedCategoryKey || '')?.label || '',
     },
   };
 }

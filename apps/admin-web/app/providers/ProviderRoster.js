@@ -9,6 +9,7 @@ function formatLabel(value) {
 export function ProviderRoster({ providers = [], onUpdated }) {
   const [busyProviderId, setBusyProviderId] = useState('');
   const [error, setError] = useState('');
+  const [pendingApprovalProvider, setPendingApprovalProvider] = useState(null);
 
   async function applyReview(providerId, payload) {
     setBusyProviderId(providerId);
@@ -40,198 +41,263 @@ export function ProviderRoster({ providers = [], onUpdated }) {
     }
   }
 
+  function requestApproval(provider) {
+    setPendingApprovalProvider(provider);
+    setError('');
+  }
+
+  async function confirmApproval() {
+    if (!pendingApprovalProvider) {
+      return;
+    }
+
+    const providerId = pendingApprovalProvider.id;
+    setPendingApprovalProvider(null);
+    await applyReview(providerId, {
+      approvalStatus: 'approved',
+      status: 'active',
+      reviewedBy: 'admin_console',
+    });
+  }
+
   if (!providers.length) {
     return <div className="empty-state">No providers have been created yet.</div>;
   }
 
   return (
-    <div className="provider-roster-grid">
-      {error ? <div className="notice error">{error}</div> : null}
-      {providers.map((provider) => (
-        <article key={provider.id} className="lead-card">
-          <div className="lead-card-header">
-            <div>
-              <div className="muted small-label">{provider.categoryLabel || provider.categoryKey}</div>
-              <h2>{provider.businessName}</h2>
-              <p className="muted">
-                {[provider.serviceArea?.city, provider.serviceArea?.state].filter(Boolean).join(', ') ||
-                  'Coverage not set'}
-              </p>
-            </div>
-            <div className="lead-status-stack">
-              <span className="status-badge status-neutral">
-                {formatLabel(provider.compliance?.approvalStatus)}
-              </span>
-              <span className="muted small-label">{formatLabel(provider.status)}</span>
-            </div>
-          </div>
+    <>
+      <div className="provider-roster-grid">
+        {error ? <div className="notice error">{error}</div> : null}
+        {providers.map((provider) => {
+          const isApproved =
+            provider.compliance?.approvalStatus === 'approved' && provider.status === 'active';
+          const isBusy = busyProviderId === provider.id;
 
-          <div className="tag-row">
-            {(provider.serviceHighlights || []).map((item) => (
-              <span key={`${provider.id}-${item}`}>{item}</span>
-            ))}
-          </div>
+          return (
+            <article key={provider.id} className="lead-card">
+              <div className="lead-card-header">
+                <div>
+                  <div className="muted small-label">{provider.categoryLabel || provider.categoryKey}</div>
+                  <h2>{provider.businessName}</h2>
+                  <p className="muted">
+                    {[provider.serviceArea?.city, provider.serviceArea?.state].filter(Boolean).join(', ') ||
+                      'Coverage not set'}
+                  </p>
+                </div>
+                <div className="lead-status-stack">
+                  <span className="status-badge status-neutral">
+                    {formatLabel(provider.compliance?.approvalStatus)}
+                  </span>
+                  <span className="muted small-label">{formatLabel(provider.status)}</span>
+                </div>
+              </div>
 
-          <div className="lead-meta-grid">
-            <div>
-              <strong>Verification</strong>
-              <span>{formatLabel(provider.verification?.review?.level || 'self_reported')}</span>
-            </div>
-            <div>
-              <strong>License</strong>
-              <span>{formatLabel(provider.compliance?.licenseStatus)}</span>
-            </div>
-            <div>
-              <strong>Insurance</strong>
-              <span>{formatLabel(provider.compliance?.insuranceStatus)}</span>
-            </div>
-            <div>
-              <strong>Turnaround</strong>
-              <span>{provider.turnaroundLabel || 'Not set'}</span>
-            </div>
-          </div>
+              <div className="tag-row">
+                {(provider.serviceHighlights || []).map((item) => (
+                  <span key={`${provider.id}-${item}`}>{item}</span>
+                ))}
+              </div>
 
-          <div className="lead-meta-grid">
-            <div>
-              <strong>Review status</strong>
-              <span>{formatLabel(provider.verification?.review?.reviewStatus || 'none')}</span>
-            </div>
-            <div>
-              <strong>Bonding</strong>
-              <span>{provider.verification?.bonding?.hasBond ? 'Self-reported bonded' : 'Not reported'}</span>
-            </div>
-            <div>
-              <strong>Insurance doc</strong>
-              <span>{provider.verification?.insurance?.certificateDocument ? 'Uploaded' : 'Not uploaded'}</span>
-            </div>
-            <div>
-              <strong>License doc</strong>
-              <span>{provider.verification?.license?.document ? 'Uploaded' : 'Not uploaded'}</span>
-            </div>
-          </div>
+              <div className="lead-meta-grid">
+                <div>
+                  <strong>Verification</strong>
+                  <span>{formatLabel(provider.verification?.review?.level || 'self_reported')}</span>
+                </div>
+                <div>
+                  <strong>License</strong>
+                  <span>{formatLabel(provider.compliance?.licenseStatus)}</span>
+                </div>
+                <div>
+                  <strong>Insurance</strong>
+                  <span>{formatLabel(provider.compliance?.insuranceStatus)}</span>
+                </div>
+                <div>
+                  <strong>Turnaround</strong>
+                  <span>{provider.turnaroundLabel || 'Not set'}</span>
+                </div>
+              </div>
 
-          {(provider.verification?.insurance?.carrier ||
-            provider.verification?.license?.licenseNumber ||
-            provider.verification?.review?.reviewNotes) ? (
-            <div className="lead-message-block">
-              <strong>Verification notes</strong>
-              <p>
-                {provider.verification?.insurance?.carrier
-                  ? `Insurance carrier: ${provider.verification.insurance.carrier}. `
-                  : ''}
-                {provider.verification?.license?.licenseNumber
-                  ? `License number: ${provider.verification.license.licenseNumber}. `
-                  : ''}
-                {provider.verification?.review?.reviewNotes || 'No admin review notes yet.'}
-              </p>
-            </div>
-          ) : null}
+              <div className="lead-meta-grid">
+                <div>
+                  <strong>Review status</strong>
+                  <span>{formatLabel(provider.verification?.review?.reviewStatus || 'none')}</span>
+                </div>
+                <div>
+                  <strong>Bonding</strong>
+                  <span>{provider.verification?.bonding?.hasBond ? 'Self-reported bonded' : 'Not reported'}</span>
+                </div>
+                <div>
+                  <strong>Insurance doc</strong>
+                  <span>{provider.verification?.insurance?.certificateDocument ? 'Uploaded' : 'Not uploaded'}</span>
+                </div>
+                <div>
+                  <strong>License doc</strong>
+                  <span>{provider.verification?.license?.document ? 'Uploaded' : 'Not uploaded'}</span>
+                </div>
+              </div>
 
-          {(provider.verification?.insurance?.certificateDocument || provider.verification?.license?.document) ? (
-            <div className="lead-action-row">
-              {provider.verification?.insurance?.certificateDocument ? (
-                <a
-                  className="admin-button admin-button-secondary"
-                  href={`/api/admin/providers/${provider.id}/verification-documents/insurance_certificate`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  View insurance doc
-                </a>
+              {(provider.verification?.insurance?.carrier ||
+                provider.verification?.license?.licenseNumber ||
+                provider.verification?.review?.reviewNotes) ? (
+                <div className="lead-message-block">
+                  <strong>Verification notes</strong>
+                  <p>
+                    {provider.verification?.insurance?.carrier
+                      ? `Insurance carrier: ${provider.verification.insurance.carrier}. `
+                      : ''}
+                    {provider.verification?.license?.licenseNumber
+                      ? `License number: ${provider.verification.license.licenseNumber}. `
+                      : ''}
+                    {provider.verification?.review?.reviewNotes || 'No admin review notes yet.'}
+                  </p>
+                </div>
               ) : null}
-              {provider.verification?.license?.document ? (
-                <a
-                  className="admin-button admin-button-secondary"
-                  href={`/api/admin/providers/${provider.id}/verification-documents/license_document`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  View license doc
-                </a>
+
+              {(provider.verification?.insurance?.certificateDocument || provider.verification?.license?.document) ? (
+                <div className="lead-action-row">
+                  {provider.verification?.insurance?.certificateDocument ? (
+                    <a
+                      className="admin-button admin-button-secondary"
+                      href={`/api/admin/providers/${provider.id}/verification-documents/insurance_certificate`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      View insurance doc
+                    </a>
+                  ) : null}
+                  {provider.verification?.license?.document ? (
+                    <a
+                      className="admin-button admin-button-secondary"
+                      href={`/api/admin/providers/${provider.id}/verification-documents/license_document`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      View license doc
+                    </a>
+                  ) : null}
+                </div>
               ) : null}
+
+              <div className="lead-message-block">
+                <strong>Pricing summary</strong>
+                <p>{provider.pricingSummary || 'No pricing summary provided yet.'}</p>
+              </div>
+
+              <div className="lead-action-row">
+                <button
+                  type="button"
+                  className={isApproved ? 'admin-button admin-button-success' : 'admin-button'}
+                  disabled={isBusy || isApproved}
+                  onClick={() => requestApproval(provider)}
+                >
+                  {isBusy ? 'Saving...' : isApproved ? 'Approved' : 'Approve'}
+                </button>
+                <button
+                  type="button"
+                  className="admin-button"
+                  disabled={isBusy}
+                  onClick={() =>
+                    applyReview(provider.id, {
+                      reviewStatus: 'verified',
+                      approvalStatus: 'approved',
+                      status: 'active',
+                      isVerified: true,
+                      reviewedBy: 'admin_console',
+                    })
+                  }
+                >
+                  Verify documents
+                </button>
+                <button
+                  type="button"
+                  className="admin-button admin-button-secondary"
+                  disabled={isBusy}
+                  onClick={() =>
+                    applyReview(provider.id, {
+                      approvalStatus: 'review',
+                      reviewStatus: 'submitted',
+                      reviewedBy: 'admin_console',
+                    })
+                  }
+                >
+                  Send to review
+                </button>
+                <button
+                  type="button"
+                  className="admin-button admin-button-secondary"
+                  disabled={isBusy}
+                  onClick={() =>
+                    applyReview(provider.id, {
+                      reviewStatus: 'rejected',
+                      isVerified: false,
+                      reviewedBy: 'admin_console',
+                    })
+                  }
+                >
+                  Reject verification
+                </button>
+                <button
+                  type="button"
+                  className="admin-button admin-button-secondary"
+                  disabled={isBusy}
+                  onClick={() =>
+                    applyReview(provider.id, {
+                      status: 'paused',
+                      reviewedBy: 'admin_console',
+                    })
+                  }
+                >
+                  Pause
+                </button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      {pendingApprovalProvider ? (
+        <div className="admin-dialog-backdrop" role="presentation" onClick={() => setPendingApprovalProvider(null)}>
+          <div
+            className="admin-dialog-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="approve-provider-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="small-label">Provider approval</span>
+            <h2 id="approve-provider-title">Approve {pendingApprovalProvider.businessName}?</h2>
+            <p>
+              This will mark the provider as approved and activate them for marketplace visibility in their category.
+            </p>
+            <div className="admin-dialog-meta">
+              <div>
+                <strong>Category</strong>
+                <span>{pendingApprovalProvider.categoryLabel || pendingApprovalProvider.categoryKey}</span>
+              </div>
+              <div>
+                <strong>Coverage</strong>
+                <span>
+                  {[pendingApprovalProvider.serviceArea?.city, pendingApprovalProvider.serviceArea?.state]
+                    .filter(Boolean)
+                    .join(', ') || 'Coverage not set'}
+                </span>
+              </div>
             </div>
-          ) : null}
-
-          <div className="lead-message-block">
-            <strong>Pricing summary</strong>
-            <p>{provider.pricingSummary || 'No pricing summary provided yet.'}</p>
+            <div className="admin-dialog-actions">
+              <button
+                type="button"
+                className="admin-button admin-button-secondary"
+                onClick={() => setPendingApprovalProvider(null)}
+              >
+                Cancel
+              </button>
+              <button type="button" className="admin-button" onClick={confirmApproval}>
+                Confirm approval
+              </button>
+            </div>
           </div>
-
-          <div className="lead-action-row">
-            <button
-              type="button"
-              className="admin-button"
-              disabled={busyProviderId === provider.id}
-              onClick={() =>
-                applyReview(provider.id, {
-                  approvalStatus: 'approved',
-                  status: 'active',
-                  reviewedBy: 'admin_console',
-                })
-              }
-            >
-              {busyProviderId === provider.id ? 'Saving...' : 'Approve'}
-            </button>
-            <button
-              type="button"
-              className="admin-button"
-              disabled={busyProviderId === provider.id}
-              onClick={() =>
-                applyReview(provider.id, {
-                  reviewStatus: 'verified',
-                  approvalStatus: 'approved',
-                  status: 'active',
-                  isVerified: true,
-                  reviewedBy: 'admin_console',
-                })
-              }
-            >
-              Verify documents
-            </button>
-            <button
-              type="button"
-              className="admin-button admin-button-secondary"
-              disabled={busyProviderId === provider.id}
-              onClick={() =>
-                applyReview(provider.id, {
-                  approvalStatus: 'review',
-                  reviewStatus: 'submitted',
-                  reviewedBy: 'admin_console',
-                })
-              }
-            >
-              Send to review
-            </button>
-            <button
-              type="button"
-              className="admin-button admin-button-secondary"
-              disabled={busyProviderId === provider.id}
-              onClick={() =>
-                applyReview(provider.id, {
-                  reviewStatus: 'rejected',
-                  isVerified: false,
-                  reviewedBy: 'admin_console',
-                })
-              }
-            >
-              Reject verification
-            </button>
-            <button
-              type="button"
-              className="admin-button admin-button-secondary"
-              disabled={busyProviderId === provider.id}
-              onClick={() =>
-                applyReview(provider.id, {
-                  status: 'paused',
-                  reviewedBy: 'admin_console',
-                })
-              }
-            >
-              Pause
-            </button>
-          </div>
-        </article>
-      ))}
-    </div>
+        </div>
+      ) : null}
+    </>
   );
 }

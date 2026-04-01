@@ -186,11 +186,56 @@ function formatWorkflowStatus(status) {
 }
 
 function buildProviderFallbackQuery(task, property) {
-  const categoryLabel = task?.providerCategoryLabel || task?.title || 'home services';
+  const categoryQueryByKey = {
+    inspector: 'home inspector',
+    title_company: 'title company',
+    real_estate_attorney: 'real estate attorney',
+    photographer: 'real estate photographer',
+    cleaning_service: 'house cleaning service',
+    termite_inspection: 'termite inspection',
+    notary: 'mobile notary',
+    nhd_report: 'natural hazard disclosure report provider',
+    staging_company: 'home staging company',
+  };
+  const categoryLabel =
+    categoryQueryByKey[task?.providerCategoryKey] || task?.providerCategoryLabel || task?.title || 'home services';
   const locationLabel = [property?.city, property?.state, property?.zip].filter(Boolean).join(', ');
   return [categoryLabel, 'near', locationLabel || property?.addressLine1 || 'this property']
     .filter(Boolean)
     .join(' ');
+}
+
+function formatProviderStatusLabel(status) {
+  return String(status || 'unavailable')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function buildProviderAvailabilityMessage(providerSuggestionTask, providerSource) {
+  if (!providerSuggestionTask) {
+    return '';
+  }
+
+  const categoryLabel =
+    providerSource?.categoryLabel ||
+    providerSuggestionTask.providerCategoryLabel ||
+    providerSuggestionTask.title ||
+    'providers';
+  const liveCount = Number(providerSource?.internalProviders || 0);
+  const unavailableCount = Number(providerSource?.unavailableProviders || 0);
+
+  if (liveCount > 0) {
+    return '';
+  }
+
+  if (unavailableCount > 0) {
+    const statusCounts = Object.entries(providerSource?.unavailableStatusCounts || {})
+      .map(([status, count]) => `${count} ${formatProviderStatusLabel(status).toLowerCase()}`)
+      .join(', ');
+    return `No live ${categoryLabel.toLowerCase()} are available yet. ${unavailableCount} matching provider${unavailableCount === 1 ? ' is' : 's are'} still in setup${statusCounts ? ` (${statusCounts})` : ''} and will appear here once they go live.`;
+  }
+
+  return `No ${categoryLabel.toLowerCase()} are available for this property yet.`;
 }
 
 function searchGooglePlaces(service, request) {
@@ -687,10 +732,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        providerSuggestionsRef.current?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'start',
-        });
+        if (providerSuggestionsRef.current) {
+          const stickyOffset = 150;
+          const top = providerSuggestionsRef.current.getBoundingClientRect().top + window.scrollY - stickyOffset;
+          window.scrollTo({
+            top: Math.max(0, top),
+            behavior: 'smooth',
+          });
+        }
         setPendingChecklistFocusTarget('');
       });
     });
@@ -2772,16 +2821,20 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             </div>
           ) : providerSuggestionTask ? (
             <p className="workspace-control-note">
-              No active marketplace providers are available for this category yet. Add providers in Workside or enable browser Google Maps fallback to broaden coverage.
+              {buildProviderAvailabilityMessage(providerSuggestionTask, providerSource) ||
+                'No active marketplace providers are available for this category yet.'}
             </p>
           ) : null}
           {providerSource ? (
             <p className="workspace-control-note">
-              {providerSource.internalProviders || 0} internal provider match(es)
+              {providerSource.internalProviders || 0} live internal provider match(es)
+              {providerSource.unavailableProviders
+                ? ` · ${providerSource.unavailableProviders} not yet live`
+                : ''}
               {providerSource.externalProviders
                 ? ` · ${providerSource.externalProviders} Google fallback result(s)`
                 : providerSource.googleFallbackEnabled
-                  ? ' · Google fallback ready if marketplace coverage is thin.'
+                  ? ' · Google fallback available if live marketplace coverage is thin.'
                   : ' · Google fallback unavailable for this browser session.'}
             </p>
           ) : null}
