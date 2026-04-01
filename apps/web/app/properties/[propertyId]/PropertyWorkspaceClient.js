@@ -409,6 +409,21 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   const isArchivedProperty = property?.status === 'archived';
 
+  function scrollWorkspaceBodyToTop() {
+    if (!workspaceBodyMainRef.current || typeof window === 'undefined') {
+      return;
+    }
+
+    const stickyOffset = 104;
+    const top =
+      workspaceBodyMainRef.current.getBoundingClientRect().top + window.scrollY - stickyOffset;
+
+    window.scrollTo({
+      top: Math.max(0, top),
+      behavior: 'smooth',
+    });
+  }
+
   function openWorkflowStep(step) {
     if (!step || (!step.actionTarget && !step.actionHref)) {
       return;
@@ -422,9 +437,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (step.actionTarget) {
       setActiveTab(step.actionTarget);
       requestAnimationFrame(() => {
-        workspaceBodyMainRef.current?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'start',
+        requestAnimationFrame(() => {
+          scrollWorkspaceBodyToTop();
         });
       });
     }
