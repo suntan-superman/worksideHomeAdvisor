@@ -1876,6 +1876,11 @@ select {
   top: 112px;
   display: grid;
   gap: 18px;
+  max-height: calc(100vh - 128px);
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-width: thin;
+  isolation: isolate;
 }
 
 .workspace-body-main {
@@ -2063,55 +2068,6 @@ select {
 .workspace-step-item .workspace-workflow-status {
   justify-self: end;
   white-space: nowrap;
-}
-
-.workspace-step-tooltip {
-  position: absolute;
-  left: calc(100% + 12px);
-  top: 50%;
-  z-index: 12;
-  width: 240px;
-  display: grid;
-  gap: 6px;
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(36, 40, 45, 0.08);
-  background: rgba(255, 252, 247, 0.98);
-  box-shadow: 0 16px 30px rgba(83, 67, 52, 0.16);
-  color: var(--ink);
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-50%) translateX(-6px);
-  transition: opacity 120ms ease, transform 120ms ease;
-}
-
-.workspace-step-tooltip strong {
-  font-size: 0.95rem;
-}
-
-.workspace-step-tooltip span {
-  color: var(--muted);
-  font-size: 0.88rem;
-  line-height: 1.45;
-}
-
-.workspace-step-tooltip::before {
-  content: '';
-  position: absolute;
-  left: -6px;
-  top: 50%;
-  width: 12px;
-  height: 12px;
-  background: rgba(255, 252, 247, 0.98);
-  border-left: 1px solid rgba(36, 40, 45, 0.08);
-  border-bottom: 1px solid rgba(36, 40, 45, 0.08);
-  transform: translateY(-50%) rotate(45deg);
-}
-
-.workspace-step-item:hover .workspace-step-tooltip,
-.workspace-step-item:focus-visible .workspace-step-tooltip {
-  opacity: 1;
-  transform: translateY(-50%) translateX(0);
 }
 
 .workspace-workflow-hover-card {
@@ -2512,25 +2468,6 @@ select {
     grid-column: auto;
     position: static;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .workspace-step-tooltip {
-    left: 0;
-    top: calc(100% + 10px);
-    transform: translateY(-6px);
-  }
-
-  .workspace-step-tooltip::before {
-    left: 24px;
-    top: -6px;
-    border-left: 1px solid rgba(36, 40, 45, 0.08);
-    border-bottom: 1px solid rgba(36, 40, 45, 0.08);
-    transform: rotate(135deg);
-  }
-
-  .workspace-step-item:hover .workspace-step-tooltip,
-  .workspace-step-item:focus-visible .workspace-step-tooltip {
-    transform: translateY(0);
   }
 }
 
