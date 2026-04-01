@@ -389,6 +389,21 @@ function buildRawStepStates(context, role) {
     }
   }
 
+  steps.forEach((step, index) => {
+    if (step.status !== 'locked') {
+      return;
+    }
+
+    const blockingStep = steps
+      .slice(0, index)
+      .find((previousStep) => previousStep.isRequired && previousStep.status !== 'complete');
+
+    if (blockingStep) {
+      step.lockedReason = `Finish "${blockingStep.title}" first to unlock this step.`;
+      step.unlocksWhen = blockingStep.title;
+    }
+  });
+
   return {
     steps,
     propertyDetailsComplete,

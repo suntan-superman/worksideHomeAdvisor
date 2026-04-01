@@ -190,6 +190,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const visionCompareRef = useRef(null);
   const visionGalleryRef = useRef(null);
   const workspaceBodyMainRef = useRef(null);
+  const checklistWorkflowRef = useRef(null);
+  const providerSuggestionsRef = useRef(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [property, setProperty] = useState(null);
   const [dashboard, setDashboard] = useState(null);
@@ -228,6 +230,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [showExpandedMap, setShowExpandedMap] = useState(false);
   const [guidedWorkflow, setGuidedWorkflow] = useState(null);
   const [workflowPreviewStepKey, setWorkflowPreviewStepKey] = useState('');
+  const [checklistSummaryMode, setChecklistSummaryMode] = useState('open');
   const [status, setStatus] = useState('Loading property workspace...');
   const [toast, setToast] = useState(null);
   const viewerRole = useMemo(() => {
@@ -382,6 +385,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
     return [...groups.entries()];
   }, [checklist?.items]);
+  const completedChecklistItems = useMemo(
+    () => (checklist?.items || []).filter((item) => item.status === 'done'),
+    [checklist?.items],
+  );
+  const openChecklistItems = useMemo(
+    () => (checklist?.items || []).filter((item) => item.status !== 'done'),
+    [checklist?.items],
+  );
   const providerSuggestionTask = useMemo(() => {
     const tasksWithProviders = (checklist?.items || []).filter((item) => item.providerCategoryKey);
     if (!tasksWithProviders.length) {
@@ -464,6 +475,17 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     });
   }
 
+  function scrollElementIntoView(elementRef) {
+    if (!elementRef?.current) {
+      return;
+    }
+
+    elementRef.current.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  }
+
   function openWorkflowStep(step) {
     if (!step || (!step.actionTarget && !step.actionHref)) {
       return;
@@ -483,6 +505,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setActiveTab(step.actionTarget);
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
+          if (step.key === 'providers') {
+            scrollElementIntoView(providerSuggestionsRef);
+            return;
+          }
+          if (step.key === 'prep_checklist') {
+            scrollElementIntoView(checklistWorkflowRef);
+            return;
+          }
           scrollWorkspaceBodyToTop();
         });
       });
@@ -2164,7 +2194,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   const renderChecklistTab = () => (
     <div className="workspace-two-column">
-      <div className="content-card checklist-card">
+      <div ref={checklistWorkflowRef} className="content-card checklist-card">
         <div className="section-header-tight">
           <div>
             <span className="label">Checklist workflow</span>
@@ -2222,10 +2252,45 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           <span className="label">Progress summary</span>
           <h2>{readinessScore}/100 readiness</h2>
           <div className="mini-stats">
-            <div className="stat-card"><strong>Completed</strong><span>{checklist?.summary?.completedCount ?? 0}</span></div>
-            <div className="stat-card"><strong>Open</strong><span>{checklist?.summary?.openCount ?? 0}</span></div>
+            <button
+              type="button"
+              className={checklistSummaryMode === 'completed' ? 'stat-card stat-card-button active' : 'stat-card stat-card-button'}
+              onClick={() => setChecklistSummaryMode('completed')}
+            >
+              <strong>Completed</strong>
+              <span>{checklist?.summary?.completedCount ?? 0}</span>
+            </button>
+            <button
+              type="button"
+              className={checklistSummaryMode === 'open' ? 'stat-card stat-card-button active' : 'stat-card stat-card-button'}
+              onClick={() => setChecklistSummaryMode('open')}
+            >
+              <strong>Open</strong>
+              <span>{checklist?.summary?.openCount ?? 0}</span>
+            </button>
           </div>
           <p><strong>Next task:</strong> {checklist?.nextTask?.title || 'No open tasks right now'}</p>
+          <div className="workspace-inner-card checklist-summary-card">
+            <strong>{checklistSummaryMode === 'completed' ? 'Completed items' : 'Open items'}</strong>
+            {(checklistSummaryMode === 'completed' ? completedChecklistItems : openChecklistItems).length ? (
+              <ul className="plain-list checklist-summary-list">
+                {(checklistSummaryMode === 'completed' ? completedChecklistItems : openChecklistItems)
+                  .slice(0, 6)
+                  .map((item) => (
+                    <li key={`summary-${item.id}`}>
+                      <strong>{item.title}</strong>
+                      <span>{formatChecklistCategory(item.category)}</span>
+                    </li>
+                  ))}
+              </ul>
+            ) : (
+              <p className="workspace-control-note">
+                {checklistSummaryMode === 'completed'
+                  ? 'Completed tasks will appear here as you finish them.'
+                  : 'Open tasks will appear here until they are completed.'}
+              </p>
+            )}
+          </div>
         </div>
 
         <form className="content-card checklist-form" onSubmit={handleCreateChecklistTask}>
@@ -2235,7 +2300,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           <button type="submit" className="button-secondary" disabled={Boolean(status) || isArchivedProperty}>Save task</button>
         </form>
 
-        <div className="content-card workspace-side-panel">
+        <div ref={providerSuggestionsRef} className="content-card workspace-side-panel">
           <span className="label">Provider suggestions</span>
           <h2>{providerSuggestionTask?.providerCategoryLabel || 'No provider-linked task yet'}</h2>
           <p>
@@ -2504,6 +2569,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               <div className="workspace-workflow-hover-card">
                 <strong>{workflowPreviewStep?.title || 'Hover over a step'}</strong>
                 <p>{workflowPreviewStep?.description || 'Each workflow step explains what to do next and can jump you to the right part of the workspace.'}</p>
+                {workflowPreviewStep?.status === 'locked' ? (
+                  <p className="workspace-control-note">
+                    Locked means an earlier required step still needs attention before this one opens.
+                    {workflowPreviewStep?.lockedReason ? ` ${workflowPreviewStep.lockedReason}` : ''}
+                  </p>
+                ) : null}
                 {workflowPreviewStep?.helperText ? (
                   <p className="workspace-control-note">{workflowPreviewStep.helperText}</p>
                 ) : null}

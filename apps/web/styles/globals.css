@@ -264,6 +264,25 @@ select {
   padding: 18px;
 }
 
+.stat-card-button {
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.stat-card-button:hover,
+.stat-card-button:focus-visible {
+  border-color: rgba(200, 116, 71, 0.24);
+  background: rgba(255, 246, 239, 0.94);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(83, 67, 52, 0.08);
+}
+
+.stat-card-button.active {
+  border-color: rgba(200, 116, 71, 0.28);
+  background: rgba(255, 246, 239, 0.96);
+}
+
 .stat-card span,
 .metric-card p,
 .feature-card p,
@@ -1885,7 +1904,7 @@ select {
 
 .workspace-body-layout {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 272px minmax(0, 1fr);
   gap: 24px;
   align-items: start;
 }
@@ -1905,6 +1924,7 @@ select {
 .workspace-body-main {
   display: grid;
   gap: 18px;
+  min-width: 0;
 }
 
 .workspace-content-layout {
@@ -1912,12 +1932,14 @@ select {
   grid-template-columns: minmax(0, 1fr) 280px;
   gap: 24px;
   align-items: start;
+  min-width: 0;
 }
 
 .workspace-tab-main,
 .workspace-tab-stack {
   display: grid;
   gap: 24px;
+  min-width: 0;
 }
 
 .workspace-two-column {
@@ -1932,6 +1954,7 @@ select {
   top: 182px;
   display: grid;
   gap: 18px;
+  min-width: 0;
 }
 
 .workspace-workflow-card,
@@ -2063,8 +2086,8 @@ select {
 }
 
 .workspace-step-item {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
 }
 
 .workspace-step-item:not(.noninteractive) {
@@ -2085,7 +2108,7 @@ select {
 }
 
 .workspace-step-item .workspace-workflow-status {
-  justify-self: end;
+  justify-self: start;
   white-space: nowrap;
 }
 
@@ -2240,6 +2263,25 @@ select {
   color: var(--muted);
 }
 
+.checklist-summary-card {
+  gap: 12px;
+}
+
+.checklist-summary-list {
+  display: grid;
+  gap: 10px;
+}
+
+.checklist-summary-list li {
+  display: grid;
+  gap: 2px;
+}
+
+.checklist-summary-list span {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
 .brochure-photo-plan {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2274,11 +2316,13 @@ select {
 .brochure-photo-plan-card div {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .brochure-photo-plan-card span {
   color: var(--muted);
   font-size: 0.9rem;
+  overflow-wrap: anywhere;
 }
 
 .brochure-photo-plan-card em {
@@ -2301,6 +2345,7 @@ select {
   border-radius: 18px;
   border: 1px solid rgba(36, 40, 45, 0.08);
   background: rgba(255, 255, 255, 0.74);
+  min-width: 0;
 }
 
 .report-outline-card {
