@@ -1003,11 +1003,16 @@ select {
   justify-content: space-between;
   gap: 16px;
   align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .property-map-header p {
   margin: 10px 0 0;
   color: var(--muted);
+}
+
+.property-map-link {
+  flex: 0 0 auto;
 }
 
 .property-map-frame {

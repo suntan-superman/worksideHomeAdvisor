@@ -1313,8 +1313,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               <p>Review the home and nearby comps side by side instead of in a long stack.</p>
             </div>
             {googleMapsUrl ? (
-              <a href={googleMapsUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button button-no-wrap">
-                Open in Google Maps
+              <a
+                href={googleMapsUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="button-secondary inline-button button-no-wrap property-map-link"
+                title="Open this property and its surrounding area in Google Maps."
+              >
+                View in Maps
               </a>
             ) : null}
           </div>
