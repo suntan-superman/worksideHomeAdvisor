@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -107,6 +108,14 @@ function formatWorkflowStatus(status) {
   return 'Available';
 }
 
+function getVisionJobLabel(jobType) {
+  if (jobType === 'declutter_preview') {
+    return 'Decluttering photo';
+  }
+
+  return 'Enhancing photo';
+}
+
 export function RootScreen() {
   const queryClient = useQueryClient();
   const [authMode, setAuthMode] = useState('login');
@@ -123,6 +132,8 @@ export function RootScreen() {
   const [listingNoteDraft, setListingNoteDraft] = useState('');
   const [customTaskTitle, setCustomTaskTitle] = useState('');
   const [photoAsset, setPhotoAsset] = useState(null);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [pendingVisionJobType, setPendingVisionJobType] = useState('');
   const [form, setForm] = useState({
     email: '',
     password: '',
@@ -289,6 +300,23 @@ export function RootScreen() {
 
     return () => {
       active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSubscription = Keyboard.addListener(showEvent, () => {
+      setKeyboardVisible(true);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
     };
   }, []);
 
@@ -697,6 +725,12 @@ export function RootScreen() {
     }
 
     setError('');
+    setPendingVisionJobType(jobType);
+    setStatus(
+      jobType === 'declutter_preview'
+        ? 'Creating a declutter preview. This can take a moment.'
+        : 'Enhancing the selected photo. This can take a moment.',
+    );
 
     try {
       const response = await createVariantMutation.mutateAsync({
@@ -716,6 +750,8 @@ export function RootScreen() {
       );
     } catch (requestError) {
       setError(requestError.message);
+    } finally {
+      setPendingVisionJobType('');
     }
   }
 
@@ -1106,20 +1142,51 @@ export function RootScreen() {
                                 Materials currently prefer {selectedAsset.selectedVariant.label || 'the saved vision variant'} for this photo.
                               </Text>
                             ) : null}
-                            <View style={styles.actionRow}>
+                            {createVariantMutation.isPending ? (
+                              <View style={styles.visionJobCard}>
+                                <View style={styles.visionJobHeader}>
+                                  <ActivityIndicator color="#d28859" />
+                                  <Text style={styles.visionJobTitle}>
+                                    {getVisionJobLabel(pendingVisionJobType)}
+                                  </Text>
+                                </View>
+                                <Text style={styles.variantHint}>
+                                  Workside is processing this image now. Your updated version will appear below automatically.
+                                </Text>
+                              </View>
+                            ) : null}
+                            <View style={[styles.actionRow, styles.visionActionRow]}>
                               <Pressable
                                 onPress={() => handleGenerateVariant('enhance_listing_quality')}
-                                style={[styles.button, styles.buttonSecondary, styles.flexButton]}
+                                style={[styles.button, styles.buttonSecondary, styles.flexButton, styles.visionActionButton]}
                                 disabled={busy}
                               >
-                                <Text style={styles.buttonSecondaryText}>Enhance</Text>
+                                <Text
+                                  style={[styles.buttonSecondaryText, styles.visionActionButtonText]}
+                                  numberOfLines={1}
+                                  adjustsFontSizeToFit
+                                  minimumFontScale={0.85}
+                                >
+                                  {pendingVisionJobType === 'enhance_listing_quality' && createVariantMutation.isPending
+                                    ? 'Enhancing...'
+                                    : 'Enhance'}
+                                </Text>
                               </Pressable>
                               <Pressable
                                 onPress={() => handleGenerateVariant('declutter_preview')}
-                                style={[styles.button, styles.buttonSecondary, styles.flexButton]}
+                                style={[styles.button, styles.buttonSecondary, styles.flexButton, styles.visionActionButton]}
                                 disabled={busy}
                               >
-                                <Text style={styles.buttonSecondaryText}>Declutter</Text>
+                                <Text
+                                  style={[styles.buttonSecondaryText, styles.visionActionButtonText]}
+                                  numberOfLines={1}
+                                  adjustsFontSizeToFit
+                                  minimumFontScale={0.85}
+                                >
+                                  {pendingVisionJobType === 'declutter_preview' && createVariantMutation.isPending
+                                    ? 'Decluttering...'
+                                    : 'Declutter'}
+                                </Text>
                               </Pressable>
                             </View>
                             {selectedVariant ? (
@@ -1328,7 +1395,13 @@ export function RootScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          keyboardVisible ? styles.scrollContentKeyboard : null,
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.card}>
           <Text style={styles.kicker}>Seller Access</Text>
           <Text style={styles.title}>Workside Home Advisor</Text>
@@ -1445,6 +1518,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 18,
   },
+  scrollContentKeyboard: {
+    justifyContent: 'flex-start',
+    paddingBottom: 160,
+  },
   card: {
     backgroundColor: 'rgba(38, 50, 61, 0.78)',
     borderRadius: 24,
@@ -1481,6 +1558,9 @@ const styles = StyleSheet.create({
   actionRow: {
     flexDirection: 'row',
     gap: 10,
+  },
+  visionActionRow: {
+    alignItems: 'stretch',
   },
   segmentButton: {
     flex: 1,
@@ -1999,6 +2079,31 @@ const styles = StyleSheet.create({
     backgroundColor: '#24303a',
     borderWidth: 1,
     borderColor: '#3d4e5b',
+  },
+  visionJobCard: {
+    gap: 8,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: '#31404d',
+    borderWidth: 1,
+    borderColor: '#425563',
+  },
+  visionJobHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  visionJobTitle: {
+    color: '#f8f1e6',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  visionActionButton: {
+    minWidth: 0,
+  },
+  visionActionButtonText: {
+    fontSize: 15,
+    textAlign: 'center',
   },
   visionImage: {
     width: '100%',
