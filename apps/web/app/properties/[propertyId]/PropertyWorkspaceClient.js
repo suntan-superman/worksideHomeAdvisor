@@ -399,7 +399,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     return { title: 'Review the latest outputs', detail: 'Both brochure and report are ready. Use Overview to compare the latest deliverables.', tab: 'overview' };
   }, [checklist?.nextTask?.detail, checklist?.nextTask?.title, latestFlyer, latestReport, listingCandidateAssets.length, mediaAssets.length, property?.status, selectedMediaAsset, selectedVariant]);
   const workflowNextStep = guidedWorkflow?.nextStep || null;
-  const workflowPhases = guidedWorkflow?.phases || [];
   const workflowSteps = guidedWorkflow?.steps || [];
   const workflowPreviewStep =
     workflowSteps.find((step) => step.key === workflowPreviewStepKey) ||
@@ -410,7 +409,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const isArchivedProperty = property?.status === 'archived';
 
   function openWorkflowStep(step) {
-    if (!step) {
+    if (!step || (!step.actionTarget && !step.actionHref)) {
       return;
     }
 
@@ -2429,64 +2428,47 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 </div>
               </div>
             </div>
-            <div className="content-card workspace-workflow-card workspace-workflow-detail-card">
-              <span className="label">Step details</span>
-              <h3>{workflowPreviewStep?.title || 'Choose a workflow step'}</h3>
-              <p>{workflowPreviewStep?.description || 'Hover over a workflow step to see what it includes.'}</p>
-              {workflowPreviewStep?.helperText ? (
-                <p className="workspace-control-note">{workflowPreviewStep.helperText}</p>
-              ) : null}
-              {workflowPreviewStep ? (
-                <div className="workspace-workflow-detail-meta">
-                  <span className={`workspace-workflow-status workspace-workflow-status-${workflowPreviewStep.status}`}>
-                    {formatWorkflowStatus(workflowPreviewStep.status)}
-                  </span>
-                  <span>{workflowPreviewStep.actionTarget ? `Opens ${WORKSPACE_TABS.find((tab) => tab.id === workflowPreviewStep.actionTarget)?.label || 'workspace'}` : 'Guided step'}</span>
-                </div>
-              ) : null}
-              <button
-                type="button"
-                className="button-primary"
-                onClick={() => workflowPreviewStep && openWorkflowStep(workflowPreviewStep)}
-                disabled={Boolean(status) || !workflowPreviewStep || (!workflowPreviewStep.actionTarget && !workflowPreviewStep.actionHref)}
-              >
-                {workflowPreviewStep?.ctaLabel || 'Open step'}
-              </button>
-            </div>
-            <div className="content-card workspace-workflow-card workspace-wizard-card">
-              <span className="label">Workflow phases</span>
-              <div className="workspace-phase-list">
-                {workflowPhases.map((phase) => (
-                  <div key={phase.key} className={`workspace-phase-item workspace-phase-item-${phase.status}`}>
-                    <div>
-                      <strong>{phase.label}</strong>
-                      <span>{phase.completedSteps}/{phase.totalSteps} required steps complete</span>
-                    </div>
-                    <em>{formatWorkflowStatus(phase.status)}</em>
-                  </div>
-                ))}
-              </div>
-              <div className="workspace-step-list">
+            <div className="content-card workspace-workflow-card workspace-wizard-card workspace-workflow-nav-card">
+              <span className="label">Guided steps</span>
+              <div className="workspace-step-list workspace-step-list-compact">
                 {workflowSteps.map((step) => (
                   <button
                     key={step.key}
                     type="button"
-                    className={`workspace-step-item workspace-step-item-${step.status}${workflowNextStep?.key === step.key ? ' active' : ''}${workflowPreviewStep?.key === step.key ? ' preview' : ''}`}
+                    className={`workspace-step-item workspace-step-item-${step.status}${workflowNextStep?.key === step.key ? ' active' : ''}${workflowPreviewStep?.key === step.key ? ' preview' : ''}${(!step.actionTarget && !step.actionHref) ? ' noninteractive' : ''}`}
                     onClick={() => {
                       setWorkflowPreviewStepKey(step.key);
                       openWorkflowStep(step);
                     }}
                     onMouseEnter={() => setWorkflowPreviewStepKey(step.key)}
                     onFocus={() => setWorkflowPreviewStepKey(step.key)}
-                    disabled={Boolean(status) || (!step.actionTarget && !step.actionHref)}
+                    aria-disabled={Boolean(status) || (!step.actionTarget && !step.actionHref)}
+                    title={`${step.title}: ${step.description}${step.helperText ? ` ${step.helperText}` : ''}${step.actionTarget ? ` Opens ${WORKSPACE_TABS.find((tab) => tab.id === step.actionTarget)?.label || 'workspace'}.` : ''}`}
                   >
                     <div className="workspace-step-copy">
                       <strong>{step.title}</strong>
-                      <span>{step.description}</span>
+                      <span>{step.actionTarget ? WORKSPACE_TABS.find((tab) => tab.id === step.actionTarget)?.label || 'Workspace' : 'Not ready yet'}</span>
                     </div>
-                    <em>{formatWorkflowStatus(step.status)}</em>
+                    <em className={`workspace-workflow-status workspace-workflow-status-${step.status}`}>{formatWorkflowStatus(step.status)}</em>
                   </button>
                 ))}
+              </div>
+              <div className="workspace-workflow-hover-card">
+                <strong>{workflowPreviewStep?.title || 'Hover over a step'}</strong>
+                <p>{workflowPreviewStep?.description || 'Each workflow step explains what to do next and can jump you to the right part of the workspace.'}</p>
+                {workflowPreviewStep?.helperText ? (
+                  <p className="workspace-control-note">{workflowPreviewStep.helperText}</p>
+                ) : null}
+                {workflowPreviewStep ? (
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={() => openWorkflowStep(workflowPreviewStep)}
+                    disabled={Boolean(status) || (!workflowPreviewStep.actionTarget && !workflowPreviewStep.actionHref)}
+                  >
+                    {workflowPreviewStep?.ctaLabel || 'Open this step'}
+                  </button>
+                ) : null}
               </div>
             </div>
           </aside>

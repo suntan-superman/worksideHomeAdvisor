@@ -1866,7 +1866,7 @@ select {
 
 .workspace-tab-layout {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 300px;
+  grid-template-columns: 240px minmax(0, 1fr) 280px;
   gap: 24px;
   align-items: start;
 }
@@ -1910,6 +1910,10 @@ select {
   gap: 14px;
 }
 
+.workspace-workflow-nav-card {
+  gap: 14px;
+}
+
 .workspace-workflow-detail-meta {
   display: flex;
   flex-wrap: wrap;
@@ -1942,6 +1946,7 @@ select {
 .workspace-workflow-status-locked,
 .workspace-workflow-status-blocked {
   color: var(--muted);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .workspace-wizard-card {
@@ -1952,6 +1957,10 @@ select {
 .workspace-step-list {
   display: grid;
   gap: 10px;
+}
+
+.workspace-step-list-compact {
+  gap: 8px;
 }
 
 .workspace-phase-item,
@@ -2010,21 +2019,57 @@ select {
 }
 
 .workspace-step-item-locked,
-.workspace-step-item:disabled {
+.workspace-step-item.noninteractive {
   opacity: 0.64;
 }
 
-.workspace-step-item:not(:disabled) {
+.workspace-step-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.workspace-step-item:not(.noninteractive) {
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease, transform 120ms ease, box-shadow 120ms ease;
 }
 
-.workspace-step-item:not(:disabled):hover,
-.workspace-step-item:not(:disabled):focus-visible {
+.workspace-step-item:not(.noninteractive):hover,
+.workspace-step-item:not(.noninteractive):focus-visible {
   border-color: rgba(200, 116, 71, 0.24);
   background: rgba(255, 246, 239, 0.94);
   transform: translateY(-1px);
   box-shadow: 0 10px 22px rgba(83, 67, 52, 0.08);
+}
+
+.workspace-step-item strong {
+  font-size: 0.98rem;
+}
+
+.workspace-step-item .workspace-workflow-status {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.workspace-workflow-hover-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(36, 40, 45, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.workspace-workflow-hover-card strong {
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.workspace-workflow-hover-card p {
+  margin: 0;
+}
+
+.workspace-workflow-hover-card .button-primary {
+  width: 100%;
 }
 
 .workflow-phase-list {
@@ -2390,6 +2435,18 @@ select {
 
   .workspace-modal-preview-image {
     height: 200px;
+  }
+}
+
+@media (max-width: 1400px) {
+  .workspace-tab-layout {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .workspace-quick-rail {
+    grid-column: 1 / -1;
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
