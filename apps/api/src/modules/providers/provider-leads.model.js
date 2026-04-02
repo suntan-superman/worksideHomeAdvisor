@@ -153,6 +153,60 @@ const savedProviderSchema = new mongoose.Schema(
 
 savedProviderSchema.index({ propertyId: 1, userId: 1, providerId: 1 }, { unique: true });
 
+const providerReferenceSchema = new mongoose.Schema(
+  {
+    propertyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Property',
+      required: true,
+      index: true,
+    },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
+    source: {
+      type: String,
+      enum: ['internal', 'google_maps'],
+      required: true,
+      default: 'internal',
+      index: true,
+    },
+    sourceRefId: { type: String, required: true, index: true },
+    providerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Provider',
+      default: null,
+      index: true,
+    },
+    categoryKey: { type: String, default: '', index: true },
+    categoryLabel: { type: String, default: '' },
+    businessName: { type: String, required: true, default: '' },
+    description: { type: String, default: '' },
+    coverageLabel: { type: String, default: '' },
+    city: { type: String, default: '' },
+    state: { type: String, default: '' },
+    email: { type: String, default: '' },
+    phone: { type: String, default: '' },
+    websiteUrl: { type: String, default: '' },
+    mapsUrl: { type: String, default: '' },
+    rating: { type: Number, default: 0 },
+    reviewCount: { type: Number, default: 0 },
+    notes: { type: String, default: '' },
+  },
+  {
+    timestamps: true,
+    collection: 'providerReferences',
+  },
+);
+
+providerReferenceSchema.index(
+  { propertyId: 1, userId: 1, source: 1, sourceRefId: 1 },
+  { unique: true },
+);
+
 const providerAnalyticsSchema = new mongoose.Schema(
   {
     providerId: {
@@ -230,6 +284,10 @@ export const ProviderResponseModel =
 
 export const SavedProviderModel =
   mongoose.models.SavedProvider || mongoose.model('SavedProvider', savedProviderSchema);
+
+export const ProviderReferenceModel =
+  mongoose.models.ProviderReference ||
+  mongoose.model('ProviderReference', providerReferenceSchema);
 
 export const ProviderAnalyticsModel =
   mongoose.models.ProviderAnalytics ||

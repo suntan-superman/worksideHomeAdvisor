@@ -11,12 +11,15 @@ import { ProviderModel } from './provider.model.js';
 
 import {
   createProviderLeadRequest,
+  createProviderReferenceForProperty,
   createProviderPortalSessionForUser,
   createProviderPortalSession,
+  deleteProviderReference,
   createProviderProfile,
   getProviderVerificationDocumentFile,
   listProviderCategories,
   listProviderLeadsForProperty,
+  listProviderReferencesForProperty,
   listProvidersForProperty,
   respondToProviderPortalLead,
   saveProviderForProperty,
@@ -46,6 +49,10 @@ const providerParamsSchema = z.object({
   providerId: z.string().min(1),
 });
 
+const providerReferenceParamsSchema = z.object({
+  referenceId: z.string().min(1),
+});
+
 const providerDiscoveryQuerySchema = z.object({
   category: z.string().trim().min(1).optional(),
   limit: z.coerce.number().int().positive().max(10).optional(),
@@ -59,6 +66,26 @@ const createLeadSchema = z.object({
   message: z.string().trim().max(280).optional(),
   maxProviders: z.number().int().min(1).max(5).optional(),
   deliveryMode: z.enum(['email', 'sms', 'sms_and_email']).optional(),
+});
+
+const providerReferenceCreateSchema = z.object({
+  source: z.enum(['internal', 'google_maps']).default('internal'),
+  sourceRefId: z.string().trim().min(1).max(120).optional(),
+  providerId: z.string().trim().min(1).optional(),
+  categoryKey: z.string().trim().max(80).optional(),
+  categoryLabel: z.string().trim().max(120).optional(),
+  businessName: z.string().trim().max(140).optional(),
+  description: z.string().trim().max(400).optional(),
+  coverageLabel: z.string().trim().max(120).optional(),
+  city: z.string().trim().max(80).optional(),
+  state: z.string().trim().max(40).optional(),
+  email: z.string().trim().email().max(120).optional().or(z.literal('')),
+  phone: z.string().trim().max(40).optional(),
+  websiteUrl: z.string().trim().url().max(220).optional().or(z.literal('')),
+  mapsUrl: z.string().trim().url().max(220).optional().or(z.literal('')),
+  rating: z.coerce.number().min(0).max(5).optional(),
+  reviewCount: z.coerce.number().int().min(0).optional(),
+  notes: z.string().trim().max(240).optional(),
 });
 
 const providerSignupSchema = z.object({
@@ -213,6 +240,41 @@ export async function providersRoutes(fastify) {
       return reply.send({ leads });
     } catch (error) {
       const statusCode = error.message === 'Property not found.' ? 404 : 400;
+      return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/properties/:propertyId/provider-references', async (request, reply) => {
+    try {
+      const { propertyId } = propertyParamsSchema.parse(request.params);
+      const references = await listProviderReferencesForProperty(propertyId);
+      return reply.send({ references });
+    } catch (error) {
+      const statusCode = error.message === 'Property not found.' ? 404 : 400;
+      return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/properties/:propertyId/provider-references', async (request, reply) => {
+    try {
+      const { propertyId } = propertyParamsSchema.parse(request.params);
+      await assertPropertyEditableById(propertyId);
+      const payload = providerReferenceCreateSchema.parse(request.body || {});
+      const result = await createProviderReferenceForProperty(propertyId, payload);
+      return reply.code(201).send(result);
+    } catch (error) {
+      const statusCode = error.message === 'Property not found.' ? 404 : 400;
+      return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
+  fastify.delete('/provider-references/:referenceId', async (request, reply) => {
+    try {
+      const { referenceId } = providerReferenceParamsSchema.parse(request.params);
+      const result = await deleteProviderReference(referenceId);
+      return reply.send(result);
+    } catch (error) {
+      const statusCode = error.message === 'Provider reference not found.' ? 404 : 400;
       return reply.code(statusCode).send({ message: error.message });
     }
   });

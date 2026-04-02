@@ -11,6 +11,7 @@ import {
   LeadDispatchModel,
   LeadRequestModel,
   ProviderAnalyticsModel,
+  ProviderReferenceModel,
   ProviderResponseModel,
   ProviderSmsLogModel,
   SavedProviderModel,
@@ -670,6 +671,37 @@ function serializeProvider(document, extras = {}) {
   };
 }
 
+function serializeProviderReference(document) {
+  if (!document) {
+    return null;
+  }
+
+  return {
+    id: document._id?.toString?.() || String(document._id),
+    propertyId: document.propertyId?.toString?.() || String(document.propertyId || ''),
+    userId: document.userId?.toString?.() || String(document.userId || ''),
+    providerId: document.providerId?.toString?.() || String(document.providerId || ''),
+    source: document.source || 'internal',
+    sourceRefId: document.sourceRefId || '',
+    categoryKey: document.categoryKey || '',
+    categoryLabel: document.categoryLabel || '',
+    businessName: document.businessName || '',
+    description: document.description || '',
+    coverageLabel: document.coverageLabel || '',
+    city: document.city || '',
+    state: document.state || '',
+    email: document.email || '',
+    phone: document.phone || '',
+    websiteUrl: document.websiteUrl || '',
+    mapsUrl: document.mapsUrl || '',
+    rating: Number(document.rating || 0),
+    reviewCount: Number(document.reviewCount || 0),
+    notes: document.notes || '',
+    createdAt: document.createdAt || null,
+    updatedAt: document.updatedAt || null,
+  };
+}
+
 function serializeProviderPortalLead(dispatch, leadRequest) {
   const propertyAddress =
     leadRequest?.propertySnapshot?.address ||
@@ -1276,6 +1308,149 @@ export async function saveProviderForProperty(propertyId, providerId) {
   );
 
   return { saved: true, providerId };
+}
+
+export async function createProviderReferenceForProperty(propertyId, payload = {}) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to save provider references.');
+  }
+
+  const property = await getPropertyById(propertyId);
+  if (!property) throw new Error('Property not found.');
+
+  const source = payload.source === 'google_maps' ? 'google_maps' : 'internal';
+  let sourceRefId = normalizeString(payload.sourceRefId);
+  let providerId = null;
+  let referencePayload = {
+    categoryKey: normalizeString(payload.categoryKey),
+    categoryLabel: normalizeString(payload.categoryLabel),
+    businessName: normalizeString(payload.businessName),
+    description: normalizeString(payload.description).slice(0, 400),
+    coverageLabel: normalizeString(payload.coverageLabel).slice(0, 120),
+    city: normalizeString(payload.city).slice(0, 80),
+    state: normalizeString(payload.state).slice(0, 40),
+    email: normalizeString(payload.email).slice(0, 120),
+    phone: normalizeString(payload.phone).slice(0, 40),
+    websiteUrl: normalizeString(payload.websiteUrl).slice(0, 220),
+    mapsUrl: normalizeString(payload.mapsUrl).slice(0, 220),
+    rating: Number(payload.rating || 0),
+    reviewCount: Number(payload.reviewCount || 0),
+    notes: normalizeString(payload.notes).slice(0, 240),
+  };
+
+  if (source === 'internal') {
+    providerId = payload.providerId;
+    const provider = await ProviderModel.findById(providerId).lean();
+    if (!provider) {
+      throw new Error('Provider not found.');
+    }
+    sourceRefId = provider._id?.toString?.() || String(provider._id);
+    referencePayload = {
+      categoryKey: provider.categoryKey || '',
+      categoryLabel: payload.categoryLabel || '',
+      businessName: provider.businessName || '',
+      description: provider.description || '',
+      coverageLabel: payload.coverageLabel || '',
+      city: provider.serviceArea?.city || '',
+      state: provider.serviceArea?.state || '',
+      email: provider.email || '',
+      phone: provider.phone || '',
+      websiteUrl: provider.websiteUrl || '',
+      mapsUrl: '',
+      rating: 0,
+      reviewCount: 0,
+      notes: normalizeString(payload.notes).slice(0, 240),
+    };
+  }
+
+  if (!sourceRefId || !referencePayload.businessName) {
+    throw new Error('Provider reference is missing required details.');
+  }
+
+  const existingReference = await ProviderReferenceModel.findOne({
+    propertyId,
+    userId: property.ownerUserId,
+    source,
+    sourceRefId,
+  }).lean();
+
+  if (!existingReference) {
+    const existingCount = await ProviderReferenceModel.countDocuments({
+      propertyId,
+      userId: property.ownerUserId,
+    });
+    if (existingCount >= 5) {
+      throw new Error('You can save up to 5 provider references per property.');
+    }
+  }
+
+  const reference = await ProviderReferenceModel.findOneAndUpdate(
+    {
+      propertyId,
+      userId: property.ownerUserId,
+      source,
+      sourceRefId,
+    },
+    {
+      $set: {
+        providerId,
+        ...referencePayload,
+      },
+      $setOnInsert: {
+        propertyId,
+        userId: property.ownerUserId,
+        source,
+        sourceRefId,
+      },
+    },
+    {
+      new: true,
+      upsert: true,
+      setDefaultsOnInsert: true,
+    },
+  ).lean();
+
+  return {
+    reference: serializeProviderReference(reference),
+  };
+}
+
+export async function listProviderReferencesForProperty(propertyId) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to list provider references.');
+  }
+
+  const property = await getPropertyById(propertyId);
+  if (!property) throw new Error('Property not found.');
+
+  const references = await ProviderReferenceModel.find({
+    propertyId,
+    userId: property.ownerUserId,
+  })
+    .sort({ createdAt: 1, businessName: 1 })
+    .lean();
+
+  return {
+    items: references.map((reference) => serializeProviderReference(reference)),
+  };
+}
+
+export async function deleteProviderReference(referenceId) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to remove provider references.');
+  }
+
+  const reference = await ProviderReferenceModel.findById(referenceId);
+  if (!reference) {
+    throw new Error('Provider reference not found.');
+  }
+
+  await reference.deleteOne();
+
+  return {
+    deleted: true,
+    referenceId,
+  };
 }
 
 export async function createProviderLeadRequest(propertyId, payload = {}) {
@@ -1968,6 +2143,7 @@ export async function deleteAdminProvider(providerId) {
 
   await Promise.all([
     SavedProviderModel.deleteMany({ providerId }),
+    ProviderReferenceModel.deleteMany({ providerId }),
     LeadDispatchModel.deleteMany({ providerId }),
     ProviderAnalyticsModel.deleteMany({ providerId }),
     ProviderResponseModel.deleteMany({ providerId }),

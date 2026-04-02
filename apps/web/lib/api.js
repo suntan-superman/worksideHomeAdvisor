@@ -159,6 +159,27 @@ export function saveProvider(propertyId, providerId) {
   });
 }
 
+export function listProviderReferences(propertyId) {
+  return request(`/api/v1/properties/${propertyId}/provider-references`);
+}
+
+export function createProviderReference(propertyId, payload) {
+  return request(`/api/v1/properties/${propertyId}/provider-references`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteProviderReference(referenceId) {
+  return request(`/api/v1/provider-references/${referenceId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function getProviderReferenceSheetExportUrl(propertyId) {
+  return `${API_BASE_URL}/api/v1/properties/${propertyId}/providers/reference-sheet.pdf`;
+}
+
 export function signupProvider(payload, token) {
   return request('/api/v1/provider-portal/signup', {
     method: 'POST',

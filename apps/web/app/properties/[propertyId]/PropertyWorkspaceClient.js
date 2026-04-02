@@ -15,7 +15,9 @@ import {
   createChecklistItem,
   createImageEnhancementJob,
   createProviderLead,
+  createProviderReference,
   deleteMediaAsset as deleteMediaAssetRequest,
+  deleteProviderReference,
   generateFlyer,
   generateReport,
   getChecklist,
@@ -25,9 +27,11 @@ import {
   getLatestPricing,
   getLatestReport,
   getProperty,
+  getProviderReferenceSheetExportUrl,
   getReportExportUrl,
   getWorkflow,
   listProviderLeads,
+  listProviderReferences,
   listProviders,
   listMediaAssets,
   listMediaVariants,
@@ -328,6 +332,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [customChecklistDetail, setCustomChecklistDetail] = useState('');
   const [providerRecommendations, setProviderRecommendations] = useState([]);
   const [externalProviderRecommendations, setExternalProviderRecommendations] = useState([]);
+  const [providerReferences, setProviderReferences] = useState([]);
   const [providerLeads, setProviderLeads] = useState([]);
   const [providerSource, setProviderSource] = useState(null);
   const [activeProviderTaskKey, setActiveProviderTaskKey] = useState('');
@@ -542,6 +547,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     return tasksWithProviders.find((item) => item.status !== 'done') || tasksWithProviders[0];
   }, [activeProviderTaskKey, checklist?.items]);
+  const providerReferenceIds = useMemo(
+    () => new Set(providerReferences.map((reference) => `${reference.source}:${reference.sourceRefId}`)),
+    [providerReferences],
+  );
   const providerGoogleSearchUrl = useMemo(() => {
     if (!providerSuggestionTask) {
       return '';
@@ -1017,6 +1026,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     return nextLeads;
   }
 
+  async function refreshProviderReferences() {
+    const response = await listProviderReferences(propertyId);
+    const nextReferences = response.references?.items || [];
+    setProviderReferences(nextReferences);
+    return nextReferences;
+  }
+
   useEffect(() => {
     refreshMediaVariants(selectedMediaAsset?.id).catch(() => {
       setMediaVariants([]);
@@ -1042,6 +1058,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   useEffect(() => {
     refreshProviderLeads().catch(() => {
       setProviderLeads([]);
+    });
+  }, [propertyId]);
+
+  useEffect(() => {
+    refreshProviderReferences().catch(() => {
+      setProviderReferences([]);
     });
   }, [propertyId]);
 
@@ -1561,6 +1583,70 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
   }
 
+  async function handleSaveProviderReference(provider, source = 'internal') {
+    if (blockArchivedMutation()) {
+      return;
+    }
+
+    setStatus('Saving provider reference...');
+    setToast(null);
+    try {
+      await createProviderReference(propertyId, {
+        source,
+        sourceRefId:
+          source === 'google_maps'
+            ? provider.sourceRefId || provider.id
+            : provider.id,
+        providerId: source === 'internal' ? provider.id : undefined,
+        categoryKey: provider.categoryKey,
+        categoryLabel: providerSuggestionTask?.providerCategoryLabel || provider.categoryLabel || '',
+        businessName: provider.businessName,
+        description: provider.description,
+        coverageLabel: provider.coverageLabel,
+        city: provider.city,
+        state: provider.state,
+        email: provider.email,
+        phone: provider.phone,
+        websiteUrl: provider.websiteUrl,
+        mapsUrl: provider.mapsUrl,
+        rating: provider.rating,
+        reviewCount: provider.reviewCount,
+      });
+      await refreshProviderReferences();
+      setToast({
+        tone: 'success',
+        title: 'Added to reference sheet',
+        message: `${provider.businessName} is now saved for the printable provider reference sheet.`,
+      });
+    } catch (requestError) {
+      setToast({ tone: 'error', title: 'Could not save provider reference', message: requestError.message });
+    } finally {
+      setStatus('');
+    }
+  }
+
+  async function handleRemoveProviderReference(referenceId) {
+    if (blockArchivedMutation()) {
+      return;
+    }
+
+    setStatus('Removing provider reference...');
+    setToast(null);
+    try {
+      await deleteProviderReference(referenceId);
+      await refreshProviderReferences();
+      setToast({
+        tone: 'success',
+        title: 'Reference removed',
+        message: 'The provider reference has been removed from the printable shortlist.',
+      });
+    } catch (requestError) {
+      setToast({ tone: 'error', title: 'Could not remove provider reference', message: requestError.message });
+    } finally {
+      setStatus('');
+    }
+  }
+
   async function handleRequestProviderLead(provider) {
     if (blockArchivedMutation()) {
       return;
@@ -1604,6 +1690,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   function handleDownloadReportPdf() {
     const exportUrl = getReportExportUrl(propertyId);
+    window.open(exportUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  function handleDownloadProviderReferenceSheet() {
+    const exportUrl = getProviderReferenceSheetExportUrl(propertyId);
     window.open(exportUrl, '_blank', 'noopener,noreferrer');
   }
 
@@ -2772,6 +2863,19 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     <button type="button" className="button-secondary" onClick={() => handleSaveProvider(provider.id)} disabled={Boolean(status) || isArchivedProperty || provider.saved}>
                       {provider.saved ? 'Saved' : 'Save provider'}
                     </button>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => handleSaveProviderReference(provider, 'internal')}
+                      disabled={
+                        Boolean(status) ||
+                        isArchivedProperty ||
+                        providerReferenceIds.has(`internal:${provider.id}`) ||
+                        providerReferences.length >= 5
+                      }
+                    >
+                      {providerReferenceIds.has(`internal:${provider.id}`) ? 'On sheet' : 'Add to sheet'}
+                    </button>
                     <button type="button" className="button-primary" onClick={() => handleRequestProviderLead(provider)} disabled={Boolean(status) || isArchivedProperty}>
                       Request by email
                     </button>
@@ -2805,6 +2909,19 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     <span>External discovery</span>
                   </div>
                   <div className="provider-card-actions">
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => handleSaveProviderReference(provider, 'google_maps')}
+                      disabled={
+                        Boolean(status) ||
+                        isArchivedProperty ||
+                        providerReferenceIds.has(`google_maps:${provider.id}`) ||
+                        providerReferences.length >= 5
+                      }
+                    >
+                      {providerReferenceIds.has(`google_maps:${provider.id}`) ? 'On sheet' : 'Add to sheet'}
+                    </button>
                     {provider.mapsUrl ? (
                       <a href={provider.mapsUrl} target="_blank" rel="noreferrer" className="button-primary inline-button">
                         Open in Maps
@@ -2856,6 +2973,56 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 'Provider credentials are self-reported or verified where indicated. Workside does not guarantee accuracy.'}
             </p>
           ) : null}
+          <div className="workspace-inner-card provider-reference-sheet-card">
+            <div className="section-header-tight">
+              <div>
+                <strong>Provider reference sheet</strong>
+                <p className="workspace-control-note">
+                  Save up to 5 internal or Google-discovered contacts here, then export a printable reference sheet.
+                </p>
+              </div>
+              <span className="section-header-meta">{providerReferences.length}/5 saved</span>
+            </div>
+            {providerReferences.length ? (
+              <div className="provider-reference-list">
+                {providerReferences.map((reference) => (
+                  <article key={reference.id} className="provider-reference-item">
+                    <div>
+                      <strong>{reference.businessName}</strong>
+                      <span>
+                        {[reference.categoryLabel || reference.categoryKey, reference.city, reference.state]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
+                      <span>{reference.phone || reference.email || reference.websiteUrl || reference.mapsUrl || 'Contact details not listed'}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => handleRemoveProviderReference(reference.id)}
+                      disabled={Boolean(status) || isArchivedProperty}
+                    >
+                      Remove
+                    </button>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="workspace-control-note">
+                Save providers from the recommendations above to build a printable shortlist for this property.
+              </p>
+            )}
+            <div className="provider-card-actions">
+              <button
+                type="button"
+                className="button-primary"
+                onClick={handleDownloadProviderReferenceSheet}
+                disabled={!providerReferences.length}
+              >
+                Download reference sheet
+              </button>
+            </div>
+          </div>
           {providerLeads.length ? (
             <div className="provider-lead-list">
               <strong>Recent lead requests</strong>

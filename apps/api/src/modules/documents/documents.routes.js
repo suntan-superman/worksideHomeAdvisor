@@ -12,6 +12,7 @@ import {
   generatePropertyFlyer,
   getLatestPropertyFlyer,
 } from './flyer.service.js';
+import { exportProviderReferenceSheetPdf } from './provider-reference.service.js';
 import {
   exportPropertyReportPdf,
   generatePropertyReport,
@@ -280,6 +281,27 @@ export async function documentsRoutes(fastify) {
       }
 
       const { bytes, filename } = await exportPropertyReportPdf({
+        propertyId: request.params.propertyId,
+      });
+
+      reply
+        .header('Content-Type', 'application/pdf')
+        .header('Content-Disposition', `attachment; filename="${filename}"`);
+
+      return reply.send(Buffer.from(bytes));
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/:propertyId/providers/reference-sheet.pdf', async (request, reply) => {
+    try {
+      const property = await getPropertyById(request.params.propertyId);
+      if (!property) {
+        return reply.code(404).send({ message: 'Property not found.' });
+      }
+
+      const { bytes, filename } = await exportProviderReferenceSheetPdf({
         propertyId: request.params.propertyId,
       });
 
