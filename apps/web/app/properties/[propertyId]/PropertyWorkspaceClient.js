@@ -1038,7 +1038,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         setToast({
           tone: 'info',
           title: 'No Google fallback results',
-          message: 'Google did not return any additional providers for this category near the property.',
+          message: 'Google did not return structured fallback results for this category near the property. You can still open the live Google Maps search below.',
         });
       }
       return results;
@@ -2985,6 +2985,16 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   ? 'Refresh Google fallback'
                   : 'Browse Google fallback'}
               </button>
+              {providerGoogleSearchUrl ? (
+                <a
+                  href={providerGoogleSearchUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="button-secondary inline-button"
+                >
+                  Open map search
+                </a>
+              ) : null}
             </div>
           ) : null}
           {providerSearchStatus ? <p className="workspace-control-note">{providerSearchStatus}</p> : null}
@@ -3116,18 +3126,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             <p className="workspace-control-note">
               {buildProviderSourceSummary(providerSource)}
             </p>
-          ) : null}
-          {!providerRecommendations.length && !externalProviderRecommendations.length && providerGoogleSearchUrl ? (
-            <div className="provider-card-actions">
-              <a
-                href={providerGoogleSearchUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="button-secondary inline-button"
-              >
-                Search Google Maps
-              </a>
-            </div>
           ) : null}
           {providerRecommendations.length ? (
             <p className="workspace-control-note provider-disclaimer">
