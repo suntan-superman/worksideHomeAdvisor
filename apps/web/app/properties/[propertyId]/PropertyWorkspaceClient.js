@@ -242,6 +242,36 @@ function buildProviderAvailabilityMessage(providerSuggestionTask, providerSource
   return `No ${categoryLabel.toLowerCase()} are available for this property yet.`;
 }
 
+function buildProviderSourceSummary(providerSource) {
+  if (!providerSource) {
+    return '';
+  }
+
+  const totalMatches = Number(providerSource.totalCategoryProviders || 0);
+  const liveMatches = Number(providerSource.internalProviders || 0);
+  const unavailableMatches = Number(providerSource.unavailableProviders || 0);
+  const externalMatches = Number(providerSource.externalProviders || 0);
+  const parts = [];
+
+  if (totalMatches > 0) {
+    parts.push(
+      `${totalMatches} matching internal provider record(s): ${liveMatches} live${unavailableMatches ? ` · ${unavailableMatches} not yet live` : ''}`,
+    );
+  } else {
+    parts.push('No internal provider records match this category and coverage yet');
+  }
+
+  if (externalMatches > 0) {
+    parts.push(`${externalMatches} Google fallback result(s) loaded`);
+  } else if (providerSource.googleFallbackEnabled) {
+    parts.push('Google fallback available on demand');
+  } else {
+    parts.push('Google fallback unavailable for this browser session');
+  }
+
+  return parts.join(' · ');
+}
+
 function searchGooglePlaces(service, request) {
   return new Promise((resolve, reject) => {
     service.textSearch(request, (results, status) => {
@@ -335,6 +365,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [providerReferences, setProviderReferences] = useState([]);
   const [providerLeads, setProviderLeads] = useState([]);
   const [providerSource, setProviderSource] = useState(null);
+  const [showExternalProviderFallback, setShowExternalProviderFallback] = useState(false);
+  const [activeProviderDetails, setActiveProviderDetails] = useState(null);
   const [activeProviderTaskKey, setActiveProviderTaskKey] = useState('');
   const [providerSearchStatus, setProviderSearchStatus] = useState('');
   const [showMoreVisionVariants, setShowMoreVisionVariants] = useState(false);
@@ -984,6 +1016,23 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
   }
 
+  async function handleBrowseGoogleFallback() {
+    const results = externalProviderRecommendations.length
+      ? externalProviderRecommendations
+      : await searchGoogleFallbackProviders(providerSuggestionTask);
+    setShowExternalProviderFallback(true);
+    setProviderSource((current) =>
+      current
+        ? {
+            ...current,
+            externalProviders: results.length,
+            googleFallbackEnabled: Boolean(mapsApiKey),
+          }
+        : current,
+    );
+    return results;
+  }
+
   async function refreshProviders(task = providerSuggestionTask) {
     if (!task?.providerCategoryKey) {
       setProviderRecommendations([]);
@@ -1003,6 +1052,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         ? externalResultsFromApi
         : await searchGoogleFallbackProviders(task);
     setProviderRecommendations(nextProviders);
+    setExternalProviderRecommendations(fallbackProviders);
+    setShowExternalProviderFallback(Boolean(fallbackProviders.length && !nextProviders.length));
     setProviderSource({
       ...(response.providers?.source || {}),
       externalProviders: fallbackProviders.length,
@@ -2812,6 +2863,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           ) : null}
           {providerRecommendations.length ? (
             <div className="provider-card-list">
+              <div className="section-header-tight">
+                <div>
+                  <strong>Workside marketplace providers</strong>
+                  <p className="workspace-control-note">
+                    Ranked internal providers matched by category, coverage, and marketplace readiness.
+                  </p>
+                </div>
+              </div>
               {providerRecommendations.map((provider) => (
                 <article key={provider.id} className="provider-card">
                   <div className="provider-card-header">
@@ -2879,6 +2938,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     <button type="button" className="button-primary" onClick={() => handleRequestProviderLead(provider)} disabled={Boolean(status) || isArchivedProperty}>
                       Request by email
                     </button>
+                    <button type="button" className="button-secondary" onClick={() => setActiveProviderDetails({ ...provider, categoryLabel: providerSource?.categoryLabel || provider.categoryKey?.replace(/_/g, ' ') })}>
+                      Details
+                    </button>
                     {provider.websiteUrl ? (
                       <a href={provider.websiteUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button">
                         Visit website
@@ -2888,7 +2950,92 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 </article>
               ))}
             </div>
-          ) : externalProviderRecommendations.length ? (
+          ) : null}
+          {providerSource?.googleFallbackEnabled ? (
+            <div className="provider-card-actions">
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={handleBrowseGoogleFallback}
+                disabled={Boolean(status) || providerSearchStatus === 'Searching Google for nearby providers...'}
+              >
+                {externalProviderRecommendations.length || showExternalProviderFallback
+                  ? 'Refresh Google fallback'
+                  : 'Browse Google fallback'}
+              </button>
+            </div>
+          ) : null}
+          {providerSearchStatus ? <p className="workspace-control-note">{providerSearchStatus}</p> : null}
+          {showExternalProviderFallback && externalProviderRecommendations.length ? (
+            <div className="provider-card-list">
+              <div className="section-header-tight">
+                <div>
+                  <strong>Google fallback providers</strong>
+                  <p className="workspace-control-note">
+                    External local results shown when you want to broaden the search beyond Workside’s live marketplace.
+                  </p>
+                </div>
+              </div>
+              {externalProviderRecommendations.map((provider) => (
+                <article key={provider.id} className="provider-card provider-card-external">
+                  <div className="provider-card-header">
+                    <div>
+                      <strong>{provider.businessName}</strong>
+                      <span>{provider.description}</span>
+                    </div>
+                    <span className="checklist-chip checklist-chip-medium">Google result</span>
+                  </div>
+                  <div className="provider-quality-row">
+                    {provider.rating ? (
+                      <span>
+                        {provider.rating.toFixed(1)} stars{provider.reviewCount ? ` · ${provider.reviewCount} reviews` : ''}
+                      </span>
+                    ) : null}
+                    {provider.phone ? <span>{provider.phone}</span> : null}
+                    <span>External discovery</span>
+                  </div>
+                  <div className="provider-card-actions">
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => handleSaveProviderReference(provider, 'google_maps')}
+                      disabled={
+                        Boolean(status) ||
+                        isArchivedProperty ||
+                        providerReferenceIds.has(`google_maps:${provider.id}`) ||
+                        providerReferences.length >= 5
+                      }
+                    >
+                      {providerReferenceIds.has(`google_maps:${provider.id}`) ? 'On sheet' : 'Add to sheet'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => setActiveProviderDetails({ ...provider, categoryLabel: providerSource?.categoryLabel || provider.categoryKey?.replace(/_/g, ' ') })}
+                    >
+                      Details
+                    </button>
+                    {provider.mapsUrl ? (
+                      <a href={provider.mapsUrl} target="_blank" rel="noreferrer" className="button-primary inline-button">
+                        Open in Maps
+                      </a>
+                    ) : null}
+                    {provider.websiteUrl ? (
+                      <a href={provider.websiteUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button">
+                        Visit website
+                      </a>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : null}
+          {!providerRecommendations.length && showExternalProviderFallback && externalProviderRecommendations.length === 0 ? (
+            <p className="workspace-control-note">
+              Google fallback did not return any results for this category yet.
+            </p>
+          ) : null}
+          {!providerRecommendations.length && !showExternalProviderFallback && externalProviderRecommendations.length ? (
             <div className="provider-card-list">
               {externalProviderRecommendations.map((provider) => (
                 <article key={provider.id} className="provider-card provider-card-external">
@@ -2936,7 +3083,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 </article>
               ))}
             </div>
-          ) : providerSuggestionTask ? (
+          ) : null}
+          {!providerRecommendations.length && !showExternalProviderFallback && !externalProviderRecommendations.length && providerSuggestionTask ? (
             <p className="workspace-control-note">
               {buildProviderAvailabilityMessage(providerSuggestionTask, providerSource) ||
                 'No active marketplace providers are available for this category yet.'}
@@ -2944,15 +3092,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           ) : null}
           {providerSource ? (
             <p className="workspace-control-note">
-              {providerSource.internalProviders || 0} live internal provider match(es)
-              {providerSource.unavailableProviders
-                ? ` · ${providerSource.unavailableProviders} not yet live`
-                : ''}
-              {providerSource.externalProviders
-                ? ` · ${providerSource.externalProviders} Google fallback result(s)`
-                : providerSource.googleFallbackEnabled
-                  ? ' · Google fallback available if live marketplace coverage is thin.'
-                  : ' · Google fallback unavailable for this browser session.'}
+              {buildProviderSourceSummary(providerSource)}
             </p>
           ) : null}
           {!providerRecommendations.length && !externalProviderRecommendations.length && providerGoogleSearchUrl ? (
@@ -3082,6 +3222,81 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </button>
               <button type="button" className="button-secondary button-danger" onClick={handleDeleteSelectedPhoto} disabled={Boolean(status)}>
                 {status === 'Deleting photo...' ? 'Deleting...' : 'Delete photo'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {activeProviderDetails ? (
+        <div className="workspace-modal-backdrop" role="presentation" onClick={() => setActiveProviderDetails(null)}>
+          <div
+            className="workspace-modal-card provider-details-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="provider-details-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="label">Provider details</span>
+            <h2 id="provider-details-title">{activeProviderDetails.businessName}</h2>
+            <p>
+              {activeProviderDetails.description || 'No additional description is available for this provider yet.'}
+            </p>
+            <div className="mini-stats">
+              <div className="stat-card">
+                <strong>Category</strong>
+                <span>{activeProviderDetails.categoryLabel || activeProviderDetails.categoryKey?.replace(/_/g, ' ') || 'Provider'}</span>
+              </div>
+              <div className="stat-card">
+                <strong>Coverage</strong>
+                <span>{activeProviderDetails.coverageLabel || 'Coverage not listed'}</span>
+              </div>
+              <div className="stat-card">
+                <strong>Contact</strong>
+                <span>{activeProviderDetails.phone || activeProviderDetails.email || 'Not listed'}</span>
+              </div>
+              <div className="stat-card">
+                <strong>Source</strong>
+                <span>{activeProviderDetails.isExternalFallback ? 'Google fallback' : 'Workside marketplace'}</span>
+              </div>
+            </div>
+            <div className="provider-quality-row">
+              {activeProviderDetails.turnaroundLabel ? <span>{activeProviderDetails.turnaroundLabel}</span> : null}
+              {activeProviderDetails.pricingSummary ? <span>{activeProviderDetails.pricingSummary}</span> : null}
+              {typeof activeProviderDetails.rating === 'number' && activeProviderDetails.rating > 0 ? (
+                <span>
+                  {activeProviderDetails.rating.toFixed(1)} stars
+                  {activeProviderDetails.reviewCount ? ` · ${activeProviderDetails.reviewCount} reviews` : ''}
+                </span>
+              ) : null}
+              {activeProviderDetails.serviceArea?.radiusMiles ? (
+                <span>{activeProviderDetails.serviceArea.radiusMiles} mile radius</span>
+              ) : null}
+            </div>
+            {activeProviderDetails.serviceHighlights?.length ? (
+              <div className="tag-row">
+                {activeProviderDetails.serviceHighlights.map((highlight) => (
+                  <span key={`${activeProviderDetails.id}-${highlight}`}>{highlight}</span>
+                ))}
+              </div>
+            ) : null}
+            {!activeProviderDetails.isExternalFallback && activeProviderDetails.verification?.disclaimer ? (
+              <p className="workspace-control-note provider-disclaimer">
+                {activeProviderDetails.verification.disclaimer}
+              </p>
+            ) : null}
+            <div className="workspace-modal-actions">
+              {activeProviderDetails.websiteUrl ? (
+                <a href={activeProviderDetails.websiteUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button">
+                  Visit website
+                </a>
+              ) : null}
+              {activeProviderDetails.mapsUrl ? (
+                <a href={activeProviderDetails.mapsUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button">
+                  Open in Maps
+                </a>
+              ) : null}
+              <button type="button" className="button-secondary" onClick={() => setActiveProviderDetails(null)}>
+                Close
               </button>
             </div>
           </div>
