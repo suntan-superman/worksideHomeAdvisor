@@ -104,6 +104,8 @@ const GOOGLE_PLACES_QUERY_BY_CATEGORY = {
   nhd_report: 'natural hazard disclosure report provider',
 };
 
+const ZIP_COORDINATE_CACHE = new Map();
+
 function slugify(value) {
   return String(value || '')
     .toLowerCase()
@@ -118,6 +120,68 @@ function buildCategoryKey(value) {
 
 function normalizeString(value) {
   return String(value || '').trim();
+}
+
+function normalizeZip(value) {
+  return normalizeString(value).replace(/\D/g, '').slice(0, 5);
+}
+
+function toRadians(value) {
+  return (Number(value) * Math.PI) / 180;
+}
+
+function calculateDistanceMiles(pointA, pointB) {
+  if (!pointA || !pointB) {
+    return null;
+  }
+
+  const earthRadiusMiles = 3958.8;
+  const deltaLat = toRadians(pointB.lat - pointA.lat);
+  const deltaLng = toRadians(pointB.lng - pointA.lng);
+  const lat1 = toRadians(pointA.lat);
+  const lat2 = toRadians(pointB.lat);
+
+  const haversine =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) ** 2;
+
+  return earthRadiusMiles * (2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine)));
+}
+
+async function getZipCoordinates(zipCode) {
+  const normalizedZip = normalizeZip(zipCode);
+  if (!normalizedZip || !env.GOOGLE_MAPS_API_KEY) {
+    return null;
+  }
+
+  if (ZIP_COORDINATE_CACHE.has(normalizedZip)) {
+    return ZIP_COORDINATE_CACHE.get(normalizedZip);
+  }
+
+  try {
+    const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
+    url.searchParams.set('components', `postal_code:${normalizedZip}|country:US`);
+    url.searchParams.set('key', env.GOOGLE_MAPS_API_KEY);
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      ZIP_COORDINATE_CACHE.set(normalizedZip, null);
+      return null;
+    }
+
+    const payload = await response.json();
+    const location = payload?.results?.[0]?.geometry?.location;
+    const point =
+      typeof location?.lat === 'number' && typeof location?.lng === 'number'
+        ? { lat: location.lat, lng: location.lng }
+        : null;
+
+    ZIP_COORDINATE_CACHE.set(normalizedZip, point);
+    return point;
+  } catch {
+    ZIP_COORDINATE_CACHE.set(normalizedZip, null);
+    return null;
+  }
 }
 
 function normalizeZipList(value) {
@@ -388,7 +452,11 @@ function buildAcceptanceScore(analytics) {
   return Math.max(20, Math.min(100, Math.round((acceptedCount / leadCount) * 100)));
 }
 
-function buildCoverageScore(provider, property) {
+function buildCoverageScore(provider, property, coverageContext = null) {
+  if (coverageContext?.score) {
+    return coverageContext.score;
+  }
+
   const propertyZip = normalizeString(property?.zip);
   const propertyCity = normalizeString(property?.city).toLowerCase();
   const propertyState = normalizeString(property?.state).toLowerCase();
@@ -420,11 +488,11 @@ function buildFreshnessScore(provider) {
   return 40;
 }
 
-function buildProviderRankScore(provider, property, analytics) {
+function buildProviderRankScore(provider, property, analytics, coverageContext = null) {
   const qualityScore = Math.max(0, Math.min(100, Number(provider.qualityScore || 60)));
   const responseSpeedScore = buildResponseSpeedScore(provider.averageResponseMinutes);
   const leadAcceptanceScore = buildAcceptanceScore(analytics);
-  const distanceScore = buildCoverageScore(provider, property);
+  const distanceScore = buildCoverageScore(provider, property, coverageContext);
   const subscriptionBoostScore = buildSubscriptionBoostScore(provider);
   const freshnessScore = buildFreshnessScore(provider);
   const verificationLevel = buildVerificationLevel(provider.verification, provider.isVerified);
@@ -470,7 +538,7 @@ function buildProviderRankScore(provider, property, analytics) {
   };
 }
 
-function buildRankingBadges(provider, scoreBreakdown, rankIndex) {
+function buildRankingBadges(provider, scoreBreakdown, rankIndex, coverageContext = null) {
   const badges = [];
   const verificationLevel = buildVerificationLevel(provider.verification, provider.isVerified);
   if (rankIndex === 0) badges.push('Top Pick');
@@ -480,12 +548,17 @@ function buildRankingBadges(provider, scoreBreakdown, rankIndex) {
   if (provider.compliance?.insuranceStatus === 'verified') badges.push('Insured');
   if (provider.isSponsored) badges.push('Sponsored');
   if (scoreBreakdown.responseSpeedScore >= 74) badges.push('Fast Response');
-  if (scoreBreakdown.distanceScore >= 100) badges.push('ZIP Match');
+  if (coverageContext?.type === 'zip_match' || scoreBreakdown.distanceScore >= 100) badges.push('ZIP Match');
+  if (coverageContext?.type === 'radius_match') badges.push('Within Service Radius');
   if (scoreBreakdown.verificationScore >= 72) badges.push('Trust Details Added');
   return badges;
 }
 
-function buildCoverageLabel(provider, property) {
+function buildCoverageLabel(provider, property, coverageContext = null) {
+  if (coverageContext?.label) {
+    return coverageContext.label;
+  }
+
   const propertyZip = normalizeString(property?.zip);
   const zipCodes = provider.serviceArea?.zipCodes || [];
   if (propertyZip && zipCodes.includes(propertyZip)) return 'Covers this ZIP';
@@ -1172,20 +1245,86 @@ async function getProviderAnalyticsMap(providerIds = []) {
   );
 }
 
-function filterProvidersForProperty(providers, property) {
-  return providers.filter((provider) => {
-    const propertyState = normalizeString(property.state).toLowerCase();
-    const propertyCity = normalizeString(property.city).toLowerCase();
-    const propertyZip = normalizeString(property.zip);
-    const providerState = normalizeString(provider.serviceArea?.state).toLowerCase();
-    const providerCity = normalizeString(provider.serviceArea?.city).toLowerCase();
-    const providerZips = provider.serviceArea?.zipCodes || [];
+async function buildProviderCoverageContext(provider, property) {
+  const propertyState = normalizeString(property?.state).toLowerCase();
+  const propertyCity = normalizeString(property?.city).toLowerCase();
+  const propertyZip = normalizeZip(property?.zip);
+  const providerState = normalizeString(provider.serviceArea?.state).toLowerCase();
+  const providerCity = normalizeString(provider.serviceArea?.city).toLowerCase();
+  const providerZips = (provider.serviceArea?.zipCodes || []).map(normalizeZip).filter(Boolean);
+  const radiusMiles = Math.max(0, Number(provider.serviceArea?.radiusMiles || 25));
 
-    if (propertyZip && providerZips.includes(propertyZip)) return true;
-    if (providerState && providerState === propertyState && providerCity && providerCity === propertyCity) return true;
-  if (providerState && providerState === propertyState && Number(provider.serviceArea?.radiusMiles || 0) >= 25) return true;
-  return false;
-  });
+  if (propertyZip && providerZips.includes(propertyZip)) {
+    return {
+      matches: true,
+      type: 'zip_match',
+      score: 100,
+      label: 'Covers this ZIP',
+      distanceMiles: 0,
+    };
+  }
+
+  if (propertyZip && providerZips.length && radiusMiles > 0) {
+    const propertyCoordinates = await getZipCoordinates(propertyZip);
+    if (propertyCoordinates) {
+      const providerCoordinateEntries = await Promise.all(
+        providerZips.map(async (zipCode) => ({
+          zipCode,
+          point: await getZipCoordinates(zipCode),
+        })),
+      );
+
+      const distanceEntries = providerCoordinateEntries
+        .map((entry) => ({
+          zipCode: entry.zipCode,
+          distanceMiles: entry.point ? calculateDistanceMiles(propertyCoordinates, entry.point) : null,
+        }))
+        .filter((entry) => typeof entry.distanceMiles === 'number' && Number.isFinite(entry.distanceMiles));
+
+      if (distanceEntries.length) {
+        const closest = distanceEntries.sort((left, right) => left.distanceMiles - right.distanceMiles)[0];
+        if (closest.distanceMiles <= radiusMiles) {
+          const coverageRatio = radiusMiles ? closest.distanceMiles / radiusMiles : 0;
+          return {
+            matches: true,
+            type: 'radius_match',
+            score: Math.max(65, Math.round(95 - coverageRatio * 25)),
+            label: `Covers property from ZIP ${closest.zipCode} (${closest.distanceMiles.toFixed(1)} mi away)`,
+            distanceMiles: closest.distanceMiles,
+            sourceZip: closest.zipCode,
+          };
+        }
+      }
+    }
+  }
+
+  if (providerCity && providerState && providerCity === propertyCity && providerState === propertyState) {
+    return {
+      matches: true,
+      type: 'city_match',
+      score: 80,
+      label: `Serves ${property.city}`,
+      distanceMiles: null,
+    };
+  }
+
+  if (providerState && providerState === propertyState && radiusMiles >= 25) {
+    return {
+      matches: true,
+      type: 'state_radius_match',
+      score: 55,
+      label: `${radiusMiles} mile service radius`,
+      distanceMiles: null,
+    };
+  }
+
+  return {
+    matches: false,
+    type: 'none',
+    score: 20,
+    label: `${radiusMiles} mile service radius`,
+    distanceMiles: null,
+  };
 }
 
 export async function listProvidersForProperty(propertyId, { categoryKey = '', limit = 3, taskKey = '' } = {}) {
@@ -1212,19 +1351,25 @@ export async function listProvidersForProperty(propertyId, { categoryKey = '', l
     query.categoryKey = resolvedCategoryKey;
   }
 
-  const matchedProviders = filterProvidersForProperty(
-    await ProviderModel.find(query).sort({ isSponsored: -1, qualityScore: -1, updatedAt: -1 }).lean(),
-    property,
+  const providerDocuments = await ProviderModel.find(query)
+    .sort({ isSponsored: -1, qualityScore: -1, updatedAt: -1 })
+    .lean();
+  const providerCoverageEntries = await Promise.all(
+    providerDocuments.map(async (provider) => ({
+      provider,
+      coverage: await buildProviderCoverageContext(provider, property),
+    })),
   );
-  const providers = matchedProviders.filter((provider) => provider.status === 'active');
-  const unavailableProviders = matchedProviders.filter((provider) => provider.status !== 'active');
+  const matchedProviders = providerCoverageEntries.filter((entry) => entry.coverage.matches);
+  const providers = matchedProviders.filter((entry) => entry.provider.status === 'active');
+  const unavailableProviders = matchedProviders.filter((entry) => entry.provider.status !== 'active');
   const unavailableStatusCounts = unavailableProviders.reduce((summary, provider) => {
-    const key = normalizeString(provider.status) || 'unavailable';
+    const key = normalizeString(provider.provider.status) || 'unavailable';
     summary[key] = Number(summary[key] || 0) + 1;
     return summary;
   }, {});
 
-  const analyticsByProviderId = await getProviderAnalyticsMap(providers.map((provider) => provider._id));
+  const analyticsByProviderId = await getProviderAnalyticsMap(providers.map(({ provider }) => provider._id));
   const savedProviderIds = new Set(
     (
       await SavedProviderModel.find({
@@ -1235,12 +1380,18 @@ export async function listProvidersForProperty(propertyId, { categoryKey = '', l
   );
 
   const rankedProviders = providers
-    .map((provider) => {
+    .map(({ provider, coverage }) => {
       const providerId = provider._id?.toString?.() || String(provider._id);
       return {
         provider,
+        coverage,
         analytics: analyticsByProviderId.get(providerId) || null,
-        rank: buildProviderRankScore(provider, property, analyticsByProviderId.get(providerId) || null),
+        rank: buildProviderRankScore(
+          provider,
+          property,
+          analyticsByProviderId.get(providerId) || null,
+          coverage,
+        ),
       };
     })
     .sort((left, right) => {
@@ -1261,14 +1412,14 @@ export async function listProvidersForProperty(propertyId, { categoryKey = '', l
   return {
     categories,
     categoryKey: resolvedCategoryKey || '',
-    items: rankedProviders.map(({ provider, analytics, rank }, index) =>
+    items: rankedProviders.map(({ provider, analytics, rank, coverage }, index) =>
       serializeProvider(provider, {
         saved: savedProviderIds.has(provider._id?.toString?.() || String(provider._id)),
         categoryDocument: categoryByKey.get(provider.categoryKey) || null,
         city: provider.serviceArea?.city || '',
         state: provider.serviceArea?.state || '',
-        coverageLabel: buildCoverageLabel(provider, property),
-        rankingBadges: buildRankingBadges(provider, rank.breakdown, index),
+        coverageLabel: buildCoverageLabel(provider, property, coverage),
+        rankingBadges: buildRankingBadges(provider, rank.breakdown, index, coverage),
         ranking: rank,
         analytics: analytics
           ? {

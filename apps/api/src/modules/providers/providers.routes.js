@@ -41,6 +41,19 @@ const stateCodeSchema = z
   .transform((value) => value.toUpperCase())
   .pipe(z.enum(US_STATE_CODES));
 
+const optionalStateCodeSchema = z.preprocess((value) => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const normalized = String(value).trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  return normalized.toUpperCase();
+}, z.enum(US_STATE_CODES).optional());
+
 const propertyParamsSchema = z.object({
   propertyId: z.string().min(1),
 });
@@ -112,7 +125,7 @@ const providerSignupSchema = z.object({
   insuranceExpirationDate: z.string().trim().max(40).optional(),
   hasLicense: z.boolean().optional(),
   licenseNumber: z.string().trim().max(80).optional(),
-  licenseState: stateCodeSchema.optional(),
+  licenseState: optionalStateCodeSchema,
   hasBond: z.boolean().optional(),
   deliveryMode: z.enum(['sms', 'email', 'sms_and_email']).optional(),
   notifyPhone: z.string().trim().max(40).optional(),
@@ -145,7 +158,7 @@ const providerPortalProfileSchema = z.object({
   pricingSummary: z.string().trim().max(140).optional(),
   serviceHighlights: z.array(z.string().trim().min(1).max(60)).max(6).optional(),
   city: z.string().trim().max(80).optional(),
-  state: stateCodeSchema.optional(),
+  state: optionalStateCodeSchema,
   zipCodes: z.array(z.string().trim().min(3).max(12)).max(25).optional(),
   radiusMiles: z.number().int().min(5).max(1000).optional(),
   hasInsurance: z.boolean().optional(),
@@ -154,7 +167,7 @@ const providerPortalProfileSchema = z.object({
   insuranceExpirationDate: z.string().trim().max(40).optional(),
   hasLicense: z.boolean().optional(),
   licenseNumber: z.string().trim().max(80).optional(),
-  licenseState: stateCodeSchema.optional(),
+  licenseState: optionalStateCodeSchema,
   hasBond: z.boolean().optional(),
   deliveryMode: z.enum(['sms', 'email', 'sms_and_email']).optional(),
   notifyPhone: z.string().trim().max(40).optional(),

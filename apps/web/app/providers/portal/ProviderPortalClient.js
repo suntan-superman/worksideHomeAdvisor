@@ -53,6 +53,11 @@ const US_STATE_OPTIONS = [
   'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
 ];
 
+function normalizeOptionalStateCode(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  return US_STATE_OPTIONS.includes(normalized) ? normalized : '';
+}
+
 function formatPhoneInput(value) {
   const digits = String(value || '').replace(/\D/g, '').slice(0, 10);
 
@@ -282,7 +287,7 @@ export function ProviderPortalClient({
       pricingSummary: provider.pricingSummary || '',
       serviceHighlights: (provider.serviceHighlights || []).join(', '),
       city: provider.serviceArea?.city || '',
-      state: provider.serviceArea?.state || '',
+      state: normalizeOptionalStateCode(provider.serviceArea?.state),
       zipCodes: (provider.serviceArea?.zipCodes || []).join(', '),
       radiusMiles: provider.serviceArea?.radiusMiles || 25,
       deliveryMode: provider.leadRouting?.deliveryMode || 'sms_and_email',
@@ -297,7 +302,7 @@ export function ProviderPortalClient({
         : '',
       hasLicense: Boolean(provider.verification?.license?.hasLicense),
       licenseNumber: provider.verification?.license?.licenseNumber || '',
-      licenseState: provider.verification?.license?.state || '',
+      licenseState: normalizeOptionalStateCode(provider.verification?.license?.state),
       hasBond: Boolean(provider.verification?.bonding?.hasBond),
     });
   }, [dashboard]);
@@ -337,11 +342,15 @@ export function ProviderPortalClient({
     setError('');
 
     try {
+      const normalizedState = normalizeOptionalStateCode(profileForm.state);
+      const normalizedLicenseState = profileForm.hasLicense
+        ? normalizeOptionalStateCode(profileForm.licenseState)
+        : '';
       const result = await updateProviderPortalProfile(
         portalSession.providerId,
         {
           description: profileForm.description,
-          websiteUrl: profileForm.websiteUrl,
+          websiteUrl: profileForm.websiteUrl.trim(),
           turnaroundLabel: profileForm.turnaroundLabel,
           pricingSummary: profileForm.pricingSummary,
           serviceHighlights: profileForm.serviceHighlights
@@ -349,7 +358,7 @@ export function ProviderPortalClient({
             .map((value) => value.trim())
             .filter(Boolean),
           city: profileForm.city,
-          state: profileForm.state,
+          state: normalizedState || undefined,
           zipCodes: profileForm.zipCodes
             .split(',')
             .map((value) => value.trim())
@@ -357,7 +366,7 @@ export function ProviderPortalClient({
           radiusMiles: Number(profileForm.radiusMiles),
           deliveryMode: profileForm.deliveryMode,
           notifyPhone: profileForm.notifyPhone,
-          notifyEmail: profileForm.notifyEmail,
+          notifyEmail: profileForm.notifyEmail.trim(),
           preferredContactMethod: profileForm.preferredContactMethod,
           hasInsurance: profileForm.hasInsurance,
           insuranceCarrier: profileForm.insuranceCarrier,
@@ -365,7 +374,7 @@ export function ProviderPortalClient({
           insuranceExpirationDate: profileForm.insuranceExpirationDate || undefined,
           hasLicense: profileForm.hasLicense,
           licenseNumber: profileForm.licenseNumber,
-          licenseState: profileForm.licenseState,
+          licenseState: normalizedLicenseState || undefined,
           hasBond: profileForm.hasBond,
         },
         portalSession.token,
