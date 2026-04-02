@@ -152,6 +152,7 @@ const providerPortalSessionSchema = z.object({
 });
 
 const providerPortalProfileSchema = z.object({
+  categoryKey: z.string().trim().min(1).max(80).optional(),
   description: z.string().trim().max(600).optional(),
   websiteUrl: z.string().trim().url().max(180).optional().or(z.literal('')),
   turnaroundLabel: z.string().trim().max(80).optional(),

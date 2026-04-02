@@ -8,6 +8,7 @@ import {
   createProviderBillingCheckout,
   createProviderPortalSession,
   downloadProviderVerificationDocument,
+  listProviderCategories,
   respondToProviderPortalLead,
   submitProviderVerification,
   syncProviderBillingSession,
@@ -23,6 +24,7 @@ import { getStoredSession } from '../../../lib/session';
 import { Toast } from '../../../components/Toast';
 
 const INITIAL_PROFILE_FORM = {
+  categoryKey: '',
   description: '',
   websiteUrl: '',
   turnaroundLabel: '',
@@ -146,6 +148,14 @@ export function ProviderPortalClient({
     billingState,
     sessionId,
   ];
+  const providerCategoriesQuery = useQuery({
+    queryKey: ['provider-categories'],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const payload = await listProviderCategories();
+      return payload.categories || [];
+    },
+  });
 
   useEffect(() => {
     setAppSession(getStoredSession());
@@ -281,6 +291,7 @@ export function ProviderPortalClient({
     }
 
     setProfileForm({
+      categoryKey: provider.categoryKey || '',
       description: provider.description || '',
       websiteUrl: provider.websiteUrl || '',
       turnaroundLabel: provider.turnaroundLabel || '',
@@ -311,8 +322,22 @@ export function ProviderPortalClient({
   const wantsEmail = ['email', 'sms_and_email'].includes(profileForm.deliveryMode);
   const notifyPhoneIsValid = countPhoneDigits(profileForm.notifyPhone) >= 10;
   const notifyEmailIsValid = !profileForm.notifyEmail || isValidEmail(profileForm.notifyEmail);
+  const categoryOptions = providerCategoriesQuery.data || [];
+  const categoryExists = categoryOptions.some((category) => category.key === profileForm.categoryKey);
+  const normalizedCategoryOptions = categoryExists
+    ? categoryOptions
+    : [
+        ...(profileForm.categoryKey
+          ? [{
+              key: profileForm.categoryKey,
+              label: dashboard?.provider?.categoryLabel || formatCategoryLabel(profileForm.categoryKey),
+            }]
+          : []),
+        ...categoryOptions,
+      ];
   const loading = !appSessionReady || portalSessionQuery.isLoading;
   const profileFormReady = Boolean(
+    profileForm.categoryKey &&
     (!wantsSms || (profileForm.notifyPhone && notifyPhoneIsValid)) &&
       (!wantsEmail || !profileForm.notifyEmail || notifyEmailIsValid),
   );
@@ -349,6 +374,7 @@ export function ProviderPortalClient({
       const result = await updateProviderPortalProfile(
         portalSession.providerId,
         {
+          categoryKey: profileForm.categoryKey,
           description: profileForm.description,
           websiteUrl: profileForm.websiteUrl.trim(),
           turnaroundLabel: profileForm.turnaroundLabel,
@@ -728,6 +754,21 @@ export function ProviderPortalClient({
         <form className="form-card provider-portal-profile" onSubmit={handleSaveProfile}>
           <span className="label">Marketplace profile</span>
           <h2>Keep your listing current</h2>
+          <label>
+            Business type
+            <select
+              className="select-input"
+              value={profileForm.categoryKey}
+              onChange={(event) => updateField('categoryKey', event.target.value)}
+            >
+              <option value="">Select a business type</option>
+              {normalizedCategoryOptions.map((category) => (
+                <option key={category.key} value={category.key}>
+                  {category.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <label>
             Short description
             <textarea

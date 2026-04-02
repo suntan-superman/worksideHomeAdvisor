@@ -1917,6 +1917,14 @@ export async function updateProviderPortalProfile(providerId, token, payload = {
   }
 
   const provider = await authenticateProviderPortal(providerId, token);
+  if (payload.categoryKey !== undefined) {
+    const categoryKey = normalizeString(payload.categoryKey);
+    const category = await ProviderCategoryModel.findOne({ key: categoryKey, isActive: true }).lean();
+    if (!category) {
+      throw new Error('Select a valid active provider category.');
+    }
+    provider.categoryKey = category.key;
+  }
   const touchedVerificationField = [
     'hasInsurance',
     'insuranceCarrier',
