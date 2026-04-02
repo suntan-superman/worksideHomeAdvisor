@@ -189,6 +189,12 @@ function formatWorkflowStatus(status) {
   return 'Available';
 }
 
+function buildPropertyAddressLabel(property) {
+  return [property?.addressLine1, property?.city, property?.state, property?.zip]
+    .filter(Boolean)
+    .join(', ');
+}
+
 function buildProviderFallbackQuery(task, property) {
   const categoryQueryByKey = {
     inspector: 'home inspector',
@@ -203,8 +209,9 @@ function buildProviderFallbackQuery(task, property) {
   };
   const categoryLabel =
     categoryQueryByKey[task?.providerCategoryKey] || task?.providerCategoryLabel || task?.title || 'home services';
-  const locationLabel = [property?.city, property?.state, property?.zip].filter(Boolean).join(', ');
-  return [categoryLabel, 'near', locationLabel || property?.addressLine1 || 'this property']
+  const addressLabel = buildPropertyAddressLabel(property);
+  const fallbackLocationLabel = [property?.city, property?.state, property?.zip].filter(Boolean).join(', ');
+  return [categoryLabel, 'near', addressLabel || fallbackLocationLabel || 'this property']
     .filter(Boolean)
     .join(' ');
 }

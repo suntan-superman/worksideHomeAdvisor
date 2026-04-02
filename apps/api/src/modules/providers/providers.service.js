@@ -618,6 +618,79 @@ function buildGoogleProviderQuery(categoryKey, property) {
   return [serviceQuery, 'near', locationQuery].filter(Boolean).join(' ');
 }
 
+function buildPropertyLocationQuery(property = {}) {
+  return [property?.addressLine1, property?.city, property?.state, property?.zip]
+    .filter(Boolean)
+    .join(', ');
+}
+
+async function getPropertyCoordinates(property = {}) {
+  const fullAddress = buildPropertyLocationQuery(property);
+  if (!env.GOOGLE_MAPS_API_KEY || !fullAddress) {
+    return getZipCoordinates(property?.zip);
+  }
+
+  try {
+    const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
+    url.searchParams.set('address', fullAddress);
+    url.searchParams.set('key', env.GOOGLE_MAPS_API_KEY);
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      return getZipCoordinates(property?.zip);
+    }
+
+    const payload = await response.json();
+    const location = payload?.results?.[0]?.geometry?.location;
+    if (typeof location?.lat === 'number' && typeof location?.lng === 'number') {
+      return { lat: location.lat, lng: location.lng };
+    }
+  } catch {
+    return getZipCoordinates(property?.zip);
+  }
+
+  return getZipCoordinates(property?.zip);
+}
+
+async function requestGoogleFallbackPlaces(textQuery, { limit = 5, locationBias = null } = {}) {
+  const body = {
+    textQuery,
+    maxResultCount: Math.max(1, Math.min(Number(limit || 5), 5)),
+    languageCode: 'en',
+    regionCode: 'US',
+  };
+
+  if (locationBias?.lat && locationBias?.lng) {
+    body.locationBias = {
+      circle: {
+        center: {
+          latitude: locationBias.lat,
+          longitude: locationBias.lng,
+        },
+        radius: 35000,
+      },
+    };
+  }
+
+  const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': env.GOOGLE_MAPS_API_KEY,
+      'X-Goog-FieldMask':
+        'places.id,places.displayName,places.formattedAddress,places.googleMapsUri,places.websiteUri,places.nationalPhoneNumber,places.rating,places.userRatingCount,places.primaryTypeDisplayName',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    return [];
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  return Array.isArray(payload.places) ? payload.places : [];
+}
+
 function buildExternalProviderFallbackItem(place = {}, categoryKey = '', property = {}) {
   const displayName =
     place.displayName?.text ||
@@ -691,38 +764,41 @@ async function searchGoogleFallbackProviders(property, { categoryKey = '', limit
     return [];
   }
 
-  const textQuery = buildGoogleProviderQuery(categoryKey, property);
-  if (!textQuery) {
+  const serviceQuery = GOOGLE_PLACES_QUERY_BY_CATEGORY[categoryKey] || categoryKey.replace(/_/g, ' ');
+  const cityStateZip = [property?.city, property?.state, property?.zip].filter(Boolean).join(', ');
+  const fullAddress = buildPropertyLocationQuery(property);
+  const fallbackQueries = [
+    serviceQuery,
+    cityStateZip ? `${serviceQuery} near ${cityStateZip}` : '',
+    property?.city && property?.state ? `${serviceQuery} in ${property.city}, ${property.state}` : '',
+    buildGoogleProviderQuery(categoryKey, property),
+    fullAddress ? `${serviceQuery} near ${fullAddress}` : '',
+  ]
+    .map((query) => normalizeString(query))
+    .filter(Boolean)
+    .filter((query, index, allQueries) => allQueries.indexOf(query) === index);
+
+  if (!fallbackQueries.length) {
     return [];
   }
 
   try {
-    const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': env.GOOGLE_MAPS_API_KEY,
-        'X-Goog-FieldMask':
-          'places.id,places.displayName,places.formattedAddress,places.googleMapsUri,places.websiteUri,places.nationalPhoneNumber,places.rating,places.userRatingCount,places.primaryTypeDisplayName',
-      },
-      body: JSON.stringify({
-        textQuery,
-        maxResultCount: Math.max(1, Math.min(Number(limit || 5), 5)),
-        languageCode: 'en',
-        regionCode: 'US',
-      }),
-    });
+    const propertyCoordinates = await getPropertyCoordinates(property);
 
-    if (!response.ok) {
-      return [];
+    for (const textQuery of fallbackQueries) {
+      const places = await requestGoogleFallbackPlaces(textQuery, {
+        limit,
+        locationBias: propertyCoordinates,
+      });
+
+      if (places.length) {
+        return places
+          .slice(0, Math.max(1, Math.min(Number(limit || 5), 5)))
+          .map((place) => buildExternalProviderFallbackItem(place, categoryKey, property));
+      }
     }
 
-    const payload = await response.json().catch(() => ({}));
-    return Array.isArray(payload.places)
-      ? payload.places
-          .slice(0, Math.max(1, Math.min(Number(limit || 5), 5)))
-          .map((place) => buildExternalProviderFallbackItem(place, categoryKey, property))
-      : [];
+    return [];
   } catch {
     return [];
   }
