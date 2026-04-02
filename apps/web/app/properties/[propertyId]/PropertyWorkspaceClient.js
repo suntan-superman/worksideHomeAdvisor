@@ -1017,22 +1017,43 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   async function handleBrowseGoogleFallback() {
-    const response = await listProviders(propertyId, {
-      taskKey: providerSuggestionTask?.systemKey || providerSuggestionTask?.id,
-      limit: 5,
-      includeExternal: true,
-    });
-    const results = response.providers?.externalItems || [];
-    setExternalProviderRecommendations(results);
-    setShowExternalProviderFallback(true);
-    setProviderSource((current) =>
-      ({
-        ...(current || {}),
-        ...(response.providers?.source || {}),
-        externalProviders: results.length,
-      })
-    );
-    return results;
+    try {
+      setProviderSearchStatus('Searching Google fallback providers...');
+      const response = await listProviders(propertyId, {
+        taskKey: providerSuggestionTask?.systemKey || providerSuggestionTask?.id,
+        limit: 5,
+        includeExternal: true,
+      });
+      const results = response.providers?.externalItems || [];
+      setExternalProviderRecommendations(results);
+      setShowExternalProviderFallback(true);
+      setProviderSource((current) =>
+        ({
+          ...(current || {}),
+          ...(response.providers?.source || {}),
+          externalProviders: results.length,
+        })
+      );
+      if (!results.length) {
+        setToast({
+          tone: 'info',
+          title: 'No Google fallback results',
+          message: 'Google did not return any additional providers for this category near the property.',
+        });
+      }
+      return results;
+    } catch (error) {
+      setShowExternalProviderFallback(true);
+      setExternalProviderRecommendations([]);
+      setToast({
+        tone: 'error',
+        title: 'Could not load Google fallback',
+        message: error.message || 'Google fallback search could not be completed.',
+      });
+      return [];
+    } finally {
+      setProviderSearchStatus('');
+    }
   }
 
   async function refreshProviders(task = providerSuggestionTask) {
@@ -2958,7 +2979,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 type="button"
                 className="button-secondary"
                 onClick={handleBrowseGoogleFallback}
-                disabled={Boolean(status) || providerSearchStatus === 'Searching Google for nearby providers...'}
+                disabled={Boolean(status) || Boolean(providerSearchStatus)}
               >
                 {externalProviderRecommendations.length || showExternalProviderFallback
                   ? 'Refresh Google fallback'
@@ -3031,7 +3052,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               ))}
             </div>
           ) : null}
-          {!providerRecommendations.length && showExternalProviderFallback && externalProviderRecommendations.length === 0 ? (
+          {showExternalProviderFallback && externalProviderRecommendations.length === 0 ? (
             <p className="workspace-control-note">
               Google fallback did not return any results for this category yet.
             </p>
