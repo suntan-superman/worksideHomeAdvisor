@@ -703,6 +703,25 @@ async function requestGoogleFallbackPlaces(textQuery, { limit = 5, locationBias 
   return Array.isArray(payload.places) ? payload.places : [];
 }
 
+async function requestGoogleLegacyTextSearch(textQuery, { limit = 5, locationBias = null } = {}) {
+  const url = new URL('https://maps.googleapis.com/maps/api/place/textsearch/json');
+  url.searchParams.set('query', textQuery);
+  url.searchParams.set('key', env.GOOGLE_MAPS_API_KEY);
+
+  if (locationBias?.lat && locationBias?.lng) {
+    url.searchParams.set('location', `${locationBias.lat},${locationBias.lng}`);
+    url.searchParams.set('radius', '120000');
+  }
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    return [];
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  return Array.isArray(payload.results) ? payload.results : [];
+}
+
 function buildExternalProviderFallbackItem(place = {}, categoryKey = '', property = {}) {
   const displayName =
     place.displayName?.text ||
@@ -771,6 +790,76 @@ function buildExternalProviderFallbackItem(place = {}, categoryKey = '', propert
   };
 }
 
+function buildLegacyGoogleProviderFallbackItem(place = {}, categoryKey = '', property = {}) {
+  const displayName = place.name || 'Google result';
+  const address = place.formatted_address || '';
+
+  return {
+    id: `google-${place.place_id || slugify(`${displayName}-${address}`)}`,
+    sourceRefId: place.place_id || '',
+    userId: '',
+    businessName: displayName,
+    slug: slugify(displayName),
+    categoryKey,
+    description: address || `Google Maps result near ${property.city || property.state || 'the property'}.`,
+    phone: '',
+    email: '',
+    websiteUrl: '',
+    mapsUrl:
+      place.place_id
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(displayName)}&query_place_id=${encodeURIComponent(place.place_id)}`
+        : address
+          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([displayName, address].filter(Boolean).join(', '))}`
+          : '',
+    status: 'external',
+    isVerified: false,
+    isSponsored: false,
+    qualityScore: 0,
+    averageResponseMinutes: 0,
+    yearsInBusiness: null,
+    turnaroundLabel: '',
+    pricingSummary: '',
+    serviceHighlights: ['Google Maps result'],
+    serviceArea: {
+      city: property.city || '',
+      state: property.state || '',
+      zipCodes: property.zip ? [property.zip] : [],
+      radiusMiles: 0,
+    },
+    leadRouting: {
+      deliveryMode: 'email',
+      notifyPhone: '',
+      notifyEmail: '',
+      preferredContactMethod: 'email',
+    },
+    subscription: {
+      planCode: 'external_fallback',
+      status: 'external',
+    },
+    compliance: {
+      approvalStatus: 'draft',
+      licenseStatus: 'unverified',
+      insuranceStatus: 'unverified',
+      reviewedAt: null,
+      reviewedBy: '',
+    },
+    verification: {
+      review: {
+        level: 'self_reported',
+      },
+      disclaimer: PROVIDER_VERIFICATION_DISCLAIMER,
+    },
+    coverageLabel: 'Google Maps result',
+    rankingBadges: ['Google result'],
+    rating: Number(place.rating || 0),
+    reviewCount: Number(place.user_ratings_total || 0),
+    externalSource: 'google_places_legacy',
+    isExternalFallback: true,
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
 async function searchGoogleFallbackProviders(property, { categoryKey = '', limit = 5 } = {}) {
   if (!env.GOOGLE_MAPS_API_KEY || !property || !categoryKey) {
     return [];
@@ -810,6 +899,19 @@ async function searchGoogleFallbackProviders(property, { categoryKey = '', limit
         return places
           .slice(0, Math.max(1, Math.min(Number(limit || 5), 5)))
           .map((place) => buildExternalProviderFallbackItem(place, categoryKey, property));
+      }
+    }
+
+    for (const textQuery of fallbackQueries) {
+      const places = await requestGoogleLegacyTextSearch(textQuery, {
+        limit,
+        locationBias: propertyCoordinates,
+      });
+
+      if (places.length) {
+        return places
+          .slice(0, Math.max(1, Math.min(Number(limit || 5), 5)))
+          .map((place) => buildLegacyGoogleProviderFallbackItem(place, categoryKey, property));
       }
     }
 

@@ -7,7 +7,7 @@ import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slide
 import { formatCurrency } from '@workside/utils';
 
 import { AppFrame } from '../../../components/AppFrame';
-import { PropertyLocationMap, loadGoogleMapsApi } from '../../../components/PropertyLocationMap';
+import { PropertyLocationMap, ProviderResultsMap, loadGoogleMapsApi } from '../../../components/PropertyLocationMap';
 import { Toast } from '../../../components/Toast';
 import {
   analyzePricing,
@@ -374,6 +374,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [providerSource, setProviderSource] = useState(null);
   const [showExternalProviderFallback, setShowExternalProviderFallback] = useState(false);
   const [activeProviderDetails, setActiveProviderDetails] = useState(null);
+  const [showProviderMap, setShowProviderMap] = useState(false);
   const [activeProviderTaskKey, setActiveProviderTaskKey] = useState('');
   const [providerSearchStatus, setProviderSearchStatus] = useState('');
   const [showMoreVisionVariants, setShowMoreVisionVariants] = useState(false);
@@ -602,6 +603,17 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
   }, [property, providerSuggestionTask]);
+  const providerMapProviders = useMemo(() => {
+    const internalProviders = (providerRecommendations || []).map((provider) => ({
+      ...provider,
+      categoryLabel: providerSource?.categoryLabel || provider.categoryKey?.replace(/_/g, ' '),
+    }));
+    const externalProviders = (externalProviderRecommendations || []).map((provider) => ({
+      ...provider,
+      categoryLabel: providerSource?.categoryLabel || provider.categoryKey?.replace(/_/g, ' '),
+    }));
+    return [...internalProviders, ...externalProviders];
+  }, [externalProviderRecommendations, providerRecommendations, providerSource?.categoryLabel]);
   const recentOutputs = useMemo(
     () =>
       [
@@ -1041,6 +1053,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           externalProviders: results.length,
         })
       );
+      if (results.length) {
+        setShowProviderMap(true);
+      }
       if (!results.length) {
         setToast({
           tone: 'info',
@@ -2982,6 +2997,16 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           ) : null}
           {providerSource?.googleFallbackEnabled ? (
             <div className="provider-card-actions">
+              {providerMapProviders.length ? (
+                <button
+                  type="button"
+                  className="button-primary"
+                  onClick={() => setShowProviderMap(true)}
+                  disabled={Boolean(status)}
+                >
+                  Open provider map
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="button-secondary"
@@ -3251,6 +3276,52 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 {status === 'Deleting photo...' ? 'Deleting...' : 'Delete photo'}
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+      {showProviderMap ? (
+        <div className="workspace-modal-backdrop" role="presentation" onClick={() => setShowProviderMap(false)}>
+          <div
+            className="workspace-modal-card workspace-map-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="provider-map-title"
+            aria-describedby="provider-map-description"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="workspace-map-modal-header">
+              <div>
+                <span className="label">Provider map</span>
+                <h2 id="provider-map-title">
+                  {providerSource?.categoryLabel || providerSuggestionTask?.providerCategoryLabel || 'Provider coverage'}
+                </h2>
+                <p id="provider-map-description">
+                  Review marketplace and Google fallback providers around the property in a controlled map view.
+                </p>
+              </div>
+              <div className="workspace-modal-actions">
+                {providerGoogleSearchUrl ? (
+                  <a
+                    href={providerGoogleSearchUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="button-secondary inline-button"
+                  >
+                    Open map search
+                  </a>
+                ) : null}
+                <button type="button" className="button-secondary" onClick={() => setShowProviderMap(false)}>
+                  Close map
+                </button>
+              </div>
+            </div>
+            <ProviderResultsMap
+              property={property}
+              providers={providerMapProviders}
+              mapsApiKey={mapsApiKey}
+              googleMapsUrl={providerGoogleSearchUrl}
+              frameClassName="property-map-frame-expanded"
+            />
           </div>
         </div>
       ) : null}

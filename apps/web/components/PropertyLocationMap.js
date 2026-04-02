@@ -88,6 +88,48 @@ function formatCompSummary(comp) {
   return parts.join(' • ');
 }
 
+function buildProviderAddressQuery(provider) {
+  const serviceAreaLabel = [
+    provider?.serviceArea?.city,
+    provider?.serviceArea?.state,
+    provider?.serviceArea?.zipCodes?.[0],
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  const descriptionLooksLikeAddress =
+    provider?.isExternalFallback && provider?.description && /\d/.test(provider.description);
+
+  return [
+    provider?.businessName,
+    descriptionLooksLikeAddress ? provider.description : '',
+    serviceAreaLabel,
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function formatProviderSummary(provider) {
+  const parts = [];
+
+  if (provider?.categoryLabel) {
+    parts.push(provider.categoryLabel);
+  }
+  if (provider?.rating) {
+    parts.push(
+      `${Number(provider.rating).toFixed(1)} stars${provider.reviewCount ? ` · ${provider.reviewCount} reviews` : ''}`,
+    );
+  }
+  if (provider?.turnaroundLabel) {
+    parts.push(provider.turnaroundLabel);
+  }
+  if (provider?.pricingSummary) {
+    parts.push(provider.pricingSummary);
+  }
+
+  return parts.join(' • ');
+}
+
 export function PropertyLocationMap({
   property,
   comps = [],
@@ -244,6 +286,167 @@ export function PropertyLocationMap({
               className="button-secondary inline-button"
             >
               View comps in Maps
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function ProviderResultsMap({
+  property,
+  providers = [],
+  mapsApiKey = '',
+  googleMapsUrl = '',
+  frameClassName = '',
+}) {
+  const mapRef = useRef(null);
+  const [mapError, setMapError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function renderMap() {
+      const addressQuery = buildAddressQuery(property);
+      if (!mapRef.current || !addressQuery) {
+        return;
+      }
+
+      setMapError('');
+
+      try {
+        const maps = await loadGoogleMapsApi(mapsApiKey);
+        if (cancelled || !mapRef.current) {
+          return;
+        }
+
+        const geocoder = new maps.Geocoder();
+        const map = new maps.Map(mapRef.current, {
+          center: { lat: 35.3733, lng: -119.0187 },
+          zoom: 12,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: true,
+        });
+
+        const bounds = new maps.LatLngBounds();
+        const infoWindow = new maps.InfoWindow();
+
+        const propertyLocation = await geocodeAddress(geocoder, addressQuery);
+        if (cancelled) {
+          return;
+        }
+
+        const propertyMarker = new maps.Marker({
+          map,
+          position: propertyLocation,
+          title: property.title || addressQuery,
+          label: {
+            text: 'H',
+            color: '#ffffff',
+          },
+        });
+
+        propertyMarker.addListener('click', () => {
+          infoWindow.setContent(
+            `<div style="max-width:220px;"><strong>${property.title || 'Subject property'}</strong><br/>${addressQuery}</div>`,
+          );
+          infoWindow.open({ anchor: propertyMarker, map });
+        });
+
+        bounds.extend(propertyLocation);
+
+        const providerCandidates = (providers || []).slice(0, 12);
+        for (let index = 0; index < providerCandidates.length; index += 1) {
+          const provider = providerCandidates[index];
+          const providerQuery = buildProviderAddressQuery(provider);
+          if (!providerQuery) {
+            continue;
+          }
+
+          let providerLocation = null;
+          try {
+            const resolved = await geocodeAddress(geocoder, providerQuery);
+            providerLocation = {
+              lat: resolved.lat(),
+              lng: resolved.lng(),
+            };
+          } catch {
+            providerLocation = null;
+          }
+
+          if (!providerLocation || cancelled) {
+            continue;
+          }
+
+          const marker = new maps.Marker({
+            map,
+            position: providerLocation,
+            title: provider.businessName,
+            label: {
+              text: String(index + 1),
+              color: '#ffffff',
+            },
+            icon: {
+              path: maps.SymbolPath.CIRCLE,
+              fillColor: provider.isExternalFallback ? '#5e7f8d' : '#c87447',
+              fillOpacity: 1,
+              strokeColor: '#19212a',
+              strokeWeight: 1,
+              scale: 11,
+            },
+          });
+
+          marker.addListener('click', () => {
+            infoWindow.setContent(
+              `<div style="max-width:250px;"><strong>${provider.businessName}</strong><br/>${provider.description || providerQuery}<br/><span style="color:#5d685f;">${formatProviderSummary(
+                provider,
+              )}</span></div>`,
+            );
+            infoWindow.open({ anchor: marker, map });
+          });
+
+          bounds.extend(providerLocation);
+        }
+
+        if (!bounds.isEmpty()) {
+          map.fitBounds(bounds, 72);
+        } else {
+          map.setCenter(propertyLocation);
+          map.setZoom(13);
+        }
+      } catch {
+        if (!cancelled) {
+          setMapError('The provider map could not be loaded with the current Google Maps settings.');
+        }
+      }
+    }
+
+    renderMap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [googleMapsUrl, mapsApiKey, property, providers]);
+
+  return (
+    <div className="property-map-shell">
+      <div
+        ref={mapRef}
+        className={`property-map-frame property-map-frame-js${frameClassName ? ` ${frameClassName}` : ''}`}
+      />
+      {mapError ? (
+        <div className="property-map-fallback">
+          <p>{mapError}</p>
+          {googleMapsUrl ? (
+            <a
+              href={googleMapsUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="button-secondary inline-button"
+            >
+              Open map search
             </a>
           ) : null}
         </div>
