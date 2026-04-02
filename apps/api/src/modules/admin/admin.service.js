@@ -19,6 +19,7 @@ import {
   listAdminProviderLeads,
   listAdminProviders,
   resendAdminProviderLead,
+  deleteAdminProvider,
   updateAdminProviderCategory,
   updateAdminProviderReview,
 } from '../providers/providers.service.js';
@@ -495,4 +496,8 @@ export async function closeAdminProviderLeadAction(leadRequestId, resolution) {
 
 export async function updateAdminProviderReviewAction(providerId, payload) {
   return updateAdminProviderReview(providerId, payload);
+}
+
+export async function deleteAdminProviderAction(providerId) {
+  return deleteAdminProvider(providerId);
 }

@@ -1956,6 +1956,32 @@ export async function updateAdminProviderReview(providerId, payload = {}) {
   };
 }
 
+export async function deleteAdminProvider(providerId) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to remove providers.');
+  }
+
+  const provider = await ProviderModel.findById(providerId);
+  if (!provider) {
+    throw new Error('Provider not found.');
+  }
+
+  await Promise.all([
+    SavedProviderModel.deleteMany({ providerId }),
+    LeadDispatchModel.deleteMany({ providerId }),
+    ProviderAnalyticsModel.deleteMany({ providerId }),
+    ProviderResponseModel.deleteMany({ providerId }),
+    ProviderSmsLogModel.deleteMany({ providerId }),
+  ]);
+
+  await provider.deleteOne();
+
+  return {
+    deleted: true,
+    providerId,
+  };
+}
+
 export async function listAdminProviders({ limit = 50 } = {}) {
   await ensureProviderCategories();
 

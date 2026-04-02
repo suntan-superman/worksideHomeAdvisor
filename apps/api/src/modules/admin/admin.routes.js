@@ -4,6 +4,7 @@ import {
   closeAdminProviderLeadAction,
   createAdminProvider,
   createAdminProviderCategoryAction,
+  deleteAdminProviderAction,
   getAdminBillingSnapshot,
   getAdminMediaVariantSnapshot,
   getAdminOverview,
@@ -215,6 +216,15 @@ export async function adminRoutes(fastify) {
       return reply.send(await updateAdminProviderReviewAction(request.params.providerId, payload));
     } catch (error) {
       request.log.error({ err: error, providerId: request.params?.providerId }, 'admin provider review update failed');
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.delete('/providers/:providerId', async (request, reply) => {
+    try {
+      return reply.send(await deleteAdminProviderAction(request.params.providerId));
+    } catch (error) {
+      request.log.error({ err: error, providerId: request.params?.providerId }, 'admin provider delete failed');
       return reply.code(400).send({ message: error.message });
     }
   });

@@ -217,6 +217,53 @@ a {
   gap: 18px;
 }
 
+.provider-roster-toolbar {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.provider-roster-toolbar-group {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.provider-roster-toolbar-search {
+  grid-template-columns: minmax(260px, 1fr);
+}
+
+.provider-roster-toolbar label {
+  display: grid;
+  gap: 6px;
+}
+
+.provider-roster-toolbar span {
+  color: var(--muted);
+  font-size: 0.84rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.provider-roster-toolbar input,
+.provider-roster-toolbar select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font: inherit;
+}
+
+.provider-roster-summary {
+  margin-top: -2px;
+}
+
 .lead-card {
   display: grid;
   gap: 18px;
@@ -349,6 +396,12 @@ a {
   opacity: 1;
 }
 
+.admin-button-danger {
+  background: rgba(145, 61, 61, 0.22);
+  border-color: rgba(214, 110, 110, 0.38);
+  color: #ffd9d9;
+}
+
 .admin-dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -380,6 +433,31 @@ a {
   margin: 0;
   color: var(--muted);
   line-height: 1.65;
+}
+
+.admin-dialog-confirmation {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-dialog-confirmation span {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.admin-dialog-confirmation strong {
+  color: var(--text);
+}
+
+.admin-dialog-confirmation input {
+  width: 100%;
+  min-height: 46px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font: inherit;
 }
 
 .admin-dialog-meta {
