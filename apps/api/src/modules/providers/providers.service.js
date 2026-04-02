@@ -106,6 +106,18 @@ const GOOGLE_PLACES_QUERY_BY_CATEGORY = {
   nhd_report: 'natural hazard disclosure report provider',
 };
 
+const GOOGLE_PLACES_QUERY_VARIANTS_BY_CATEGORY = {
+  inspector: ['home inspector', 'property inspector', 'home inspection service'],
+  title_company: ['title company', 'escrow company'],
+  real_estate_attorney: ['real estate attorney', 'real estate lawyer', 'property lawyer'],
+  photographer: ['photographer', 'photography service', 'real estate photographer'],
+  cleaning_service: ['cleaning service', 'house cleaning service', 'house cleaner'],
+  termite_inspection: ['termite inspection', 'pest inspection', 'termite inspector'],
+  notary: ['notary public', 'mobile notary', 'notary service'],
+  nhd_report: ['natural hazard disclosure report', 'hazard disclosure provider', 'property disclosure service'],
+  staging_company: ['home staging company', 'home stager', 'staging service'],
+};
+
 const ZIP_COORDINATE_CACHE = new Map();
 
 function slugify(value) {
@@ -667,7 +679,7 @@ async function requestGoogleFallbackPlaces(textQuery, { limit = 5, locationBias 
           latitude: locationBias.lat,
           longitude: locationBias.lng,
         },
-        radius: 35000,
+        radius: 120000,
       },
     };
   }
@@ -764,16 +776,19 @@ async function searchGoogleFallbackProviders(property, { categoryKey = '', limit
     return [];
   }
 
-  const serviceQuery = GOOGLE_PLACES_QUERY_BY_CATEGORY[categoryKey] || categoryKey.replace(/_/g, ' ');
+  const queryVariants =
+    GOOGLE_PLACES_QUERY_VARIANTS_BY_CATEGORY[categoryKey] ||
+    [GOOGLE_PLACES_QUERY_BY_CATEGORY[categoryKey] || categoryKey.replace(/_/g, ' ')];
+  const serviceQuery = queryVariants[0];
   const cityStateZip = [property?.city, property?.state, property?.zip].filter(Boolean).join(', ');
   const fullAddress = buildPropertyLocationQuery(property);
-  const fallbackQueries = [
-    serviceQuery,
-    cityStateZip ? `${serviceQuery} near ${cityStateZip}` : '',
-    property?.city && property?.state ? `${serviceQuery} in ${property.city}, ${property.state}` : '',
-    buildGoogleProviderQuery(categoryKey, property),
-    fullAddress ? `${serviceQuery} near ${fullAddress}` : '',
-  ]
+  const fallbackQueries = queryVariants
+    .flatMap((queryTerm) => [
+      queryTerm,
+      cityStateZip ? `${queryTerm} near ${cityStateZip}` : '',
+      property?.city && property?.state ? `${queryTerm} in ${property.city}, ${property.state}` : '',
+      fullAddress ? `${queryTerm} near ${fullAddress}` : '',
+    ])
     .map((query) => normalizeString(query))
     .filter(Boolean)
     .filter((query, index, allQueries) => allQueries.indexOf(query) === index);

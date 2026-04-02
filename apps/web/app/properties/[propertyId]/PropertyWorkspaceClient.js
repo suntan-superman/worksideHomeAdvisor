@@ -211,7 +211,7 @@ function buildProviderFallbackQuery(task, property) {
     categoryQueryByKey[task?.providerCategoryKey] || task?.providerCategoryLabel || task?.title || 'home services';
   const addressLabel = buildPropertyAddressLabel(property);
   const fallbackLocationLabel = [property?.city, property?.state, property?.zip].filter(Boolean).join(', ');
-  return [categoryLabel, 'near', addressLabel || fallbackLocationLabel || 'this property']
+  return [categoryLabel, addressLabel || fallbackLocationLabel || 'this property']
     .filter(Boolean)
     .join(' ');
 }
