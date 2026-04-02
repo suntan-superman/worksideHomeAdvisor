@@ -156,6 +156,10 @@ async function deliverEmail({ to, subject, text, html, logLabel, logMeta }) {
   await sendViaSendGrid({ to, subject, text, html });
 }
 
+function getAdminAlertEmail() {
+  return env.ADMIN_ALERT_EMAIL || BRANDING.supportEmail;
+}
+
 function buildOtpHtml(code, role = 'seller') {
   const workspaceLabel =
     role === 'provider'
@@ -420,5 +424,85 @@ export async function sendProviderLeadEmail({
     }),
     logLabel: 'Provider lead email',
     logMeta: { categoryLabel, propertyAddress },
+  });
+}
+
+function buildProviderProfileChangeAlertHtml({
+  businessName = '',
+  providerEmail = '',
+  categoryLabel = '',
+  coverageLabel = '',
+  changeItems = [],
+}) {
+  const safeBusinessName = escapeHtml(businessName || 'Provider');
+  const safeProviderEmail = escapeHtml(providerEmail || 'No email on file');
+  const safeCategoryLabel = escapeHtml(categoryLabel || 'Unknown category');
+  const safeCoverageLabel = escapeHtml(coverageLabel || 'Coverage not set');
+  const itemsHtml = changeItems
+    .map((item) => `<li style="margin-bottom: 8px;">${escapeHtml(item)}</li>`)
+    .join('');
+
+  return renderEmailShell({
+    eyebrow: 'Admin alert',
+    title: 'An approved provider profile was updated.',
+    intro: `${safeBusinessName} made changes to an approved marketplace profile and may need review.`,
+    bodyHtml: `
+      <div style="margin: 0 0 22px; padding: 22px; border-radius: 22px; background: #f6efe8; border: 1px solid #ead9cb;">
+        <div style="font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.ink}; font-size: 16px; font-weight: 700; margin-bottom: 8px;">
+          Provider details
+        </div>
+        <div style="font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.slate}; font-size: 15px; line-height: 1.7;">
+          <strong>${safeBusinessName}</strong><br />
+          ${safeProviderEmail}<br />
+          ${safeCategoryLabel}<br />
+          ${safeCoverageLabel}
+        </div>
+      </div>
+      <div style="margin: 0 0 22px; padding: 22px; border-radius: 22px; background: #fff8f2; border: 1px solid #f1d1be;">
+        <div style="font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.ink}; font-size: 16px; font-weight: 700; margin-bottom: 8px;">
+          Changes submitted
+        </div>
+        <ul style="margin: 0; padding-left: 18px; font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.slate}; font-size: 15px; line-height: 1.8;">
+          ${itemsHtml || '<li>No field-level summary was available.</li>'}
+        </ul>
+      </div>
+    `.trim(),
+    footerNote: `${BRANDING.footerCopy} ${BRANDING.supportEmail}`,
+  });
+}
+
+export async function sendAdminProviderProfileChangeAlert({
+  businessName,
+  providerEmail,
+  categoryLabel,
+  coverageLabel,
+  changeItems = [],
+}) {
+  const to = getAdminAlertEmail();
+  await deliverEmail({
+    to,
+    subject: `Provider profile updated: ${businessName || 'Approved provider'}`,
+    text: [
+      'Approved provider profile updated',
+      '',
+      `Provider: ${businessName || 'Unknown provider'}`,
+      `Email: ${providerEmail || 'No email on file'}`,
+      `Category: ${categoryLabel || 'Unknown category'}`,
+      `Coverage: ${coverageLabel || 'Coverage not set'}`,
+      '',
+      'Changes:',
+      ...(changeItems.length ? changeItems.map((item) => `- ${item}`) : ['- No field-level summary was available.']),
+      '',
+      'Review the provider in the Workside admin portal if needed.',
+    ].join('\n'),
+    html: buildProviderProfileChangeAlertHtml({
+      businessName,
+      providerEmail,
+      categoryLabel,
+      coverageLabel,
+      changeItems,
+    }),
+    logLabel: 'Admin provider profile change alert',
+    logMeta: { businessName, providerEmail, categoryLabel },
   });
 }

@@ -3,7 +3,9 @@ import mongoose from 'mongoose';
 
 import { normalizePhoneNumber, notifyQueuedLeadDispatches } from '../marketplace-sms/marketplace-sms.service.js';
 import { env } from '../../config/env.js';
+import { sendAdminProviderProfileChangeAlert } from '../../services/emailService.js';
 import { readStoredAsset, saveProviderDocumentBuffer } from '../../services/storageService.js';
+import { logError } from '../../lib/logger.js';
 import { ChecklistModel } from '../tasks/checklist.model.js';
 import { getPropertyById } from '../properties/property.service.js';
 import { UserModel } from '../auth/auth.model.js';
@@ -120,6 +122,42 @@ function buildCategoryKey(value) {
 
 function normalizeString(value) {
   return String(value || '').trim();
+}
+
+function arraysEqual(left = [], right = []) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
+}
+
+function buildProviderProfileChangeSummary(before, after) {
+  const changes = [];
+
+  if (before.categoryKey !== after.categoryKey) changes.push(`Category changed from ${before.categoryKey || 'unset'} to ${after.categoryKey || 'unset'}`);
+  if (before.description !== after.description) changes.push('Short description updated');
+  if (before.websiteUrl !== after.websiteUrl) changes.push('Website updated');
+  if (before.turnaroundLabel !== after.turnaroundLabel) changes.push('Turnaround updated');
+  if (before.pricingSummary !== after.pricingSummary) changes.push('Pricing summary updated');
+  if (!arraysEqual(before.serviceHighlights, after.serviceHighlights)) changes.push('Service highlights updated');
+  if (before.city !== after.city || before.state !== after.state) changes.push(`Service city/state updated to ${[after.city, after.state].filter(Boolean).join(', ') || 'not set'}`);
+  if (!arraysEqual(before.zipCodes, after.zipCodes)) changes.push('ZIP coverage updated');
+  if (before.radiusMiles !== after.radiusMiles) changes.push(`Service radius updated to ${after.radiusMiles} miles`);
+  if (before.notifyPhone !== after.notifyPhone) changes.push('Lead SMS phone updated');
+  if (before.notifyEmail !== after.notifyEmail) changes.push('Lead email updated');
+  if (before.deliveryMode !== after.deliveryMode) changes.push(`Delivery mode changed to ${after.deliveryMode}`);
+  if (before.preferredContactMethod !== after.preferredContactMethod) changes.push(`Preferred contact method changed to ${after.preferredContactMethod}`);
+  if (before.hasInsurance !== after.hasInsurance) changes.push(after.hasInsurance ? 'Insurance marked as provided' : 'Insurance removed');
+  if (before.insuranceCarrier !== after.insuranceCarrier) changes.push('Insurance carrier updated');
+  if (before.insurancePolicyNumber !== after.insurancePolicyNumber) changes.push('Insurance policy number updated');
+  if (before.insuranceExpirationDate !== after.insuranceExpirationDate) changes.push('Insurance expiration updated');
+  if (before.hasLicense !== after.hasLicense) changes.push(after.hasLicense ? 'License marked as provided' : 'License removed');
+  if (before.licenseNumber !== after.licenseNumber) changes.push('License number updated');
+  if (before.licenseState !== after.licenseState) changes.push(`License state changed to ${after.licenseState || 'unset'}`);
+  if (before.hasBond !== after.hasBond) changes.push(after.hasBond ? 'Bonding marked as provided' : 'Bonding removed');
+
+  return changes;
 }
 
 function normalizeZip(value) {
@@ -1917,6 +1955,33 @@ export async function updateProviderPortalProfile(providerId, token, payload = {
   }
 
   const provider = await authenticateProviderPortal(providerId, token);
+  const wasApproved = provider.compliance?.approvalStatus === 'approved';
+  const beforeSnapshot = {
+    categoryKey: normalizeString(provider.categoryKey),
+    description: normalizeString(provider.description),
+    websiteUrl: normalizeString(provider.websiteUrl),
+    turnaroundLabel: normalizeString(provider.turnaroundLabel),
+    pricingSummary: normalizeString(provider.pricingSummary),
+    serviceHighlights: (provider.serviceHighlights || []).map(normalizeString),
+    city: normalizeString(provider.serviceArea?.city),
+    state: normalizeString(provider.serviceArea?.state),
+    zipCodes: (provider.serviceArea?.zipCodes || []).map(normalizeString),
+    radiusMiles: Number(provider.serviceArea?.radiusMiles || 25),
+    notifyPhone: normalizeString(provider.leadRouting?.notifyPhone),
+    notifyEmail: normalizeString(provider.leadRouting?.notifyEmail),
+    deliveryMode: normalizeString(provider.leadRouting?.deliveryMode),
+    preferredContactMethod: normalizeString(provider.leadRouting?.preferredContactMethod),
+    hasInsurance: Boolean(provider.verification?.insurance?.hasInsurance),
+    insuranceCarrier: normalizeString(provider.verification?.insurance?.carrier),
+    insurancePolicyNumber: normalizeString(provider.verification?.insurance?.policyNumber),
+    insuranceExpirationDate: provider.verification?.insurance?.expirationDate
+      ? new Date(provider.verification.insurance.expirationDate).toISOString().slice(0, 10)
+      : '',
+    hasLicense: Boolean(provider.verification?.license?.hasLicense),
+    licenseNumber: normalizeString(provider.verification?.license?.licenseNumber),
+    licenseState: normalizeString(provider.verification?.license?.state),
+    hasBond: Boolean(provider.verification?.bonding?.hasBond),
+  };
   if (payload.categoryKey !== undefined) {
     const categoryKey = normalizeString(payload.categoryKey);
     const category = await ProviderCategoryModel.findOne({ key: categoryKey, isActive: true }).lean();
@@ -1994,6 +2059,61 @@ export async function updateProviderPortalProfile(providerId, token, payload = {
   }
 
   await provider.save();
+  const category = await ProviderCategoryModel.findOne({ key: provider.categoryKey }).lean();
+  const afterSnapshot = {
+    categoryKey: normalizeString(provider.categoryKey),
+    description: normalizeString(provider.description),
+    websiteUrl: normalizeString(provider.websiteUrl),
+    turnaroundLabel: normalizeString(provider.turnaroundLabel),
+    pricingSummary: normalizeString(provider.pricingSummary),
+    serviceHighlights: (provider.serviceHighlights || []).map(normalizeString),
+    city: normalizeString(provider.serviceArea?.city),
+    state: normalizeString(provider.serviceArea?.state),
+    zipCodes: (provider.serviceArea?.zipCodes || []).map(normalizeString),
+    radiusMiles: Number(provider.serviceArea?.radiusMiles || 25),
+    notifyPhone: normalizeString(provider.leadRouting?.notifyPhone),
+    notifyEmail: normalizeString(provider.leadRouting?.notifyEmail),
+    deliveryMode: normalizeString(provider.leadRouting?.deliveryMode),
+    preferredContactMethod: normalizeString(provider.leadRouting?.preferredContactMethod),
+    hasInsurance: Boolean(provider.verification?.insurance?.hasInsurance),
+    insuranceCarrier: normalizeString(provider.verification?.insurance?.carrier),
+    insurancePolicyNumber: normalizeString(provider.verification?.insurance?.policyNumber),
+    insuranceExpirationDate: provider.verification?.insurance?.expirationDate
+      ? new Date(provider.verification.insurance.expirationDate).toISOString().slice(0, 10)
+      : '',
+    hasLicense: Boolean(provider.verification?.license?.hasLicense),
+    licenseNumber: normalizeString(provider.verification?.license?.licenseNumber),
+    licenseState: normalizeString(provider.verification?.license?.state),
+    hasBond: Boolean(provider.verification?.bonding?.hasBond),
+  };
+  const changeItems = buildProviderProfileChangeSummary(beforeSnapshot, afterSnapshot);
+
+  if (wasApproved && changeItems.length) {
+    const coverageLabel = [
+      provider.serviceArea?.city,
+      provider.serviceArea?.state,
+      provider.serviceArea?.zipCodes?.length
+        ? `ZIPs: ${(provider.serviceArea.zipCodes || []).join(', ')}`
+        : '',
+      provider.serviceArea?.radiusMiles ? `${provider.serviceArea.radiusMiles} mile radius` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    sendAdminProviderProfileChangeAlert({
+      businessName: provider.businessName,
+      providerEmail: provider.email,
+      categoryLabel: category?.label || provider.categoryKey,
+      coverageLabel,
+      changeItems,
+    }).catch((error) => {
+      logError('Approved provider profile change alert failed', {
+        providerId: provider._id?.toString?.() || String(provider._id),
+        message: error.message,
+      });
+    });
+  }
+
   const dashboard = await buildProviderPortalDashboard(provider);
   return { dashboard };
 }
