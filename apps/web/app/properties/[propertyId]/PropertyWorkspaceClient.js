@@ -1017,18 +1017,20 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   async function handleBrowseGoogleFallback() {
-    const results = externalProviderRecommendations.length
-      ? externalProviderRecommendations
-      : await searchGoogleFallbackProviders(providerSuggestionTask);
+    const response = await listProviders(propertyId, {
+      taskKey: providerSuggestionTask?.systemKey || providerSuggestionTask?.id,
+      limit: 5,
+      includeExternal: true,
+    });
+    const results = response.providers?.externalItems || [];
+    setExternalProviderRecommendations(results);
     setShowExternalProviderFallback(true);
     setProviderSource((current) =>
-      current
-        ? {
-            ...current,
-            externalProviders: results.length,
-            googleFallbackEnabled: Boolean(mapsApiKey),
-          }
-        : current,
+      ({
+        ...(current || {}),
+        ...(response.providers?.source || {}),
+        externalProviders: results.length,
+      })
     );
     return results;
   }
@@ -1057,7 +1059,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setProviderSource({
       ...(response.providers?.source || {}),
       externalProviders: fallbackProviders.length,
-      googleFallbackEnabled: Boolean(mapsApiKey),
     });
     return nextProviders;
   }

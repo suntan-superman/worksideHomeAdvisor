@@ -1365,7 +1365,10 @@ async function buildProviderCoverageContext(provider, property) {
   };
 }
 
-export async function listProvidersForProperty(propertyId, { categoryKey = '', limit = 3, taskKey = '' } = {}) {
+export async function listProvidersForProperty(
+  propertyId,
+  { categoryKey = '', limit = 3, taskKey = '', includeExternal = false } = {},
+) {
   const property = await getPropertyById(propertyId);
   if (!property) {
     throw new Error('Property not found.');
@@ -1440,12 +1443,12 @@ export async function listProvidersForProperty(propertyId, { categoryKey = '', l
     })
     .slice(0, Math.max(1, Number(limit || 3)));
 
-  const externalItems = rankedProviders.length
-    ? []
-    : await searchGoogleFallbackProviders(property, {
+  const externalItems = !rankedProviders.length || includeExternal
+    ? await searchGoogleFallbackProviders(property, {
         categoryKey: resolvedCategoryKey,
         limit: Math.max(1, Math.min(Number(limit || 5), 5)),
-      });
+      })
+    : [];
 
   return {
     categories,

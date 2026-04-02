@@ -123,7 +123,7 @@ export function getWorkflow(propertyId, role = 'seller') {
   return request(`/api/v1/properties/${propertyId}/workflow${search}`);
 }
 
-export function listProviders(propertyId, { categoryKey, taskKey, limit } = {}) {
+export function listProviders(propertyId, { categoryKey, taskKey, limit, includeExternal } = {}) {
   const search = new URLSearchParams();
   if (categoryKey) {
     search.set('category', categoryKey);
@@ -133,6 +133,9 @@ export function listProviders(propertyId, { categoryKey, taskKey, limit } = {}) 
   }
   if (limit) {
     search.set('limit', String(limit));
+  }
+  if (includeExternal) {
+    search.set('includeExternal', 'true');
   }
   const query = search.toString();
   return request(`/api/v1/properties/${propertyId}/providers${query ? `?${query}` : ''}`);

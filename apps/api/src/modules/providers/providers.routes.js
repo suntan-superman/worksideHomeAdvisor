@@ -70,6 +70,7 @@ const providerDiscoveryQuerySchema = z.object({
   category: z.string().trim().min(1).optional(),
   limit: z.coerce.number().int().positive().max(10).optional(),
   taskKey: z.string().trim().min(1).optional(),
+  includeExternal: z.coerce.boolean().optional(),
 });
 
 const createLeadSchema = z.object({
@@ -226,6 +227,7 @@ export async function providersRoutes(fastify) {
         categoryKey: query.category,
         limit: query.limit,
         taskKey: query.taskKey,
+        includeExternal: query.includeExternal,
       });
       return reply.send({ providers });
     } catch (error) {
