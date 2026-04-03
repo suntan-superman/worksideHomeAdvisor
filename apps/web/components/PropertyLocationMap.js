@@ -350,10 +350,10 @@ export function ProviderResultsMap({
   frameClassName = '',
 }) {
   const [mapError, setMapError] = useState('');
-  const [zoom, setZoom] = useState(11);
+  const [zoomOffset, setZoomOffset] = useState(0);
   const [resolvedImageUrl, setResolvedImageUrl] = useState('');
   const [isLoadingMap, setIsLoadingMap] = useState(false);
-  const imageUrl = typeof buildImageUrl === 'function' ? buildImageUrl(zoom) : '';
+  const imageUrl = typeof buildImageUrl === 'function' ? buildImageUrl(zoomOffset) : '';
 
   useEffect(() => {
     let cancelled = false;
@@ -424,27 +424,41 @@ export function ProviderResultsMap({
     };
   }, [imageUrl]);
 
-  return (
-    <div className="property-map-shell">
-      <div className="property-map-actions provider-static-map-toolbar">
-        <span className="provider-static-map-zoom-label">Zoom {zoom}</span>
-        <button
-          type="button"
-          className="button-secondary inline-button"
-          onClick={() => setZoom((current) => Math.max(8, current - 1))}
-          disabled={zoom <= 8}
-        >
-          Zoom out
-        </button>
-        <button
-          type="button"
-          className="button-secondary inline-button"
-          onClick={() => setZoom((current) => Math.min(17, current + 1))}
-          disabled={zoom >= 17}
-        >
-          Zoom in
-        </button>
-      </div>
+    return (
+      <div className="property-map-shell">
+        <div className="property-map-actions provider-static-map-toolbar">
+          <span className="provider-static-map-zoom-label">
+            {zoomOffset === 0
+              ? 'Fitted view'
+              : zoomOffset > 0
+                ? `Closer view +${zoomOffset}`
+                : `Wider view ${zoomOffset}`}
+          </span>
+          <button
+            type="button"
+            className="button-secondary inline-button"
+            onClick={() => setZoomOffset((current) => Math.max(-4, current - 1))}
+            disabled={zoomOffset <= -4}
+          >
+            Wider
+          </button>
+          <button
+            type="button"
+            className="button-secondary inline-button"
+            onClick={() => setZoomOffset((current) => Math.min(4, current + 1))}
+            disabled={zoomOffset >= 4}
+          >
+            Closer
+          </button>
+          <button
+            type="button"
+            className="button-secondary inline-button"
+            onClick={() => setZoomOffset(0)}
+            disabled={zoomOffset === 0}
+          >
+            Reset
+          </button>
+        </div>
       <div className={`property-map-frame provider-static-map-frame${frameClassName ? ` ${frameClassName}` : ''}`}>
         {isLoadingMap ? (
           <div className="property-map-loading">Loading provider map…</div>

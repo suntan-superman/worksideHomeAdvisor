@@ -119,6 +119,7 @@ const GOOGLE_PLACES_QUERY_VARIANTS_BY_CATEGORY = {
 };
 
 const ZIP_COORDINATE_CACHE = new Map();
+const ADDRESS_COORDINATE_CACHE = new Map();
 
 function slugify(value) {
   return String(value || '')
@@ -240,6 +241,42 @@ async function getZipCoordinates(zipCode) {
   }
 }
 
+async function geocodeAddressQuery(addressQuery) {
+  const normalizedAddress = normalizeString(addressQuery);
+  if (!normalizedAddress || !env.GOOGLE_MAPS_SERVER_API_KEY) {
+    return null;
+  }
+
+  if (ADDRESS_COORDINATE_CACHE.has(normalizedAddress)) {
+    return ADDRESS_COORDINATE_CACHE.get(normalizedAddress);
+  }
+
+  try {
+    const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
+    url.searchParams.set('address', normalizedAddress);
+    url.searchParams.set('key', env.GOOGLE_MAPS_SERVER_API_KEY);
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      ADDRESS_COORDINATE_CACHE.set(normalizedAddress, null);
+      return null;
+    }
+
+    const payload = await response.json();
+    const location = payload?.results?.[0]?.geometry?.location;
+    const point =
+      typeof location?.lat === 'number' && typeof location?.lng === 'number'
+        ? { lat: location.lat, lng: location.lng }
+        : null;
+
+    ADDRESS_COORDINATE_CACHE.set(normalizedAddress, point);
+    return point;
+  } catch {
+    ADDRESS_COORDINATE_CACHE.set(normalizedAddress, null);
+    return null;
+  }
+}
+
 function normalizeZipList(value) {
   return Array.isArray(value)
     ? value.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 25)
@@ -280,7 +317,44 @@ function buildProviderMarkerLabel(index) {
   return String.fromCharCode(65 + Math.min(index - 9, 25));
 }
 
-function buildProviderStaticMapRequestUrl(property, providers = [], zoom = 11) {
+function latitudeToRadians(latitude) {
+  const sine = Math.sin((latitude * Math.PI) / 180);
+  const radX2 = Math.log((1 + sine) / (1 - sine)) / 2;
+  return Math.max(Math.min(radX2, Math.PI), -Math.PI) / 2;
+}
+
+function zoomForFraction(mapPixels, fraction) {
+  if (!Number.isFinite(fraction) || fraction <= 0) {
+    return 17;
+  }
+
+  return Math.floor(Math.log(mapPixels / 256 / fraction) / Math.LN2);
+}
+
+function calculateStaticMapZoom(points = [], { width = 640, height = 420, zoomOffset = 0 } = {}) {
+  if (points.length <= 1) {
+    return Math.max(8, Math.min(17, 13 + Number(zoomOffset || 0)));
+  }
+
+  const latitudes = points.map((point) => point.lat);
+  const longitudes = points.map((point) => point.lng);
+  const minLat = Math.min(...latitudes);
+  const maxLat = Math.max(...latitudes);
+  const minLng = Math.min(...longitudes);
+  const maxLng = Math.max(...longitudes);
+
+  const latFraction = (latitudeToRadians(maxLat) - latitudeToRadians(minLat)) / Math.PI;
+  const lngDiff = maxLng - minLng;
+  const lngFraction = ((lngDiff < 0 ? lngDiff + 360 : lngDiff) || 0.01) / 360;
+
+  const latZoom = zoomForFraction(height * 0.76, latFraction || 0.01);
+  const lngZoom = zoomForFraction(width * 0.76, lngFraction || 0.01);
+  const fittedZoom = Math.min(latZoom, lngZoom, 17);
+
+  return Math.max(8, Math.min(17, fittedZoom + Number(zoomOffset || 0)));
+}
+
+async function buildProviderStaticMapRequestUrl(property, providers = [], zoomOffset = 0) {
   if (!env.GOOGLE_MAPS_SERVER_API_KEY) {
     throw new Error('Google Maps server key is not configured for provider map images.');
   }
@@ -295,19 +369,80 @@ function buildProviderStaticMapRequestUrl(property, providers = [], zoom = 11) {
   url.searchParams.set('size', '1280x840');
   url.searchParams.set('scale', '2');
   url.searchParams.set('maptype', 'roadmap');
-  url.searchParams.set('zoom', String(Math.max(8, Math.min(Number(zoom || 11), 17))));
-  url.searchParams.set('center', propertyQuery);
-  url.searchParams.append('markers', `color:0xc87447|label:H|${propertyQuery}`);
+  const mapPoints = [];
 
-  providers.slice(0, 10).forEach((provider, index) => {
+  const propertyPoint = (await geocodeAddressQuery(propertyQuery)) || (await resolvePropertyLocationBias(property));
+  if (propertyPoint) {
+    mapPoints.push(propertyPoint);
+  }
+
+  const providerPoints = [];
+  for (let index = 0; index < providers.slice(0, 10).length; index += 1) {
+    const provider = providers[index];
     const providerQuery = buildProviderAddressQuery(provider);
     if (!providerQuery) {
-      return;
+      continue;
     }
 
+    const providerZipPoint = await getZipCoordinates(provider?.serviceArea?.zipCodes?.[0]);
+    const providerPoint = provider.isExternalFallback
+      ? (await geocodeAddressQuery(providerQuery)) || providerZipPoint || null
+      : providerZipPoint ||
+        (await geocodeAddressQuery(
+          [
+            normalizeString(provider?.serviceArea?.city),
+            normalizeString(provider?.serviceArea?.state),
+            normalizeString(provider?.serviceArea?.zipCodes?.[0]),
+          ]
+            .filter(Boolean)
+            .join(', '),
+        )) ||
+        null;
+    providerPoints.push({
+      provider,
+      point: providerPoint,
+      query: providerQuery,
+      index,
+    });
+    if (providerPoint) {
+      mapPoints.push(providerPoint);
+    }
+  }
+
+  const centerPoint =
+    mapPoints.length
+      ? {
+          lat: mapPoints.reduce((sum, point) => sum + point.lat, 0) / mapPoints.length,
+          lng: mapPoints.reduce((sum, point) => sum + point.lng, 0) / mapPoints.length,
+        }
+      : propertyPoint;
+
+  if (centerPoint) {
+    url.searchParams.set('center', `${centerPoint.lat},${centerPoint.lng}`);
+  } else {
+    url.searchParams.set('center', propertyQuery);
+  }
+
+  url.searchParams.set(
+    'zoom',
+    String(calculateStaticMapZoom(mapPoints, { width: 640, height: 420, zoomOffset })),
+  );
+  url.searchParams.append(
+    'markers',
+    propertyPoint
+      ? `color:0xc87447|label:H|${propertyPoint.lat},${propertyPoint.lng}`
+      : `color:0xc87447|label:H|${propertyQuery}`,
+  );
+
+  providerPoints.forEach(({ provider, point, query, index }) => {
     const markerColor = provider.isExternalFallback ? '0x5e7f8d' : '0x4f7b62';
     const markerLabel = buildProviderMarkerLabel(index);
-    url.searchParams.append('markers', `color:${markerColor}|label:${markerLabel}|${providerQuery}`);
+    url.searchParams.append(
+      'markers',
+      point
+        ? `color:${markerColor}|label:${markerLabel}|${point.lat},${point.lng}`
+        : `color:${markerColor}|label:${markerLabel}|${query}`,
+    );
   });
 
   return url.toString();
@@ -1846,7 +1981,7 @@ export async function saveProviderForProperty(propertyId, providerId) {
 
 export async function getProviderMapImageForProperty(
   propertyId,
-  { categoryKey = '', taskKey = '', includeExternal = false, zoom = 11 } = {},
+  { categoryKey = '', taskKey = '', includeExternal = false, zoomOffset = 0 } = {},
 ) {
   const property = await getPropertyById(propertyId);
   if (!property) {
@@ -1866,7 +2001,7 @@ export async function getProviderMapImageForProperty(
     ...(includeExternal ? providerResults.externalItems || [] : []),
   ].slice(0, 10);
 
-  const requestUrl = buildProviderStaticMapRequestUrl(property, mapProviders, zoom);
+  const requestUrl = await buildProviderStaticMapRequestUrl(property, mapProviders, zoomOffset);
   const response = await fetch(requestUrl);
   if (!response.ok) {
     const errorText = await response.text().catch(() => '');

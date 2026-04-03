@@ -242,12 +242,17 @@ export async function providersRoutes(fastify) {
       const { propertyId } = propertyParamsSchema.parse(request.params);
       const query = providerDiscoveryQuerySchema.extend({
         zoom: z.coerce.number().int().min(8).max(17).optional(),
+        zoomOffset: z.coerce.number().int().min(-5).max(5).optional(),
       }).parse(request.query || {});
       const image = await getProviderMapImageForProperty(propertyId, {
         categoryKey: query.category,
         taskKey: query.taskKey,
         includeExternal: query.includeExternal,
-        zoom: query.zoom,
+        zoomOffset: Number.isFinite(query.zoomOffset)
+          ? query.zoomOffset
+          : Number.isFinite(query.zoom)
+            ? query.zoom - 11
+            : 0,
       });
       reply.header('Content-Type', image.contentType);
       reply.header('Cache-Control', 'no-store');

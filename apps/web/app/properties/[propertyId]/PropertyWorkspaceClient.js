@@ -576,12 +576,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     unavailableProviderRecommendations,
   ]);
   const providerMapImageUrlBuilder = useMemo(
-    () => (zoom = 11) =>
+    () => (zoomOffset = 0) =>
       getProviderMapImageUrl(propertyId, {
         categoryKey: providerSource?.categoryKey || providerSuggestionTask?.providerCategoryKey,
         taskKey: providerSuggestionTask?.systemKey || providerSuggestionTask?.id,
         includeExternal: Boolean(externalProviderRecommendations.length),
-        zoom,
+        zoomOffset,
       }),
     [
       externalProviderRecommendations.length,

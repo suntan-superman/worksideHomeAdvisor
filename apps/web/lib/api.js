@@ -141,7 +141,7 @@ export function listProviders(propertyId, { categoryKey, taskKey, limit, include
   return request(`/api/v1/properties/${propertyId}/providers${query ? `?${query}` : ''}`);
 }
 
-export function getProviderMapImageUrl(propertyId, { categoryKey, taskKey, includeExternal, zoom } = {}) {
+export function getProviderMapImageUrl(propertyId, { categoryKey, taskKey, includeExternal, zoomOffset } = {}) {
   const search = new URLSearchParams();
   if (categoryKey) {
     search.set('category', categoryKey);
@@ -152,8 +152,8 @@ export function getProviderMapImageUrl(propertyId, { categoryKey, taskKey, inclu
   if (includeExternal) {
     search.set('includeExternal', 'true');
   }
-  if (zoom) {
-    search.set('zoom', String(zoom));
+  if (Number.isFinite(zoomOffset) && zoomOffset !== 0) {
+    search.set('zoomOffset', String(zoomOffset));
   }
   const query = search.toString();
   return `${API_BASE_URL}/api/v1/properties/${propertyId}/provider-map${query ? `?${query}` : ''}`;
