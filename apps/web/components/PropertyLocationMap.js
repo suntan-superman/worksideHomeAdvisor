@@ -3,6 +3,15 @@
 import { useEffect, useRef, useState } from 'react';
 
 let googleMapsLoaderPromise = null;
+let googleMapsReadyResolver = null;
+
+function waitForNextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(resolve);
+    });
+  });
+}
 
 function buildAddressQuery(property) {
   return [
@@ -30,6 +39,7 @@ export function loadGoogleMapsApi(apiKey) {
 
   googleMapsLoaderPromise = new Promise((resolve, reject) => {
     const previousAuthFailure = window.gm_authFailure;
+    const previousReadyCallback = window.__worksideGoogleMapsReady;
     const handleAuthFailure = () => {
       googleMapsLoaderPromise = null;
       reject(new Error('Google Maps browser key is not authorized for this domain.'));
@@ -37,11 +47,25 @@ export function loadGoogleMapsApi(apiKey) {
         previousAuthFailure();
       }
     };
+    const handleReady = () => {
+      if (window.google?.maps) {
+        googleMapsReadyResolver?.(window.google.maps);
+        googleMapsReadyResolver = null;
+      }
+      if (typeof previousReadyCallback === 'function') {
+        previousReadyCallback();
+      }
+    };
     window.gm_authFailure = handleAuthFailure;
+    window.__worksideGoogleMapsReady = handleReady;
 
     const existingScript = document.querySelector('script[data-workside-google-maps="true"]');
     if (existingScript) {
-      existingScript.addEventListener('load', () => resolve(window.google.maps), { once: true });
+      if (window.google?.maps) {
+        resolve(window.google.maps);
+        return;
+      }
+      googleMapsReadyResolver = resolve;
       existingScript.addEventListener(
         'error',
         () => {
@@ -56,11 +80,11 @@ export function loadGoogleMapsApi(apiKey) {
     }
 
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly`;
+    googleMapsReadyResolver = resolve;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly&loading=async&callback=__worksideGoogleMapsReady`;
     script.async = true;
     script.defer = true;
     script.dataset.worksideGoogleMaps = 'true';
-    script.onload = () => resolve(window.google.maps);
     script.onerror = () => {
       googleMapsLoaderPromise = null;
       reject(new Error('Google Maps failed to load.'));
@@ -185,6 +209,7 @@ export function PropertyLocationMap({
       setMapError('');
 
       try {
+        await waitForNextPaint();
         const maps = await loadGoogleMapsApi(mapsApiKey);
         if (cancelled || !mapRef.current) {
           return;
@@ -349,6 +374,7 @@ export function ProviderResultsMap({
       setMapError('');
 
       try {
+        await waitForNextPaint();
         const maps = await loadGoogleMapsApi(mapsApiKey);
         if (cancelled || !mapRef.current) {
           return;
