@@ -1664,6 +1664,19 @@ export async function listProvidersForProperty(
           : null,
       }),
     ),
+    unavailableItems: unavailableProviders.map(({ provider, coverage }) =>
+      serializeProvider(provider, {
+        saved: savedProviderIds.has(provider._id?.toString?.() || String(provider._id)),
+        categoryDocument: categoryByKey.get(provider.categoryKey) || null,
+        city: provider.serviceArea?.city || '',
+        state: provider.serviceArea?.state || '',
+        coverageLabel: buildCoverageLabel(provider, property, coverage),
+        rankingBadges: [
+          formatProviderStatusLabel(provider.status),
+          ...(provider.serviceHighlights || []).slice(0, 2),
+        ],
+      }),
+    ),
     externalItems,
     source: {
       internalProviders: providers.length,

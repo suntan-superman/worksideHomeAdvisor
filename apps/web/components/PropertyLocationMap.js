@@ -130,6 +130,19 @@ function formatProviderSummary(provider) {
   return parts.join(' • ');
 }
 
+function offsetMarkerPosition(position, markerIndex, totalAtPoint) {
+  if (!position || totalAtPoint <= 1) {
+    return position;
+  }
+
+  const angle = (Math.PI * 2 * markerIndex) / totalAtPoint;
+  const offsetDistance = 0.01;
+  return {
+    lat: position.lat + Math.sin(angle) * offsetDistance,
+    lng: position.lng + Math.cos(angle) * offsetDistance,
+  };
+}
+
 export function PropertyLocationMap({
   property,
   comps = [],
@@ -358,6 +371,7 @@ export function ProviderResultsMap({
         bounds.extend(propertyLocation);
 
         const providerCandidates = (providers || []).slice(0, 12);
+        const providerBaseLocations = [];
         for (let index = 0; index < providerCandidates.length; index += 1) {
           const provider = providerCandidates[index];
           const providerQuery = buildProviderAddressQuery(provider);
@@ -380,12 +394,37 @@ export function ProviderResultsMap({
             continue;
           }
 
+          providerBaseLocations.push({
+            provider,
+            query: providerQuery,
+            basePosition: providerLocation,
+          });
+        }
+
+        const groupedProviderLocations = providerBaseLocations.map((entry, index, allEntries) => {
+          const overlappingEntries = allEntries.filter((candidate) =>
+            Math.abs(candidate.basePosition.lat - entry.basePosition.lat) < 0.0008 &&
+            Math.abs(candidate.basePosition.lng - entry.basePosition.lng) < 0.0008,
+          );
+          const overlapIndex = overlappingEntries.findIndex((candidate) => candidate === entry);
+          return {
+            ...entry,
+            markerPosition: offsetMarkerPosition(entry.basePosition, overlapIndex, overlappingEntries.length),
+          };
+        });
+
+        for (let index = 0; index < groupedProviderLocations.length; index += 1) {
+          const providerEntry = groupedProviderLocations[index];
+          const provider = providerEntry.provider;
+          const markerPosition = providerEntry.markerPosition;
+          const markerLabel = String(index + 1);
+
           const marker = new maps.Marker({
             map,
-            position: providerLocation,
+            position: markerPosition,
             title: provider.businessName,
             label: {
-              text: String(index + 1),
+              text: markerLabel,
               color: '#ffffff',
             },
             icon: {
@@ -400,14 +439,14 @@ export function ProviderResultsMap({
 
           marker.addListener('click', () => {
             infoWindow.setContent(
-              `<div style="max-width:250px;"><strong>${provider.businessName}</strong><br/>${provider.description || providerQuery}<br/><span style="color:#5d685f;">${formatProviderSummary(
+              `<div style="max-width:250px;"><strong>${provider.businessName}</strong><br/>${provider.description || providerEntry.query}<br/><span style="color:#5d685f;">${formatProviderSummary(
                 provider,
               )}</span></div>`,
             );
             infoWindow.open({ anchor: marker, map });
           });
 
-          bounds.extend(providerLocation);
+          bounds.extend(markerPosition);
         }
 
         if (!bounds.isEmpty()) {

@@ -368,6 +368,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [customChecklistTitle, setCustomChecklistTitle] = useState('');
   const [customChecklistDetail, setCustomChecklistDetail] = useState('');
   const [providerRecommendations, setProviderRecommendations] = useState([]);
+  const [unavailableProviderRecommendations, setUnavailableProviderRecommendations] = useState([]);
   const [externalProviderRecommendations, setExternalProviderRecommendations] = useState([]);
   const [providerReferences, setProviderReferences] = useState([]);
   const [providerLeads, setProviderLeads] = useState([]);
@@ -608,12 +609,21 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       ...provider,
       categoryLabel: providerSource?.categoryLabel || provider.categoryKey?.replace(/_/g, ' '),
     }));
+    const unavailableProviders = (unavailableProviderRecommendations || []).map((provider) => ({
+      ...provider,
+      categoryLabel: providerSource?.categoryLabel || provider.categoryKey?.replace(/_/g, ' '),
+    }));
     const externalProviders = (externalProviderRecommendations || []).map((provider) => ({
       ...provider,
       categoryLabel: providerSource?.categoryLabel || provider.categoryKey?.replace(/_/g, ' '),
     }));
-    return [...internalProviders, ...externalProviders];
-  }, [externalProviderRecommendations, providerRecommendations, providerSource?.categoryLabel]);
+    return [...internalProviders, ...unavailableProviders, ...externalProviders];
+  }, [
+    externalProviderRecommendations,
+    providerRecommendations,
+    providerSource?.categoryLabel,
+    unavailableProviderRecommendations,
+  ]);
   const recentOutputs = useMemo(
     () =>
       [
@@ -1044,6 +1054,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         includeExternal: true,
       });
       const results = response.providers?.externalItems || [];
+      setUnavailableProviderRecommendations(response.providers?.unavailableItems || []);
       setExternalProviderRecommendations(results);
       setShowExternalProviderFallback(true);
       setProviderSource((current) =>
@@ -1081,6 +1092,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   async function refreshProviders(task = providerSuggestionTask) {
     if (!task?.providerCategoryKey) {
       setProviderRecommendations([]);
+      setUnavailableProviderRecommendations([]);
       setExternalProviderRecommendations([]);
       setProviderSource(null);
       return [];
@@ -1091,12 +1103,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       limit: 4,
     });
     const nextProviders = response.providers?.items || [];
+    const nextUnavailableProviders = response.providers?.unavailableItems || [];
     const externalResultsFromApi = response.providers?.externalItems || [];
     const fallbackProviders =
       nextProviders.length || externalResultsFromApi.length
         ? externalResultsFromApi
         : await searchGoogleFallbackProviders(task);
     setProviderRecommendations(nextProviders);
+    setUnavailableProviderRecommendations(nextUnavailableProviders);
     setExternalProviderRecommendations(fallbackProviders);
     setShowExternalProviderFallback(Boolean(fallbackProviders.length && !nextProviders.length));
     setProviderSource({
@@ -3322,6 +3336,27 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               googleMapsUrl={providerGoogleSearchUrl}
               frameClassName="property-map-frame-expanded"
             />
+            {providerMapProviders.length ? (
+              <div className="provider-map-summary-list">
+                {providerMapProviders.map((provider) => (
+                  <article key={`provider-map-summary-${provider.id}`} className="provider-map-summary-item">
+                    <div>
+                      <strong>{provider.businessName}</strong>
+                      <span>
+                        {provider.isExternalFallback ? 'Google fallback' : 'Workside marketplace'}
+                        {provider.coverageLabel ? ` · ${provider.coverageLabel}` : ''}
+                        {!provider.isExternalFallback && provider.status ? ` · ${provider.status.replace(/_/g, ' ')}` : ''}
+                      </span>
+                    </div>
+                    <div className="provider-map-summary-meta">
+                      {provider.turnaroundLabel ? <span>{provider.turnaroundLabel}</span> : null}
+                      {provider.pricingSummary ? <span>{provider.pricingSummary}</span> : null}
+                      {provider.phone ? <span>{provider.phone}</span> : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

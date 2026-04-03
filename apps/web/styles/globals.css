@@ -2617,6 +2617,36 @@ select {
   min-height: 560px;
 }
 
+.provider-map-summary-list {
+  display: grid;
+  gap: 12px;
+}
+
+.provider-map-summary-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.provider-map-summary-item strong {
+  display: block;
+}
+
+.provider-map-summary-item span {
+  color: var(--muted);
+}
+
+.provider-map-summary-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 1100px) {
   .workspace-body-layout,
   .workspace-content-layout,
