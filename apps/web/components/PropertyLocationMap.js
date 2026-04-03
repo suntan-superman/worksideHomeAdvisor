@@ -145,6 +145,79 @@ function offsetMarkerPosition(position, markerIndex, totalAtPoint) {
   };
 }
 
+function createCoordinateBucketKey(position) {
+  if (!position) {
+    return '';
+  }
+
+  return `${Number(position.lat).toFixed(4)}:${Number(position.lng).toFixed(4)}`;
+}
+
+function buildProviderAddressQuery(provider) {
+  if (!provider) {
+    return '';
+  }
+
+  const serviceAreaParts = [
+    provider.serviceArea?.zipCodes?.[0],
+    provider.serviceArea?.city,
+    provider.serviceArea?.state,
+  ].filter(Boolean);
+  if (serviceAreaParts.length) {
+    return serviceAreaParts.join(', ');
+  }
+
+  const description = String(provider.description || '').trim();
+  if (description && description.includes(',')) {
+    return description;
+  }
+
+  const fallbackLocationParts = [
+    provider.serviceArea?.city,
+    provider.serviceArea?.state,
+  ].filter(Boolean);
+  return fallbackLocationParts.join(', ');
+}
+
+function formatProviderMapInfoWindow(provider, markerLabel) {
+  const detailParts = [];
+  if (typeof provider.rating === 'number' && provider.rating > 0) {
+    detailParts.push(
+      `Rating: ${provider.rating.toFixed(1)}${provider.reviewCount ? ` (${provider.reviewCount} reviews)` : ''}`,
+    );
+  }
+  if (provider.coverageLabel) {
+    detailParts.push(provider.coverageLabel);
+  }
+  if (provider.turnaroundLabel) {
+    detailParts.push(provider.turnaroundLabel);
+  }
+  if (provider.pricingSummary) {
+    detailParts.push(provider.pricingSummary);
+  }
+
+  const actionLinks = [];
+  if (provider.websiteUrl) {
+    actionLinks.push(
+      `<a href="${provider.websiteUrl}" target="_blank" rel="noreferrer noopener">Website</a>`,
+    );
+  }
+  if (provider.mapsUrl) {
+    actionLinks.push(
+      `<a href="${provider.mapsUrl}" target="_blank" rel="noreferrer noopener">Directions</a>`,
+    );
+  }
+
+  return `
+    <div style="max-width:260px;">
+      <strong>${markerLabel}. ${provider.businessName || 'Provider'}</strong><br/>
+      <span style="color:#5d685f;">${provider.isExternalFallback ? 'Google fallback' : 'Workside marketplace'}</span>
+      ${detailParts.length ? `<div style="margin-top:6px;color:#5d685f;">${detailParts.join('<br/>')}</div>` : ''}
+      ${actionLinks.length ? `<div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;">${actionLinks.join('')}</div>` : ''}
+    </div>
+  `;
+}
+
 function buildMapOptions(maps, zoom = 12) {
   return {
     center: { lat: 35.3733, lng: -119.0187 },
@@ -345,67 +418,201 @@ export function PropertyLocationMap({
 }
 
 export function ProviderResultsMap({
-  buildImageUrl,
+  property,
+  providers = [],
+  mapsApiKey = '',
   googleMapsUrl = '',
   frameClassName = '',
 }) {
+  const mapRef = useRef(null);
   const [mapError, setMapError] = useState('');
-  const [zoomOffset, setZoomOffset] = useState(0);
-  const [resolvedImageUrl, setResolvedImageUrl] = useState('');
+  const [mapZoomMode, setMapZoomMode] = useState('fit');
   const [isLoadingMap, setIsLoadingMap] = useState(false);
-  const imageUrl = typeof buildImageUrl === 'function' ? buildImageUrl(zoomOffset) : '';
 
   useEffect(() => {
     let cancelled = false;
-    let objectUrl = '';
+    let paintCheckTimer = null;
 
-    async function loadMapImage() {
-      if (!imageUrl) {
-        setResolvedImageUrl('');
-        setMapError('The provider map image URL could not be created. You can still use Open map search.');
+    async function renderProviderMap() {
+      const propertyAddress = buildAddressQuery(property);
+      if (!mapRef.current || !propertyAddress) {
         return;
       }
 
-      setIsLoadingMap(true);
       setMapError('');
-      setResolvedImageUrl('');
+      setIsLoadingMap(true);
 
       try {
-        const response = await fetch(imageUrl, { cache: 'no-store' });
-        const contentType = response.headers.get('content-type') || '';
-
-        if (!response.ok) {
-          const text = await response.text().catch(() => '');
-          let message = text || `Provider map request failed with status ${response.status}.`;
-          try {
-            const parsed = JSON.parse(text);
-            message = parsed?.message || message;
-          } catch {
-            // leave as text
-          }
-          throw new Error(message);
+        await waitForNextPaint();
+        const maps = await loadGoogleMapsApi(mapsApiKey);
+        if (cancelled || !mapRef.current) {
+          return;
         }
 
-        if (!contentType.startsWith('image/')) {
-          const text = await response.text().catch(() => '');
-          let message = text || 'Provider map request did not return an image.';
-          try {
-            const parsed = JSON.parse(text);
-            message = parsed?.message || message;
-          } catch {
-            // leave as text
-          }
-          throw new Error(message);
+        mapRef.current.innerHTML = '';
+        const geocoder = new maps.Geocoder();
+        const infoWindow = new maps.InfoWindow();
+        const propertyLocation = await geocodeAddress(geocoder, propertyAddress);
+        if (cancelled || !mapRef.current) {
+          return;
         }
 
-        const blob = await response.blob();
-        objectUrl = URL.createObjectURL(blob);
-        if (!cancelled) {
-          setResolvedImageUrl(objectUrl);
+        const map = new maps.Map(mapRef.current, {
+          ...buildMapOptions(maps, 12),
+          center: propertyLocation,
+          fullscreenControl: false,
+        });
+        paintCheckTimer = scheduleMapPaintCheck(mapRef, () => {
+          if (!cancelled) {
+            setMapError('The in-app provider map did not finish rendering. You can still use Open map search.');
+          }
+        });
+
+        const bounds = new maps.LatLngBounds();
+
+        const propertyMarker = new maps.Marker({
+          map,
+          position: propertyLocation,
+          title: property?.title || propertyAddress,
+          label: {
+            text: 'H',
+            color: '#ffffff',
+          },
+          icon: {
+            path: maps.SymbolPath.CIRCLE,
+            fillColor: '#c87447',
+            fillOpacity: 1,
+            strokeColor: '#19212a',
+            strokeWeight: 1,
+            scale: 13,
+          },
+        });
+        propertyMarker.addListener('click', () => {
+          infoWindow.setContent(
+            `<div style="max-width:240px;"><strong>${property?.title || 'Subject property'}</strong><br/>${propertyAddress}</div>`,
+          );
+          infoWindow.open({ anchor: propertyMarker, map });
+        });
+        bounds.extend(propertyLocation);
+
+        const coordinateBucketTotals = new Map();
+        const resolvedProviders = [];
+
+        for (const provider of providers || []) {
+          let basePosition = null;
+
+          if (
+            typeof provider.latitude === 'number' &&
+            Number.isFinite(provider.latitude) &&
+            typeof provider.longitude === 'number' &&
+            Number.isFinite(provider.longitude)
+          ) {
+            basePosition = { lat: provider.latitude, lng: provider.longitude };
+          } else {
+            const providerQuery = buildProviderAddressQuery(provider);
+            if (!providerQuery) {
+              continue;
+            }
+
+            try {
+              const resolved = await geocodeAddress(geocoder, providerQuery);
+              basePosition = {
+                lat: resolved.lat(),
+                lng: resolved.lng(),
+              };
+            } catch {
+              continue;
+            }
+          }
+
+          if (!basePosition || cancelled) {
+            continue;
+          }
+
+          const bucketKey = createCoordinateBucketKey(basePosition);
+          resolvedProviders.push({
+            provider,
+            basePosition,
+            bucketKey,
+          });
+          coordinateBucketTotals.set(bucketKey, (coordinateBucketTotals.get(bucketKey) || 0) + 1);
+        }
+
+        const coordinateBucketIndexes = new Map();
+        resolvedProviders.forEach(({ provider, basePosition, bucketKey }, index) => {
+          const overlapIndex = coordinateBucketIndexes.get(bucketKey) || 0;
+          coordinateBucketIndexes.set(bucketKey, overlapIndex + 1);
+          const position = offsetMarkerPosition(
+            basePosition,
+            overlapIndex,
+            coordinateBucketTotals.get(bucketKey) || 1,
+          );
+          const markerLabel = String(index + 1);
+          const marker = new maps.Marker({
+            map,
+            position,
+            title: provider.businessName,
+            label: {
+              text: markerLabel,
+              color: '#ffffff',
+            },
+            icon: {
+              path: maps.SymbolPath.CIRCLE,
+              fillColor: provider.isExternalFallback ? '#c87447' : '#2e7d32',
+              fillOpacity: provider.isExternalFallback ? 0.92 : 1,
+              strokeColor: '#19212a',
+              strokeWeight: 1,
+              scale: 11,
+            },
+          });
+
+          marker.addListener('click', () => {
+            infoWindow.setContent(formatProviderMapInfoWindow(provider, markerLabel));
+            infoWindow.open({ anchor: marker, map });
+          });
+          bounds.extend(position);
+        });
+
+        if (!bounds.isEmpty()) {
+          map.fitBounds(bounds, {
+            top: 80,
+            bottom: 80,
+            left: 80,
+            right: 80,
+          });
+
+          window.setTimeout(() => {
+            if (!cancelled) {
+              maps.event?.trigger?.(map, 'resize');
+            }
+          }, 300);
+
+          if (mapZoomMode === 'closer') {
+            window.setTimeout(() => {
+              if (!cancelled && typeof map.getZoom === 'function' && typeof map.setZoom === 'function') {
+                const currentZoom = map.getZoom();
+                if (Number.isFinite(currentZoom)) {
+                  map.setZoom(Math.min(16, currentZoom + 1));
+                }
+              }
+            }, 350);
+          } else if (mapZoomMode === 'wider') {
+            window.setTimeout(() => {
+              if (!cancelled && typeof map.getZoom === 'function' && typeof map.setZoom === 'function') {
+                const currentZoom = map.getZoom();
+                if (Number.isFinite(currentZoom)) {
+                  map.setZoom(Math.max(8, currentZoom - 1));
+                }
+              }
+            }, 350);
+          }
         }
       } catch (error) {
         if (!cancelled) {
-          setMapError(error?.message || 'The in-app provider map image could not be loaded. You can still use Open map search.');
+          setMapError(
+            error?.message ||
+              'The in-app provider map could not be loaded. You can still use Open map search.',
+          );
         }
       } finally {
         if (!cancelled) {
@@ -414,65 +621,56 @@ export function ProviderResultsMap({
       }
     }
 
-    loadMapImage();
+    renderProviderMap();
 
     return () => {
       cancelled = true;
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
+      if (paintCheckTimer) {
+        window.clearTimeout(paintCheckTimer);
       }
     };
-  }, [imageUrl]);
+  }, [googleMapsUrl, mapZoomMode, mapsApiKey, property, providers]);
 
-    return (
-      <div className="property-map-shell">
-        <div className="property-map-actions provider-static-map-toolbar">
-          <span className="provider-static-map-zoom-label">
-            {zoomOffset === 0
-              ? 'Fitted view'
-              : zoomOffset > 0
-                ? `Closer view +${zoomOffset}`
-                : `Wider view ${zoomOffset}`}
-          </span>
-          <button
-            type="button"
-            className="button-secondary inline-button"
-            onClick={() => setZoomOffset((current) => Math.max(-4, current - 1))}
-            disabled={zoomOffset <= -4}
-          >
-            Wider
-          </button>
-          <button
-            type="button"
-            className="button-secondary inline-button"
-            onClick={() => setZoomOffset((current) => Math.min(4, current + 1))}
-            disabled={zoomOffset >= 4}
-          >
-            Closer
-          </button>
-          <button
-            type="button"
-            className="button-secondary inline-button"
-            onClick={() => setZoomOffset(0)}
-            disabled={zoomOffset === 0}
-          >
-            Reset
-          </button>
-        </div>
-      <div className={`property-map-frame provider-static-map-frame${frameClassName ? ` ${frameClassName}` : ''}`}>
-        {isLoadingMap ? (
-          <div className="property-map-loading">Loading provider map…</div>
-        ) : null}
-        {resolvedImageUrl ? (
-          <img
-            src={resolvedImageUrl}
-            alt="Provider map"
-            className="provider-static-map-image"
-            onError={() => {
-              setMapError('The in-app provider map image could not be loaded. You can still use Open map search.');
-            }}
-          />
-        ) : null}
+  return (
+    <div className="property-map-shell">
+      <div className="property-map-actions provider-static-map-toolbar">
+        <span className="provider-static-map-zoom-label">
+          {mapZoomMode === 'fit'
+            ? 'Fitted view'
+            : mapZoomMode === 'closer'
+              ? 'Closer view'
+              : 'Wider view'}
+        </span>
+        <button
+          type="button"
+          className="button-secondary inline-button"
+          onClick={() => setMapZoomMode('wider')}
+          disabled={mapZoomMode === 'wider'}
+        >
+          Wider
+        </button>
+        <button
+          type="button"
+          className="button-secondary inline-button"
+          onClick={() => setMapZoomMode('closer')}
+          disabled={mapZoomMode === 'closer'}
+        >
+          Closer
+        </button>
+        <button
+          type="button"
+          className="button-secondary inline-button"
+          onClick={() => setMapZoomMode('fit')}
+          disabled={mapZoomMode === 'fit'}
+        >
+          Reset
+        </button>
+      </div>
+      <div
+        ref={mapRef}
+        className={`property-map-frame property-map-frame-js provider-static-map-frame${frameClassName ? ` ${frameClassName}` : ''}`}
+      >
+        {isLoadingMap ? <div className="property-map-loading">Loading provider map…</div> : null}
       </div>
       {mapError ? (
         <div className="property-map-fallback">
