@@ -187,6 +187,35 @@ function offsetMarkerPosition(position, markerIndex, totalAtPoint) {
   };
 }
 
+function buildMapOptions(maps, zoom = 12) {
+  return {
+    center: { lat: 35.3733, lng: -119.0187 },
+    zoom,
+    mapTypeControl: false,
+    streetViewControl: false,
+    fullscreenControl: false,
+    ...(maps?.RenderingType?.RASTER ? { renderingType: maps.RenderingType.RASTER } : {}),
+  };
+}
+
+function scheduleMapPaintCheck(mapRef, onFailure) {
+  return window.setTimeout(() => {
+    const mapElement = mapRef.current;
+    if (!mapElement) {
+      return;
+    }
+
+    const hasRenderedMap =
+      Boolean(mapElement.querySelector('.gm-style')) ||
+      Boolean(mapElement.querySelector('canvas')) ||
+      Boolean(mapElement.querySelector('img'));
+
+    if (!hasRenderedMap) {
+      onFailure();
+    }
+  }, 2500);
+}
+
 export function PropertyLocationMap({
   property,
   comps = [],
@@ -199,6 +228,7 @@ export function PropertyLocationMap({
 
   useEffect(() => {
     let cancelled = false;
+    let paintCheckTimer = null;
 
     async function renderMap() {
       const addressQuery = buildAddressQuery(property);
@@ -215,13 +245,13 @@ export function PropertyLocationMap({
           return;
         }
 
+        mapRef.current.innerHTML = '';
         const geocoder = new maps.Geocoder();
-        const map = new maps.Map(mapRef.current, {
-          center: { lat: 35.3733, lng: -119.0187 },
-          zoom: 13,
-          mapTypeControl: false,
-          streetViewControl: false,
-          fullscreenControl: true,
+        const map = new maps.Map(mapRef.current, buildMapOptions(maps, 13));
+        paintCheckTimer = scheduleMapPaintCheck(mapRef, () => {
+          if (!cancelled) {
+            setMapError('The in-app map did not finish rendering. You can still use the external map link.');
+          }
         });
 
         const bounds = new maps.LatLngBounds();
@@ -312,10 +342,11 @@ export function PropertyLocationMap({
 
         if (!bounds.isEmpty()) {
           map.fitBounds(bounds, 56);
+          maps.event?.trigger?.(map, 'resize');
         }
-      } catch {
+      } catch (error) {
         if (!cancelled) {
-          setMapError('The interactive map could not be loaded with the current Google Maps settings.');
+          setMapError(error?.message || 'The interactive map could not be loaded with the current Google Maps settings.');
         }
       }
     }
@@ -324,6 +355,9 @@ export function PropertyLocationMap({
 
     return () => {
       cancelled = true;
+      if (paintCheckTimer) {
+        window.clearTimeout(paintCheckTimer);
+      }
     };
   }, [comps, mapsApiKey, property]);
 
@@ -364,6 +398,7 @@ export function ProviderResultsMap({
 
   useEffect(() => {
     let cancelled = false;
+    let paintCheckTimer = null;
 
     async function renderMap() {
       const addressQuery = buildAddressQuery(property);
@@ -380,13 +415,13 @@ export function ProviderResultsMap({
           return;
         }
 
+        mapRef.current.innerHTML = '';
         const geocoder = new maps.Geocoder();
-        const map = new maps.Map(mapRef.current, {
-          center: { lat: 35.3733, lng: -119.0187 },
-          zoom: 12,
-          mapTypeControl: false,
-          streetViewControl: false,
-          fullscreenControl: true,
+        const map = new maps.Map(mapRef.current, buildMapOptions(maps, 12));
+        paintCheckTimer = scheduleMapPaintCheck(mapRef, () => {
+          if (!cancelled) {
+            setMapError('The in-app provider map did not finish rendering. You can still use Open map search.');
+          }
         });
 
         const bounds = new maps.LatLngBounds();
@@ -497,13 +532,14 @@ export function ProviderResultsMap({
 
         if (!bounds.isEmpty()) {
           map.fitBounds(bounds, 72);
+          maps.event?.trigger?.(map, 'resize');
         } else {
           map.setCenter(propertyLocation);
           map.setZoom(13);
         }
-      } catch {
+      } catch (error) {
         if (!cancelled) {
-          setMapError('The provider map could not be loaded with the current Google Maps settings.');
+          setMapError(error?.message || 'The provider map could not be loaded with the current Google Maps settings.');
         }
       }
     }
@@ -512,6 +548,9 @@ export function ProviderResultsMap({
 
     return () => {
       cancelled = true;
+      if (paintCheckTimer) {
+        window.clearTimeout(paintCheckTimer);
+      }
     };
   }, [googleMapsUrl, mapsApiKey, property, providers]);
 
