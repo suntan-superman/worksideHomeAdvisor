@@ -624,6 +624,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     providerSource?.categoryLabel,
     unavailableProviderRecommendations,
   ]);
+  const hasInternalProviderResults =
+    providerRecommendations.length > 0 || unavailableProviderRecommendations.length > 0;
   const recentOutputs = useMemo(
     () =>
       [
@@ -3009,7 +3011,69 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               ))}
             </div>
           ) : null}
-          {providerSource?.googleFallbackEnabled ? (
+          {unavailableProviderRecommendations.length ? (
+            <div className="provider-card-list">
+              <div className="section-header-tight">
+                <div>
+                  <strong>Matching providers still in setup</strong>
+                  <p className="workspace-control-note">
+                    These providers match the category and coverage, but they are not fully live in the marketplace yet.
+                  </p>
+                </div>
+              </div>
+              {unavailableProviderRecommendations.map((provider) => (
+                <article key={provider.id} className="provider-card provider-card-unavailable">
+                  <div className="provider-card-header">
+                    <div>
+                      <strong>{provider.businessName}</strong>
+                      <span>{provider.coverageLabel || [provider.city, provider.state].filter(Boolean).join(', ')}</span>
+                    </div>
+                    <span className="checklist-chip checklist-chip-medium">
+                      {formatProviderStatusLabel(provider.status)}
+                    </span>
+                  </div>
+                  <p>{provider.description || 'This provider matches the category, but their marketplace profile is not fully live yet.'}</p>
+                  <div className="provider-quality-row">
+                    <span>{provider.turnaroundLabel || 'Turnaround not listed'}</span>
+                    <span>{provider.pricingSummary || 'Pricing summary not listed'}</span>
+                    <span>
+                      {provider.verification?.review?.level === 'verified'
+                        ? 'Verified credentials'
+                        : provider.verification?.review?.level === 'details_provided'
+                          ? 'Trust details provided'
+                          : 'Self-reported trust profile'}
+                    </span>
+                  </div>
+                  <div className="tag-row">
+                    {(provider.rankingBadges || []).map((badge) => (
+                      <span key={`${provider.id}-${badge}`}>{badge}</span>
+                    ))}
+                  </div>
+                  <div className="provider-card-actions">
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() =>
+                        setActiveProviderDetails({
+                          ...provider,
+                          categoryLabel:
+                            providerSource?.categoryLabel || provider.categoryKey?.replace(/_/g, ' '),
+                        })
+                      }
+                    >
+                      Details
+                    </button>
+                    {provider.websiteUrl ? (
+                      <a href={provider.websiteUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button">
+                        Visit website
+                      </a>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : null}
+          {providerSource?.googleFallbackEnabled || providerGoogleSearchUrl || providerMapProviders.length ? (
             <div className="provider-card-actions">
               {providerMapProviders.length ? (
                 <button
@@ -3113,7 +3177,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               Google fallback did not return any results for this category yet.
             </p>
           ) : null}
-          {!providerRecommendations.length && !showExternalProviderFallback && externalProviderRecommendations.length ? (
+          {!hasInternalProviderResults && !showExternalProviderFallback && externalProviderRecommendations.length ? (
             <div className="provider-card-list">
               {externalProviderRecommendations.map((provider) => (
                 <article key={provider.id} className="provider-card provider-card-external">
@@ -3162,7 +3226,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               ))}
             </div>
           ) : null}
-          {!providerRecommendations.length && !showExternalProviderFallback && !externalProviderRecommendations.length && providerSuggestionTask ? (
+          {!hasInternalProviderResults && !showExternalProviderFallback && !externalProviderRecommendations.length && providerSuggestionTask ? (
             <p className="workspace-control-note">
               {buildProviderAvailabilityMessage(providerSuggestionTask, providerSource) ||
                 'No active marketplace providers are available for this category yet.'}
@@ -3173,9 +3237,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               {buildProviderSourceSummary(providerSource)}
             </p>
           ) : null}
-          {providerRecommendations.length ? (
+          {hasInternalProviderResults ? (
             <p className="workspace-control-note provider-disclaimer">
               {providerRecommendations[0]?.verification?.disclaimer ||
+                unavailableProviderRecommendations[0]?.verification?.disclaimer ||
                 'Provider credentials are self-reported or verified where indicated. Workside does not guarantee accuracy.'}
             </p>
           ) : null}

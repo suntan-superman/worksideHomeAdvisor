@@ -1,6 +1,6 @@
 # Workside Progress And Priorities
 
-Last updated: 2026-03-31
+Last updated: 2026-04-02
 
 This document is the working checkpoint after the latest implementation pass across the HomeAdvisor / Workside codebase.
 
@@ -23,6 +23,7 @@ The platform is now well beyond the scaffold stage.
 - Auth, OTP verification, dashboard, pricing, media capture, report generation, flyer generation, checklist persistence, and listing-photo workflows are all in place
 - Vision generation is running with Replicate-backed presets and before/after review UI
 - Property workspace, seller dashboard, and mobile workspace now include a computed guided workflow layer with role-aware seller / realtor copy, progress, next-step guidance, and market-ready scoring
+- Seller workflow now includes a persisted chosen list price, shortlist-based provider reference sheet export, property archive / restore, and active-property limits
 
 ### Admin side
 
@@ -30,6 +31,7 @@ The platform is now well beyond the scaffold stage.
 - Admin overview, users, properties, billing, usage, workers, and providers pages are implemented
 - Provider operations and variant lifecycle visibility exist
 - Providers page now has a tabbed workspace to reduce scrolling
+- Provider roster now supports stronger review controls, exact-name delete confirmation, and better operational sorting/filtering
 
 ### Marketplace side
 
@@ -39,6 +41,9 @@ The platform is now well beyond the scaffold stage.
 - Provider portal exists
 - Provider lead operations exist in admin
 - Provider verification tiers, trust fields, and document upload now exist
+- Provider matching now uses ZIP-plus-radius coverage logic
+- Provider shortlist / printable provider reference sheet flow now exists
+- In-app provider map exists and Google-fallback search paths now have both structured and map-search fallbacks
 
 ### Infrastructure side
 
@@ -51,6 +56,23 @@ The platform is now well beyond the scaffold stage.
 Bottom line:
 
 The product now has real seller, provider, and admin surfaces. The main remaining work is refinement, hardening, and closing the last architecture gaps rather than inventing brand-new foundations.
+
+---
+
+## 1.1 Recent Progress Since The Last Update
+
+- [x] chosen list price flow implemented and persisted on properties
+- [x] flyer / report generation now prefer seller-selected list price when present
+- [x] provider reference sheet shortlist and printable PDF export implemented
+- [x] provider map modal implemented inside the seller workspace for better viewport control
+- [x] provider matching now uses service ZIP plus radius instead of mostly city/state heuristics
+- [x] provider portal category editing added so providers can correct mismatched business types
+- [x] admin alert email added when an approved provider changes their profile
+- [x] provider delete flow in admin now requires exact-name confirmation
+- [x] provider roster now exposes more identifying details and sorting / filtering controls
+- [x] mobile camera capture flow now prompts to save or discard after each shot
+- [x] web photo deletion now uses a real in-app confirmation modal
+- [x] idle logout added across seller web, provider portal, and admin
 
 ---
 
@@ -85,6 +107,7 @@ The product now has real seller, provider, and admin surfaces. The main remainin
 - [x] Active-property limits tied to seller / agent billing access
 - [x] Property archive / restore with read-only archived state
 - [x] Pricing analysis
+- [x] Seller-chosen list price with low / mid / high / custom selection
 - [x] Comp display and map
 - [x] Media upload and storage
 - [x] AI photo review
@@ -94,6 +117,7 @@ The product now has real seller, provider, and admin surfaces. The main remainin
 - [x] Role-aware next-step recommendations in the property workspace
 - [x] Brochure/flyer generation
 - [x] Seller report generation and export
+- [x] Provider shortlist / reference sheet PDF export
 
 ### 2.4 Vision pipeline
 
@@ -112,6 +136,9 @@ The product now has real seller, provider, and admin surfaces. The main remainin
 - [x] Provider records and categories
 - [x] Provider lead requests
 - [x] Provider save/request flows from seller checklist context
+- [x] Provider map inside seller workspace
+- [x] ZIP-plus-radius provider coverage matching
+- [x] Internal provider vs not-yet-live provider distinction in seller discovery
 - [x] Admin provider seeding
 - [x] Admin provider review/approval controls
 - [x] Provider signup flow
@@ -124,6 +151,7 @@ The product now has real seller, provider, and admin surfaces. The main remainin
 - [x] Provider verification submission for admin review
 - [x] Seller-facing provider trust badges and disclaimer
 - [x] Admin document access and verification actions
+- [x] Admin alert email when approved providers update their profile
 
 ### 2.6 Admin and ops
 
@@ -168,10 +196,11 @@ These areas exist and are useful, but they are not yet “finished product” qu
 
 ### 3.3 Provider system
 
-- [~] Provider marketplace foundation is real, but provider ranking and coverage fallback are still early
+- [~] Provider marketplace foundation is real, but Google fallback discovery is still inconsistent compared with consumer Google Maps behavior
 - [~] Provider portal exists, but account-management maturity is still limited
 - [~] Provider onboarding is much better now, but billing + verification UX can still be polished
 - [~] Verification is now real, but admin automation and expiry workflows are still early
+- [~] Provider matching is much stronger now, but it still depends heavily on clean category/status/ZIP data in provider records
 
 ### 3.4 Admin UX
 
@@ -194,6 +223,7 @@ These areas exist and are useful, but they are not yet “finished product” qu
 - [~] A property-level workflow engine now exists across property workspace, dashboard, and mobile, but account setup / onboarding still needs the same guided treatment
 - [x] Seller / realtor workflow copy is now role-aware in the property workspace, dashboard, and mobile workspace
 - [~] Workflow state is computed automatically, but deeper blocker logic and more nuanced optional-step handling can still improve
+- [~] Property workspace layout is much better, but several tabs still need more mid-width responsive polish
 
 ---
 
@@ -214,8 +244,15 @@ Current status:
 ### 4.2 Provider fallback outside marketplace coverage
 
 - Internal provider recommendations exist
-- Area-aware fallback behavior is not fully implemented yet
-- Google fallback remains a future refinement
+- Area-aware internal matching is implemented with ZIP-plus-radius coverage
+- Structured Google fallback exists, but it is still not matching consumer Google Maps results reliably in all cases
+- Live Google Maps search and the in-app provider map are currently the practical fallback experiences when structured Google fallback returns zero results
+
+### 4.3 Google provider search parity
+
+- The backend now tries multiple Google search strategies, including broader query variants and a legacy text-search fallback
+- External Google Maps still often shows providers that the backend structured fallback does not return
+- This remains an active product-quality issue rather than a missing feature
 
 ---
 
@@ -273,8 +310,10 @@ These are the highest-value refinements because they affect trust, demos, and ev
 
 - [ ] use provider service areas more explicitly in ranking/filtering
 - [ ] show “no providers in area yet” gracefully
-- [ ] add fallback path for uncovered areas
+- [~] fallback path for uncovered areas exists, but needs better structured Google result reliability and clearer user-facing explanation
 - [ ] give strong precedence to registered Workside providers over fallback results
+- [ ] add richer detail views and saved-reference actions for Google fallback providers
+- [ ] improve in-app provider map presentation and marker detail for dense local markets
 
 ### 5.5 Provider profile maturity
 
@@ -302,6 +341,7 @@ These are the highest-value refinements because they affect trust, demos, and ev
 
 - [ ] improve brochure layout and visual finish
 - [ ] improve report layout and PDF polish
+- [ ] add a comprehensive property review PDF that includes a full-page comp map and complete gathered property context
 - [ ] persist brochure/report draft state more explicitly per property
 - [ ] add stronger seller-facing customization controls
 - [ ] store final PDFs with durable download URLs
@@ -337,6 +377,7 @@ These are the highest-value refinements because they affect trust, demos, and ev
 - [ ] clearer usage / failure diagnostics in admin
 - [ ] better worker-backed processing story for long-running document/vision jobs
 - [ ] add admin notifications/tasks when a provider submits verification
+- [ ] add better diagnostics around Google fallback provider searches so we can distinguish API-empty, API-blocked, and query-mismatch cases
 
 ---
 
@@ -370,7 +411,8 @@ If work resumes tomorrow, the most sensible order is:
 5. Refine vision quality on the three Replicate presets
 6. Polish report/brochure premium output quality
 7. Add provider account recovery / linking tools
-8. Start real automated tests around the new flows
+8. Stabilize Google fallback provider discovery and diagnostics
+9. Start real automated tests around the new flows
 
 ---
 
@@ -382,7 +424,8 @@ If the goal is immediate product value with low rework risk, start here:
 
 - validate live provider billing thoroughly
 - tighten provider coverage filtering
-- add graceful uncovered-area fallback behavior
+- stabilize structured Google fallback behavior and diagnostics
+- improve the in-app provider map / provider details experience
 
 ### Option B: Premium output quality
 
@@ -410,7 +453,38 @@ That gives the product a stronger operational core before spending more time on 
 - Provider onboarding now creates real provider auth accounts and requires email verification before billing continuation
 - Provider verification now supports self-reported trust fields, document upload, seller-facing trust display, and admin verification review
 - Property workspace now has a real role-aware guided workflow rail powered by a backend workflow endpoint
+- Provider discovery now supports internal providers, unavailable matching internal providers, shortlist saving, and an in-app provider map
+- Structured Google fallback is still under active refinement and does not yet mirror consumer Google Maps results reliably
+- Seller pricing flow now includes a persisted chosen list price that should carry into documents after regeneration
 - SMS marketplace logic exists in code, but rollout is paused intentionally
+
+---
+
+## 8.1 Current Known Issues And Potential Risks
+
+### Web app
+
+- [ ] Structured Google fallback provider search can still return zero results even when consumer Google Maps clearly shows local matches
+- [ ] External Google Maps search still controls its own zoom behavior, so the external map page remains inconsistent; the in-app provider map is the preferred controlled experience
+- [ ] Property workspace responsive behavior is much improved, but Report, Brochure, Checklist, and provider layouts can still feel cramped on mid-width desktop viewports
+- [ ] Provider discovery quality is very sensitive to provider data hygiene: wrong category, non-active status, invalid ZIP/state, or incomplete radius coverage can make matching feel “broken”
+- [ ] Generated reports and flyers may need regeneration after pricing, image, or chosen-price changes; this is correct behavior, but it can still surprise users if we do not make it explicit
+- [ ] Google-backed provider content shown in-app should continue to be treated as fallback discovery, not durable exported directory content, unless first saved into a Workside-managed shortlist
+
+### Mobile app
+
+- [ ] Camera capture/save flow is much safer now, but it still needs broader end-to-end UX validation around multiple shots, interruptions, and resumed sessions
+- [ ] Login / OTP and keyboard-safe layout have improved, but they still need a full App Store-style polish pass across device sizes
+- [ ] Vision progress feedback is much better, but more end-to-end loading / error feedback could still help during slower backend jobs
+- [ ] React Query now powers the main mobile workspace flow, but offline behavior, reconnect behavior, and background refresh expectations still need more testing
+- [ ] Media management on mobile is still better at capture than at deeper organization/review compared with the web workspace
+
+### Backend / platform risks
+
+- [ ] Google geocoding and Places-based provider matching rely on external APIs, quotas, and category/query behavior that can differ from consumer Google Maps
+- [ ] Provider duplication, category drift, and self-reported trust data can create misleading marketplace output unless admin review stays tight
+- [ ] Provider SMS remains intentionally paused, so lead outreach is email-first for now and should be treated as an interim operational mode
+- [ ] The codebase now has real breadth across seller, provider, admin, billing, and AI flows, so missing automated tests remain a material reliability risk
 
 ---
 
