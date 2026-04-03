@@ -246,6 +246,73 @@ function normalizeZipList(value) {
     : [];
 }
 
+function buildPropertyAddressQuery(property) {
+  return [
+    normalizeString(property?.addressLine1),
+    normalizeString(property?.city),
+    normalizeString(property?.state),
+    normalizeString(property?.zip),
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function buildProviderAddressQuery(provider) {
+  const descriptionLooksLikeAddress =
+    Boolean(provider?.isExternalFallback) && normalizeString(provider?.description) && /\d/.test(normalizeString(provider.description));
+
+  return [
+    normalizeString(provider?.businessName),
+    descriptionLooksLikeAddress ? normalizeString(provider.description) : '',
+    normalizeString(provider?.serviceArea?.city),
+    normalizeString(provider?.serviceArea?.state),
+    normalizeString(provider?.serviceArea?.zipCodes?.[0]),
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function buildProviderMarkerLabel(index) {
+  if (index < 9) {
+    return String(index + 1);
+  }
+
+  return String.fromCharCode(65 + Math.min(index - 9, 25));
+}
+
+function buildProviderStaticMapRequestUrl(property, providers = [], zoom = 11) {
+  if (!env.GOOGLE_MAPS_SERVER_API_KEY) {
+    throw new Error('Google Maps server key is not configured for provider map images.');
+  }
+
+  const propertyQuery = buildPropertyAddressQuery(property);
+  if (!propertyQuery) {
+    throw new Error('Property address is not available for the provider map.');
+  }
+
+  const url = new URL('https://maps.googleapis.com/maps/api/staticmap');
+  url.searchParams.set('key', env.GOOGLE_MAPS_SERVER_API_KEY);
+  url.searchParams.set('size', '1280x840');
+  url.searchParams.set('scale', '2');
+  url.searchParams.set('maptype', 'roadmap');
+  url.searchParams.set('zoom', String(Math.max(8, Math.min(Number(zoom || 11), 17))));
+  url.searchParams.set('center', propertyQuery);
+  url.searchParams.append('markers', `color:0xc87447|label:H|${propertyQuery}`);
+
+  providers.slice(0, 10).forEach((provider, index) => {
+    const providerQuery = buildProviderAddressQuery(provider);
+    if (!providerQuery) {
+      return;
+    }
+
+    const markerColor = provider.isExternalFallback ? '0x5e7f8d' : '0x4f7b62';
+    const markerLabel = buildProviderMarkerLabel(index);
+    url.searchParams.append('markers', `color:${markerColor}|label:${markerLabel}|${providerQuery}`);
+  });
+
+  return url.toString();
+}
+
 function normalizeStringList(value, { limit = 6, maxLength = 60 } = {}) {
   return Array.isArray(value)
     ? value
@@ -1775,6 +1842,44 @@ export async function saveProviderForProperty(propertyId, providerId) {
   );
 
   return { saved: true, providerId };
+}
+
+export async function getProviderMapImageForProperty(
+  propertyId,
+  { categoryKey = '', taskKey = '', includeExternal = false, zoom = 11 } = {},
+) {
+  const property = await getPropertyById(propertyId);
+  if (!property) {
+    throw new Error('Property not found.');
+  }
+
+  const providerResults = await listProvidersForProperty(propertyId, {
+    categoryKey,
+    taskKey,
+    includeExternal,
+    limit: 10,
+  });
+
+  const mapProviders = [
+    ...(providerResults.items || []),
+    ...(providerResults.unavailableItems || []),
+    ...(includeExternal ? providerResults.externalItems || [] : []),
+  ].slice(0, 10);
+
+  const requestUrl = buildProviderStaticMapRequestUrl(property, mapProviders, zoom);
+  const response = await fetch(requestUrl);
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(
+      `Provider map image request failed (${response.status}). ${normalizeString(errorText) || 'Google Maps did not return an image.'}`.trim(),
+    );
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return {
+    buffer,
+    contentType: response.headers.get('content-type') || 'image/png',
+  };
 }
 
 export async function createProviderReferenceForProperty(propertyId, payload = {}) {

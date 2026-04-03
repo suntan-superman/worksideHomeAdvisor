@@ -132,48 +132,6 @@ function formatCompSummary(comp) {
   return parts.join(' • ');
 }
 
-function buildProviderAddressQuery(provider) {
-  const serviceAreaLabel = [
-    provider?.serviceArea?.city,
-    provider?.serviceArea?.state,
-    provider?.serviceArea?.zipCodes?.[0],
-  ]
-    .filter(Boolean)
-    .join(', ');
-
-  const descriptionLooksLikeAddress =
-    provider?.isExternalFallback && provider?.description && /\d/.test(provider.description);
-
-  return [
-    provider?.businessName,
-    descriptionLooksLikeAddress ? provider.description : '',
-    serviceAreaLabel,
-  ]
-    .filter(Boolean)
-    .join(', ');
-}
-
-function formatProviderSummary(provider) {
-  const parts = [];
-
-  if (provider?.categoryLabel) {
-    parts.push(provider.categoryLabel);
-  }
-  if (provider?.rating) {
-    parts.push(
-      `${Number(provider.rating).toFixed(1)} stars${provider.reviewCount ? ` · ${provider.reviewCount} reviews` : ''}`,
-    );
-  }
-  if (provider?.turnaroundLabel) {
-    parts.push(provider.turnaroundLabel);
-  }
-  if (provider?.pricingSummary) {
-    parts.push(provider.pricingSummary);
-  }
-
-  return parts.join(' • ');
-}
-
 function offsetMarkerPosition(position, markerIndex, totalAtPoint) {
   if (!position || totalAtPoint <= 1) {
     return position;
@@ -214,48 +172,6 @@ function scheduleMapPaintCheck(mapRef, onFailure) {
       onFailure();
     }
   }, 2500);
-}
-
-function buildProviderMarkerLabel(index) {
-  if (index < 9) {
-    return String(index + 1);
-  }
-
-  return String.fromCharCode(65 + Math.min(index - 9, 25));
-}
-
-function buildStaticProviderMapUrl({
-  property,
-  providers = [],
-  mapsApiKey = '',
-  zoom = 11,
-}) {
-  const propertyQuery = buildAddressQuery(property);
-  if (!mapsApiKey || !propertyQuery) {
-    return '';
-  }
-
-  const url = new URL('https://maps.googleapis.com/maps/api/staticmap');
-  url.searchParams.set('key', mapsApiKey);
-  url.searchParams.set('size', '640x420');
-  url.searchParams.set('scale', '2');
-  url.searchParams.set('maptype', 'roadmap');
-  url.searchParams.set('zoom', String(zoom));
-  url.searchParams.set('center', propertyQuery);
-  url.searchParams.append('markers', `color:0xc87447|label:H|${propertyQuery}`);
-
-  providers.slice(0, 10).forEach((provider, index) => {
-    const providerQuery = buildProviderAddressQuery(provider);
-    if (!providerQuery) {
-      return;
-    }
-
-    const markerColor = provider.isExternalFallback ? '0x5e7f8d' : '0x4f7b62';
-    const markerLabel = buildProviderMarkerLabel(index);
-    url.searchParams.append('markers', `color:${markerColor}|label:${markerLabel}|${providerQuery}`);
-  });
-
-  return url.toString();
 }
 
 export function PropertyLocationMap({
@@ -429,25 +345,17 @@ export function PropertyLocationMap({
 }
 
 export function ProviderResultsMap({
-  property,
-  providers = [],
-  mapsApiKey = '',
+  buildImageUrl,
   googleMapsUrl = '',
   frameClassName = '',
 }) {
   const [mapError, setMapError] = useState('');
   const [zoom, setZoom] = useState(11);
+  const imageUrl = typeof buildImageUrl === 'function' ? buildImageUrl(zoom) : '';
 
   useEffect(() => {
     setMapError('');
-  }, [mapsApiKey, property, providers, zoom]);
-
-  const staticMapUrl = buildStaticProviderMapUrl({
-    property,
-    providers,
-    mapsApiKey,
-    zoom,
-  });
+  }, [imageUrl]);
 
   return (
     <div className="property-map-shell">
@@ -471,10 +379,10 @@ export function ProviderResultsMap({
         </button>
       </div>
       <div className={`property-map-frame provider-static-map-frame${frameClassName ? ` ${frameClassName}` : ''}`}>
-        {staticMapUrl ? (
+        {imageUrl ? (
           <img
-            src={staticMapUrl}
-            alt={`Provider map for ${property?.title || 'the property'}`}
+            src={imageUrl}
+            alt="Provider map"
             className="provider-static-map-image"
             onError={() => {
               setMapError('The in-app provider map image could not be loaded. You can still use Open map search.');

@@ -17,6 +17,7 @@ import {
   deleteProviderReference,
   createProviderProfile,
   getProviderVerificationDocumentFile,
+  getProviderMapImageForProperty,
   listProviderCategories,
   listProviderLeadsForProperty,
   listProviderReferencesForProperty,
@@ -230,6 +231,27 @@ export async function providersRoutes(fastify) {
         includeExternal: query.includeExternal,
       });
       return reply.send({ providers });
+    } catch (error) {
+      const statusCode = error.message === 'Property not found.' ? 404 : 400;
+      return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/properties/:propertyId/provider-map', async (request, reply) => {
+    try {
+      const { propertyId } = propertyParamsSchema.parse(request.params);
+      const query = providerDiscoveryQuerySchema.extend({
+        zoom: z.coerce.number().int().min(8).max(17).optional(),
+      }).parse(request.query || {});
+      const image = await getProviderMapImageForProperty(propertyId, {
+        categoryKey: query.category,
+        taskKey: query.taskKey,
+        includeExternal: query.includeExternal,
+        zoom: query.zoom,
+      });
+      reply.header('Content-Type', image.contentType);
+      reply.header('Cache-Control', 'no-store');
+      return reply.send(image.buffer);
     } catch (error) {
       const statusCode = error.message === 'Property not found.' ? 404 : 400;
       return reply.code(statusCode).send({ message: error.message });

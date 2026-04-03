@@ -141,6 +141,24 @@ export function listProviders(propertyId, { categoryKey, taskKey, limit, include
   return request(`/api/v1/properties/${propertyId}/providers${query ? `?${query}` : ''}`);
 }
 
+export function getProviderMapImageUrl(propertyId, { categoryKey, taskKey, includeExternal, zoom } = {}) {
+  const search = new URLSearchParams();
+  if (categoryKey) {
+    search.set('category', categoryKey);
+  }
+  if (taskKey) {
+    search.set('taskKey', taskKey);
+  }
+  if (includeExternal) {
+    search.set('includeExternal', 'true');
+  }
+  if (zoom) {
+    search.set('zoom', String(zoom));
+  }
+  const query = search.toString();
+  return `${API_BASE_URL}/api/v1/properties/${propertyId}/provider-map${query ? `?${query}` : ''}`;
+}
+
 export function createProviderLead(propertyId, payload) {
   return request(`/api/v1/properties/${propertyId}/provider-leads`, {
     method: 'POST',

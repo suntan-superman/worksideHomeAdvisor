@@ -27,6 +27,7 @@ import {
   getLatestPricing,
   getLatestReport,
   getProperty,
+  getProviderMapImageUrl,
   getProviderReferenceSheetExportUrl,
   getReportExportUrl,
   getWorkflow,
@@ -574,6 +575,23 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     providerSource?.categoryLabel,
     unavailableProviderRecommendations,
   ]);
+  const providerMapImageUrlBuilder = useMemo(
+    () => (zoom = 11) =>
+      getProviderMapImageUrl(propertyId, {
+        categoryKey: providerSource?.categoryKey || providerSuggestionTask?.providerCategoryKey,
+        taskKey: providerSuggestionTask?.systemKey || providerSuggestionTask?.id,
+        includeExternal: Boolean(externalProviderRecommendations.length),
+        zoom,
+      }),
+    [
+      externalProviderRecommendations.length,
+      propertyId,
+      providerSource?.categoryKey,
+      providerSuggestionTask?.id,
+      providerSuggestionTask?.providerCategoryKey,
+      providerSuggestionTask?.systemKey,
+    ],
+  );
   const hasInternalProviderResults =
     providerRecommendations.length > 0 || unavailableProviderRecommendations.length > 0;
   const recentOutputs = useMemo(
@@ -3291,9 +3309,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </div>
             </div>
             <ProviderResultsMap
-              property={property}
-              providers={providerMapProviders}
-              mapsApiKey={mapsApiKey}
+              buildImageUrl={providerMapImageUrlBuilder}
               googleMapsUrl={providerGoogleSearchUrl}
               frameClassName="property-map-frame-expanded"
             />
