@@ -29,12 +29,29 @@ export function loadGoogleMapsApi(apiKey) {
   }
 
   googleMapsLoaderPromise = new Promise((resolve, reject) => {
+    const previousAuthFailure = window.gm_authFailure;
+    const handleAuthFailure = () => {
+      googleMapsLoaderPromise = null;
+      reject(new Error('Google Maps browser key is not authorized for this domain.'));
+      if (typeof previousAuthFailure === 'function') {
+        previousAuthFailure();
+      }
+    };
+    window.gm_authFailure = handleAuthFailure;
+
     const existingScript = document.querySelector('script[data-workside-google-maps="true"]');
     if (existingScript) {
       existingScript.addEventListener('load', () => resolve(window.google.maps), { once: true });
-      existingScript.addEventListener('error', () => reject(new Error('Google Maps failed to load.')), {
-        once: true,
-      });
+      existingScript.addEventListener(
+        'error',
+        () => {
+          googleMapsLoaderPromise = null;
+          reject(new Error('Google Maps failed to load.'));
+        },
+        {
+          once: true,
+        },
+      );
       return;
     }
 
@@ -44,7 +61,10 @@ export function loadGoogleMapsApi(apiKey) {
     script.defer = true;
     script.dataset.worksideGoogleMaps = 'true';
     script.onload = () => resolve(window.google.maps);
-    script.onerror = () => reject(new Error('Google Maps failed to load.'));
+    script.onerror = () => {
+      googleMapsLoaderPromise = null;
+      reject(new Error('Google Maps failed to load.'));
+    };
     document.head.appendChild(script);
   });
 

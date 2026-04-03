@@ -206,7 +206,7 @@ function calculateDistanceMiles(pointA, pointB) {
 
 async function getZipCoordinates(zipCode) {
   const normalizedZip = normalizeZip(zipCode);
-  if (!normalizedZip || !env.GOOGLE_MAPS_API_KEY) {
+  if (!normalizedZip || !env.GOOGLE_MAPS_SERVER_API_KEY) {
     return null;
   }
 
@@ -217,7 +217,7 @@ async function getZipCoordinates(zipCode) {
   try {
     const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
     url.searchParams.set('components', `postal_code:${normalizedZip}|country:US`);
-    url.searchParams.set('key', env.GOOGLE_MAPS_API_KEY);
+    url.searchParams.set('key', env.GOOGLE_MAPS_SERVER_API_KEY);
 
     const response = await fetch(url);
     if (!response.ok) {
@@ -644,14 +644,14 @@ function buildPropertyLocationQuery(property = {}) {
 
 async function getPropertyCoordinates(property = {}) {
   const fullAddress = buildPropertyLocationQuery(property);
-  if (!env.GOOGLE_MAPS_API_KEY || !fullAddress) {
+  if (!env.GOOGLE_MAPS_SERVER_API_KEY || !fullAddress) {
     return getZipCoordinates(property?.zip);
   }
 
   try {
     const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
     url.searchParams.set('address', fullAddress);
-    url.searchParams.set('key', env.GOOGLE_MAPS_API_KEY);
+    url.searchParams.set('key', env.GOOGLE_MAPS_SERVER_API_KEY);
 
     const response = await fetch(url);
     if (!response.ok) {
@@ -694,7 +694,7 @@ async function requestGoogleFallbackPlaces(textQuery, { limit = 5, locationBias 
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Goog-Api-Key': env.GOOGLE_MAPS_API_KEY,
+      'X-Goog-Api-Key': env.GOOGLE_MAPS_SERVER_API_KEY,
       'X-Goog-FieldMask':
         'places.id,places.displayName,places.formattedAddress,places.googleMapsUri,places.websiteUri,places.nationalPhoneNumber,places.rating,places.userRatingCount,places.primaryTypeDisplayName',
     },
@@ -727,7 +727,7 @@ async function requestGoogleFallbackPlaces(textQuery, { limit = 5, locationBias 
 async function requestGoogleLegacyTextSearch(textQuery, { limit = 5, locationBias = null } = {}) {
   const url = new URL('https://maps.googleapis.com/maps/api/place/textsearch/json');
   url.searchParams.set('query', textQuery);
-  url.searchParams.set('key', env.GOOGLE_MAPS_API_KEY);
+  url.searchParams.set('key', env.GOOGLE_MAPS_SERVER_API_KEY);
 
   if (locationBias?.lat && locationBias?.lng) {
     url.searchParams.set('location', `${locationBias.lat},${locationBias.lng}`);
@@ -897,7 +897,7 @@ function buildLegacyGoogleProviderFallbackItem(place = {}, categoryKey = '', pro
 }
 
 async function searchGoogleFallbackProviders(property, { categoryKey = '', limit = 5 } = {}) {
-  if (!env.GOOGLE_MAPS_API_KEY || !property || !categoryKey) {
+  if (!env.GOOGLE_MAPS_SERVER_API_KEY || !property || !categoryKey) {
     return { items: [], diagnostic: '' };
   }
 
@@ -1752,7 +1752,7 @@ export async function listProvidersForProperty(
       unavailableProviders: unavailableProviders.length,
       unavailableStatusCounts,
       externalProviders: externalItems.length,
-      googleFallbackEnabled: Boolean(env.GOOGLE_MAPS_API_KEY),
+      googleFallbackEnabled: Boolean(env.GOOGLE_MAPS_SERVER_API_KEY),
       googleFallbackDiagnostic: googleFallbackResult.diagnostic || '',
       categoryLabel: categoryByKey.get(resolvedCategoryKey || '')?.label || '',
     },
