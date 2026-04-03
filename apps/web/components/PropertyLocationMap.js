@@ -216,6 +216,48 @@ function scheduleMapPaintCheck(mapRef, onFailure) {
   }, 2500);
 }
 
+function buildProviderMarkerLabel(index) {
+  if (index < 9) {
+    return String(index + 1);
+  }
+
+  return String.fromCharCode(65 + Math.min(index - 9, 25));
+}
+
+function buildStaticProviderMapUrl({
+  property,
+  providers = [],
+  mapsApiKey = '',
+  zoom = 11,
+}) {
+  const propertyQuery = buildAddressQuery(property);
+  if (!mapsApiKey || !propertyQuery) {
+    return '';
+  }
+
+  const url = new URL('https://maps.googleapis.com/maps/api/staticmap');
+  url.searchParams.set('key', mapsApiKey);
+  url.searchParams.set('size', '640x420');
+  url.searchParams.set('scale', '2');
+  url.searchParams.set('maptype', 'roadmap');
+  url.searchParams.set('zoom', String(zoom));
+  url.searchParams.set('center', propertyQuery);
+  url.searchParams.append('markers', `color:0xc87447|label:H|${propertyQuery}`);
+
+  providers.slice(0, 10).forEach((provider, index) => {
+    const providerQuery = buildProviderAddressQuery(provider);
+    if (!providerQuery) {
+      return;
+    }
+
+    const markerColor = provider.isExternalFallback ? '0x5e7f8d' : '0x4f7b62';
+    const markerLabel = buildProviderMarkerLabel(index);
+    url.searchParams.append('markers', `color:${markerColor}|label:${markerLabel}|${providerQuery}`);
+  });
+
+  return url.toString();
+}
+
 export function PropertyLocationMap({
   property,
   comps = [],
@@ -393,173 +435,53 @@ export function ProviderResultsMap({
   googleMapsUrl = '',
   frameClassName = '',
 }) {
-  const mapRef = useRef(null);
   const [mapError, setMapError] = useState('');
+  const [zoom, setZoom] = useState(11);
 
   useEffect(() => {
-    let cancelled = false;
-    let paintCheckTimer = null;
+    setMapError('');
+  }, [mapsApiKey, property, providers, zoom]);
 
-    async function renderMap() {
-      const addressQuery = buildAddressQuery(property);
-      if (!mapRef.current || !addressQuery) {
-        return;
-      }
-
-      setMapError('');
-
-      try {
-        await waitForNextPaint();
-        const maps = await loadGoogleMapsApi(mapsApiKey);
-        if (cancelled || !mapRef.current) {
-          return;
-        }
-
-        mapRef.current.innerHTML = '';
-        const geocoder = new maps.Geocoder();
-        const map = new maps.Map(mapRef.current, buildMapOptions(maps, 12));
-        paintCheckTimer = scheduleMapPaintCheck(mapRef, () => {
-          if (!cancelled) {
-            setMapError('The in-app provider map did not finish rendering. You can still use Open map search.');
-          }
-        });
-
-        const bounds = new maps.LatLngBounds();
-        const infoWindow = new maps.InfoWindow();
-
-        const propertyLocation = await geocodeAddress(geocoder, addressQuery);
-        if (cancelled) {
-          return;
-        }
-
-        const propertyMarker = new maps.Marker({
-          map,
-          position: propertyLocation,
-          title: property.title || addressQuery,
-          label: {
-            text: 'H',
-            color: '#ffffff',
-          },
-        });
-
-        propertyMarker.addListener('click', () => {
-          infoWindow.setContent(
-            `<div style="max-width:220px;"><strong>${property.title || 'Subject property'}</strong><br/>${addressQuery}</div>`,
-          );
-          infoWindow.open({ anchor: propertyMarker, map });
-        });
-
-        bounds.extend(propertyLocation);
-
-        const providerCandidates = (providers || []).slice(0, 12);
-        const providerBaseLocations = [];
-        for (let index = 0; index < providerCandidates.length; index += 1) {
-          const provider = providerCandidates[index];
-          const providerQuery = buildProviderAddressQuery(provider);
-          if (!providerQuery) {
-            continue;
-          }
-
-          let providerLocation = null;
-          try {
-            const resolved = await geocodeAddress(geocoder, providerQuery);
-            providerLocation = {
-              lat: resolved.lat(),
-              lng: resolved.lng(),
-            };
-          } catch {
-            providerLocation = null;
-          }
-
-          if (!providerLocation || cancelled) {
-            continue;
-          }
-
-          providerBaseLocations.push({
-            provider,
-            query: providerQuery,
-            basePosition: providerLocation,
-          });
-        }
-
-        const groupedProviderLocations = providerBaseLocations.map((entry, index, allEntries) => {
-          const overlappingEntries = allEntries.filter((candidate) =>
-            Math.abs(candidate.basePosition.lat - entry.basePosition.lat) < 0.0008 &&
-            Math.abs(candidate.basePosition.lng - entry.basePosition.lng) < 0.0008,
-          );
-          const overlapIndex = overlappingEntries.findIndex((candidate) => candidate === entry);
-          return {
-            ...entry,
-            markerPosition: offsetMarkerPosition(entry.basePosition, overlapIndex, overlappingEntries.length),
-          };
-        });
-
-        for (let index = 0; index < groupedProviderLocations.length; index += 1) {
-          const providerEntry = groupedProviderLocations[index];
-          const provider = providerEntry.provider;
-          const markerPosition = providerEntry.markerPosition;
-          const markerLabel = String(index + 1);
-
-          const marker = new maps.Marker({
-            map,
-            position: markerPosition,
-            title: provider.businessName,
-            label: {
-              text: markerLabel,
-              color: '#ffffff',
-            },
-            icon: {
-              path: maps.SymbolPath.CIRCLE,
-              fillColor: provider.isExternalFallback ? '#5e7f8d' : '#c87447',
-              fillOpacity: 1,
-              strokeColor: '#19212a',
-              strokeWeight: 1,
-              scale: 11,
-            },
-          });
-
-          marker.addListener('click', () => {
-            infoWindow.setContent(
-              `<div style="max-width:250px;"><strong>${provider.businessName}</strong><br/>${provider.description || providerEntry.query}<br/><span style="color:#5d685f;">${formatProviderSummary(
-                provider,
-              )}</span></div>`,
-            );
-            infoWindow.open({ anchor: marker, map });
-          });
-
-          bounds.extend(markerPosition);
-        }
-
-        if (!bounds.isEmpty()) {
-          map.fitBounds(bounds, 72);
-          maps.event?.trigger?.(map, 'resize');
-        } else {
-          map.setCenter(propertyLocation);
-          map.setZoom(13);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setMapError(error?.message || 'The provider map could not be loaded with the current Google Maps settings.');
-        }
-      }
-    }
-
-    renderMap();
-
-    return () => {
-      cancelled = true;
-      if (paintCheckTimer) {
-        window.clearTimeout(paintCheckTimer);
-      }
-    };
-  }, [googleMapsUrl, mapsApiKey, property, providers]);
+  const staticMapUrl = buildStaticProviderMapUrl({
+    property,
+    providers,
+    mapsApiKey,
+    zoom,
+  });
 
   return (
     <div className="property-map-shell">
-      <div
-        ref={mapRef}
-        className={`property-map-frame property-map-frame-js${frameClassName ? ` ${frameClassName}` : ''}`}
-      />
+      <div className="property-map-actions provider-static-map-toolbar">
+        <span className="provider-static-map-zoom-label">Zoom {zoom}</span>
+        <button
+          type="button"
+          className="button-secondary inline-button"
+          onClick={() => setZoom((current) => Math.max(8, current - 1))}
+          disabled={zoom <= 8}
+        >
+          Zoom out
+        </button>
+        <button
+          type="button"
+          className="button-secondary inline-button"
+          onClick={() => setZoom((current) => Math.min(17, current + 1))}
+          disabled={zoom >= 17}
+        >
+          Zoom in
+        </button>
+      </div>
+      <div className={`property-map-frame provider-static-map-frame${frameClassName ? ` ${frameClassName}` : ''}`}>
+        {staticMapUrl ? (
+          <img
+            src={staticMapUrl}
+            alt={`Provider map for ${property?.title || 'the property'}`}
+            className="provider-static-map-image"
+            onError={() => {
+              setMapError('The in-app provider map image could not be loaded. You can still use Open map search.');
+            }}
+          />
+        ) : null}
+      </div>
       {mapError ? (
         <div className="property-map-fallback">
           <p>{mapError}</p>

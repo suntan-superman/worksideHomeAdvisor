@@ -1062,6 +1062,30 @@ select {
   gap: 12px;
 }
 
+.provider-static-map-toolbar {
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.provider-static-map-zoom-label {
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.provider-static-map-frame {
+  padding: 0;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.provider-static-map-image {
+  display: block;
+  width: 100%;
+  min-height: 320px;
+  object-fit: cover;
+  border: 0;
+}
+
 .property-map-fallback {
   display: grid;
   gap: 12px;
