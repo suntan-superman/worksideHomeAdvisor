@@ -136,6 +136,12 @@ function normalizeString(value) {
   return String(value || '').trim();
 }
 
+function formatProviderStatusLabel(status) {
+  return String(status || 'unavailable')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 function arraysEqual(left = [], right = []) {
   if (left.length !== right.length) {
     return false;
