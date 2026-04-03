@@ -351,10 +351,77 @@ export function ProviderResultsMap({
 }) {
   const [mapError, setMapError] = useState('');
   const [zoom, setZoom] = useState(11);
+  const [resolvedImageUrl, setResolvedImageUrl] = useState('');
+  const [isLoadingMap, setIsLoadingMap] = useState(false);
   const imageUrl = typeof buildImageUrl === 'function' ? buildImageUrl(zoom) : '';
 
   useEffect(() => {
-    setMapError('');
+    let cancelled = false;
+    let objectUrl = '';
+
+    async function loadMapImage() {
+      if (!imageUrl) {
+        setResolvedImageUrl('');
+        setMapError('The provider map image URL could not be created. You can still use Open map search.');
+        return;
+      }
+
+      setIsLoadingMap(true);
+      setMapError('');
+      setResolvedImageUrl('');
+
+      try {
+        const response = await fetch(imageUrl, { cache: 'no-store' });
+        const contentType = response.headers.get('content-type') || '';
+
+        if (!response.ok) {
+          const text = await response.text().catch(() => '');
+          let message = text || `Provider map request failed with status ${response.status}.`;
+          try {
+            const parsed = JSON.parse(text);
+            message = parsed?.message || message;
+          } catch {
+            // leave as text
+          }
+          throw new Error(message);
+        }
+
+        if (!contentType.startsWith('image/')) {
+          const text = await response.text().catch(() => '');
+          let message = text || 'Provider map request did not return an image.';
+          try {
+            const parsed = JSON.parse(text);
+            message = parsed?.message || message;
+          } catch {
+            // leave as text
+          }
+          throw new Error(message);
+        }
+
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) {
+          setResolvedImageUrl(objectUrl);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMapError(error?.message || 'The in-app provider map image could not be loaded. You can still use Open map search.');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingMap(false);
+        }
+      }
+    }
+
+    loadMapImage();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
   }, [imageUrl]);
 
   return (
@@ -379,9 +446,12 @@ export function ProviderResultsMap({
         </button>
       </div>
       <div className={`property-map-frame provider-static-map-frame${frameClassName ? ` ${frameClassName}` : ''}`}>
-        {imageUrl ? (
+        {isLoadingMap ? (
+          <div className="property-map-loading">Loading provider map…</div>
+        ) : null}
+        {resolvedImageUrl ? (
           <img
-            src={imageUrl}
+            src={resolvedImageUrl}
             alt="Provider map"
             className="provider-static-map-image"
             onError={() => {

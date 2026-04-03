@@ -1086,6 +1086,14 @@ select {
   border: 0;
 }
 
+.property-map-loading {
+  display: grid;
+  place-items: center;
+  min-height: 320px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .property-map-fallback {
   display: grid;
   gap: 12px;
