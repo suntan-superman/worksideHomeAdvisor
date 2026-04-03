@@ -209,10 +209,10 @@ export function ProviderPortalClient({
       }
 
       let result = null;
-      if (appSession?.token && ['provider', 'admin', 'super_admin'].includes(appSession.user?.role)) {
-        result = await createProviderPortalSession({}, appSession.token);
-      } else if (incomingSession?.providerId && incomingSession?.token) {
+      if (incomingSession?.providerId && incomingSession?.token) {
         result = await createProviderPortalSession(incomingSession);
+      } else if (appSession?.token && ['provider', 'admin', 'super_admin'].includes(appSession.user?.role)) {
+        result = await createProviderPortalSession({}, appSession.token);
       } else {
         return {
           dashboard: null,

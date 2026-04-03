@@ -1132,11 +1132,22 @@ async function findProviderForUser(userId, email = '') {
   let provider = null;
 
   if (userId && mongoose.Types.ObjectId.isValid(userId)) {
-    provider = await ProviderModel.findOne({ userId });
+    const linkedProviders = await ProviderModel.find({ userId }).sort({ updatedAt: -1, createdAt: -1 });
+    if (linkedProviders.length > 1) {
+      throw new Error('Multiple provider profiles are linked to this account. Contact support so the correct profile can be linked.');
+    }
+    provider = linkedProviders[0] || null;
   }
 
   if (!provider && email) {
-    provider = await ProviderModel.findOne({ email: String(email).toLowerCase().trim() });
+    const emailProviders = await ProviderModel.find({ email: String(email).toLowerCase().trim() }).sort({
+      updatedAt: -1,
+      createdAt: -1,
+    });
+    if (emailProviders.length > 1) {
+      throw new Error('Multiple provider profiles share this email address. Contact support so the correct profile can be linked.');
+    }
+    provider = emailProviders[0] || null;
     if (provider && !provider.userId && userId && mongoose.Types.ObjectId.isValid(userId)) {
       provider.userId = userId;
       await provider.save();
