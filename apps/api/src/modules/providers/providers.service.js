@@ -701,12 +701,27 @@ async function requestGoogleFallbackPlaces(textQuery, { limit = 5, locationBias 
     body: JSON.stringify(body),
   });
 
+  const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    return [];
+    return {
+      items: [],
+      diagnostic:
+        payload?.error?.message ||
+        `Places API searchText request failed with status ${response.status}.`,
+    };
   }
 
-  const payload = await response.json().catch(() => ({}));
-  return Array.isArray(payload.places) ? payload.places : [];
+  if (payload?.error?.message) {
+    return {
+      items: [],
+      diagnostic: payload.error.message,
+    };
+  }
+
+  return {
+    items: Array.isArray(payload.places) ? payload.places : [],
+    diagnostic: '',
+  };
 }
 
 async function requestGoogleLegacyTextSearch(textQuery, { limit = 5, locationBias = null } = {}) {
@@ -720,12 +735,27 @@ async function requestGoogleLegacyTextSearch(textQuery, { limit = 5, locationBia
   }
 
   const response = await fetch(url);
+  const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    return [];
+    return {
+      items: [],
+      diagnostic:
+        payload?.error_message ||
+        `Places legacy text search request failed with status ${response.status}.`,
+    };
   }
 
-  const payload = await response.json().catch(() => ({}));
-  return Array.isArray(payload.results) ? payload.results : [];
+  if (payload?.status && payload.status !== 'OK' && payload.status !== 'ZERO_RESULTS') {
+    return {
+      items: [],
+      diagnostic: payload.error_message || `Places legacy text search returned ${payload.status}.`,
+    };
+  }
+
+  return {
+    items: Array.isArray(payload.results) ? payload.results : [],
+    diagnostic: '',
+  };
 }
 
 function buildExternalProviderFallbackItem(place = {}, categoryKey = '', property = {}) {
@@ -868,7 +898,7 @@ function buildLegacyGoogleProviderFallbackItem(place = {}, categoryKey = '', pro
 
 async function searchGoogleFallbackProviders(property, { categoryKey = '', limit = 5 } = {}) {
   if (!env.GOOGLE_MAPS_API_KEY || !property || !categoryKey) {
-    return [];
+    return { items: [], diagnostic: '' };
   }
 
   const queryVariants =
@@ -889,41 +919,61 @@ async function searchGoogleFallbackProviders(property, { categoryKey = '', limit
     .filter((query, index, allQueries) => allQueries.indexOf(query) === index);
 
   if (!fallbackQueries.length) {
-    return [];
+    return { items: [], diagnostic: '' };
   }
 
   try {
     const propertyCoordinates = await getPropertyCoordinates(property);
+    let latestDiagnostic = '';
 
     for (const textQuery of fallbackQueries) {
-      const places = await requestGoogleFallbackPlaces(textQuery, {
+      const { items: places, diagnostic } = await requestGoogleFallbackPlaces(textQuery, {
         limit,
         locationBias: propertyCoordinates,
       });
+      if (diagnostic) {
+        latestDiagnostic = latestDiagnostic || diagnostic;
+      }
 
       if (places.length) {
-        return places
-          .slice(0, Math.max(1, Math.min(Number(limit || 5), 5)))
-          .map((place) => buildExternalProviderFallbackItem(place, categoryKey, property));
+        return {
+          items: places
+            .slice(0, Math.max(1, Math.min(Number(limit || 5), 5)))
+            .map((place) => buildExternalProviderFallbackItem(place, categoryKey, property)),
+          diagnostic: '',
+        };
       }
     }
 
     for (const textQuery of fallbackQueries) {
-      const places = await requestGoogleLegacyTextSearch(textQuery, {
+      const { items: places, diagnostic } = await requestGoogleLegacyTextSearch(textQuery, {
         limit,
         locationBias: propertyCoordinates,
       });
+      if (diagnostic) {
+        latestDiagnostic = latestDiagnostic || diagnostic;
+      }
 
       if (places.length) {
-        return places
-          .slice(0, Math.max(1, Math.min(Number(limit || 5), 5)))
-          .map((place) => buildLegacyGoogleProviderFallbackItem(place, categoryKey, property));
+        return {
+          items: places
+            .slice(0, Math.max(1, Math.min(Number(limit || 5), 5)))
+            .map((place) => buildLegacyGoogleProviderFallbackItem(place, categoryKey, property)),
+          diagnostic: '',
+        };
       }
     }
 
-    return [];
-  } catch {
-    return [];
+    return { items: [], diagnostic: latestDiagnostic };
+  } catch (error) {
+    logError('provider.google_fallback_search_failed', error, {
+      categoryKey,
+      propertyId: property?._id?.toString?.() || String(property?._id || ''),
+    });
+    return {
+      items: [],
+      diagnostic: 'Google fallback search could not be completed at this time.',
+    };
   }
 }
 
@@ -1653,12 +1703,13 @@ export async function listProvidersForProperty(
     })
     .slice(0, Math.max(1, Number(limit || 3)));
 
-  const externalItems = !rankedProviders.length || includeExternal
+  const googleFallbackResult = !rankedProviders.length || includeExternal
     ? await searchGoogleFallbackProviders(property, {
         categoryKey: resolvedCategoryKey,
         limit: Math.max(1, Math.min(Number(limit || 5), 5)),
       })
-    : [];
+    : { items: [], diagnostic: '' };
+  const externalItems = googleFallbackResult.items || [];
 
   return {
     categories,
@@ -1702,6 +1753,7 @@ export async function listProvidersForProperty(
       unavailableStatusCounts,
       externalProviders: externalItems.length,
       googleFallbackEnabled: Boolean(env.GOOGLE_MAPS_API_KEY),
+      googleFallbackDiagnostic: googleFallbackResult.diagnostic || '',
       categoryLabel: categoryByKey.get(resolvedCategoryKey || '')?.label || '',
     },
   };

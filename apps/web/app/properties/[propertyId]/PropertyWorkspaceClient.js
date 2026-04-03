@@ -7,7 +7,7 @@ import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slide
 import { formatCurrency } from '@workside/utils';
 
 import { AppFrame } from '../../../components/AppFrame';
-import { PropertyLocationMap, ProviderResultsMap, loadGoogleMapsApi } from '../../../components/PropertyLocationMap';
+import { PropertyLocationMap, ProviderResultsMap } from '../../../components/PropertyLocationMap';
 import { Toast } from '../../../components/Toast';
 import {
   analyzePricing,
@@ -277,56 +277,6 @@ function buildProviderSourceSummary(providerSource) {
   }
 
   return parts.join(' · ');
-}
-
-function searchGooglePlaces(service, request) {
-  return new Promise((resolve, reject) => {
-    service.textSearch(request, (results, status) => {
-      if (status === 'OK' || status === 'ZERO_RESULTS') {
-        resolve(results || []);
-        return;
-      }
-
-      reject(new Error(`Google provider search failed: ${status}`));
-    });
-  });
-}
-
-function getGooglePlaceDetails(service, maps, placeId) {
-  return new Promise((resolve) => {
-    if (!placeId || !maps?.places?.PlacesServiceStatus) {
-      resolve(null);
-      return;
-    }
-
-    service.getDetails(
-      {
-        placeId,
-        fields: ['formatted_phone_number', 'website', 'url', 'name', 'formatted_address'],
-      },
-      (place, status) => {
-        if (status === maps.places.PlacesServiceStatus.OK && place) {
-          resolve(place);
-          return;
-        }
-
-        resolve(null);
-      },
-    );
-  });
-}
-
-function buildGooglePlaceMapUrl(place) {
-  if (place?.url) {
-    return place.url;
-  }
-
-  const label = [place?.name, place?.formatted_address].filter(Boolean).join(', ');
-  if (!label) {
-    return '';
-  }
-
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(label)}`;
 }
 
 export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
@@ -992,61 +942,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     return response.workflow;
   }
 
-  async function searchGoogleFallbackProviders(task = providerSuggestionTask) {
-    if (!mapsApiKey || !task?.providerCategoryKey || !property) {
-      setExternalProviderRecommendations([]);
-      return [];
-    }
-
-    try {
-      setProviderSearchStatus('Searching Google for nearby providers...');
-      const maps = await loadGoogleMapsApi(mapsApiKey);
-      if (!maps.places && typeof maps.importLibrary === 'function') {
-        await maps.importLibrary('places');
-      }
-      if (!maps.places) {
-        setExternalProviderRecommendations([]);
-        return [];
-      }
-      const placesService = new maps.places.PlacesService(document.createElement('div'));
-      const textQuery = buildProviderFallbackQuery(task, property);
-      const placeResults = await searchGooglePlaces(placesService, { query: textQuery });
-
-      const detailedResults = await Promise.all(
-        placeResults.slice(0, 5).map(async (place) => {
-          const detail = await getGooglePlaceDetails(placesService, maps, place.place_id);
-          return {
-            id: `google-${place.place_id || place.name}`,
-            businessName: place.name || 'Google result',
-            categoryKey: task.providerCategoryKey,
-            description:
-              place.formatted_address ||
-              detail?.formatted_address ||
-              `Google Maps result for ${task.providerCategoryLabel || 'provider search'}.`,
-            coverageLabel: 'Google Maps result',
-            city: property.city || '',
-            state: property.state || '',
-            rating: Number(place.rating || 0),
-            reviewCount: Number(place.user_ratings_total || 0),
-            websiteUrl: detail?.website || '',
-            mapsUrl: buildGooglePlaceMapUrl(detail || place),
-            phone: detail?.formatted_phone_number || '',
-            isExternalFallback: true,
-            externalSource: 'google_maps',
-          };
-        }),
-      );
-
-      setExternalProviderRecommendations(detailedResults);
-      return detailedResults;
-    } catch {
-      setExternalProviderRecommendations([]);
-      return [];
-    } finally {
-      setProviderSearchStatus('');
-    }
-  }
-
   async function handleBrowseGoogleFallback() {
     try {
       setProviderSearchStatus('Searching Google fallback providers...');
@@ -1056,6 +951,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         includeExternal: true,
       });
       const results = response.providers?.externalItems || [];
+      const fallbackDiagnostic = response.providers?.source?.googleFallbackDiagnostic || '';
       setUnavailableProviderRecommendations(response.providers?.unavailableItems || []);
       setExternalProviderRecommendations(results);
       setShowExternalProviderFallback(true);
@@ -1071,9 +967,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       }
       if (!results.length) {
         setToast({
-          tone: 'info',
-          title: 'No Google fallback results',
-          message: 'Google did not return structured fallback results for this category near the property. You can still open the live Google Maps search below.',
+          tone: fallbackDiagnostic ? 'error' : 'info',
+          title: fallbackDiagnostic ? 'Could not load Google fallback' : 'No Google fallback results',
+          message:
+            fallbackDiagnostic ||
+            'Google did not return structured fallback results for this category near the property. You can still open the live Google Maps search below.',
         });
       }
       return results;
@@ -1107,17 +1005,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     const nextProviders = response.providers?.items || [];
     const nextUnavailableProviders = response.providers?.unavailableItems || [];
     const externalResultsFromApi = response.providers?.externalItems || [];
-    const fallbackProviders =
-      nextProviders.length || externalResultsFromApi.length
-        ? externalResultsFromApi
-        : await searchGoogleFallbackProviders(task);
     setProviderRecommendations(nextProviders);
     setUnavailableProviderRecommendations(nextUnavailableProviders);
-    setExternalProviderRecommendations(fallbackProviders);
-    setShowExternalProviderFallback(Boolean(fallbackProviders.length && !nextProviders.length));
+    setExternalProviderRecommendations(externalResultsFromApi);
+    setShowExternalProviderFallback(Boolean(externalResultsFromApi.length && !nextProviders.length));
     setProviderSource({
       ...(response.providers?.source || {}),
-      externalProviders: fallbackProviders.length,
+      externalProviders: externalResultsFromApi.length,
     });
     return nextProviders;
   }
@@ -1160,6 +1054,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   useEffect(() => {
     refreshProviders(providerSuggestionTask).catch(() => {
       setProviderRecommendations([]);
+      setUnavailableProviderRecommendations([]);
       setExternalProviderRecommendations([]);
       setProviderSource(null);
       setProviderSearchStatus('');
@@ -3174,7 +3069,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           ) : null}
           {showExternalProviderFallback && externalProviderRecommendations.length === 0 ? (
             <p className="workspace-control-note">
-              Google fallback did not return any results for this category yet.
+              {providerSource?.googleFallbackDiagnostic ||
+                'Google fallback did not return any results for this category yet.'}
             </p>
           ) : null}
           {!hasInternalProviderResults && !showExternalProviderFallback && externalProviderRecommendations.length ? (
