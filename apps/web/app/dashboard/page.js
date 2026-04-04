@@ -16,6 +16,7 @@ import {
   getBillingSummary,
   getDashboard,
   getWorkflow,
+  listProviders,
   restoreProperty as restorePropertyRequest,
   syncBillingSession,
   listProperties,
@@ -57,6 +58,111 @@ function getPreferredPlanOrder(user) {
   return ['seller_pro', 'seller_unlock'];
 }
 
+function getWorkflowStepHref(step, propertyId) {
+  if (step?.actionHref) {
+    return step.actionHref;
+  }
+
+  if (propertyId) {
+    return `/properties/${propertyId}`;
+  }
+
+  return '/dashboard';
+}
+
+function getDashboardCtaLabel(step) {
+  switch (step?.key) {
+    case 'property_details':
+      return 'Confirm property details';
+    case 'pricing_review':
+      return 'Review pricing strategy';
+    case 'capture_photos':
+      return 'Capture listing photos';
+    case 'review_photos':
+      return 'Review best images';
+    case 'enhance_photos':
+      return 'Polish image quality';
+    case 'prep_checklist':
+      return 'Work the prep checklist';
+    case 'providers':
+      return 'Line up local help';
+    case 'report':
+      return 'Build seller report';
+    case 'brochure':
+      return 'Create marketing materials';
+    case 'final_review':
+      return 'Run final review';
+    default:
+      return step?.ctaLabel || 'Open next step';
+  }
+}
+
+function formatWorkflowUxStatus(status) {
+  return String(status || '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function parseTurnaroundHours(label) {
+  if (!label) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const normalized = String(label).toLowerCase();
+  if (normalized.includes('same day')) {
+    return 8;
+  }
+
+  const match = normalized.match(/(\d+(?:\.\d+)?)/);
+  return match ? Number(match[1]) : Number.POSITIVE_INFINITY;
+}
+
+function buildProviderHighlights(providers = []) {
+  if (!providers.length) {
+    return [];
+  }
+
+  const recommended = providers[0];
+  const fastest = [...providers].sort(
+    (left, right) => parseTurnaroundHours(left.turnaroundLabel) - parseTurnaroundHours(right.turnaroundLabel),
+  )[0];
+  const bestRated = [...providers].sort(
+    (left, right) => (right.rating || 0) - (left.rating || 0),
+  )[0];
+
+  const distinct = [];
+  const seen = new Set();
+
+  [
+    {
+      key: 'recommended',
+      eyebrow: 'Top recommended',
+      provider: recommended,
+      helper: 'Best overall internal match based on coverage, readiness, and marketplace ranking.',
+    },
+    {
+      key: 'fastest',
+      eyebrow: 'Fastest response',
+      provider: fastest,
+      helper: 'Useful when you need help moving prep or photo work forward quickly.',
+    },
+    {
+      key: 'best-rated',
+      eyebrow: 'Best rated',
+      provider: bestRated,
+      helper: 'Strong social proof based on the available review signal.',
+    },
+  ].forEach((entry) => {
+    if (!entry.provider?.id || seen.has(entry.provider.id)) {
+      return;
+    }
+    seen.add(entry.provider.id);
+    distinct.push(entry);
+  });
+
+  return distinct;
+}
+
 export default function DashboardPage() {
   const queryClient = useQueryClient();
   const [session, setSession] = useState(null);
@@ -70,6 +176,8 @@ export default function DashboardPage() {
   const [toast, setToast] = useState(null);
   const [billingFlowState, setBillingFlowState] = useState('');
   const [billingSessionId, setBillingSessionId] = useState('');
+  const [showCompletedWorkflowSteps, setShowCompletedWorkflowSteps] = useState(false);
+  const [focusedWorkflowStepKey, setFocusedWorkflowStepKey] = useState('');
   const [createForm, setCreateForm] = useState({
     title: '',
     addressLine1: '',
@@ -121,6 +229,66 @@ export default function DashboardPage() {
     refetchInterval: 10_000,
   });
   const workflow = workflowQuery.data || null;
+  const providerSupportTask = useMemo(
+    () =>
+      (dashboard?.tasks || []).find(
+        (item) => item.providerCategoryKey && item.status !== 'done',
+      ) ||
+      (dashboard?.tasks || []).find((item) => item.providerCategoryKey) ||
+      null,
+    [dashboard?.tasks],
+  );
+
+  const providerHighlightsQuery = useQuery({
+    queryKey: [
+      'dashboard-provider-highlights',
+      selectedPropertyId,
+      providerSupportTask?.providerCategoryKey || '',
+      providerSupportTask?.systemKey || providerSupportTask?.id || '',
+    ],
+    enabled: Boolean(selectedPropertyId && providerSupportTask?.providerCategoryKey),
+    queryFn: async () =>
+      listProviders(selectedPropertyId, {
+        taskKey: providerSupportTask?.systemKey || providerSupportTask?.id,
+        limit: 6,
+      }),
+    staleTime: 20_000,
+  });
+
+  const providerHighlightCards = useMemo(
+    () => buildProviderHighlights(providerHighlightsQuery.data?.providers?.items || []),
+    [providerHighlightsQuery.data?.providers?.items],
+  );
+  const workflowVisibleSteps = useMemo(
+    () =>
+      (workflow?.steps || []).filter(
+        (step) => showCompletedWorkflowSteps || step.uxStatus !== 'completed',
+      ),
+    [showCompletedWorkflowSteps, workflow?.steps],
+  );
+  const selectedWorkflowStep = useMemo(
+    () =>
+      (workflow?.steps || []).find((step) => step.key === focusedWorkflowStepKey) ||
+      workflow?.nextAction ||
+      workflow?.steps?.[0] ||
+      null,
+    [focusedWorkflowStepKey, workflow?.nextAction, workflow?.steps],
+  );
+
+  useEffect(() => {
+    if (!workflow?.steps?.length) {
+      setFocusedWorkflowStepKey('');
+      return;
+    }
+
+    setFocusedWorkflowStepKey((current) => {
+      const currentStillExists = workflow.steps.some((step) => step.key === current);
+      if (currentStillExists) {
+        return current;
+      }
+      return workflow.nextAction?.key || workflow.steps[0]?.key || '';
+    });
+  }, [workflow?.nextAction?.key, workflow?.steps]);
 
   useEffect(() => {
     const stored = getStoredSession();
@@ -272,6 +440,18 @@ export default function DashboardPage() {
       message: billingSummaryQuery.error.message,
     });
   }, [billingSummaryQuery.error]);
+
+  useEffect(() => {
+    if (!providerHighlightsQuery.error) {
+      return;
+    }
+
+    setToast({
+      tone: 'error',
+      title: 'Could not load provider highlights',
+      message: providerHighlightsQuery.error.message,
+    });
+  }, [providerHighlightsQuery.error]);
 
   useEffect(() => {
     if (
@@ -619,11 +799,11 @@ export default function DashboardPage() {
                   onClick={handleAnalyzePricing}
                   disabled={!selectedPropertyId || selectedPropertyArchived || Boolean(actionState)}
                 >
-                  {actionState.includes('pricing') ? 'Running analysis...' : 'Run pricing analysis'}
+                  {actionState.includes('pricing') ? 'Refreshing pricing...' : 'Refresh pricing strategy'}
                 </button>
                 {selectedPropertyId ? (
                   <Link className="button-secondary inline-button" href={`/properties/${selectedPropertyId}`}>
-                    Open property workspace
+                    Continue guided workspace
                   </Link>
                 ) : null}
               </div>
@@ -695,7 +875,7 @@ export default function DashboardPage() {
                   onClick={handleStartCheckout}
                   disabled={!session?.user?.id || !selectedBillingPlan || Boolean(actionState)}
                 >
-                  Start Stripe checkout
+                  Unlock plan in Stripe
                 </button>
               </div>
             </article>
@@ -710,52 +890,164 @@ export default function DashboardPage() {
             </article>
           </section>
 
-          {selectedPropertyId ? (
-            <section className="dashboard-grid">
-              <article className="feature-card">
-                <span className="label">Your progress</span>
-                <h3>{workflow?.completionPercent ?? 0}% complete</h3>
-                <p>
-                  {workflow?.currentPhaseLabel || 'Workflow'} · {viewerRole === 'agent' ? 'Realtor guide' : 'Seller guide'}
-                </p>
-                <div className="mini-stats">
-                  <div className="stat-card">
-                    <strong>Market-ready</strong>
-                    <span>{workflow?.marketReadyScore ?? dashboard?.property?.readinessScore ?? 0}/100</span>
-                  </div>
-                  <div className="stat-card">
-                    <strong>Current step</strong>
-                    <span>{workflow?.nextStep?.title || 'Choose a property to begin'}</span>
-                  </div>
+          {selectedPropertyId && workflow ? (
+            <section className="dashboard-guide-shell">
+              <aside className="content-card dashboard-workflow-rail">
+                <div className="dashboard-workflow-rail-header">
+                  <span className="label">Workflow navigator</span>
+                  <h3>
+                    {workflow.statusSummary?.completed || 0}/{workflow.steps?.length || 0} steps complete
+                  </h3>
+                  <p>
+                    {workflow.currentPhaseLabel || 'Workflow'} · {viewerRole === 'agent' ? 'Realtor guide' : 'Seller guide'}
+                  </p>
                 </div>
-              </article>
 
-              <article className="feature-card">
-                <span className="label">Next step</span>
-                <h3>{workflow?.nextStep?.title || 'Add your property'}</h3>
-                <p>{workflow?.nextStep?.description || 'Create or select a property to begin the guided workflow.'}</p>
-                {workflow?.nextStep?.helperText ? <p>{workflow.nextStep.helperText}</p> : null}
-                {selectedPropertyId ? (
-                  <Link
-                    className="button-primary inline-button"
-                    href={`/properties/${selectedPropertyId}`}
-                  >
-                    {workflow?.nextStep?.ctaLabel || 'Open property workspace'}
-                  </Link>
-                ) : null}
-              </article>
+                <div className="dashboard-readiness-pill dashboard-readiness-pill-compact">
+                  <strong>{workflow.marketReadyScore ?? dashboard?.property?.readinessScore ?? 0}/100 ready</strong>
+                  <span>{workflow.readinessSummary?.label || 'Readiness'}</span>
+                </div>
 
-              <article className="feature-card">
-                <span className="label">Workflow phases</span>
-                <div className="workflow-phase-list">
-                  {(workflow?.phases || []).map((phase) => (
-                    <div key={phase.key} className={`workflow-phase-item workflow-phase-item-${phase.status}`}>
-                      <strong>{phase.label}</strong>
-                      <span>{phase.completedSteps}/{phase.totalSteps} complete</span>
-                    </div>
+                <div className="dashboard-step-counts">
+                  <span>{workflow.statusSummary?.recommended || 0} recommended</span>
+                  <span>{workflow.statusSummary?.inProgress || 0} in progress</span>
+                  <span>{workflow.statusSummary?.blocked || 0} blocked</span>
+                </div>
+
+                <div className="dashboard-step-list">
+                  {workflowVisibleSteps.map((step) => (
+                    <button
+                      key={step.key}
+                      type="button"
+                      className={`dashboard-step-button dashboard-step-button-${step.uxStatus}${selectedWorkflowStep?.key === step.key ? ' active' : ''}`}
+                      onClick={() => setFocusedWorkflowStepKey(step.key)}
+                    >
+                      <span className="dashboard-step-index">{step.sequenceIndex}</span>
+                      <span className="dashboard-step-copy">
+                        <strong>{step.title}</strong>
+                        <span>{formatWorkflowUxStatus(step.uxStatus)}</span>
+                      </span>
+                    </button>
                   ))}
                 </div>
-              </article>
+
+                {(workflow.statusSummary?.completed || 0) > 0 ? (
+                  <button
+                    type="button"
+                    className="button-secondary inline-button dashboard-completed-toggle"
+                    onClick={() => setShowCompletedWorkflowSteps((current) => !current)}
+                  >
+                    {showCompletedWorkflowSteps
+                      ? `Hide completed (${workflow.statusSummary.completed})`
+                      : `Show completed (${workflow.statusSummary.completed})`}
+                  </button>
+                ) : null}
+              </aside>
+
+              <div className="dashboard-guide-main">
+                <article className="content-card dashboard-next-action-card">
+                  <div className="dashboard-next-action-copy">
+                    <span className="label">Next action engine</span>
+                    <h2>{selectedWorkflowStep?.title || 'Choose a property to begin'}</h2>
+                    <p>
+                      {selectedWorkflowStep?.description ||
+                        'Create or select a property to begin the guided workflow.'}
+                    </p>
+                    {selectedWorkflowStep?.helperText ? (
+                      <p className="dashboard-next-action-helper">{selectedWorkflowStep.helperText}</p>
+                    ) : null}
+                    {selectedWorkflowStep?.lockedReason ? (
+                      <p className="dashboard-next-action-helper">{selectedWorkflowStep.lockedReason}</p>
+                    ) : null}
+                    <div className="tag-row">
+                      <span>{formatWorkflowUxStatus(selectedWorkflowStep?.uxStatus || 'ready')}</span>
+                      <span>{selectedWorkflowStep?.phaseLabel || workflow.currentPhaseLabel}</span>
+                    </div>
+                  </div>
+                  <div className="dashboard-next-action-actions">
+                    <Link
+                      className="button-primary inline-button"
+                      href={getWorkflowStepHref(selectedWorkflowStep, selectedPropertyId)}
+                    >
+                      {getDashboardCtaLabel(selectedWorkflowStep)}
+                    </Link>
+                    <Link
+                      className="button-secondary inline-button"
+                      href={`/properties/${selectedPropertyId}`}
+                    >
+                      Open property workspace
+                    </Link>
+                  </div>
+                </article>
+
+                <section className="dashboard-guide-grid">
+                  <article className="feature-card dashboard-readiness-card">
+                    <span className="label">Readiness score</span>
+                    <h3>{workflow.marketReadyScore ?? dashboard?.property?.readinessScore ?? 0}/100</h3>
+                    <p>{workflow.readinessSummary?.message || 'Complete the guided steps to improve market readiness.'}</p>
+                    <div className="mini-stats">
+                      <div className="stat-card">
+                        <strong>Completion</strong>
+                        <span>{workflow.completionPercent ?? 0}% complete</span>
+                      </div>
+                      <div className="stat-card">
+                        <strong>Current phase</strong>
+                        <span>{workflow.currentPhaseLabel || 'Workflow'}</span>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article className="feature-card dashboard-provider-card">
+                    <span className="label">Provider ranking</span>
+                    <h3>{providerSupportTask?.providerCategoryLabel || 'Provider guidance'}</h3>
+                    <p>
+                      {providerSupportTask?.providerPrompt ||
+                        'When a checklist step calls for outside help, we will surface the strongest local options here.'}
+                    </p>
+                    {providerHighlightsQuery.isLoading ? (
+                      <p>Loading ranked provider options...</p>
+                    ) : providerHighlightCards.length ? (
+                      <div className="dashboard-provider-highlight-list">
+                        {providerHighlightCards.map((entry) => (
+                          <div key={entry.key} className="dashboard-provider-highlight">
+                            <span className="label">{entry.eyebrow}</span>
+                            <strong>{entry.provider.businessName}</strong>
+                            <span>
+                              {entry.provider.coverageLabel ||
+                                [entry.provider.city, entry.provider.state].filter(Boolean).join(', ')}
+                            </span>
+                            <span>{entry.provider.turnaroundLabel || 'Turnaround not listed'}</span>
+                            <span>
+                              {entry.provider.rating
+                                ? `${entry.provider.rating.toFixed(1)} stars${entry.provider.reviewCount ? ` · ${entry.provider.reviewCount} reviews` : ''}`
+                                : 'Rating not listed'}
+                            </span>
+                            <p>{entry.helper}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p>
+                        {providerSupportTask?.providerCategoryLabel
+                          ? 'No live internal providers are ranked for this step yet. The property workspace can still broaden the search with Google fallback.'
+                          : 'No provider-ranked tasks are active right now.'}
+                      </p>
+                    )}
+                  </article>
+
+                  <article className="feature-card dashboard-phase-card">
+                    <span className="label">Phase progress</span>
+                    <div className="workflow-phase-list">
+                      {(workflow?.phases || []).map((phase) => (
+                        <div key={phase.key} className={`workflow-phase-item workflow-phase-item-${phase.status}`}>
+                          <strong>{phase.label}</strong>
+                          <span>{phase.completedSteps}/{phase.totalSteps} complete</span>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                </section>
+              </div>
             </section>
           ) : null}
 
@@ -876,7 +1168,7 @@ export default function DashboardPage() {
                 className="button-primary"
                 disabled={Boolean(actionState) || (propertyCapacity ? !propertyCapacity.canCreateActiveProperty : false)}
               >
-                Create property
+                Start this property
               </button>
             </form>
 

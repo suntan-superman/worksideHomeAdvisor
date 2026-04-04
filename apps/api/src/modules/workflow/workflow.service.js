@@ -447,6 +447,91 @@ function buildNextStep(steps) {
     null;
 }
 
+function mapStepStatusToUxStatus(step, recommendedStepKey) {
+  if (step.status === 'complete') {
+    return 'completed';
+  }
+
+  if (step.status === 'locked') {
+    return 'blocked';
+  }
+
+  if (step.key === recommendedStepKey) {
+    return 'recommended';
+  }
+
+  if (step.status === 'in_progress') {
+    return 'in_progress';
+  }
+
+  return 'ready';
+}
+
+function buildStatusSummary(steps) {
+  return steps.reduce(
+    (summary, step) => {
+      if (step.uxStatus === 'completed') {
+        summary.completed += 1;
+      } else if (step.uxStatus === 'blocked') {
+        summary.blocked += 1;
+      } else {
+        summary.open += 1;
+        if (step.uxStatus === 'recommended') {
+          summary.recommended += 1;
+        }
+        if (step.uxStatus === 'ready') {
+          summary.ready += 1;
+        }
+        if (step.uxStatus === 'in_progress') {
+          summary.inProgress += 1;
+        }
+      }
+
+      return summary;
+    },
+    {
+      completed: 0,
+      open: 0,
+      blocked: 0,
+      recommended: 0,
+      ready: 0,
+      inProgress: 0,
+    },
+  );
+}
+
+function buildReadinessSummary(marketReadyScore, completionPercent) {
+  if (marketReadyScore >= 85) {
+    return {
+      tone: 'strong',
+      label: 'Market-ready momentum',
+      message: `You have ${completionPercent}% of the guided workflow complete and the property is in strong shape for final materials.`,
+    };
+  }
+
+  if (marketReadyScore >= 60) {
+    return {
+      tone: 'steady',
+      label: 'Good progress',
+      message: `You have ${completionPercent}% complete. Tightening the remaining prep and photo tasks should lift presentation quality quickly.`,
+    };
+  }
+
+  if (marketReadyScore >= 35) {
+    return {
+      tone: 'building',
+      label: 'Foundation in place',
+      message: `You have ${completionPercent}% complete. The next few guided actions will noticeably improve pricing confidence and marketing quality.`,
+    };
+  }
+
+  return {
+    tone: 'early',
+    label: 'Just getting started',
+    message: `You have ${completionPercent}% complete. Focus on the recommended step first so the rest of the workflow unlocks cleanly.`,
+  };
+}
+
 export async function getGuidedWorkflowState(propertyId, role = 'seller') {
   const normalizedRole = normalizeRole(role);
   const [property, pricing, mediaAssets, checklist, latestFlyer, latestReport, providerLeads] =
@@ -512,8 +597,16 @@ export async function getGuidedWorkflowState(propertyId, role = 'seller') {
   });
   const phases = buildPhaseSummary(steps);
   const nextStep = buildNextStep(steps);
+  const recommendedStepKey = nextStep?.key || '';
+  const stepsWithUxState = steps.map((step, index) => ({
+    ...step,
+    sequenceIndex: index + 1,
+    uxStatus: mapStepStatusToUxStatus(step, recommendedStepKey),
+  }));
   const currentPhase = nextStep?.phase || phases.find((phase) => phase.status !== 'complete')?.key || 'final_review';
-  const currentStep = nextStep?.key || steps.at(-1)?.key || '';
+  const currentStep = nextStep?.key || stepsWithUxState.at(-1)?.key || '';
+  const statusSummary = buildStatusSummary(stepsWithUxState);
+  const readinessSummary = buildReadinessSummary(marketReadyScore, completionPercent);
 
   return {
     propertyId,
@@ -524,8 +617,17 @@ export async function getGuidedWorkflowState(propertyId, role = 'seller') {
     completionPercent,
     marketReadyScore,
     phases,
-    steps,
+    steps: stepsWithUxState,
     nextStep,
+    nextAction: nextStep
+      ? {
+          ...nextStep,
+          uxStatus: 'recommended',
+          sequenceIndex: stepsWithUxState.find((step) => step.key === nextStep.key)?.sequenceIndex || 1,
+        }
+      : null,
+    statusSummary,
+    readinessSummary,
     metrics: {
       photoCount: photoSummary.photoCount,
       roomCoverageCount: photoSummary.roomCoverageCount,

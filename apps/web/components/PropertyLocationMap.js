@@ -427,13 +427,31 @@ export function ProviderResultsMap({
   frameClassName = '',
 }) {
   const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const mapsRef = useRef(null);
+  const infoWindowRef = useRef(null);
+  const propertyMarkerRef = useRef(null);
+  const providerMarkersRef = useRef([]);
+  const fittedZoomRef = useRef(null);
+  const paintCheckTimerRef = useRef(null);
   const [mapError, setMapError] = useState('');
   const [mapZoomMode, setMapZoomMode] = useState('fit');
   const [isLoadingMap, setIsLoadingMap] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    let paintCheckTimer = null;
+
+    function clearProviderMarkers() {
+      providerMarkersRef.current.forEach((marker) => marker.setMap(null));
+      providerMarkersRef.current = [];
+      if (propertyMarkerRef.current) {
+        propertyMarkerRef.current.setMap(null);
+        propertyMarkerRef.current = null;
+      }
+      if (infoWindowRef.current) {
+        infoWindowRef.current.close();
+      }
+    }
 
     async function renderProviderMap() {
       const propertyAddress = buildAddressQuery(property);
@@ -451,20 +469,32 @@ export function ProviderResultsMap({
           return;
         }
 
-        mapRef.current.innerHTML = '';
+        mapsRef.current = maps;
         const geocoder = new maps.Geocoder();
-        const infoWindow = new maps.InfoWindow();
         const propertyLocation = await geocodeAddress(geocoder, propertyAddress);
         if (cancelled || !mapRef.current) {
           return;
         }
 
-        const map = new maps.Map(mapRef.current, {
-          ...buildMapOptions(maps, 12),
-          center: propertyLocation,
-          fullscreenControl: false,
-        });
-        paintCheckTimer = scheduleMapPaintCheck(mapRef, () => {
+        if (!mapInstanceRef.current) {
+          mapInstanceRef.current = new maps.Map(mapRef.current, {
+            ...buildMapOptions(maps, 12),
+            center: propertyLocation,
+            fullscreenControl: false,
+          });
+        }
+        const map = mapInstanceRef.current;
+
+        if (!infoWindowRef.current) {
+          infoWindowRef.current = new maps.InfoWindow();
+        }
+
+        clearProviderMarkers();
+
+        if (paintCheckTimerRef.current) {
+          window.clearTimeout(paintCheckTimerRef.current);
+        }
+        paintCheckTimerRef.current = scheduleMapPaintCheck(mapRef, () => {
           if (!cancelled) {
             setMapError('The in-app provider map did not finish rendering. You can still use Open map search.');
           }
@@ -486,14 +516,15 @@ export function ProviderResultsMap({
             fillOpacity: 1,
             strokeColor: '#19212a',
             strokeWeight: 1,
-            scale: 13,
+              scale: 13,
           },
         });
+        propertyMarkerRef.current = propertyMarker;
         propertyMarker.addListener('click', () => {
-          infoWindow.setContent(
+          infoWindowRef.current?.setContent(
             `<div style="max-width:240px;"><strong>${property?.title || 'Subject property'}</strong><br/>${propertyAddress}</div>`,
           );
-          infoWindow.open({ anchor: propertyMarker, map });
+          infoWindowRef.current?.open({ anchor: propertyMarker, map });
         });
         bounds.extend(propertyLocation);
 
@@ -567,10 +598,11 @@ export function ProviderResultsMap({
               scale: 11,
             },
           });
+          providerMarkersRef.current.push(marker);
 
           marker.addListener('click', () => {
-            infoWindow.setContent(formatProviderMapInfoWindow(provider, markerLabel));
-            infoWindow.open({ anchor: marker, map });
+            infoWindowRef.current?.setContent(formatProviderMapInfoWindow(provider, markerLabel));
+            infoWindowRef.current?.open({ anchor: marker, map });
           });
           bounds.extend(position);
         });
@@ -582,32 +614,19 @@ export function ProviderResultsMap({
             left: 80,
             right: 80,
           });
-
           window.setTimeout(() => {
-            if (!cancelled) {
-              maps.event?.trigger?.(map, 'resize');
+            if (cancelled) {
+              return;
             }
+            maps.event?.trigger?.(map, 'resize');
+            if (typeof map.getZoom === 'function') {
+              const fittedZoom = map.getZoom();
+              if (Number.isFinite(fittedZoom)) {
+                fittedZoomRef.current = fittedZoom;
+              }
+            }
+            setMapZoomMode('fit');
           }, 300);
-
-          if (mapZoomMode === 'closer') {
-            window.setTimeout(() => {
-              if (!cancelled && typeof map.getZoom === 'function' && typeof map.setZoom === 'function') {
-                const currentZoom = map.getZoom();
-                if (Number.isFinite(currentZoom)) {
-                  map.setZoom(Math.min(16, currentZoom + 1));
-                }
-              }
-            }, 350);
-          } else if (mapZoomMode === 'wider') {
-            window.setTimeout(() => {
-              if (!cancelled && typeof map.getZoom === 'function' && typeof map.setZoom === 'function') {
-                const currentZoom = map.getZoom();
-                if (Number.isFinite(currentZoom)) {
-                  map.setZoom(Math.max(8, currentZoom - 1));
-                }
-              }
-            }, 350);
-          }
         }
       } catch (error) {
         if (!cancelled) {
@@ -627,11 +646,34 @@ export function ProviderResultsMap({
 
     return () => {
       cancelled = true;
-      if (paintCheckTimer) {
-        window.clearTimeout(paintCheckTimer);
+      if (paintCheckTimerRef.current) {
+        window.clearTimeout(paintCheckTimerRef.current);
+        paintCheckTimerRef.current = null;
       }
     };
-  }, [googleMapsUrl, mapZoomMode, mapsApiKey, property, providers]);
+  }, [mapsApiKey, property, providers]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    const fittedZoom = fittedZoomRef.current;
+    if (!map || !Number.isFinite(fittedZoom) || typeof map.setZoom !== 'function') {
+      return;
+    }
+
+    if (mapZoomMode === 'fit') {
+      map.setZoom(fittedZoom);
+      return;
+    }
+
+    if (mapZoomMode === 'closer') {
+      map.setZoom(Math.min(16, fittedZoom + 1));
+      return;
+    }
+
+    if (mapZoomMode === 'wider') {
+      map.setZoom(Math.max(8, fittedZoom - 1));
+    }
+  }, [mapZoomMode]);
 
   return (
     <div className="property-map-shell">

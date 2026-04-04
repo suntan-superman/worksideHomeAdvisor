@@ -350,6 +350,185 @@ select {
   align-items: start;
 }
 
+.dashboard-guide-shell {
+  display: grid;
+  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+  gap: 22px;
+  margin-top: 32px;
+  align-items: start;
+}
+
+.dashboard-workflow-rail {
+  position: sticky;
+  top: 24px;
+  display: grid;
+  gap: 16px;
+}
+
+.dashboard-workflow-rail-header h3,
+.dashboard-next-action-card h2,
+.dashboard-provider-card h3,
+.dashboard-readiness-card h3 {
+  margin: 10px 0 0;
+}
+
+.dashboard-workflow-rail-header p,
+.dashboard-next-action-helper,
+.dashboard-provider-highlight p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.dashboard-readiness-pill {
+  display: grid;
+  gap: 4px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(70, 99, 79, 0.14);
+  background: rgba(245, 250, 245, 0.92);
+}
+
+.dashboard-readiness-pill span {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.dashboard-step-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dashboard-step-counts span {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(25, 33, 42, 0.06);
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.dashboard-step-list {
+  display: grid;
+  gap: 10px;
+}
+
+.dashboard-step-button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  text-align: left;
+  border-radius: 18px;
+  border: 1px solid rgba(25, 33, 42, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.dashboard-step-button:hover,
+.dashboard-step-button:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(200, 116, 71, 0.28);
+}
+
+.dashboard-step-button.active {
+  border-color: rgba(200, 116, 71, 0.36);
+  background: rgba(255, 248, 241, 0.94);
+}
+
+.dashboard-step-button-recommended {
+  border-color: rgba(200, 116, 71, 0.22);
+  background: rgba(255, 246, 239, 0.92);
+}
+
+.dashboard-step-button-in_progress {
+  border-color: rgba(214, 169, 83, 0.22);
+  background: rgba(255, 250, 240, 0.9);
+}
+
+.dashboard-step-button-blocked {
+  opacity: 0.75;
+  background: rgba(247, 244, 239, 0.9);
+}
+
+.dashboard-step-button-completed {
+  border-color: rgba(70, 99, 79, 0.18);
+  background: rgba(245, 250, 245, 0.9);
+}
+
+.dashboard-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: rgba(25, 33, 42, 0.08);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.dashboard-step-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.dashboard-step-copy strong {
+  color: var(--ink);
+}
+
+.dashboard-step-copy span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.dashboard-completed-toggle {
+  justify-self: start;
+}
+
+.dashboard-guide-main {
+  display: grid;
+  gap: 20px;
+}
+
+.dashboard-next-action-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
+  align-items: center;
+  background: linear-gradient(180deg, rgba(255, 249, 241, 0.94), rgba(255, 244, 233, 0.9)), var(--panel);
+}
+
+.dashboard-next-action-actions {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.dashboard-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.dashboard-provider-highlight-list {
+  display: grid;
+  gap: 12px;
+}
+
+.dashboard-provider-highlight {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(25, 33, 42, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.dashboard-provider-highlight strong {
+  color: var(--ink);
+}
+
 .form-card {
   display: grid;
   gap: 16px;
@@ -1766,10 +1945,26 @@ select {
   cursor: pointer;
 }
 
+@media (max-width: 1280px) {
+  .dashboard-guide-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-workflow-rail {
+    position: static;
+  }
+
+  .dashboard-guide-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 900px) {
   .hero-grid,
   .content-grid,
   .workspace-grid,
+  .dashboard-guide-grid,
+  .dashboard-guide-shell,
   .dashboard-grid,
   .section-grid,
   .metric-grid {
@@ -1835,6 +2030,18 @@ select {
 
   .checklist-provider-inline {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-workflow-rail {
+    position: static;
+  }
+
+  .dashboard-next-action-card {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-next-action-actions {
+    justify-items: stretch;
   }
 }
 
