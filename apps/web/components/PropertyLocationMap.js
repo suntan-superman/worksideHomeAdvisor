@@ -394,10 +394,12 @@ export function PropertyLocationMap({
 
   return (
     <div className="property-map-shell">
-      <div
-        ref={mapRef}
-        className={`property-map-frame property-map-frame-js${frameClassName ? ` ${frameClassName}` : ''}`}
-      />
+      <div className="property-map-frame-shell">
+        <div
+          ref={mapRef}
+          className={`property-map-frame property-map-frame-js${frameClassName ? ` ${frameClassName}` : ''}`}
+        />
+      </div>
       {mapError ? (
         <div className="property-map-fallback">
           <p>{mapError}</p>
@@ -666,11 +668,12 @@ export function ProviderResultsMap({
           Reset
         </button>
       </div>
-      <div
-        ref={mapRef}
-        className={`property-map-frame property-map-frame-js provider-static-map-frame${frameClassName ? ` ${frameClassName}` : ''}`}
-      >
-        {isLoadingMap ? <div className="property-map-loading">Loading provider map…</div> : null}
+      <div className="property-map-frame-shell">
+        <div
+          ref={mapRef}
+          className={`property-map-frame property-map-frame-js provider-static-map-frame${frameClassName ? ` ${frameClassName}` : ''}`}
+        />
+        {isLoadingMap ? <div className="property-map-loading-overlay">Loading provider map…</div> : null}
       </div>
       {mapError ? (
         <div className="property-map-fallback">
