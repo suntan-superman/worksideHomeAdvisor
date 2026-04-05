@@ -574,6 +574,16 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     providerSource?.categoryLabel,
     unavailableProviderRecommendations,
   ]);
+  const providerMapViewportProviders = useMemo(() => {
+    const internalAndSetupProviders = providerMapProviders.filter(
+      (provider) => !provider.isExternalFallback,
+    );
+    if (internalAndSetupProviders.length) {
+      return internalAndSetupProviders;
+    }
+
+    return providerMapProviders;
+  }, [providerMapProviders]);
   const hasInternalProviderResults =
     providerRecommendations.length > 0 || unavailableProviderRecommendations.length > 0;
   const recentOutputs = useMemo(
@@ -3271,7 +3281,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   {providerSource?.categoryLabel || providerSuggestionTask?.providerCategoryLabel || 'Provider coverage'}
                 </h2>
                 <p id="provider-map-description">
-                  Review marketplace and Google fallback providers around the property in a controlled map view.
+                  {hasInternalProviderResults
+                    ? 'Review matched Workside marketplace providers around the property in a controlled map view.'
+                    : 'Review Google fallback providers around the property in a controlled map view.'}
                 </p>
               </div>
               <div className="workspace-modal-actions">
@@ -3292,13 +3304,18 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             </div>
             <ProviderResultsMap
               property={property}
-              providers={providerMapProviders}
+              providers={providerMapViewportProviders}
               mapsApiKey={mapsApiKey}
               googleMapsUrl={providerGoogleSearchUrl}
               frameClassName="property-map-frame-expanded"
             />
             {providerMapProviders.length ? (
               <div className="provider-map-summary-list">
+                {providerMapViewportProviders.length !== providerMapProviders.length ? (
+                  <p className="workspace-control-note provider-map-summary-note">
+                    The map is focused on matched Workside providers so the view stays local. Google fallback results remain available in the checklist list and through Google Maps.
+                  </p>
+                ) : null}
                 {providerMapProviders.map((provider) => (
                   <article key={`provider-map-summary-${provider.id}`} className="provider-map-summary-item">
                     <div>

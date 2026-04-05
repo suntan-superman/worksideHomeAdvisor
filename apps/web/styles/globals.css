@@ -2859,6 +2859,8 @@ select {
 .workspace-map-modal-card {
   width: min(1100px, 100%);
   gap: 20px;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
 }
 
 .workspace-map-modal-header {
@@ -2870,12 +2872,16 @@ select {
 }
 
 .property-map-frame-expanded {
-  min-height: 560px;
+  min-height: min(560px, 58vh);
 }
 
 .provider-map-summary-list {
   display: grid;
   gap: 12px;
+}
+
+.provider-map-summary-note {
+  margin: 0;
 }
 
 .provider-map-summary-item {
@@ -2995,6 +3001,6 @@ select {
   }
 
   .property-map-frame-expanded {
-    min-height: 420px;
+    min-height: min(420px, 48vh);
   }
 }
