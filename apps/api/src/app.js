@@ -13,6 +13,7 @@ import { marketplaceSmsRoutes } from './modules/marketplace-sms/marketplace-sms.
 import { providersRoutes } from './modules/providers/providers.routes.js';
 import { propertyRoutes } from './modules/properties/property.routes.js';
 import { pricingRoutes } from './modules/pricing/pricing.routes.js';
+import { publicRoutes } from './modules/public/public.routes.js';
 import { tasksRoutes } from './modules/tasks/tasks.routes.js';
 import { workflowRoutes } from './modules/workflow/workflow.routes.js';
 
@@ -35,6 +36,7 @@ export function buildApp() {
   }));
 
   app.register(authRoutes, { prefix: '/api/v1/auth' });
+  app.register(publicRoutes, { prefix: '/api/v1/public' });
   app.register(adminRoutes, { prefix: '/api/v1/admin' });
   app.register(billingRoutes, { prefix: '/api/v1/billing' });
   app.register(billingRoutes, { prefix: '/api/billing' });

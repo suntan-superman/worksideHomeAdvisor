@@ -92,13 +92,19 @@ export default function AuthPage() {
     const timedOut = params.get('timedOut') === '1';
     const requestedMode = params.get('mode');
     const requestedEmail = String(params.get('email') || '').trim();
+    const requestedRole = String(params.get('role') || '').trim();
+    const requestedFirstName = String(params.get('firstName') || '').trim();
+    const requestedPassword = String(params.get('prefillPassword') || '').trim();
+    const roleIsSupported = ROLE_OPTIONS.some((option) => option.value === requestedRole);
 
     if (requestedEmail) {
       setForm((current) => ({
         ...current,
         email: requestedEmail,
-        password: '',
+        password: requestedPassword || '',
+        firstName: requestedFirstName || current.firstName,
         otpCode: '',
+        role: roleIsSupported ? requestedRole : current.role,
       }));
     }
 
@@ -107,6 +113,14 @@ export default function AuthPage() {
       setShowVerificationOption(true);
       setStatus(`Enter the OTP sent to ${requestedEmail} to finish verification.`);
       return;
+    }
+
+    if (requestedMode === 'signup') {
+      setMode('signup');
+      setShowVerificationOption(false);
+      setStatus(getRoleStatus(roleIsSupported ? requestedRole : form.role, 'signup'));
+    } else if (roleIsSupported) {
+      setStatus(getRoleStatus(requestedRole, mode));
     }
 
     if (!timedOut) {

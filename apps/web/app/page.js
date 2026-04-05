@@ -1,112 +1,82 @@
-import Link from 'next/link';
-
-import { BRANDING } from '@workside/branding';
-
 import { AppFrame } from '../components/AppFrame';
-
-const features = [
-  {
-    title: 'Pricing guidance that explains itself',
-    body: 'See strong comps, likely list-price bands, confidence, and what would move the needle before launch.',
-  },
-  {
-    title: 'Room-by-room prep advice',
-    body: 'Get paint, staging, decluttering, and repair recommendations ranked by likely payoff.',
-  },
-  {
-    title: 'Marketing and flyer generation',
-    body: 'Turn homeowner photos into listing copy, standout feature callouts, and branded flyer drafts.',
-  },
-];
+import { FinalCTASection } from '../components/landing/FinalCTASection';
+import { HeroSection } from '../components/landing/HeroSection';
+import { RoleChooser } from '../components/landing/RoleChooser';
 
 export default function HomePage() {
   return (
     <AppFrame>
-      <section className="hero-grid">
-        <div className="hero-copy">
-          <div className="hero-kicker">{BRANDING.tagline}</div>
-          <h1>Sell with a plan, not a pile of guesses.</h1>
-          <p>
-            Workside Home Seller Assistant helps owners price their home, choose
-            the best prep work, surface the right features, and ship polished
-            marketing materials with AI support and clear disclaimers.
-          </p>
-
-          <div className="cta-row">
-            <Link href="/auth" className="button-primary">
-              Start seller onboarding
-            </Link>
-            <Link href="/providers/join" className="button-secondary">
-              List your business
-            </Link>
-            <Link href="/providers/portal" className="button-secondary">
-              Provider portal
-            </Link>
-            <Link href="/dashboard" className="button-secondary">
-              View dashboard preview
-            </Link>
+      <HeroSection
+        eyebrow="Role chooser"
+        title="Choose the right Workside path for the job in front of you."
+        subtitle="Workside is a guided selling plan for sellers, agents, and providers. Pick the route that matches your intent and start in the right funnel instead of a generic catch-all page."
+        aside={
+          <div className="landing-mini-panel landing-mini-panel-tall">
+            <span className="label">Core product</span>
+            <strong>Guided selling plan + checklist</strong>
+            <p>
+              Pricing, prep, photos, providers, reports, and flyers all support
+              the same outcome: move a property from uncertainty to market-ready.
+            </p>
           </div>
+        }
+      />
 
-          <div className="mini-stats">
-            <div className="stat-card">
-              <strong>Pricing</strong>
-              <span>Comps, scenarios, and confidence ranges</span>
-            </div>
-            <div className="stat-card">
-              <strong>Prep</strong>
-              <span>High-ROI improvements and paint guidance</span>
-            </div>
-            <div className="stat-card">
-              <strong>Marketing</strong>
-              <span>Photo ranking, flyer drafts, and listing copy</span>
-            </div>
-          </div>
-        </div>
+      <RoleChooser
+        roles={[
+          {
+            eyebrow: 'Seller funnel',
+            title: 'I am selling a home',
+            body: 'Get pricing guidance, prep recommendations, provider help, and a clear plan before you list.',
+            points: [
+              'Address-first preview',
+              'Guided prep checklist',
+              'Provider help and exports',
+            ],
+            href: '/sell',
+            cta: 'Start seller plan',
+            secondaryHref: '/dashboard',
+            secondaryCta: 'See dashboard preview',
+          },
+          {
+            eyebrow: 'Agent funnel',
+            title: 'I am a real estate agent',
+            body: 'Use Workside as a listing acceleration system with seller-facing reports, prep workflow, and property capacity tools.',
+            points: [
+              'Win listings with better prep',
+              'Seller-facing professionalism',
+              'Reusable process across properties',
+            ],
+            href: '/agents',
+            cta: 'Get agent access',
+            secondaryHref: '/auth?mode=signup&role=agent',
+            secondaryCta: 'Create agent account',
+          },
+          {
+            eyebrow: 'Provider funnel',
+            title: 'I provide home services',
+            body: 'Join the provider network to receive high-intent local seller jobs with verification and profile visibility.',
+            points: [
+              'Local lead flow',
+              'Trust profile + verification',
+              'Lead acceptance workflow',
+            ],
+            href: '/providers',
+            cta: 'Join provider network',
+            secondaryHref: '/providers/portal',
+            secondaryCta: 'Provider portal',
+          },
+        ]}
+      />
 
-        <div className="hero-panel">
-          <div className="panel-window">
-            <div className="panel-header">
-              <div>
-                <span className="label">Property workspace</span>
-                <h2>1234 Ridgeview Lane</h2>
-              </div>
-              <span className="pill">Listing ready: 78%</span>
-            </div>
-
-            <div className="metric-grid">
-              <article className="metric-card">
-                <span className="label">Suggested list band</span>
-                <strong>$624k to $649k</strong>
-                <p>Supported by nearby sales, size alignment, and current buyer demand.</p>
-              </article>
-              <article className="metric-card">
-                <span className="label">Top prep recommendation</span>
-                <strong>Repaint the living room and primary bedroom in a warm neutral.</strong>
-                <p>Best bang for the buck for photo quality and buyer appeal.</p>
-              </article>
-              <article className="metric-card span-two">
-                <span className="label">Best features to highlight</span>
-                <div className="tag-row">
-                  <span>Updated kitchen</span>
-                  <span>Large backyard</span>
-                  <span>Natural light</span>
-                  <span>Corner lot</span>
-                  <span>Move-in-ready feel</span>
-                </div>
-              </article>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="section-grid">
-        {features.map((feature) => (
-          <article key={feature.title} className="feature-card">
-            <h3>{feature.title}</h3>
-            <p>{feature.body}</p>
-          </article>
-        ))}
-      </section>
+      <FinalCTASection
+        title="The right funnel should start the experience, not just describe it."
+        body="Each path is now dedicated: sellers to /sell, agents to /agents, and providers to /providers. That keeps the promise and the onboarding sequence clear from the first click."
+        primaryHref="/sell"
+        primaryLabel="Go to seller funnel"
+        secondaryHref="/providers"
+        secondaryLabel="See provider funnel"
+      />
     </AppFrame>
   );
 }

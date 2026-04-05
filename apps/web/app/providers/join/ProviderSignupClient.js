@@ -227,7 +227,12 @@ function getExistingEmailConflictMessage(message) {
   return '';
 }
 
-export function ProviderSignupClient({ billingState = '', providerId = '' }) {
+export function ProviderSignupClient({
+  billingState = '',
+  providerId = '',
+  prefillCategoryKey = '',
+  prefillPrimaryZip = '',
+}) {
   const router = useRouter();
   const [stepIndex, setStepIndex] = useState(0);
   const [form, setForm] = useState(createInitialForm());
@@ -414,6 +419,21 @@ export function ProviderSignupClient({ billingState = '', providerId = '' }) {
       categoryKey: providerCategories[0]?.value || current.categoryKey,
     }));
   }, [form.categoryKey, providerCategories]);
+
+  useEffect(() => {
+    if (!prefillCategoryKey && !prefillPrimaryZip) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      categoryKey:
+        prefillCategoryKey && current.categoryKey === INITIAL_FORM.categoryKey
+          ? prefillCategoryKey
+          : current.categoryKey,
+      primaryZip: current.primaryZip || prefillPrimaryZip || current.primaryZip,
+    }));
+  }, [prefillCategoryKey, prefillPrimaryZip]);
 
   const signedInProvider = ['provider', 'admin', 'super_admin'].includes(appSession?.user?.role || '');
   const businessEmailIsValid = isValidEmail(form.email);

@@ -42,6 +42,34 @@ export function signup(payload) {
   });
 }
 
+export function getPublicSellerPreview(payload) {
+  return request('/api/v1/public/seller-preview', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function captureFunnelLead(payload) {
+  return request('/api/v1/public/funnel-capture', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function continuePublicSignup(payload) {
+  return request('/api/v1/public/continue-signup', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function trackLandingEvent(payload) {
+  return request('/api/v1/public/events', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function login(payload) {
   return request('/api/v1/auth/login', {
     method: 'POST',

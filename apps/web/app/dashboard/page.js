@@ -23,10 +23,30 @@ import {
 } from '../../lib/api';
 import { getStoredSession, setStoredSession } from '../../lib/session';
 
+const SELLER_LANDING_DRAFT_KEY = 'worksideSellerLandingDraft';
+
 function formatAudienceLabel(value) {
   return String(value || '')
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function loadSellerLandingDraft() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const rawDraft = window.sessionStorage.getItem(SELLER_LANDING_DRAFT_KEY);
+    if (!rawDraft) {
+      return null;
+    }
+
+    const parsedDraft = JSON.parse(rawDraft);
+    return parsedDraft && typeof parsedDraft === 'object' ? parsedDraft : null;
+  } catch {
+    return null;
+  }
 }
 
 function getAllowedBillingAudiences(user) {
@@ -296,6 +316,34 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
+    const landingDraft = loadSellerLandingDraft();
+    if (!landingDraft) {
+      return;
+    }
+
+    setCreateForm((current) => ({
+      ...current,
+      title: current.title || landingDraft.title || '',
+      addressLine1: current.addressLine1 || landingDraft.addressLine1 || '',
+      city: current.city || landingDraft.city || '',
+      state: current.state || landingDraft.state || '',
+      zip: current.zip || landingDraft.zip || '',
+      propertyType: landingDraft.propertyType || current.propertyType,
+      bedrooms: landingDraft.bedrooms || current.bedrooms,
+      bathrooms: landingDraft.bathrooms || current.bathrooms,
+      squareFeet: landingDraft.squareFeet || current.squareFeet,
+    }));
+
+    setToast((current) =>
+      current || {
+        tone: 'info',
+        title: 'Preview carried over',
+        message: 'Your landing-page property details are ready in the create-property form below.',
+      },
+    );
+  }, []);
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
@@ -540,6 +588,9 @@ export default function DashboardPage() {
 
     try {
       const response = await createProperty(createForm, session.user.id);
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.removeItem(SELLER_LANDING_DRAFT_KEY);
+      }
       const nextProperties = [response.property, ...properties];
       setProperties(nextProperties);
       setSelectedPropertyId(response.property.id);

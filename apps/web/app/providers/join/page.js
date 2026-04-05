@@ -11,10 +11,19 @@ export default function ProviderJoinPage({ searchParams }) {
     typeof searchParams?.billing === 'string' ? searchParams.billing : '';
   const providerId =
     typeof searchParams?.providerId === 'string' ? searchParams.providerId : '';
+  const prefillCategoryKey =
+    typeof searchParams?.category === 'string' ? searchParams.category : '';
+  const prefillPrimaryZip =
+    typeof searchParams?.zip === 'string' ? searchParams.zip : '';
 
   return (
     <AppFrame>
-      <ProviderSignupClient billingState={billingState} providerId={providerId} />
+      <ProviderSignupClient
+        billingState={billingState}
+        providerId={providerId}
+        prefillCategoryKey={prefillCategoryKey}
+        prefillPrimaryZip={prefillPrimaryZip}
+      />
     </AppFrame>
   );
 }
