@@ -1833,6 +1833,11 @@ select {
   background: rgba(255, 255, 255, 0.72);
 }
 
+.provider-reference-copy {
+  display: grid;
+  gap: 4px;
+}
+
 .provider-reference-item strong {
   display: block;
   margin-bottom: 4px;
@@ -1843,6 +1848,18 @@ select {
   display: block;
   color: var(--muted);
   line-height: 1.45;
+}
+
+.provider-reference-source {
+  font-size: 0.92rem;
+  color: var(--moss) !important;
+}
+
+.provider-reference-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .provider-portal-shell {

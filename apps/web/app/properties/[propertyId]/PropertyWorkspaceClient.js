@@ -222,6 +222,22 @@ function formatProviderStatusLabel(status) {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function formatProviderReferenceAccessLabel(reference) {
+  if (reference?.websiteUrl) {
+    try {
+      return new URL(reference.websiteUrl).hostname.replace(/^www\./, '');
+    } catch {
+      return 'Website available';
+    }
+  }
+
+  if (reference?.mapsUrl) {
+    return reference?.source === 'google_maps' ? 'Google Maps reference saved' : 'Maps link available';
+  }
+
+  return 'Contact details not listed';
+}
+
 function buildProviderAvailabilityMessage(providerSuggestionTask, providerSource) {
   if (!providerSuggestionTask) {
     return '';
@@ -3164,23 +3180,52 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               <div className="provider-reference-list">
                 {providerReferences.map((reference) => (
                   <article key={reference.id} className="provider-reference-item">
-                    <div>
+                    <div className="provider-reference-copy">
                       <strong>{reference.businessName}</strong>
                       <span>
                         {[reference.categoryLabel || reference.categoryKey, reference.city, reference.state]
                           .filter(Boolean)
                           .join(' · ')}
                       </span>
-                      <span>{reference.phone || reference.email || reference.websiteUrl || reference.mapsUrl || 'Contact details not listed'}</span>
+                      <span>
+                        {reference.phone ||
+                          reference.email ||
+                          formatProviderReferenceAccessLabel(reference)}
+                      </span>
+                      {reference.source === 'google_maps' ? (
+                        <span className="provider-reference-source">Google-discovered reference</span>
+                      ) : null}
                     </div>
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      onClick={() => handleRemoveProviderReference(reference.id)}
-                      disabled={Boolean(status) || isArchivedProperty}
-                    >
-                      Remove
-                    </button>
+                    <div className="provider-reference-actions">
+                      {reference.websiteUrl ? (
+                        <a
+                          href={reference.websiteUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="button-secondary inline-button"
+                        >
+                          Visit website
+                        </a>
+                      ) : null}
+                      {reference.mapsUrl ? (
+                        <a
+                          href={reference.mapsUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="button-secondary inline-button"
+                        >
+                          Open in Maps
+                        </a>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => handleRemoveProviderReference(reference.id)}
+                        disabled={Boolean(status) || isArchivedProperty}
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </article>
                 ))}
               </div>

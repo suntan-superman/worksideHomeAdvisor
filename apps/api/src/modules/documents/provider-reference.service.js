@@ -63,6 +63,22 @@ function buildReferenceSubtitle(reference) {
   return parts.join(' • ');
 }
 
+function buildReferenceAccessLabel(reference) {
+  if (reference.websiteUrl) {
+    try {
+      return new URL(reference.websiteUrl).hostname.replace(/^www\./, '');
+    } catch {
+      return 'Website available';
+    }
+  }
+
+  if (reference.mapsUrl) {
+    return reference.source === 'google_maps' ? 'Google Maps reference saved' : 'Maps link available';
+  }
+
+  return 'Not listed';
+}
+
 export async function exportProviderReferenceSheetPdf({ propertyId }) {
   if (mongoose.connection.readyState !== 1) {
     throw new Error('Database connection is required to export provider reference sheets.');
@@ -268,7 +284,7 @@ export async function exportProviderReferenceSheetPdf({ propertyId }) {
     const details = [
       ['Phone', reference.phone || 'Not listed'],
       ['Email', reference.email || 'Not listed'],
-      ['Website', reference.websiteUrl || reference.mapsUrl || 'Not listed'],
+      ['Access', buildReferenceAccessLabel(reference)],
       [
         'Source',
         reference.source === 'google_maps' ? 'Saved Google reference' : 'Workside marketplace',
