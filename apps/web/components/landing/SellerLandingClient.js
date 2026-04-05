@@ -270,9 +270,9 @@ export function SellerLandingClient({
               <p>{copyVariant.heroPanelBody}</p>
             </div>
             <div className="landing-mini-panel">
-              <span className="label">Preview categories</span>
+              <span className="label">{copyVariant.themeEyebrow || 'Preview categories'}</span>
               <div className="tag-row">
-                {previewCategories.map((category) => (
+                {(copyVariant.themePills || previewCategories).map((category) => (
                   <span key={category}>{category}</span>
                 ))}
               </div>
@@ -447,13 +447,9 @@ export function SellerLandingClient({
       </div>
 
       <PricingTeaserSection
-        title="Free preview first. Paid plan at the real unlock point."
-        body="We should not ask for payment before the user understands the value. The subscription prompt belongs after the property exists and the deeper workflow is visible."
-        bullets={[
-          'Preview the pricing band before signup.',
-          'Save the property and unlock the full checklist next.',
-          'Billing appears only when the user is ready to continue the real workspace.',
-        ]}
+        title={copyVariant.pricingTitle}
+        body={copyVariant.pricingBody}
+        bullets={copyVariant.pricingBullets}
         primaryHref="/auth?mode=signup&role=seller"
         primaryLabel="Create seller account"
         secondaryHref="/dashboard"

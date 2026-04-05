@@ -43,25 +43,7 @@ export default function ProviderLandingPage({ searchParams }) {
         aside={<ProviderLandingClient source={source} />}
       />
 
-      <ValueCardRow
-        items={[
-          {
-            eyebrow: 'Demand',
-            title: 'Qualified local work',
-            body: 'Providers appear when a seller workflow actually needs help, not as random cold directory traffic.',
-          },
-          {
-            eyebrow: 'Trust',
-            title: 'Trust badges and verification',
-            body: 'Self-reported and verified signals help providers build confidence in the marketplace.',
-          },
-          {
-            eyebrow: 'Workflow',
-            title: 'Simple lead acceptance flow',
-            body: 'Join, verify, appear in the marketplace, then manage requests from the portal instead of scattered email threads.',
-          },
-        ]}
-      />
+      <ValueCardRow items={copyVariant.valueItems} />
 
       <HowItWorksSection
         steps={[
@@ -119,10 +101,10 @@ export default function ProviderLandingPage({ searchParams }) {
       />
 
       <FinalCTASection
-        title="Join the network before the next seller request is routed."
-        body="Set the category, ZIP, and service radius now, then continue into the provider signup and billing flow from there."
+        title={copyVariant.finalTitle}
+        body={copyVariant.finalBody}
         primaryHref="/providers/join"
-        primaryLabel="Start provider signup"
+        primaryLabel={copyVariant.primaryCta}
         secondaryHref="/sell"
         secondaryLabel="See seller funnel"
       />

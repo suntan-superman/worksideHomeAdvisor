@@ -44,33 +44,19 @@ export default function AgentLandingPage({ searchParams }) {
             <span className="label">Report preview shell</span>
             <h3>Seller-ready presentation</h3>
             <ul className="landing-bullet-list">
-              <li>Pricing strategy summary</li>
-              <li>Prep plan and provider support</li>
-              <li>Marketing materials handoff</li>
+              {(copyVariant.themePills || [
+                'Pricing strategy summary',
+                'Prep plan and provider support',
+                'Marketing materials handoff',
+              ]).map((item) => (
+                <li key={item}>{item}</li>
+              ))}
             </ul>
           </div>
         }
       />
 
-      <ValueCardRow
-        items={[
-          {
-            eyebrow: 'Listings',
-            title: 'Look prepared before the seller meeting',
-            body: 'Show a plan instead of promising one later.',
-          },
-          {
-            eyebrow: 'Workflow',
-            title: 'Reuse the same listing system across properties',
-            body: 'Pricing, prep, providers, photos, and reports live in one guided sequence.',
-          },
-          {
-            eyebrow: 'Capacity',
-            title: 'Plans framed around active properties',
-            body: 'Agent billing fits the real work model: how many active listings you are moving forward at once.',
-          },
-        ]}
-      />
+      <ValueCardRow items={copyVariant.valueItems} />
 
       <HowItWorksSection
         steps={[
@@ -128,10 +114,10 @@ export default function AgentLandingPage({ searchParams }) {
       />
 
       <FinalCTASection
-        title="Turn seller confidence into signed listings."
-        body="Workside helps agents show up with pricing, prep, provider support, and presentation polish already mapped out."
+        title={copyVariant.finalTitle}
+        body={copyVariant.finalBody}
         primaryHref="/auth?mode=signup&role=agent"
-        primaryLabel="Get agent access"
+        primaryLabel={copyVariant.primaryCta}
         secondaryHref="/sell"
         secondaryLabel="See seller funnel"
       />
