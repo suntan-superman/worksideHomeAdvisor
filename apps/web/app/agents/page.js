@@ -7,26 +7,35 @@ import { HowItWorksSection } from '../../components/landing/HowItWorksSection';
 import { PricingTeaserSection } from '../../components/landing/PricingTeaserSection';
 import { TrustSignalSection } from '../../components/landing/TrustSignalSection';
 import { ValueCardRow } from '../../components/landing/ValueCardRow';
+import { getAgentLandingVariant } from '../../components/landing/copyVariants';
 
 export const metadata = {
   title: 'Agent Access | Workside Home Advisor',
   description: 'Use Workside to win more listings, guide prep faster, and present polished seller-facing reports.',
 };
 
-export default function AgentLandingPage() {
+export default function AgentLandingPage({ searchParams }) {
+  const source =
+    typeof searchParams?.src === 'string' ? searchParams.src : 'direct-agent';
+  const campaign =
+    typeof searchParams?.campaign === 'string' ? searchParams.campaign : '';
+  const medium =
+    typeof searchParams?.medium === 'string' ? searchParams.medium : '';
+  const copyVariant = getAgentLandingVariant({ source, campaign, medium });
+
   return (
     <AppFrame>
       <HeroSection
-        eyebrow="Agent funnel"
-        title="Win more listings. Get homes market-ready faster."
-        subtitle="Use branded reports, pricing guidance, guided prep flows, and provider coordination to move listings forward with less friction."
+        eyebrow={copyVariant.eyebrow}
+        title={copyVariant.title}
+        subtitle={copyVariant.subtitle}
         actions={
           <>
             <Link href="/auth?mode=signup&role=agent" className="button-primary">
-              Get agent access
+              {copyVariant.primaryCta}
             </Link>
             <Link href="/dashboard" className="button-secondary">
-              See workflow preview
+              {copyVariant.secondaryCta}
             </Link>
           </>
         }

@@ -8,6 +8,7 @@ import { PricingTeaserSection } from '../../components/landing/PricingTeaserSect
 import { ProviderLandingClient } from '../../components/landing/ProviderLandingClient';
 import { TrustSignalSection } from '../../components/landing/TrustSignalSection';
 import { ValueCardRow } from '../../components/landing/ValueCardRow';
+import { getProviderLandingVariant } from '../../components/landing/copyVariants';
 
 export const metadata = {
   title: 'Join Provider Network | Workside Home Advisor',
@@ -17,20 +18,25 @@ export const metadata = {
 export default function ProviderLandingPage({ searchParams }) {
   const source =
     typeof searchParams?.src === 'string' ? searchParams.src : 'direct-provider';
+  const campaign =
+    typeof searchParams?.campaign === 'string' ? searchParams.campaign : '';
+  const medium =
+    typeof searchParams?.medium === 'string' ? searchParams.medium : '';
+  const copyVariant = getProviderLandingVariant({ source, campaign, medium });
 
   return (
     <AppFrame>
       <HeroSection
-        eyebrow="Provider funnel"
-        title="Get high-intent seller jobs delivered to you."
-        subtitle="Join the Workside provider network and receive local service requests from homeowners and agents preparing homes for market."
+        eyebrow={copyVariant.eyebrow}
+        title={copyVariant.title}
+        subtitle={copyVariant.subtitle}
         actions={
           <>
             <Link href="/providers/join" className="button-primary">
-              Start provider signup
+              {copyVariant.primaryCta}
             </Link>
             <Link href="/providers/portal" className="button-secondary">
-              Open provider portal
+              {copyVariant.secondaryCta}
             </Link>
           </>
         }

@@ -20,6 +20,7 @@ import { PricingTeaserSection } from './PricingTeaserSection';
 import { ResultPreviewCard } from './ResultPreviewCard';
 import { TrustSignalSection } from './TrustSignalSection';
 import { ValueCardRow } from './ValueCardRow';
+import { getSellerLandingVariant } from './copyVariants';
 
 const SELLER_LANDING_DRAFT_KEY = 'worksideSellerLandingDraft';
 
@@ -59,6 +60,10 @@ export function SellerLandingClient({
   const previewCategories = useMemo(
     () => preview?.previewProviderCategories || ['cleaners', 'photographers'],
     [preview?.previewProviderCategories],
+  );
+  const copyVariant = useMemo(
+    () => getSellerLandingVariant({ source, campaign, medium }),
+    [campaign, medium, source],
   );
 
   useEffect(() => {
@@ -244,25 +249,25 @@ export function SellerLandingClient({
       />
 
       <HeroSection
-        eyebrow="Seller funnel"
-        title="Sell your home with a plan, not a guess."
-        subtitle="Get pricing guidance, prep recommendations, photo help, and provider matches in minutes, then move naturally into the guided workspace when you're ready."
+        eyebrow={copyVariant.heroEyebrow}
+        title={copyVariant.heroTitle}
+        subtitle={copyVariant.heroSubtitle}
         actions={
           <>
             <button type="button" className="button-primary" onClick={openEmailGate}>
-              Start your selling plan
+              {copyVariant.primaryCta}
             </button>
             <a href="#sell-how-it-works" className="button-secondary">
-              See how it works
+              {copyVariant.secondaryCta}
             </a>
           </>
         }
         aside={
           <div className="landing-hero-metrics">
             <div className="landing-mini-panel">
-              <span className="label">Fast value</span>
+              <span className="label">{copyVariant.heroPanelLabel}</span>
               <strong>{preview?.estimatedRange?.mid ? `Midpoint ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(preview.estimatedRange.mid)}` : 'Address to preview in under a minute'}</strong>
-              <p>Start with the property basics. We will show a partial result before we ask for signup.</p>
+              <p>{copyVariant.heroPanelBody}</p>
             </div>
             <div className="landing-mini-panel">
               <span className="label">Preview categories</span>
@@ -277,23 +282,7 @@ export function SellerLandingClient({
       />
 
       <ValueCardRow
-        items={[
-          {
-            eyebrow: 'Pricing',
-            title: 'Smart pricing guidance',
-            body: 'Show likely list bands, confidence, and how much room you have to improve before launch.',
-          },
-          {
-            eyebrow: 'Prep',
-            title: 'Guided prep checklist',
-            body: 'Know what to do first instead of staring at an overwhelming repair and staging list.',
-          },
-          {
-            eyebrow: 'Providers',
-            title: 'Local help when you need it',
-            body: 'Surface photographers, cleaners, inspectors, and other providers without leaving the workflow.',
-          },
-        ]}
+        items={copyVariant.valueItems}
       />
 
       <MiniOnboardingCard
@@ -472,10 +461,10 @@ export function SellerLandingClient({
       />
 
       <FinalCTASection
-        title="Start your plan now, then let the workflow carry the rest."
-        body="This is the shortest path from ad click to a real property workspace with pricing, prep, providers, and exports ready to unlock."
+        title={copyVariant.finalTitle}
+        body={copyVariant.finalBody}
         primaryHref="/auth?mode=signup&role=seller"
-        primaryLabel="Start your selling plan"
+        primaryLabel={copyVariant.primaryCta}
         secondaryHref="/dashboard"
         secondaryLabel="See the seller dashboard"
       />
