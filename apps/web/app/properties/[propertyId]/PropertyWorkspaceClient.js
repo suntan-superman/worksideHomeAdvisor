@@ -342,6 +342,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [showExternalProviderFallback, setShowExternalProviderFallback] = useState(false);
   const [activeProviderDetails, setActiveProviderDetails] = useState(null);
   const [showProviderMap, setShowProviderMap] = useState(false);
+  const [providerMapScope, setProviderMapScope] = useState('internal');
   const [activeProviderTaskKey, setActiveProviderTaskKey] = useState('');
   const [providerSearchStatus, setProviderSearchStatus] = useState('');
   const [showMoreVisionVariants, setShowMoreVisionVariants] = useState(false);
@@ -591,6 +592,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     unavailableProviderRecommendations,
   ]);
   const providerMapViewportProviders = useMemo(() => {
+    if (providerMapScope === 'all' && providerMapProviders.length) {
+      return providerMapProviders;
+    }
+
     const internalAndSetupProviders = providerMapProviders.filter(
       (provider) => !provider.isExternalFallback,
     );
@@ -599,9 +604,21 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
 
     return providerMapProviders;
-  }, [providerMapProviders]);
+  }, [providerMapProviders, providerMapScope]);
   const hasInternalProviderResults =
     providerRecommendations.length > 0 || unavailableProviderRecommendations.length > 0;
+
+  useEffect(() => {
+    if (hasInternalProviderResults) {
+      setProviderMapScope('internal');
+      return;
+    }
+
+    if (providerMapProviders.length) {
+      setProviderMapScope('all');
+    }
+  }, [hasInternalProviderResults, providerMapProviders.length]);
+
   const recentOutputs = useMemo(
     () =>
       [
@@ -3000,7 +3017,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 <button
                   type="button"
                   className="button-primary"
-                  onClick={() => setShowProviderMap(true)}
+                  onClick={() => {
+                    setProviderMapScope(hasInternalProviderResults ? 'internal' : 'all');
+                    setShowProviderMap(true);
+                  }}
                   disabled={Boolean(status)}
                 >
                   Open provider map
@@ -3330,6 +3350,24 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     ? 'Review matched Workside marketplace providers around the property in a controlled map view.'
                     : 'Review Google fallback providers around the property in a controlled map view.'}
                 </p>
+                {providerMapProviders.some((provider) => provider.isExternalFallback) && hasInternalProviderResults ? (
+                  <div className="workspace-map-scope-toggle" role="group" aria-label="Provider map coverage scope">
+                    <button
+                      type="button"
+                      className={providerMapScope === 'internal' ? 'mode-chip active' : 'mode-chip'}
+                      onClick={() => setProviderMapScope('internal')}
+                    >
+                      Workside only
+                    </button>
+                    <button
+                      type="button"
+                      className={providerMapScope === 'all' ? 'mode-chip active' : 'mode-chip'}
+                      onClick={() => setProviderMapScope('all')}
+                    >
+                      Include Google
+                    </button>
+                  </div>
+                ) : null}
               </div>
               <div className="workspace-modal-actions">
                 {providerGoogleSearchUrl ? (
@@ -3356,7 +3394,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             />
             {providerMapProviders.length ? (
               <div className="provider-map-summary-list">
-                {providerMapViewportProviders.length !== providerMapProviders.length ? (
+                {providerMapScope === 'internal' && providerMapViewportProviders.length !== providerMapProviders.length ? (
                   <p className="workspace-control-note provider-map-summary-note">
                     The map is focused on matched Workside providers so the view stays local. Google fallback results remain available in the checklist list and through Google Maps.
                   </p>

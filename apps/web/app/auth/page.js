@@ -9,6 +9,11 @@ import { OnboardingGuide } from '../../components/OnboardingGuide';
 import { PasswordInput } from '../../components/PasswordInput';
 import { Toast } from '../../components/Toast';
 import {
+  clearStoredAuthOnboardingState,
+  getStoredAuthOnboardingState,
+  setStoredAuthOnboardingState,
+} from '../../lib/onboarding-state';
+import {
   login,
   requestOtp,
   signup,
@@ -140,6 +145,8 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [showVerificationOption, setShowVerificationOption] = useState(false);
   const [attribution, setAttribution] = useState(null);
+  const [authStateHydrated, setAuthStateHydrated] = useState(false);
+  const [restoredAuthProgress, setRestoredAuthProgress] = useState(false);
 
   const isVerificationMode = mode === 'verify';
   const emailIsValid = isValidEmail(form.email);
@@ -175,7 +182,47 @@ export default function AuthPage() {
     const requestedAd = String(params.get('ad') || '').trim();
     const requestedAnonymousId = String(params.get('anonymousId') || '').trim();
     const roleIsSupported = ROLE_OPTIONS.some((option) => option.value === requestedRole);
-    const nextRole = roleIsSupported ? requestedRole : form.role;
+    const nextRole = roleIsSupported ? requestedRole : 'seller';
+    const hasExplicitQueryContext = Boolean(
+      timedOut ||
+        requestedMode ||
+        requestedEmail ||
+        requestedRole ||
+        requestedFirstName ||
+        requestedPassword ||
+        requestedSource ||
+        requestedMedium ||
+        requestedCampaign ||
+        requestedAdset ||
+        requestedAd ||
+        requestedAnonymousId,
+    );
+
+    if (!hasExplicitQueryContext) {
+      const restoredState = getStoredAuthOnboardingState();
+      if (restoredState) {
+        const restoredMode = ['login', 'signup', 'verify'].includes(restoredState.mode)
+          ? restoredState.mode
+          : 'login';
+        const restoredForm = restoredState.form && typeof restoredState.form === 'object' ? restoredState.form : {};
+        const restoredRole = ROLE_OPTIONS.some((option) => option.value === restoredForm.role)
+          ? restoredForm.role
+          : 'seller';
+
+        setForm((current) => ({
+          ...current,
+          ...restoredForm,
+          role: restoredRole,
+        }));
+        setMode(restoredMode);
+        setShowVerificationOption(Boolean(restoredState.showVerificationOption) || restoredMode === 'verify');
+        setStatus(restoredState.status || getRoleStatus(restoredRole, restoredMode));
+        setAttribution(restoredState.attribution || null);
+        setRestoredAuthProgress(true);
+        setAuthStateHydrated(true);
+        return;
+      }
+    }
 
     setAttribution(
       normalizeLandingAttribution({
@@ -207,6 +254,7 @@ export default function AuthPage() {
       setMode('verify');
       setShowVerificationOption(true);
       setStatus(`Enter the OTP sent to ${requestedEmail} to finish verification.`);
+      setAuthStateHydrated(true);
       return;
     }
 
@@ -219,6 +267,7 @@ export default function AuthPage() {
     }
 
     if (!timedOut) {
+      setAuthStateHydrated(true);
       return;
     }
 
@@ -230,7 +279,22 @@ export default function AuthPage() {
       title: 'Session timed out',
       message: 'For security, your Workside session was closed after inactivity.',
     });
+    setAuthStateHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!authStateHydrated) {
+      return;
+    }
+
+    setStoredAuthOnboardingState({
+      mode,
+      form,
+      status,
+      showVerificationOption,
+      attribution,
+    });
+  }, [attribution, authStateHydrated, form, mode, showVerificationOption, status]);
 
   useEffect(() => {
     if (!attribution) {
@@ -325,6 +389,7 @@ export default function AuthPage() {
           token: result.token,
           user: result.user,
         });
+        clearStoredAuthOnboardingState();
         persistAuthAttributionDraft(
           attribution
             ? {
@@ -344,6 +409,7 @@ export default function AuthPage() {
           token: result.token,
           user: result.user,
         });
+        clearStoredAuthOnboardingState();
         persistAuthAttributionDraft(
           attribution
             ? {
@@ -454,6 +520,11 @@ export default function AuthPage() {
               </button>
             ) : null}
           </div>
+          {restoredAuthProgress ? (
+            <p className="status-copy">
+              Your previous auth progress was restored in this browser so you can continue where you left off.
+            </p>
+          ) : null}
           <p className="status-copy">{status}</p>
           {attribution?.campaign ? (
             <p className="status-copy">

@@ -633,7 +633,7 @@ function hasValidLeadPhone(value) {
   return normalizePhoneNumber(value).length >= 10;
 }
 
-function buildProviderActivationChecklist(providerDocument, verificationProfile, categoryDocument = null) {
+export function buildProviderActivationChecklist(providerDocument, verificationProfile, categoryDocument = null) {
   const provider = providerDocument || {};
   const serviceArea = provider.serviceArea || {};
   const leadRouting = provider.leadRouting || {};

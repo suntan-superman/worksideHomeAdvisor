@@ -1,6 +1,6 @@
 # Workside Progress And Priorities
 
-Last updated: 2026-04-04
+Last updated: 2026-04-05
 
 This document is the working checkpoint after the latest implementation pass across the HomeAdvisor / Workside codebase.
 
@@ -84,6 +84,17 @@ The product now has real seller, provider, and admin surfaces. The main remainin
 - [x] trust / proof sections added across public landing funnels
 - [x] ad-specific copy variants added for Instagram and Facebook traffic
 - [x] campaign-specific copy variants added for seller, agent, and provider acquisition campaigns
+- [x] auth onboarding progress now persists across refreshes in-browser instead of resetting mid-flow
+- [x] provider onboarding handoff state now survives refreshes after submission so billing / verification guidance is not lost
+- [x] admin provider roster now surfaces marketplace readiness, blockers, and next-step activation guidance
+- [x] provider map now defaults to a Workside-only viewport with an explicit Google-inclusive toggle for broader discovery
+- [x] automated coverage expanded with web onboarding-state tests and provider activation tests
+- [x] auth and provider onboarding now share a real persisted onboarding-state utility instead of ad hoc local browser state handling
+- [x] provider portal / signup / auth flow continuity is stronger after refreshes, resumes, and post-submit handoffs
+- [x] in-app provider map now supports explicit `Workside only` vs `Include Google` viewport control for better discovery framing
+- [x] provider report and flyer export pipeline now uses Puppeteer-based rendering for spec-aligned PDF output
+- [x] admin provider roster now surfaces marketplace activation percentage, blockers, and next-step guidance directly in each card
+- [x] web and API test scripts now run real targeted test suites instead of placeholder commands
 
 ---
 
@@ -111,6 +122,7 @@ The product now has real seller, provider, and admin surfaces. The main remainin
 - [x] Admin and super-admin roles
 - [x] Provider onboarding now creates a real provider auth account when needed
 - [x] Provider verification emails are role-aware
+- [x] Auth onboarding state now persists across refresh / resume within the browser
 
 ### 2.3 Seller workflow
 
@@ -169,6 +181,7 @@ The product now has real seller, provider, and admin surfaces. The main remainin
 - [x] Provider signup flow
 - [x] Provider billing checkout flow
 - [x] Provider portal
+- [x] Provider onboarding and portal state now resume more reliably after refresh / return-to-flow moments
 - [x] Provider lead accept/decline in portal
 - [x] Self-reported provider verification fields
 - [x] Provider verification details in onboarding and portal
@@ -217,13 +230,14 @@ These areas exist and are useful, but they are not yet “finished product” qu
 
 - [~] Brochure/flyer generation is real, but presentation quality can improve
 - [~] Report generation is real, but export/layout quality still has room to grow
-- [~] PDF generation is good enough for workflow use, not yet best-in-class design
+- [x] Puppeteer-based PDF rendering is now wired for brochure/report exports
+- [~] PDF generation is now structurally stronger, but still not yet best-in-class design
 
 ### 3.3 Provider system
 
 - [~] Provider marketplace foundation is real, but Google fallback discovery is still inconsistent compared with consumer Google Maps behavior
 - [~] Provider portal exists, but account-management maturity is still limited
-- [~] Provider onboarding is much better now, but billing + verification UX can still be polished
+- [~] Provider onboarding is much better now, and persistence/admin readiness visibility are stronger, but billing + verification UX can still be polished
 - [~] Verification is now real, but admin automation and expiry workflows are still early
 - [~] Provider matching is much stronger now, but it still depends heavily on clean category/status/ZIP data in provider records
 
@@ -234,7 +248,11 @@ These areas exist and are useful, but they are not yet “finished product” qu
 
 ### 3.5 Testing and hardening
 
-- [ ] Real automated tests are still mostly missing
+- [~] Real automated tests are no longer completely absent, and web/API suites now cover attribution/onboarding and provider activation basics, but coverage is still light relative to the size of the workflow surface
+- [x] Public funnel response logic now has automated coverage
+- [x] Shared attribution utility logic now has automated coverage
+- [x] Provider activation checklist logic now has automated coverage
+- [x] Web onboarding-state persistence now has automated coverage
 - [ ] Worker services are still lightweight placeholders compared with the full future architecture
 
 ### 3.6 Property lifecycle and billing model
@@ -245,7 +263,7 @@ These areas exist and are useful, but they are not yet “finished product” qu
 
 ### 3.7 Guided workflow rollout
 
-- [~] A property-level workflow engine now exists across property workspace, dashboard, and mobile, but account setup / onboarding still needs the same guided treatment
+- [~] A property-level workflow engine now exists across property workspace, dashboard, and mobile, and auth/provider onboarding now persist progress more reliably, but account setup still needs deeper cross-role continuity
 - [x] Seller / realtor workflow copy is now role-aware in the property workspace, dashboard, and mobile workspace
 - [~] Workflow state is computed automatically, but deeper blocker logic and more nuanced optional-step handling can still improve
 - [~] Property workspace layout is much better, but several tabs still need more mid-width responsive polish
@@ -434,10 +452,12 @@ These are the highest-value refinements because they affect trust, demos, everyd
 ### 5.12 Automated testing
 
 - [ ] auth flows
+- [x] web onboarding-state persistence coverage exists
 - [ ] pricing flows
 - [ ] media upload and vision job flows
 - [ ] report generation
 - [ ] provider onboarding and billing
+- [x] provider activation checklist coverage exists
 - [ ] admin auth and provider lead actions
 - [ ] public seller landing preview and email gate flows
 - [ ] attribution persistence from landing to dashboard

@@ -161,6 +161,8 @@ export function ProviderRoster({ providers = [], onUpdated }) {
       const rightStatus = `${right.compliance?.approvalStatus || 'draft'} ${right.status || 'unknown'}`;
       const leftCategory = left.categoryLabel || left.categoryKey || '';
       const rightCategory = right.categoryLabel || right.categoryKey || '';
+      const leftReadiness = Number(left.activation?.readyPercent || 0);
+      const rightReadiness = Number(right.activation?.readyPercent || 0);
 
       if (sortBy === 'status') {
         return leftStatus.localeCompare(rightStatus) || left.businessName.localeCompare(right.businessName);
@@ -172,6 +174,10 @@ export function ProviderRoster({ providers = [], onUpdated }) {
 
       if (sortBy === 'location') {
         return leftLocation.localeCompare(rightLocation) || left.businessName.localeCompare(right.businessName);
+      }
+
+      if (sortBy === 'readiness') {
+        return rightReadiness - leftReadiness || left.businessName.localeCompare(right.businessName);
       }
 
       return left.businessName.localeCompare(right.businessName);
@@ -242,6 +248,7 @@ export function ProviderRoster({ providers = [], onUpdated }) {
                 <option value="status">Status</option>
                 <option value="category">Category</option>
                 <option value="location">Location</option>
+                <option value="readiness">Readiness</option>
               </select>
             </label>
           </div>
@@ -259,6 +266,7 @@ export function ProviderRoster({ providers = [], onUpdated }) {
           const isBusy = busyProviderId === provider.id;
           const locationLabel =
             [provider.serviceArea?.city, provider.serviceArea?.state].filter(Boolean).join(', ') || 'Coverage not set';
+          const activation = provider.activation || { readyPercent: 0, blockers: [], nextStep: null, live: false };
 
           return (
             <article key={provider.id} className="lead-card">
@@ -339,6 +347,29 @@ export function ProviderRoster({ providers = [], onUpdated }) {
                   <strong>License doc</strong>
                   <span>{provider.verification?.license?.document ? 'Uploaded' : 'Not uploaded'}</span>
                 </div>
+              </div>
+
+              <div className="lead-message-block">
+                <strong>Marketplace readiness</strong>
+                <p>
+                  {activation.live
+                    ? `Live in marketplace · ${activation.readyPercent || 0}% ready across activation checks.`
+                    : `${activation.readyPercent || 0}% ready · ${activation.completeCount || 0}/${activation.totalCount || 0} checks complete.`}
+                </p>
+                {activation.nextStep ? (
+                  <p>
+                    <strong>Next step:</strong> {activation.nextStep.label}. {activation.nextStep.detail}
+                  </p>
+                ) : null}
+                {activation.blockers?.length ? (
+                  <ul className="provider-activation-blockers">
+                    {activation.blockers.slice(0, 3).map((blocker) => (
+                      <li key={`${provider.id}-${blocker.key}`}>
+                        <strong>{blocker.label}:</strong> {blocker.detail}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </div>
 
               {(provider.verification?.insurance?.carrier ||

@@ -328,6 +328,18 @@ a {
   line-height: 1.6;
 }
 
+.provider-activation-blockers {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  display: grid;
+  gap: 8px;
+}
+
+.provider-activation-blockers strong {
+  color: var(--text);
+}
+
 .lead-detail-columns {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }

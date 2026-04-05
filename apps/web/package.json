@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "node -e \"console.log('web lint placeholder')\"",
-    "test": "node -e \"console.log('web test placeholder')\""
+    "test": "node --test lib/onboarding-state.test.js"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.95.2",

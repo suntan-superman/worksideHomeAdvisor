@@ -12,6 +12,11 @@ import {
   listProviderCategories,
   signupProvider,
 } from '../../../lib/api';
+import {
+  clearStoredProviderOnboardingState,
+  getStoredProviderOnboardingState,
+  setStoredProviderOnboardingState,
+} from '../../../lib/onboarding-state';
 import { setStoredProviderSession } from '../../../lib/provider-session';
 import { getStoredSession } from '../../../lib/session';
 import { Toast } from '../../../components/Toast';
@@ -95,7 +100,6 @@ const US_STATE_OPTIONS = [
   { value: 'WY', label: 'Wyoming' },
 ];
 
-const PROVIDER_SIGNUP_DRAFT_KEY = 'worksideProviderSignupDraft';
 const LARGE_RADIUS_WARNING_MILES = 150;
 const MAX_PROVIDER_RADIUS_MILES = 1000;
 
@@ -146,41 +150,26 @@ function createInitialForm(sessionUser = null) {
 }
 
 function loadProviderSignupDraft() {
-  if (typeof window === 'undefined') {
+  const parsedDraft = getStoredProviderOnboardingState();
+  if (!parsedDraft || typeof parsedDraft !== 'object') {
     return null;
   }
 
-  try {
-    const rawDraft = window.localStorage.getItem(PROVIDER_SIGNUP_DRAFT_KEY);
-    if (!rawDraft) {
-      return null;
-    }
+  const draftForm =
+    parsedDraft.form && typeof parsedDraft.form === 'object'
+      ? { ...INITIAL_FORM, ...parsedDraft.form }
+      : null;
 
-    const parsedDraft = JSON.parse(rawDraft);
-    if (!parsedDraft || typeof parsedDraft !== 'object') {
-      return null;
-    }
-
-    const draftForm =
-      parsedDraft.form && typeof parsedDraft.form === 'object'
-        ? { ...INITIAL_FORM, ...parsedDraft.form }
-        : null;
-
-    return {
-      stepIndex: Number.isInteger(parsedDraft.stepIndex) ? parsedDraft.stepIndex : 0,
-      form: draftForm,
-    };
-  } catch {
-    return null;
-  }
+  return {
+    stepIndex: Number.isInteger(parsedDraft.stepIndex) ? parsedDraft.stepIndex : 0,
+    form: draftForm,
+    createdProvider: parsedDraft.createdProvider || null,
+    pendingVerificationEmail: parsedDraft.pendingVerificationEmail || '',
+  };
 }
 
 function clearProviderSignupDraft() {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.localStorage.removeItem(PROVIDER_SIGNUP_DRAFT_KEY);
+  clearStoredProviderOnboardingState();
 }
 
 function formatPhoneInput(value) {
@@ -308,12 +297,18 @@ export function ProviderSignupClient({
 
   useEffect(() => {
     const draft = loadProviderSignupDraft();
-    if (!draft?.form) {
+    if (!draft) {
       return;
     }
 
-    setForm((current) => ({ ...current, ...draft.form }));
+    if (draft.form) {
+      setForm((current) => ({ ...current, ...draft.form }));
+    }
     setStepIndex(Math.max(0, Math.min(draft.stepIndex || 0, STEP_TITLES.length - 1)));
+    if (draft.createdProvider) {
+      setCreatedProvider(draft.createdProvider);
+      setPendingVerificationEmail(draft.pendingVerificationEmail || draft.createdProvider.email || '');
+    }
   }, []);
 
   useEffect(() => {
@@ -356,22 +351,13 @@ export function ProviderSignupClient({
   }, [form.email, form.notifyEmail]);
 
   useEffect(() => {
-    if (createdProvider) {
-      return;
-    }
-
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(
-      PROVIDER_SIGNUP_DRAFT_KEY,
-      JSON.stringify({
-        stepIndex,
-        form,
-      }),
-    );
-  }, [createdProvider, form, stepIndex]);
+    setStoredProviderOnboardingState({
+      stepIndex,
+      form,
+      createdProvider,
+      pendingVerificationEmail,
+    });
+  }, [createdProvider, form, pendingVerificationEmail, stepIndex]);
 
   useEffect(() => {
     if (billingState === 'success') {
