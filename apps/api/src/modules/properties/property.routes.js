@@ -10,6 +10,7 @@ import {
   restoreProperty,
   updatePropertyPricingDecision,
 } from './property.service.js';
+import { recordPublicFunnelEvent } from '../public/public.service.js';
 
 const querySchema = z.object({
   ownerUserId: z.string().optional(),
@@ -43,6 +44,24 @@ export async function propertyRoutes(fastify) {
       const ownerUserId =
         request.headers['x-user-id'] || new mongoose.Types.ObjectId().toString();
       const property = await createProperty(ownerUserId, payload);
+
+      if (property.attribution) {
+        await recordPublicFunnelEvent({
+          eventName: 'property_created',
+          anonymousId: property.attribution.anonymousId,
+          userId: ownerUserId,
+          propertyId: property.id,
+          attribution: property.attribution,
+          payload: {
+            propertyType: property.propertyType,
+            city: property.city,
+            state: property.state,
+            selectedListPrice: property.selectedListPrice,
+          },
+          sessionStage: 'property_created',
+        });
+      }
+
       return reply.code(201).send({ property });
     } catch (error) {
       return reply.code(400).send({ message: error.message });

@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
+import { normalizeLandingAttribution } from '@workside/utils';
 
 import { env } from '../../config/env.js';
 import { sendOtpEmail, sendWelcomeEmail } from '../../services/emailService.js';
@@ -13,6 +14,7 @@ import { PropertyModel } from '../properties/property.model.js';
 import { AnalysisLockModel } from '../usage/analysis-lock.model.js';
 import { RateLimitEventModel } from '../usage/rate-limit.model.js';
 import { UsageTrackingModel } from '../usage/usage-tracking.model.js';
+import { recordPublicFunnelEvent } from '../public/public.service.js';
 import { UserModel } from './auth.model.js';
 
 function serializeUser(user) {
@@ -68,6 +70,12 @@ export async function signup(payload) {
     firstName: payload.firstName,
     lastName: payload.lastName,
     role: payload.role || 'seller',
+    signupAttribution: payload.attribution
+      ? normalizeLandingAttribution({
+          ...payload.attribution,
+          roleIntent: payload.role || 'seller',
+        })
+      : null,
   });
 
   await storeVerificationOtp(user);
@@ -143,6 +151,20 @@ export async function verifyEmailOtp(payload) {
     firstName: user.firstName,
     role: user.role,
   });
+
+  if (user.signupAttribution) {
+    await recordPublicFunnelEvent({
+      eventName: 'signup_completed',
+      anonymousId: user.signupAttribution.anonymousId,
+      userId: user._id.toString(),
+      email: user.email,
+      attribution: user.signupAttribution,
+      payload: {
+        role: user.role,
+      },
+      sessionStage: 'signup_completed',
+    });
+  }
 
   return {
     token: signSessionToken(user),

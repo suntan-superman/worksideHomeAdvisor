@@ -7,7 +7,7 @@
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "lint": "node -e \"console.log('api lint placeholder')\"",
-    "test": "node -e \"console.log('api test placeholder')\"",
+    "test": "node --test src/modules/public/public.service.test.js",
     "seed": "node scripts/seed-demo.js",
     "admin:user": "node scripts/set-admin-user.js"
   },

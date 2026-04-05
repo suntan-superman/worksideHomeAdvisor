@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { normalizeLandingAttribution } from '@workside/utils';
 
 import { demoDashboard } from '../../data/demoData.js';
 import { getPropertyCapacitySummary } from '../billing/billing.service.js';
@@ -48,6 +49,7 @@ export function serializeProperty(document) {
     archivedReason: document.archivedReason || '',
     readinessScore: document.readinessScore,
     sellerProfile: document.sellerProfile || {},
+    attribution: document.attribution || null,
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
   };
@@ -86,9 +88,24 @@ export async function assertCanCreateActiveProperty(ownerUserId) {
 export async function createProperty(ownerUserId, payload) {
   await assertCanCreateActiveProperty(ownerUserId);
 
+  const normalizedAttribution = payload.attribution
+    ? {
+        ...normalizeLandingAttribution(payload.attribution),
+        previewReadyScore:
+          Number.isFinite(Number(payload.attribution.previewReadyScore))
+            ? Math.round(Number(payload.attribution.previewReadyScore))
+            : null,
+        previewMidPrice:
+          Number.isFinite(Number(payload.attribution.previewMidPrice))
+            ? Math.round(Number(payload.attribution.previewMidPrice))
+            : null,
+      }
+    : null;
+
   const property = await PropertyModel.create({
     ownerUserId,
     ...payload,
+    attribution: normalizedAttribution,
     status: PROPERTY_STATUS.ACTIVE,
     readinessScore: 32,
   });

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { buildLandingSearchParams } from '@workside/utils';
 
 import { AppFrame } from '../../components/AppFrame';
 import { FinalCTASection } from '../../components/landing/FinalCTASection';
@@ -22,7 +23,44 @@ export default function ProviderLandingPage({ searchParams }) {
     typeof searchParams?.campaign === 'string' ? searchParams.campaign : '';
   const medium =
     typeof searchParams?.medium === 'string' ? searchParams.medium : '';
+  const adset = typeof searchParams?.adset === 'string' ? searchParams.adset : '';
+  const ad = typeof searchParams?.ad === 'string' ? searchParams.ad : '';
+  const anonymousId =
+    typeof searchParams?.anonymousId === 'string' ? searchParams.anonymousId : '';
   const copyVariant = getProviderLandingVariant({ source, campaign, medium });
+  const providerSignupHref = `/providers/join?${buildLandingSearchParams(
+    {
+      source,
+      campaign,
+      medium,
+      adset,
+      ad,
+      anonymousId,
+      roleIntent: 'provider',
+    },
+  ).toString()}`;
+  const providerPortalHref = `/providers/portal?${buildLandingSearchParams(
+    {
+      source,
+      campaign,
+      medium,
+      adset,
+      ad,
+      anonymousId,
+      roleIntent: 'provider',
+    },
+  ).toString()}`;
+  const sellerHref = `/sell?${buildLandingSearchParams(
+    {
+      source,
+      campaign,
+      medium,
+      adset,
+      ad,
+      anonymousId,
+      roleIntent: 'seller',
+    },
+  ).toString()}`;
 
   return (
     <AppFrame>
@@ -32,15 +70,24 @@ export default function ProviderLandingPage({ searchParams }) {
         subtitle={copyVariant.subtitle}
         actions={
           <>
-            <Link href="/providers/join" className="button-primary">
+            <Link href={providerSignupHref} className="button-primary">
               {copyVariant.primaryCta}
             </Link>
-            <Link href="/providers/portal" className="button-secondary">
+            <Link href={providerPortalHref} className="button-secondary">
               {copyVariant.secondaryCta}
             </Link>
           </>
         }
-        aside={<ProviderLandingClient source={source} />}
+        aside={
+          <ProviderLandingClient
+            source={source}
+            campaign={campaign}
+            medium={medium}
+            adset={adset}
+            ad={ad}
+            anonymousId={anonymousId}
+          />
+        }
       />
 
       <ValueCardRow items={copyVariant.valueItems} />
@@ -94,18 +141,18 @@ export default function ProviderLandingPage({ searchParams }) {
           'Verification raises trust and ranking quality.',
           'Premium placement belongs after the provider sees the opportunity clearly.',
         ]}
-        primaryHref="/providers/join"
+        primaryHref={providerSignupHref}
         primaryLabel="Join provider network"
-        secondaryHref="/providers/portal"
+        secondaryHref={providerPortalHref}
         secondaryLabel="Open provider portal"
       />
 
       <FinalCTASection
         title={copyVariant.finalTitle}
         body={copyVariant.finalBody}
-        primaryHref="/providers/join"
+        primaryHref={providerSignupHref}
         primaryLabel={copyVariant.primaryCta}
-        secondaryHref="/sell"
+        secondaryHref={sellerHref}
         secondaryLabel="See seller funnel"
       />
     </AppFrame>

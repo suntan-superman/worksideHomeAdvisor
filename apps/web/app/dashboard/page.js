@@ -24,6 +24,7 @@ import {
 import { getStoredSession, setStoredSession } from '../../lib/session';
 
 const SELLER_LANDING_DRAFT_KEY = 'worksideSellerLandingDraft';
+const AUTH_ATTRIBUTION_DRAFT_KEY = 'worksideAuthAttributionDraft';
 
 function formatAudienceLabel(value) {
   return String(value || '')
@@ -44,6 +45,26 @@ function loadSellerLandingDraft() {
 
     const parsedDraft = JSON.parse(rawDraft);
     return parsedDraft && typeof parsedDraft === 'object' ? parsedDraft : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadAuthAttributionDraft() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const rawDraft = window.sessionStorage.getItem(AUTH_ATTRIBUTION_DRAFT_KEY);
+    if (!rawDraft) {
+      return null;
+    }
+
+    const parsedDraft = JSON.parse(rawDraft);
+    return parsedDraft?.attribution && typeof parsedDraft.attribution === 'object'
+      ? parsedDraft.attribution
+      : null;
   } catch {
     return null;
   }
@@ -587,9 +608,18 @@ export default function DashboardPage() {
     setToast(null);
 
     try {
-      const response = await createProperty(createForm, session.user.id);
+      const landingDraft = loadSellerLandingDraft();
+      const authAttributionDraft = loadAuthAttributionDraft();
+      const response = await createProperty(
+        {
+          ...createForm,
+          attribution: landingDraft?.attribution || authAttributionDraft || undefined,
+        },
+        session.user.id,
+      );
       if (typeof window !== 'undefined') {
         window.sessionStorage.removeItem(SELLER_LANDING_DRAFT_KEY);
+        window.sessionStorage.removeItem(AUTH_ATTRIBUTION_DRAFT_KEY);
       }
       const nextProperties = [response.property, ...properties];
       setProperties(nextProperties);

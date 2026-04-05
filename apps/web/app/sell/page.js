@@ -13,10 +13,19 @@ export default function SellerLandingPage({ searchParams }) {
     typeof searchParams?.campaign === 'string' ? searchParams.campaign : '';
   const medium =
     typeof searchParams?.medium === 'string' ? searchParams.medium : '';
+  const adset =
+    typeof searchParams?.adset === 'string' ? searchParams.adset : '';
+  const ad = typeof searchParams?.ad === 'string' ? searchParams.ad : '';
 
   return (
     <AppFrame>
-      <SellerLandingClient source={source} campaign={campaign} medium={medium} />
+      <SellerLandingClient
+        source={source}
+        campaign={campaign}
+        medium={medium}
+        adset={adset}
+        ad={ad}
+      />
     </AppFrame>
   );
 }

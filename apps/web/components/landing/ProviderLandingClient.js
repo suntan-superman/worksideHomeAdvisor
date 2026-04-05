@@ -2,23 +2,38 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { buildLandingSearchParams } from '@workside/utils';
 
-export function ProviderLandingClient({ source = 'direct-provider' }) {
+export function ProviderLandingClient({
+  source = 'direct-provider',
+  campaign = '',
+  medium = '',
+  adset = '',
+  ad = '',
+  anonymousId = '',
+}) {
   const router = useRouter();
   const [category, setCategory] = useState('photographer');
   const [zip, setZip] = useState('');
 
   const destination = useMemo(() => {
-    const search = new URLSearchParams();
-    search.set('category', category);
-    if (zip.trim()) {
-      search.set('zip', zip.trim());
-    }
-    if (source) {
-      search.set('src', source);
-    }
+    const search = buildLandingSearchParams(
+      {
+        source,
+        campaign,
+        medium,
+        adset,
+        ad,
+        anonymousId,
+        roleIntent: 'provider',
+      },
+      {
+        category,
+        zip: zip.trim(),
+      },
+    );
     return `/providers/join?${search.toString()}`;
-  }, [category, source, zip]);
+  }, [ad, adset, anonymousId, campaign, category, medium, source, zip]);
 
   return (
     <form

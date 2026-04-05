@@ -1,4 +1,10 @@
 import { z } from 'zod';
+import { normalizeLandingAttribution } from '@workside/utils';
+
+import {
+  buildSellerPreviewResponse,
+  recordPublicFunnelEvent,
+} from './public.service.js';
 
 const sellerPreviewSchema = z.object({
   address: z.string().trim().min(4),
@@ -12,14 +18,28 @@ const sellerPreviewSchema = z.object({
   bathrooms: z.coerce.number().min(0).max(12).default(2),
   squareFeet: z.coerce.number().min(400).max(20000),
   source: z.string().trim().optional(),
+  campaign: z.string().trim().optional(),
+  medium: z.string().trim().optional(),
+  adset: z.string().trim().optional(),
+  ad: z.string().trim().optional(),
+  anonymousId: z.string().trim().optional(),
+  route: z.string().trim().optional(),
+  landingPath: z.string().trim().optional(),
+  referrer: z.string().trim().optional(),
 });
 
 const funnelCaptureSchema = z.object({
   email: z.string().email(),
+  anonymousId: z.string().trim().optional(),
   roleIntent: z.enum(['seller', 'agent', 'provider']),
   source: z.string().trim().optional(),
   campaign: z.string().trim().optional(),
   medium: z.string().trim().optional(),
+  adset: z.string().trim().optional(),
+  ad: z.string().trim().optional(),
+  route: z.string().trim().optional(),
+  landingPath: z.string().trim().optional(),
+  referrer: z.string().trim().optional(),
   previewContext: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -32,112 +52,62 @@ const eventSchema = z.object({
   source: z.string().trim().optional(),
   campaign: z.string().trim().optional(),
   medium: z.string().trim().optional(),
+  adset: z.string().trim().optional(),
+  ad: z.string().trim().optional(),
   route: z.string().trim().optional(),
+  landingPath: z.string().trim().optional(),
+  referrer: z.string().trim().optional(),
   payload: z.record(z.string(), z.unknown()).optional(),
+  previewContext: z.record(z.string(), z.unknown()).optional(),
 });
 
 const continueSignupSchema = z.object({
   email: z.string().email(),
+  anonymousId: z.string().trim().optional(),
   roleIntent: z.enum(['seller', 'agent', 'provider']),
   source: z.string().trim().optional(),
   campaign: z.string().trim().optional(),
   medium: z.string().trim().optional(),
+  adset: z.string().trim().optional(),
+  ad: z.string().trim().optional(),
+  route: z.string().trim().optional(),
+  landingPath: z.string().trim().optional(),
+  referrer: z.string().trim().optional(),
   previewContext: z.record(z.string(), z.unknown()).optional(),
 });
-
-function roundToNearestThousand(value) {
-  return Math.round(value / 1000) * 1000;
-}
-
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function getPropertyTypePricePerSqft(propertyType) {
-  switch (propertyType) {
-    case 'condo':
-      return 252;
-    case 'townhome':
-      return 266;
-    case 'multi_family':
-      return 238;
-    case 'single_family':
-    default:
-      return 289;
-  }
-}
-
-function buildPreviewChecklistItems(payload) {
-  const items = [];
-
-  if (payload.squareFeet >= 2200) {
-    items.push('Prioritize decluttering and staging the largest living spaces first.');
-  } else {
-    items.push('Tighten the main living spaces and reduce visual clutter before photos.');
-  }
-
-  if (payload.bathrooms >= 3) {
-    items.push('Refresh bathroom finishes and lighting so the home feels consistently move-in ready.');
-  } else {
-    items.push('Improve first-impression rooms with light paint touchups and bright neutral finishes.');
-  }
-
-  if (payload.propertyType === 'single_family') {
-    items.push('Improve curb appeal before launch so the exterior matches the listing price ambition.');
-  }
-
-  return items.slice(0, 3);
-}
-
-function buildPreviewProviderCategories(payload) {
-  const categories = ['photographers'];
-
-  if (payload.propertyType === 'single_family') {
-    categories.push('cleaners');
-  }
-
-  if (payload.squareFeet >= 2000 || payload.bedrooms >= 4) {
-    categories.push('stagers');
-  }
-
-  return categories;
-}
-
-function buildPreviewResponse(payload) {
-  const basePricePerSqft = getPropertyTypePricePerSqft(payload.propertyType);
-  const bedroomLift = payload.bedrooms * 5;
-  const bathroomLift = payload.bathrooms * 7;
-  const sourceLift = payload.source?.includes('agent') ? 8 : 0;
-  const estimatedMidpoint = roundToNearestThousand(
-    payload.squareFeet * (basePricePerSqft + bedroomLift + bathroomLift + sourceLift),
-  );
-  const low = roundToNearestThousand(estimatedMidpoint * 0.95);
-  const high = roundToNearestThousand(estimatedMidpoint * 1.05);
-  const readinessSeed =
-    28 +
-    Math.round(payload.bathrooms * 5) +
-    Math.round(payload.bedrooms * 3) +
-    Math.round(Math.min(payload.squareFeet, 2600) / 180);
-  const marketReadyScore = clamp(readinessSeed, 32, 71);
-
-  return {
-    estimatedRange: {
-      low,
-      mid: estimatedMidpoint,
-      high,
-    },
-    marketReadyScore,
-    previewChecklistItems: buildPreviewChecklistItems(payload),
-    previewProviderCategories: buildPreviewProviderCategories(payload),
-    requiresSignupForFullPlan: true,
-  };
-}
 
 export async function publicRoutes(fastify) {
   fastify.post('/seller-preview', async (request, reply) => {
     try {
       const payload = sellerPreviewSchema.parse(request.body);
-      return reply.send(buildPreviewResponse(payload));
+      const preview = buildSellerPreviewResponse(payload);
+      const attribution = normalizeLandingAttribution({
+        ...payload,
+        roleIntent: 'seller',
+      });
+
+      await recordPublicFunnelEvent({
+        eventName: 'seller_preview_generated',
+        anonymousId: payload.anonymousId,
+        attribution,
+        previewContext: {
+          address: payload.address,
+          city: payload.city,
+          state: payload.state,
+          postalCode: payload.postalCode,
+          propertyType: payload.propertyType,
+        },
+        payload: {
+          estimatedMid: preview.estimatedRange.mid,
+          marketReadyScore: preview.marketReadyScore,
+        },
+        sessionStage: 'preview',
+      });
+
+      return reply.send({
+        ...preview,
+        attribution,
+      });
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }
@@ -146,22 +116,19 @@ export async function publicRoutes(fastify) {
   fastify.post('/funnel-capture', async (request, reply) => {
     try {
       const payload = funnelCaptureSchema.parse(request.body);
-      fastify.log.info(
-        {
-          type: 'funnel_capture',
-          roleIntent: payload.roleIntent,
-          email: payload.email,
-          source: payload.source,
-          campaign: payload.campaign,
-          medium: payload.medium,
-          previewContext: payload.previewContext,
-        },
-        'Landing funnel capture received.',
-      );
+      const result = await recordPublicFunnelEvent({
+        eventName: `${payload.roleIntent}_email_captured`,
+        anonymousId: payload.anonymousId,
+        email: payload.email,
+        attribution: payload,
+        previewContext: payload.previewContext,
+        sessionStage: 'email_gate',
+      });
 
       return reply.code(201).send({
         ok: true,
         capturedAt: new Date().toISOString(),
+        attribution: result.attribution,
       });
     } catch (error) {
       return reply.code(400).send({ message: error.message });
@@ -171,17 +138,21 @@ export async function publicRoutes(fastify) {
   fastify.post('/events', async (request, reply) => {
     try {
       const payload = eventSchema.parse(request.body);
-      fastify.log.info(
-        {
-          type: 'landing_event',
-          ...payload,
-        },
-        `Landing event: ${payload.name}`,
-      );
+      const result = await recordPublicFunnelEvent({
+        eventName: payload.name,
+        anonymousId: payload.anonymousId,
+        userId: payload.userId,
+        propertyId: payload.propertyId,
+        attribution: payload,
+        previewContext: payload.previewContext,
+        payload: payload.payload,
+        sessionStage: payload.name,
+      });
 
       return reply.code(202).send({
         ok: true,
         acceptedAt: new Date().toISOString(),
+        attribution: result.attribution,
       });
     } catch (error) {
       return reply.code(400).send({ message: error.message });
@@ -191,27 +162,37 @@ export async function publicRoutes(fastify) {
   fastify.post('/continue-signup', async (request, reply) => {
     try {
       const payload = continueSignupSchema.parse(request.body);
-      fastify.log.info(
-        {
-          type: 'continue_signup',
-          roleIntent: payload.roleIntent,
-          email: payload.email,
-          source: payload.source,
-          campaign: payload.campaign,
-          medium: payload.medium,
-          previewContext: payload.previewContext,
-        },
-        'Landing signup continuation requested.',
-      );
+      const result = await recordPublicFunnelEvent({
+        eventName: 'continue_signup',
+        anonymousId: payload.anonymousId,
+        email: payload.email,
+        attribution: payload,
+        previewContext: payload.previewContext,
+        sessionStage: 'continue_signup',
+      });
 
       const search = new URLSearchParams({
         mode: 'signup',
         email: payload.email,
         role: payload.roleIntent,
+        src: result.attribution.source,
+        medium: result.attribution.medium,
+        campaign: result.attribution.campaign,
       });
+
+      if (result.attribution.adset) {
+        search.set('adset', result.attribution.adset);
+      }
+      if (result.attribution.ad) {
+        search.set('ad', result.attribution.ad);
+      }
+      if (payload.anonymousId) {
+        search.set('anonymousId', payload.anonymousId);
+      }
 
       return reply.send({
         ok: true,
+        attribution: result.attribution,
         nextPath: `/auth?${search.toString()}`,
       });
     } catch (error) {

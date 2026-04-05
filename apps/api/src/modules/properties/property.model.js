@@ -13,6 +13,25 @@ const sellerProfileSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const attributionSchema = new mongoose.Schema(
+  {
+    anonymousId: { type: String, default: '' },
+    platform: { type: String, default: '' },
+    source: { type: String, default: '' },
+    medium: { type: String, default: '' },
+    campaign: { type: String, default: '' },
+    adset: { type: String, default: '' },
+    ad: { type: String, default: '' },
+    route: { type: String, default: '' },
+    landingPath: { type: String, default: '' },
+    referrer: { type: String, default: '' },
+    roleIntent: { type: String, default: '' },
+    previewReadyScore: { type: Number, default: null },
+    previewMidPrice: { type: Number, default: null },
+  },
+  { _id: false },
+);
+
 const propertySchema = new mongoose.Schema(
   {
     ownerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -44,6 +63,7 @@ const propertySchema = new mongoose.Schema(
     archivedReason: { type: String, default: '' },
     readinessScore: { type: Number, default: 0 },
     sellerProfile: { type: sellerProfileSchema, default: {} },
+    attribution: { type: attributionSchema, default: null },
   },
   {
     timestamps: true,

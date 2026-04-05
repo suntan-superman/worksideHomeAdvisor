@@ -232,6 +232,12 @@ export function ProviderSignupClient({
   providerId = '',
   prefillCategoryKey = '',
   prefillPrimaryZip = '',
+  source = '',
+  campaign = '',
+  medium = '',
+  adset = '',
+  ad = '',
+  anonymousId = '',
 }) {
   const router = useRouter();
   const [stepIndex, setStepIndex] = useState(0);
@@ -651,6 +657,21 @@ export function ProviderSignupClient({
         preferredContactMethod: form.preferredContactMethod,
         smsOptIn: form.smsOptIn,
         planCode: form.planCode,
+        attribution:
+          source || campaign || medium || adset || ad || anonymousId
+            ? {
+                source,
+                campaign,
+                medium,
+                adset,
+                ad,
+                anonymousId,
+                roleIntent: 'provider',
+                route: '/providers/join',
+                landingPath: '/providers/join',
+                referrer: typeof document === 'undefined' ? '' : document.referrer,
+              }
+            : undefined,
       };
 
       const result = await signupProvider(payload, appSession?.token);

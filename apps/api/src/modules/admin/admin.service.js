@@ -25,6 +25,7 @@ import {
 } from '../providers/providers.service.js';
 import { PricingAnalysisModel } from '../pricing/pricing.model.js';
 import { PropertyModel } from '../properties/property.model.js';
+import { getAdminFunnelSnapshot } from '../public/public.service.js';
 import { AnalysisLockModel } from '../usage/analysis-lock.model.js';
 import { RateLimitEventModel } from '../usage/rate-limit.model.js';
 import { UsageTrackingModel } from '../usage/usage-tracking.model.js';
@@ -359,6 +360,10 @@ export async function getAdminUsageSnapshot() {
       updatedAt: record.updatedAt || null,
     })),
   };
+}
+
+export async function getAdminFunnelOverview() {
+  return getAdminFunnelSnapshot();
 }
 
 export async function getAdminMediaVariantSnapshot() {

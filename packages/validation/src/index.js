@@ -6,6 +6,21 @@ export const signupSchema = z.object({
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
   role: z.enum(['seller', 'agent', 'provider']).optional(),
+  attribution: z
+    .object({
+      anonymousId: z.string().min(1).optional(),
+      platform: z.string().min(1).optional(),
+      source: z.string().min(1).optional(),
+      medium: z.string().min(1).optional(),
+      campaign: z.string().min(1).optional(),
+      adset: z.string().min(1).optional(),
+      ad: z.string().min(1).optional(),
+      route: z.string().min(1).optional(),
+      landingPath: z.string().min(1).optional(),
+      referrer: z.string().min(1).optional(),
+      roleIntent: z.string().min(1).optional(),
+    })
+    .optional(),
 });
 
 export const verifyOtpSchema = z.object({
@@ -23,6 +38,23 @@ export const propertySchema = z.object({
   bedrooms: z.number().nonnegative().optional(),
   bathrooms: z.number().nonnegative().optional(),
   squareFeet: z.number().int().positive().optional(),
+  attribution: z
+    .object({
+      anonymousId: z.string().min(1).optional(),
+      platform: z.string().min(1).optional(),
+      source: z.string().min(1).optional(),
+      medium: z.string().min(1).optional(),
+      campaign: z.string().min(1).optional(),
+      adset: z.string().min(1).optional(),
+      ad: z.string().min(1).optional(),
+      route: z.string().min(1).optional(),
+      landingPath: z.string().min(1).optional(),
+      referrer: z.string().min(1).optional(),
+      roleIntent: z.string().min(1).optional(),
+      previewReadyScore: z.number().nonnegative().optional(),
+      previewMidPrice: z.number().nonnegative().optional(),
+    })
+    .optional(),
 });
 
 export const aiRequestSchema = z.object({

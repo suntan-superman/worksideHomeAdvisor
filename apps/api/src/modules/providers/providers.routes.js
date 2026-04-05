@@ -135,6 +135,18 @@ const providerSignupSchema = z.object({
   preferredContactMethod: z.enum(['sms', 'email', 'phone']).optional(),
   planCode: z.string().trim().max(60).optional(),
   smsOptIn: z.boolean().optional(),
+  attribution: z.object({
+    source: z.string().trim().optional(),
+    campaign: z.string().trim().optional(),
+    medium: z.string().trim().optional(),
+    adset: z.string().trim().optional(),
+    ad: z.string().trim().optional(),
+    anonymousId: z.string().trim().optional(),
+    roleIntent: z.string().trim().optional(),
+    route: z.string().trim().optional(),
+    landingPath: z.string().trim().optional(),
+    referrer: z.string().trim().optional(),
+  }).optional(),
 });
 
 const providerBillingCheckoutSchema = z.object({
@@ -372,6 +384,7 @@ export async function providersRoutes(fastify) {
           firstName: payload.firstName,
           lastName: payload.lastName,
           role: 'provider',
+          attribution: payload.attribution,
         });
 
         userId = authSignup.userId;

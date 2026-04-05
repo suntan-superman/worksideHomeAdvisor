@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { normalizeLandingAttribution } from '@workside/utils';
 
 import { Toast } from '../Toast';
 import {
@@ -23,6 +24,7 @@ import { ValueCardRow } from './ValueCardRow';
 import { getSellerLandingVariant } from './copyVariants';
 
 const SELLER_LANDING_DRAFT_KEY = 'worksideSellerLandingDraft';
+const LANDING_ANONYMOUS_ID_KEY = 'worksideLandingAnonymousId';
 
 function normalizeState(value) {
   return String(value || '').trim().toUpperCase().slice(0, 2);
@@ -32,12 +34,33 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 }
 
+function getOrCreateAnonymousId() {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  const existingId = window.localStorage.getItem(LANDING_ANONYMOUS_ID_KEY);
+  if (existingId) {
+    return existingId;
+  }
+
+  const nextId =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `anon_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  window.localStorage.setItem(LANDING_ANONYMOUS_ID_KEY, nextId);
+  return nextId;
+}
+
 export function SellerLandingClient({
   source = 'direct-sell',
   campaign = '',
   medium = '',
+  adset = '',
+  ad = '',
 }) {
   const router = useRouter();
+  const [anonymousId, setAnonymousId] = useState('');
   const [form, setForm] = useState({
     address: '',
     city: '',
@@ -65,17 +88,34 @@ export function SellerLandingClient({
     () => getSellerLandingVariant({ source, campaign, medium }),
     [campaign, medium, source],
   );
+  const attribution = useMemo(
+    () =>
+      normalizeLandingAttribution({
+        source,
+        campaign,
+        medium,
+        adset,
+        ad,
+        roleIntent: 'seller',
+        route: '/sell',
+        landingPath: '/sell',
+        referrer: typeof document === 'undefined' ? '' : document.referrer,
+      }),
+    [ad, adset, campaign, medium, source],
+  );
+
+  useEffect(() => {
+    setAnonymousId(getOrCreateAnonymousId());
+  }, []);
 
   useEffect(() => {
     trackLandingEvent({
       name: 'seller_landing_viewed',
+      anonymousId,
       roleIntent: 'seller',
-      source,
-      campaign,
-      medium,
-      route: '/sell',
+      ...attribution,
     }).catch(() => {});
-  }, [campaign, medium, source]);
+  }, [anonymousId, attribution]);
 
   function updateField(field, value) {
     setForm((current) => ({
@@ -92,11 +132,9 @@ export function SellerLandingClient({
     try {
       await trackLandingEvent({
         name: 'seller_preview_started',
+        anonymousId,
         roleIntent: 'seller',
-        source,
-        campaign,
-        medium,
-        route: '/sell',
+        ...attribution,
         payload: {
           propertyType: form.propertyType,
         },
@@ -104,17 +142,16 @@ export function SellerLandingClient({
 
       const response = await getPublicSellerPreview({
         ...form,
-        source,
+        ...attribution,
+        anonymousId,
       });
       setPreview(response);
 
       await trackLandingEvent({
         name: 'seller_preview_completed',
+        anonymousId,
         roleIntent: 'seller',
-        source,
-        campaign,
-        medium,
-        route: '/sell',
+        ...attribution,
         payload: {
           estimatedMid: response.estimatedRange?.mid,
           marketReadyScore: response.marketReadyScore,
@@ -135,11 +172,9 @@ export function SellerLandingClient({
     setEmailGateOpen(true);
     trackLandingEvent({
       name: 'seller_email_gate_viewed',
+      anonymousId,
       roleIntent: 'seller',
-      source,
-      campaign,
-      medium,
-      route: '/sell',
+      ...attribution,
     }).catch(() => {});
   }
 
@@ -175,19 +210,16 @@ export function SellerLandingClient({
 
       await captureFunnelLead({
         email: gateEmail,
+        anonymousId,
         roleIntent: 'seller',
-        source,
-        campaign,
-        medium,
+        ...attribution,
         previewContext,
       });
       await trackLandingEvent({
         name: 'seller_email_submitted',
+        anonymousId,
         roleIntent: 'seller',
-        source,
-        campaign,
-        medium,
-        route: '/sell',
+        ...attribution,
         payload: {
           address: form.address,
           postalCode: form.postalCode,
@@ -208,19 +240,21 @@ export function SellerLandingClient({
             bathrooms: Number(form.bathrooms),
             squareFeet: Number(form.squareFeet),
             preview,
-            source,
-            campaign,
-            medium,
+            attribution: {
+              ...attribution,
+              anonymousId,
+              previewReadyScore: preview?.marketReadyScore || 0,
+              previewMidPrice: preview?.estimatedRange?.mid || 0,
+            },
           }),
         );
       }
 
       const continuation = await continuePublicSignup({
         email: gateEmail,
+        anonymousId,
         roleIntent: 'seller',
-        source,
-        campaign,
-        medium,
+        ...attribution,
         previewContext,
       });
       const nextPath = new URL(continuation.nextPath, window.location.origin);

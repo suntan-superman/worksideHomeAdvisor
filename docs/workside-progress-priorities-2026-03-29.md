@@ -1,6 +1,6 @@
 # Workside Progress And Priorities
 
-Last updated: 2026-04-02
+Last updated: 2026-04-04
 
 This document is the working checkpoint after the latest implementation pass across the HomeAdvisor / Workside codebase.
 
@@ -24,6 +24,7 @@ The platform is now well beyond the scaffold stage.
 - Vision generation is running with Replicate-backed presets and before/after review UI
 - Property workspace, seller dashboard, and mobile workspace now include a computed guided workflow layer with role-aware seller / realtor copy, progress, next-step guidance, and market-ready scoring
 - Seller workflow now includes a persisted chosen list price, shortlist-based provider reference sheet export, property archive / restore, and active-property limits
+- Seller acquisition funnel now exists with a public landing page, mini onboarding, partial preview, email gate, and dashboard handoff
 
 ### Admin side
 
@@ -52,6 +53,7 @@ The platform is now well beyond the scaffold stage.
 - Admin web app is deployed
 - Stripe is wired for seller/agent plans and now extended for provider billing
 - Twilio groundwork exists, but production marketplace SMS rollout is intentionally paused pending the dedicated number / approval path
+- Public landing funnel backend endpoints now exist for seller preview, funnel capture, event tracking, and continue-signup
 
 Bottom line:
 
@@ -73,6 +75,15 @@ The product now has real seller, provider, and admin surfaces. The main remainin
 - [x] mobile camera capture flow now prompts to save or discard after each shot
 - [x] web photo deletion now uses a real in-app confirmation modal
 - [x] idle logout added across seller web, provider portal, and admin
+- [x] public landing funnel backend module added for seller preview, funnel capture, event tracking, and continue-signup
+- [x] root `/` now acts as a role chooser instead of a generic placeholder
+- [x] dedicated public landing pages now exist for `/sell`, `/agents`, and `/providers`
+- [x] seller landing now includes mini onboarding, partial pricing/readiness preview, and email gate
+- [x] seller landing handoff now pre-fills signup and dashboard property creation
+- [x] provider join flow now accepts landing prefills for category and ZIP
+- [x] trust / proof sections added across public landing funnels
+- [x] ad-specific copy variants added for Instagram and Facebook traffic
+- [x] campaign-specific copy variants added for seller, agent, and provider acquisition campaigns
 
 ---
 
@@ -118,6 +129,20 @@ The product now has real seller, provider, and admin surfaces. The main remainin
 - [x] Brochure/flyer generation
 - [x] Seller report generation and export
 - [x] Provider shortlist / reference sheet PDF export
+
+### 2.3a Public acquisition funnel
+
+- [x] Public role chooser at `/`
+- [x] Seller landing page at `/sell`
+- [x] Agent landing page at `/agents`
+- [x] Provider landing page at `/providers`
+- [x] Seller mini onboarding with partial result preview
+- [x] Email gate before full seller value reveal
+- [x] Landing-to-auth handoff with seller draft preservation
+- [x] Dashboard property-create prefill from captured seller draft
+- [x] Public funnel event tracking endpoint
+- [x] Platform-aware copy variants for Instagram and Facebook
+- [x] Campaign-aware copy variants for seller, agent, and provider funnels
 
 ### 2.4 Vision pipeline
 
@@ -225,6 +250,13 @@ These areas exist and are useful, but they are not yet “finished product” qu
 - [~] Workflow state is computed automatically, but deeper blocker logic and more nuanced optional-step handling can still improve
 - [~] Property workspace layout is much better, but several tabs still need more mid-width responsive polish
 
+### 3.8 Public landing and conversion flow
+
+- [~] Seller / agent / provider public funnels now exist, but attribution persistence and reporting still need hardening
+- [~] Seller funnel preview is real, but the quality of the partial result and trust sections can still become more premium
+- [~] Agent and provider funnels now have campaign-aware copy, but their lead capture and downstream conversion loops are still lighter than the seller flow
+- [~] Public funnels are live enough for traffic, but analytics, experiments, and CRM-grade lead handling are still early
+
 ---
 
 ## 4. Current Blockers Or Deliberate Pauses
@@ -260,9 +292,21 @@ Current status:
 
 ## Priority 0: Stabilize The Current Launch-Critical Flows
 
-These are the highest-value refinements because they affect trust, demos, and everyday use right now.
+These are the highest-value refinements because they affect trust, demos, everyday use, and paid traffic conversion right now.
 
-### 5.1 Provider account ownership and access hardening
+### 5.1 Conversion funnel hardening and attribution
+
+- [ ] add durable attribution persistence from landing -> auth -> dashboard -> property
+- [ ] add a simple canonical Meta/IG/FB campaign naming convention and parser so copy variants stay predictable
+- [ ] add stronger seller funnel event coverage and funnel-drop reporting
+- [ ] add agent/provider lead capture endpoints and dashboard/admin visibility similar to seller funnel capture
+- [ ] add CRM/export-ready lead records for public funnel submissions
+- [ ] add safer analytics around preview completion, email gate completion, signup completion, and subscription conversion
+- [ ] add experiment hooks for headline/CTA/value-card testing without rewriting the funnel shell
+- [ ] add real visual proof assets and production-quality screenshots to the public pages
+- [ ] add subscription / plan upsell treatment at the correct post-preview moment for seller traffic
+
+### 5.2 Provider account ownership and access hardening
 
 - [ ] add provider account recovery / reset flow
 - [ ] add admin tooling to link older seeded providers to real provider accounts
@@ -270,13 +314,13 @@ These are the highest-value refinements because they affect trust, demos, and ev
 - [ ] tighten provider-only account management boundaries further
 - [ ] add provider email change / re-verification flow if account email needs to be corrected later
 
-### 5.2 Provider billing validation
+### 5.3 Provider billing validation
 
 - [ ] complete live end-to-end provider signup -> verify -> billing -> portal test with Stripe
 - [ ] confirm webhook updates for provider subscription states in production
 - [ ] verify featured placement behavior against provider Stripe plans
 
-### 5.2a Seller and agent billing / property-cap model
+### 5.3a Seller and agent billing / property-cap model
 
 - [x] define how seller plans map to active property count limits
 - [x] define how agent plans map to active property count limits
@@ -284,7 +328,7 @@ These are the highest-value refinements because they affect trust, demos, and ev
 - [x] make dashboard billing chooser show only plans relevant to the signed-in account type everywhere
 - [x] show active subscription count and remaining active-property capacity in seller and agent UI
 
-### 5.2b Guided workflow system expansion
+### 5.3b Guided workflow system expansion
 
 - [x] introduce a real computed workflow state engine for seller / realtor property flows
 - [x] surface progress, next step, and role-specific workflow copy in the property workspace
@@ -295,7 +339,7 @@ These are the highest-value refinements because they affect trust, demos, and ev
 - [ ] connect workflow steps to richer property-edit screens where “open dashboard” is still a fallback
 - [ ] decide whether optional steps should be skippable or silently auto-resolved in more cases
 
-### 5.3 Vision quality refinement
+### 5.4 Vision quality refinement
 
 - [ ] tune prompts and mask regions by preset and room type
 - [ ] improve artifact rejection / low-confidence filtering
@@ -306,16 +350,18 @@ These are the highest-value refinements because they affect trust, demos, and ev
 
 ## Priority 1: Make The Marketplace Operationally Strong
 
-### 5.4 Provider coverage and ranking
+### 5.5 Provider coverage and ranking
 
 - [ ] use provider service areas more explicitly in ranking/filtering
 - [ ] show “no providers in area yet” gracefully
 - [~] fallback path for uncovered areas exists, but needs better structured Google result reliability and clearer user-facing explanation
 - [ ] give strong precedence to registered Workside providers over fallback results
 - [ ] add richer detail views and saved-reference actions for Google fallback providers
-- [ ] improve in-app provider map presentation and marker detail for dense local markets
+- [ ] improve in-app provider map presentation, marker detail, and viewport fitting for dense local markets
+- [ ] make the external Google Maps search path clearly secondary to the controlled in-app provider map
+- [ ] add better diagnostics when Google structured fallback returns zero while consumer Google Maps visibly has results
 
-### 5.5 Provider profile maturity
+### 5.6 Provider profile maturity
 
 - [ ] richer service-area editing
 - [ ] richer licensing / insurance / bonding review history
@@ -326,7 +372,7 @@ These are the highest-value refinements because they affect trust, demos, and ev
 - [ ] better featured / sponsored management
 - [ ] better provider quality scoring inputs
 
-### 5.6 Marketplace admin polish
+### 5.7 Marketplace admin polish
 
 - [ ] extend tabbed / workflow-oriented UX beyond just providers page
 - [ ] add better filters/search on providers and leads
@@ -337,7 +383,7 @@ These are the highest-value refinements because they affect trust, demos, and ev
 
 ## Priority 2: Improve Premium Seller Output Quality
 
-### 5.7 Reports and brochure quality
+### 5.8 Reports and brochure quality
 
 - [ ] improve brochure layout and visual finish
 - [ ] improve report layout and PDF polish
@@ -345,15 +391,16 @@ These are the highest-value refinements because they affect trust, demos, and ev
 - [ ] persist brochure/report draft state more explicitly per property
 - [ ] add stronger seller-facing customization controls
 - [ ] store final PDFs with durable download URLs
+- [ ] decide whether provider reference sheet should become an appendix to the larger property review PDF
 
-### 5.8 Media maturity
+### 5.9 Media maturity
 
 - [ ] add explicit media ordering
 - [ ] add first-class brochure/report inclusion state on base assets
 - [ ] refine listing-photo candidate review and ordering UX
 - [ ] improve cross-device media management polish
 
-### 5.8a Property lifecycle
+### 5.9a Property lifecycle
 
 - [x] add property archive state and archive / restore actions
 - [x] prevent editing on archived properties while still allowing read-only access
@@ -365,25 +412,26 @@ These are the highest-value refinements because they affect trust, demos, and ev
 
 ## Priority 3: Usage, Safeguards, And Trust
 
-### 5.9 Vision quotas and usage visibility
+### 5.10 Vision quotas and usage visibility
 
 - [ ] enforce plan-based vision quotas
 - [ ] expose vision usage summary in UI/admin
 - [ ] add better upgrade-required responses for premium vision usage
 
-### 5.10 Diagnostics and operations
+### 5.11 Diagnostics and operations
 
 - [ ] better structured logs for provider, billing, and vision flows
 - [ ] clearer usage / failure diagnostics in admin
 - [ ] better worker-backed processing story for long-running document/vision jobs
 - [ ] add admin notifications/tasks when a provider submits verification
-- [ ] add better diagnostics around Google fallback provider searches so we can distinguish API-empty, API-blocked, and query-mismatch cases
+- [ ] add better diagnostics around Google fallback provider searches so we can distinguish API-empty, API-blocked, query-mismatch, and auth/key-scope failures
+- [ ] add public funnel analytics and conversion reporting views in admin
 
 ---
 
 ## Priority 4: Engineering Hardening
 
-### 5.11 Automated testing
+### 5.12 Automated testing
 
 - [ ] auth flows
 - [ ] pricing flows
@@ -391,8 +439,10 @@ These are the highest-value refinements because they affect trust, demos, and ev
 - [ ] report generation
 - [ ] provider onboarding and billing
 - [ ] admin auth and provider lead actions
+- [ ] public seller landing preview and email gate flows
+- [ ] attribution persistence from landing to dashboard
 
-### 5.12 Cleanup and consistency
+### 5.13 Cleanup and consistency
 
 - [ ] formalize shared billing env/docs for Merxus + HomeAdvisor
 - [ ] tighten outdated docs that still describe older assumptions
@@ -404,14 +454,14 @@ These are the highest-value refinements because they affect trust, demos, and ev
 
 If work resumes tomorrow, the most sensible order is:
 
-1. Complete real provider signup -> verification -> billing -> portal end-to-end validation
-2. Improve provider coverage filtering and graceful no-coverage handling
-3. Refine the seller/agent property-cap model into a true per-property billing strategy where needed
-4. Extend the guided workflow system into auth / onboarding so the whole journey starts coached
-5. Refine vision quality on the three Replicate presets
-6. Polish report/brochure premium output quality
-7. Add provider account recovery / linking tools
-8. Stabilize Google fallback provider discovery and diagnostics
+1. Harden the public conversion funnel with attribution persistence and campaign naming standards
+2. Complete real provider signup -> verification -> billing -> portal end-to-end validation
+3. Stabilize Google fallback provider discovery, diagnostics, and in-app provider map presentation
+4. Refine the seller/agent property-cap model into a true per-property billing strategy where needed
+5. Extend the guided workflow system into auth / onboarding so the whole journey starts coached
+6. Refine vision quality on the three Replicate presets
+7. Polish report/brochure premium output quality
+8. Add provider account recovery / linking tools
 9. Start real automated tests around the new flows
 
 ---
@@ -420,19 +470,26 @@ If work resumes tomorrow, the most sensible order is:
 
 If the goal is immediate product value with low rework risk, start here:
 
-### Option A: Marketplace hardening
+### Option A: Conversion hardening
+
+- lock down public funnel attribution
+- make IG/FB campaign naming and copy routing production-safe
+- add funnel analytics / reporting
+- tighten seller preview -> email gate -> signup -> dashboard conversion handoff
+
+### Option B: Marketplace hardening
 
 - validate live provider billing thoroughly
 - tighten provider coverage filtering
 - stabilize structured Google fallback behavior and diagnostics
 - improve the in-app provider map / provider details experience
 
-### Option B: Premium output quality
+### Option C: Premium output quality
 
 - refine vision preset quality
 - make brochure/report output feel more premium
 
-### Option C: Trust and readiness
+### Option D: Trust and readiness
 
 - add provider account recovery / linking
 - add tests around auth, provider billing, and provider portal flows
@@ -441,7 +498,7 @@ Recommended choice:
 
 Start with **Option A**, then move into **Option B**.
 
-That gives the product a stronger operational core before spending more time on polish.
+That gives the product a stronger traffic-to-conversion engine before spending more time on polish.
 
 ---
 
@@ -457,6 +514,7 @@ That gives the product a stronger operational core before spending more time on 
 - Structured Google fallback is still under active refinement and does not yet mirror consumer Google Maps results reliably
 - Seller pricing flow now includes a persisted chosen list price that should carry into documents after regeneration
 - SMS marketplace logic exists in code, but rollout is paused intentionally
+- Public seller, agent, and provider landing pages now exist, with seller preview/email-gate flow and campaign-aware copy variants
 
 ---
 
@@ -466,10 +524,12 @@ That gives the product a stronger operational core before spending more time on 
 
 - [ ] Structured Google fallback provider search can still return zero results even when consumer Google Maps clearly shows local matches
 - [ ] External Google Maps search still controls its own zoom behavior, so the external map page remains inconsistent; the in-app provider map is the preferred controlled experience
+- [ ] In-app provider map is finally functional again, but it still needs more polished bounds fitting, legend clarity, and denser-market marker handling
 - [ ] Property workspace responsive behavior is much improved, but Report, Brochure, Checklist, and provider layouts can still feel cramped on mid-width desktop viewports
 - [ ] Provider discovery quality is very sensitive to provider data hygiene: wrong category, non-active status, invalid ZIP/state, or incomplete radius coverage can make matching feel “broken”
 - [ ] Generated reports and flyers may need regeneration after pricing, image, or chosen-price changes; this is correct behavior, but it can still surprise users if we do not make it explicit
 - [ ] Google-backed provider content shown in-app should continue to be treated as fallback discovery, not durable exported directory content, unless first saved into a Workside-managed shortlist
+- [ ] Public landing pages are live, but attribution reporting, experiment support, and production-grade analytics still need to be completed
 
 ### Mobile app
 
@@ -485,6 +545,7 @@ That gives the product a stronger operational core before spending more time on 
 - [ ] Provider duplication, category drift, and self-reported trust data can create misleading marketplace output unless admin review stays tight
 - [ ] Provider SMS remains intentionally paused, so lead outreach is email-first for now and should be treated as an interim operational mode
 - [ ] The codebase now has real breadth across seller, provider, admin, billing, and AI flows, so missing automated tests remain a material reliability risk
+- [ ] Public funnel events and lead captures exist, but there is not yet a robust attribution/reporting layer to prove paid campaign performance end to end
 
 ---
 

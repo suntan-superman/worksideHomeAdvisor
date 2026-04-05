@@ -6,6 +6,7 @@ import {
   createAdminProviderCategoryAction,
   deleteAdminProviderAction,
   getAdminBillingSnapshot,
+  getAdminFunnelOverview,
   getAdminMediaVariantSnapshot,
   getAdminOverview,
   getAdminProviderCategorySnapshot,
@@ -140,6 +141,14 @@ export async function adminRoutes(fastify) {
   fastify.get('/workers', async (_request, reply) => {
     try {
       return reply.send(await getAdminWorkerSnapshot());
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/funnel', async (_request, reply) => {
+    try {
+      return reply.send(await getAdminFunnelOverview());
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }

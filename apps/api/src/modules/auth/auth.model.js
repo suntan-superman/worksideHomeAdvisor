@@ -9,6 +9,23 @@ const otpSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const attributionSchema = new mongoose.Schema(
+  {
+    anonymousId: { type: String, default: '' },
+    platform: { type: String, default: '' },
+    source: { type: String, default: '' },
+    medium: { type: String, default: '' },
+    campaign: { type: String, default: '' },
+    adset: { type: String, default: '' },
+    ad: { type: String, default: '' },
+    route: { type: String, default: '' },
+    landingPath: { type: String, default: '' },
+    referrer: { type: String, default: '' },
+    roleIntent: { type: String, default: '' },
+  },
+  { _id: false },
+);
+
 const userSchema = new mongoose.Schema(
   {
     email: { type: String, required: true, unique: true, index: true },
@@ -26,6 +43,7 @@ const userSchema = new mongoose.Schema(
     emailVerifiedAt: { type: Date, default: null },
     verificationOtp: { type: otpSchema, default: null },
     lastLoginAt: { type: Date, default: null },
+    signupAttribution: { type: attributionSchema, default: null },
   },
   {
     timestamps: true,

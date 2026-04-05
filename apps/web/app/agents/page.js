@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { buildLandingSearchParams } from '@workside/utils';
 
 import { AppFrame } from '../../components/AppFrame';
 import { FinalCTASection } from '../../components/landing/FinalCTASection';
@@ -21,7 +22,51 @@ export default function AgentLandingPage({ searchParams }) {
     typeof searchParams?.campaign === 'string' ? searchParams.campaign : '';
   const medium =
     typeof searchParams?.medium === 'string' ? searchParams.medium : '';
+  const adset = typeof searchParams?.adset === 'string' ? searchParams.adset : '';
+  const ad = typeof searchParams?.ad === 'string' ? searchParams.ad : '';
+  const anonymousId =
+    typeof searchParams?.anonymousId === 'string' ? searchParams.anonymousId : '';
   const copyVariant = getAgentLandingVariant({ source, campaign, medium });
+  const signupHref = `/auth?${buildLandingSearchParams(
+    {
+      source,
+      campaign,
+      medium,
+      adset,
+      ad,
+      anonymousId,
+      roleIntent: 'agent',
+    },
+    {
+      mode: 'signup',
+      role: 'agent',
+    },
+  ).toString()}`;
+  const dashboardHref = `/dashboard?${buildLandingSearchParams(
+    {
+      source,
+      campaign,
+      medium,
+      adset,
+      ad,
+      anonymousId,
+      roleIntent: 'agent',
+    },
+    {
+      role: 'agent',
+    },
+  ).toString()}`;
+  const sellerHref = `/sell?${buildLandingSearchParams(
+    {
+      source,
+      campaign,
+      medium,
+      adset,
+      ad,
+      anonymousId,
+      roleIntent: 'seller',
+    },
+  ).toString()}`;
 
   return (
     <AppFrame>
@@ -31,10 +76,10 @@ export default function AgentLandingPage({ searchParams }) {
         subtitle={copyVariant.subtitle}
         actions={
           <>
-            <Link href="/auth?mode=signup&role=agent" className="button-primary">
+            <Link href={signupHref} className="button-primary">
               {copyVariant.primaryCta}
             </Link>
-            <Link href="/dashboard" className="button-secondary">
+            <Link href={dashboardHref} className="button-secondary">
               {copyVariant.secondaryCta}
             </Link>
           </>
@@ -107,18 +152,18 @@ export default function AgentLandingPage({ searchParams }) {
           'Seller-facing outputs that justify the subscription quickly.',
           'Clear route into the existing property dashboard and workspace.',
         ]}
-        primaryHref="/auth?mode=signup&role=agent"
+        primaryHref={signupHref}
         primaryLabel="Create agent account"
-        secondaryHref="/dashboard"
+        secondaryHref={dashboardHref}
         secondaryLabel="View dashboard preview"
       />
 
       <FinalCTASection
         title={copyVariant.finalTitle}
         body={copyVariant.finalBody}
-        primaryHref="/auth?mode=signup&role=agent"
+        primaryHref={signupHref}
         primaryLabel={copyVariant.primaryCta}
-        secondaryHref="/sell"
+        secondaryHref={sellerHref}
         secondaryLabel="See seller funnel"
       />
     </AppFrame>

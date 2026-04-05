@@ -81,6 +81,10 @@ export function getAdminBilling() {
   return request('/api/v1/admin/billing');
 }
 
+export function getAdminFunnel() {
+  return request('/api/v1/admin/funnel');
+}
+
 export function getAdminUsage() {
   return request('/api/v1/admin/usage');
 }

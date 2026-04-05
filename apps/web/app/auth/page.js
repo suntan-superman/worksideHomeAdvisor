@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { normalizeLandingAttribution } from '@workside/utils';
 
 import { AppFrame } from '../../components/AppFrame';
 import { PasswordInput } from '../../components/PasswordInput';
@@ -19,6 +20,7 @@ const ROLE_OPTIONS = [
   { value: 'agent', label: 'Realtor', description: 'Use agent-facing pricing and presentation workflows.' },
   { value: 'provider', label: 'Provider', description: 'Manage provider onboarding, leads, and marketplace profile.' },
 ];
+const AUTH_ATTRIBUTION_DRAFT_KEY = 'worksideAuthAttributionDraft';
 
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
@@ -52,6 +54,49 @@ function getRoleStatus(role, mode = 'login') {
   return 'Log in with your email and password to open your seller workspace.';
 }
 
+function buildOnboardingSteps(role) {
+  if (role === 'provider') {
+    return [
+      'Create your provider account',
+      'Verify your email',
+      'Finish marketplace profile and billing',
+    ];
+  }
+
+  if (role === 'agent') {
+    return [
+      'Create your agent login',
+      'Verify your email',
+      'Open the listing workspace and add your first property',
+    ];
+  }
+
+  return [
+    'Create your seller login',
+    'Verify your email',
+    'Open the guided workspace and create your property',
+  ];
+}
+
+function persistAuthAttributionDraft(attribution) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (!attribution) {
+    window.sessionStorage.removeItem(AUTH_ATTRIBUTION_DRAFT_KEY);
+    return;
+  }
+
+  window.sessionStorage.setItem(
+    AUTH_ATTRIBUTION_DRAFT_KEY,
+    JSON.stringify({
+      attribution,
+      capturedAt: new Date().toISOString(),
+    }),
+  );
+}
+
 export default function AuthPage() {
   const router = useRouter();
   const [mode, setMode] = useState('login');
@@ -67,6 +112,7 @@ export default function AuthPage() {
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showVerificationOption, setShowVerificationOption] = useState(false);
+  const [attribution, setAttribution] = useState(null);
 
   const isVerificationMode = mode === 'verify';
   const emailIsValid = isValidEmail(form.email);
@@ -95,7 +141,29 @@ export default function AuthPage() {
     const requestedRole = String(params.get('role') || '').trim();
     const requestedFirstName = String(params.get('firstName') || '').trim();
     const requestedPassword = String(params.get('prefillPassword') || '').trim();
+    const requestedSource = String(params.get('src') || '').trim();
+    const requestedMedium = String(params.get('medium') || '').trim();
+    const requestedCampaign = String(params.get('campaign') || '').trim();
+    const requestedAdset = String(params.get('adset') || '').trim();
+    const requestedAd = String(params.get('ad') || '').trim();
+    const requestedAnonymousId = String(params.get('anonymousId') || '').trim();
     const roleIsSupported = ROLE_OPTIONS.some((option) => option.value === requestedRole);
+    const nextRole = roleIsSupported ? requestedRole : form.role;
+
+    setAttribution(
+      normalizeLandingAttribution({
+        source: requestedSource,
+        medium: requestedMedium,
+        campaign: requestedCampaign,
+        adset: requestedAdset,
+        ad: requestedAd,
+        anonymousId: requestedAnonymousId,
+        roleIntent: nextRole,
+        route: '/auth',
+        landingPath: '/auth',
+        referrer: document.referrer,
+      }),
+    );
 
     if (requestedEmail) {
       setForm((current) => ({
@@ -104,7 +172,7 @@ export default function AuthPage() {
         password: requestedPassword || '',
         firstName: requestedFirstName || current.firstName,
         otpCode: '',
-        role: roleIsSupported ? requestedRole : current.role,
+        role: nextRole,
       }));
     }
 
@@ -137,6 +205,24 @@ export default function AuthPage() {
     });
   }, []);
 
+  useEffect(() => {
+    if (!attribution) {
+      return;
+    }
+
+    if (
+      !attribution.source &&
+      !attribution.campaign &&
+      !attribution.medium &&
+      !attribution.adset &&
+      !attribution.ad
+    ) {
+      return;
+    }
+
+    persistAuthAttributionDraft(attribution);
+  }, [attribution]);
+
   function updateField(field, value) {
     setForm((current) => ({
       ...current,
@@ -167,7 +253,21 @@ export default function AuthPage() {
           firstName: form.firstName,
           lastName: form.lastName,
           role: form.role,
+          attribution: attribution
+            ? {
+                ...attribution,
+                anonymousId: attribution.anonymousId || '',
+              }
+            : undefined,
         });
+        persistAuthAttributionDraft(
+          attribution
+            ? {
+                ...attribution,
+                roleIntent: form.role,
+              }
+            : null,
+        );
         setMode('verify');
         setShowVerificationOption(true);
         setStatus('Account created. Enter the OTP from your email to finish verification.');
@@ -198,6 +298,14 @@ export default function AuthPage() {
           token: result.token,
           user: result.user,
         });
+        persistAuthAttributionDraft(
+          attribution
+            ? {
+                ...attribution,
+                roleIntent: result.user?.role || form.role,
+              }
+            : null,
+        );
         setStatus('Login complete.');
         router.push(getRoleDestination(result.user?.role));
       } else {
@@ -209,6 +317,14 @@ export default function AuthPage() {
           token: result.token,
           user: result.user,
         });
+        persistAuthAttributionDraft(
+          attribution
+            ? {
+                ...attribution,
+                roleIntent: result.user?.role || form.role,
+              }
+            : null,
+        );
         setStatus('Email verified. Redirecting to your dashboard.');
         setShowVerificationOption(false);
         setToast({
@@ -303,6 +419,20 @@ export default function AuthPage() {
             ) : null}
           </div>
           <p className="status-copy">{status}</p>
+          <div className="content-subsection">
+            <span className="label">Guided onboarding</span>
+            <div className="plain-list">
+              {buildOnboardingSteps(form.role).map((step) => (
+                <p key={step}>{step}</p>
+              ))}
+            </div>
+            {attribution?.campaign ? (
+              <p className="status-copy">
+                Campaign: <strong>{attribution.campaign}</strong>
+                {attribution.platform ? ` · ${attribution.platform}` : ''}
+              </p>
+            ) : null}
+          </div>
         </div>
 
         <form className="form-card" onSubmit={handlePrimaryAction}>
