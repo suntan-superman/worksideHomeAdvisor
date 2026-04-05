@@ -1,8 +1,8 @@
 import mongoose from 'mongoose';
-import sharp from 'sharp';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { formatCurrency } from '@workside/utils';
 
+import { env } from '../../config/env.js';
 import { generateImprovementInsights, generateMarketingInsights } from '../../services/aiWorkflowService.js';
 import { buildMediaVariantUrl } from '../../services/storageService.js';
 import { buildVariantStoryBlock } from '../media/media-ai.service.js';
@@ -10,19 +10,40 @@ import { listMediaAssets } from '../media/media.service.js';
 import { MediaVariantModel } from '../media/media-variant.model.js';
 import { getLatestPricingAnalysis } from '../pricing/pricing.service.js';
 import { getPropertyById } from '../properties/property.service.js';
+import { listProvidersForProperty } from '../providers/providers.service.js';
 import { getOrCreatePropertyChecklist } from '../tasks/tasks.service.js';
 import { getLatestPropertyFlyer } from './flyer.service.js';
+import { renderPropertySummaryPdf } from './html-pdf.service.js';
+import {
+  createPdfPalette,
+  drawBrandHeader,
+  drawBulletList,
+  drawContainedImageFrame,
+  drawDocumentFooter,
+  drawDocumentFrame,
+  drawMetricCard,
+  drawSectionEyebrow,
+  drawWrappedText,
+  fetchPdfImage,
+  PDF_PAGE_HEIGHT,
+  PDF_PAGE_MARGIN,
+  sanitizeFilePart,
+} from './pdf-theme.js';
 import { ReportModel } from './report.model.js';
 
 const CORE_ROOM_LABELS = ['Living room', 'Kitchen', 'Primary bedroom', 'Bathroom', 'Exterior'];
 const REPORT_SECTION_LABELS = {
   executive_summary: 'Executive Summary',
+  property_details: 'Property Details',
   pricing_analysis: 'Pricing Analysis',
   comparable_properties: 'Comparable Properties',
   photo_review: 'Photo Review Summary',
   visual_improvement_previews: 'Visual Improvement Previews',
   readiness_score: 'Listing Readiness Score',
   improvement_recommendations: 'Improvement Recommendations',
+  provider_recommendations: 'Provider Recommendations',
+  risk_opportunity: 'Risk and Opportunity',
+  next_steps: 'Next Steps',
   seller_checklist: 'Seller Checklist',
   marketing_guidance: 'Marketing Guidance',
   draft_listing_description: 'Draft Listing Description',
@@ -259,6 +280,163 @@ function buildListingDescriptions({ property, marketingGuidance, pricing, readin
   };
 }
 
+function buildPropertyDetails(property, marketingHighlights = []) {
+  const featureTags = [
+    property?.propertyType,
+    property?.bedrooms ? `${property.bedrooms} bedrooms` : '',
+    property?.bathrooms ? `${property.bathrooms} bathrooms` : '',
+    property?.squareFeet ? `${property.squareFeet} sqft` : '',
+    property?.lotSizeSqFt ? `${property.lotSizeSqFt} lot sqft` : '',
+    property?.yearBuilt ? `Built ${property.yearBuilt}` : '',
+    ...(marketingHighlights || []).slice(0, 4),
+  ].filter(Boolean);
+
+  return {
+    bedrooms: property?.bedrooms || null,
+    bathrooms: property?.bathrooms || null,
+    squareFeet: property?.squareFeet || null,
+    lotSizeSqFt: property?.lotSizeSqFt || null,
+    yearBuilt: property?.yearBuilt || null,
+    propertyType: property?.propertyType || '',
+    featureTags: [...new Set(featureTags)].slice(0, 6),
+  };
+}
+
+function buildImprovementEconomics({ property, improvementItems = [], photoSummary, checklist }) {
+  const budgetCeiling = Number(property?.sellerProfile?.budgetMax || 0);
+  const openChecklistCount = Number(checklist?.summary?.openCount || 0);
+  const retakeCount = Number(photoSummary?.retakeCount || 0);
+  const roughImprovementCount = Math.max(1, improvementItems.length || openChecklistCount || retakeCount || 1);
+  const estimatedCost =
+    budgetCeiling > 0
+      ? Math.round(Math.min(budgetCeiling, Math.max(600, roughImprovementCount * 350)))
+      : Math.round(Math.max(750, roughImprovementCount * 425));
+  const estimatedRoi =
+    estimatedCost > 0 ? Math.round(estimatedCost * 1.6) : 0;
+
+  return {
+    estimatedCost,
+    estimatedRoi,
+    summary:
+      estimatedCost > 0
+        ? `A focused pre-listing investment of about ${formatCurrency(estimatedCost)} could support roughly ${formatCurrency(estimatedRoi)} in presentation-driven value protection or upside.`
+        : 'Improvement economics are directional only and should be reviewed before committing budget.',
+  };
+}
+
+function buildRiskOpportunitySummary({ pricing, photoSummary, improvementItems = [], checklist }) {
+  const biggestRisk = photoSummary?.retakeCount
+    ? `${photoSummary.retakeCount} photo retake recommendation${photoSummary.retakeCount === 1 ? '' : 's'} still need attention before launch.`
+    : pricing?.risks?.[0] || 'The launch plan still needs review before going to market.';
+  const biggestOpportunity =
+    improvementItems[0] ||
+    checklist?.nextTask?.title ||
+    pricing?.strengths?.[0] ||
+    'Tighten presentation and pricing alignment before publishing the listing.';
+
+  return {
+    biggestRisk,
+    biggestOpportunity,
+    narrative: `Primary risk: ${biggestRisk} Primary opportunity: ${biggestOpportunity}`,
+  };
+}
+
+function buildBuyerPersonaSummary({ property, marketingGuidance, pricing }) {
+  const buyerPersona = property?.bedrooms >= 3
+    ? 'Move-up household seeking functional space, natural light, and a turnkey-feeling home.'
+    : 'Efficiency-focused buyer looking for a clean, well-positioned home with manageable prep requirements.';
+
+  const topReasonsToBuy = [
+    ...(marketingGuidance?.featureHighlights || []),
+    pricing?.strengths?.[0] || '',
+    property?.squareFeet ? `${property.squareFeet} square feet with a practical layout.` : '',
+  ]
+    .filter(Boolean)
+    .slice(0, 5);
+
+  return {
+    buyerPersona,
+    topReasonsToBuy,
+  };
+}
+
+function buildNextStepPlan({ checklist, improvementItems = [], providerRecommendations = [], photoSummary }) {
+  const openChecklistItems = (checklist?.items || [])
+    .filter((item) => item.status !== 'done')
+    .slice(0, 3)
+    .map((item, index) => ({
+      order: index + 1,
+      title: item.title,
+      eta: item.status === 'in_progress' ? '1-2 days' : '2-4 days',
+      owner: item.ownerRole || 'seller',
+    }));
+
+  const providerSteps = providerRecommendations.slice(0, 2).map((provider, index) => ({
+    order: openChecklistItems.length + index + 1,
+    title: `Contact ${provider.businessName}`,
+    eta: 'Same day',
+    owner: 'seller',
+  }));
+
+  const fallbackSteps = improvementItems.slice(0, 2).map((title, index) => ({
+    order: openChecklistItems.length + providerSteps.length + index + 1,
+    title,
+    eta: photoSummary?.retakeCount ? '2-5 days' : '1-3 days',
+    owner: 'seller',
+  }));
+
+  return [...openChecklistItems, ...providerSteps, ...fallbackSteps].slice(0, 5);
+}
+
+async function buildProviderRecommendations(propertyId) {
+  const recommendationConfigs = [
+    {
+      categoryKey: 'photographer',
+      reason: 'Use for final listing photography and cleaner hero images.',
+    },
+    {
+      categoryKey: 'cleaning_service',
+      reason: 'Useful before photography, brochure generation, and early showings.',
+    },
+    {
+      categoryKey: 'staging_company',
+      reason: 'Helpful when key rooms still need stronger presentation and buyer clarity.',
+    },
+  ];
+
+  const results = await Promise.all(
+    recommendationConfigs.map(async (config) => {
+      try {
+        const result = await listProvidersForProperty(propertyId, {
+          categoryKey: config.categoryKey,
+          limit: 2,
+          includeExternal: false,
+        });
+        return { config, result };
+      } catch {
+        return { config, result: null };
+      }
+    }),
+  );
+
+  return results
+    .flatMap(({ config, result }) =>
+      (result?.items || []).slice(0, 1).map((provider) => ({
+        categoryKey: config.categoryKey,
+        categoryLabel: result?.source?.categoryLabel || provider.categoryKey,
+        businessName: provider.businessName,
+        coverageLabel: provider.coverageLabel || '',
+        phone: provider.phone || '',
+        email: provider.email || '',
+        ratingLabel: provider.qualityScore ? `${provider.qualityScore}/100 Workside score` : '',
+        turnaroundLabel: provider.turnaroundLabel || '',
+        pricingSummary: provider.pricingSummary || '',
+        reason: config.reason,
+      })),
+    )
+    .slice(0, 3);
+}
+
 function normalizeReportCustomizations(customizations = {}) {
   const includedSections = (customizations.includedSections || []).filter(
     (sectionId) => REPORT_SECTION_LABELS[sectionId],
@@ -341,8 +519,9 @@ function buildVisionStoryBlocks({
     .map(({ asset, variant }) => buildVariantStoryBlock({ asset, variant }));
 }
 
-function buildReportPayload({
+async function buildReportPayload({
   property,
+  propertyId,
   pricing,
   mediaAssets,
   flyer,
@@ -396,6 +575,33 @@ function buildReportPayload({
   const sectionOutline = customizations.includedSections.map(
     (sectionId) => REPORT_SECTION_LABELS[sectionId],
   );
+  const propertyDetails = buildPropertyDetails(property, marketingHighlights);
+  const providerRecommendations = includedSectionSet.has('provider_recommendations')
+    ? await buildProviderRecommendations(propertyId)
+    : [];
+  const improvementEconomics = buildImprovementEconomics({
+    property,
+    improvementItems,
+    photoSummary,
+    checklist,
+  });
+  const riskOpportunity = buildRiskOpportunitySummary({
+    pricing,
+    photoSummary,
+    improvementItems,
+    checklist,
+  });
+  const buyerPersonaSummary = buildBuyerPersonaSummary({
+    property,
+    marketingGuidance,
+    pricing,
+  });
+  const nextSteps = buildNextStepPlan({
+    checklist,
+    improvementItems,
+    providerRecommendations,
+    photoSummary,
+  });
   const visionStoryBlocks = includedSectionSet.has('visual_improvement_previews')
     ? buildVisionStoryBlocks({
         mediaAssets,
@@ -407,7 +613,7 @@ function buildReportPayload({
   return {
     reportType: 'seller_intelligence_report',
     status: 'completed',
-    reportVersion: 2,
+    reportVersion: 3,
     title: customizations.title || `${property.title} Seller Intelligence Report`,
     executiveSummary:
       customizations.executiveSummary ||
@@ -458,8 +664,11 @@ function buildReportPayload({
         bedrooms: property.bedrooms,
         bathrooms: property.bathrooms,
         squareFeet: property.squareFeet,
+        lotSizeSqFt: property.lotSizeSqFt,
+        yearBuilt: property.yearBuilt,
         propertyType: property.propertyType,
       },
+      propertyDetails: includedSectionSet.has('property_details') ? propertyDetails : null,
       sectionOutline,
       checklistSummary: includedSectionSet.has('seller_checklist')
         ? checklist?.summary || null
@@ -470,6 +679,21 @@ function buildReportPayload({
       readinessSummary: includedSectionSet.has('readiness_score')
         ? readinessSummary
         : null,
+      providerRecommendations: includedSectionSet.has('provider_recommendations')
+        ? providerRecommendations
+        : [],
+      riskOpportunity: includedSectionSet.has('risk_opportunity')
+        ? riskOpportunity
+        : null,
+      nextSteps: includedSectionSet.has('next_steps')
+        ? nextSteps
+        : [],
+      improvementEconomics: includedSectionSet.has('improvement_recommendations')
+        ? improvementEconomics
+        : null,
+      buyerPersonaSummary: includedSectionSet.has('marketing_guidance')
+        ? buyerPersonaSummary
+        : null,
       marketingGuidance: includedSectionSet.has('marketing_guidance')
         ? {
             headline: marketingGuidance?.headline || flyer?.headline || property.title,
@@ -479,6 +703,8 @@ function buildReportPayload({
               customizedListingDescriptions.shortDescription,
             featureHighlights: marketingHighlights,
             photoSuggestions: marketingGuidance?.photoSuggestions || [],
+            buyerPersona: buyerPersonaSummary.buyerPersona,
+            topReasonsToBuy: buyerPersonaSummary.topReasonsToBuy,
           }
         : null,
       improvementGuidance: includedSectionSet.has('improvement_recommendations')
@@ -628,8 +854,9 @@ export async function generatePropertyReport({ propertyId, customizations = {} }
     customizations: normalizedCustomizations,
   });
 
-  const reportPayload = buildReportPayload({
+  const reportPayload = await buildReportPayload({
     property,
+    propertyId,
     pricing,
     mediaAssets,
     flyer,
@@ -669,115 +896,42 @@ export async function getLatestPropertyReport(propertyId) {
   return attachFreshness(serialized, sourceSnapshot);
 }
 
-function wrapText(text, maxChars = 84) {
-  if (!text) {
-    return [];
+function buildComparableMapImageUrl(property, comps = []) {
+  if (!env.GOOGLE_MAPS_SERVER_API_KEY || !property) {
+    return '';
   }
 
-  const words = String(text).split(/\s+/);
-  const lines = [];
-  let line = '';
-
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (candidate.length > maxChars && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = candidate;
-    }
+  const propertyQuery = [
+    property.addressLine1,
+    property.city,
+    property.state,
+    property.zip,
+  ]
+    .filter(Boolean)
+    .join(', ');
+  if (!propertyQuery) {
+    return '';
   }
 
-  if (line) {
-    lines.push(line);
-  }
+  const url = new URL('https://maps.googleapis.com/maps/api/staticmap');
+  url.searchParams.set('key', env.GOOGLE_MAPS_SERVER_API_KEY);
+  url.searchParams.set('size', '1200x760');
+  url.searchParams.set('scale', '2');
+  url.searchParams.set('maptype', 'roadmap');
+  url.searchParams.append('markers', `color:0xc87447|label:S|${propertyQuery}`);
+  url.searchParams.append('visible', propertyQuery);
 
-  return lines;
-}
-
-function drawWrappedText(page, font, text, options) {
-  const { x, y, size = 12, color = rgb(0, 0, 0), lineHeight = size * 1.5, maxChars = 84 } = options;
-  let cursorY = y;
-
-  for (const line of wrapText(text, maxChars)) {
-    page.drawText(line, {
-      x,
-      y: cursorY,
-      size,
-      font,
-      color,
-    });
-    cursorY -= lineHeight;
-  }
-
-  return cursorY;
-}
-
-async function fetchPdfImage(pdfDoc, imageUrl) {
-  if (!imageUrl) {
-    return null;
-  }
-
-  try {
-    const response = await fetch(imageUrl);
-    if (!response.ok) {
-      return null;
+  comps.slice(0, 5).forEach((comp, index) => {
+    if (!comp?.address) {
+      return;
     }
 
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    const contentType = response.headers.get('content-type') || '';
-    const isPng =
-      contentType.includes('png') ||
-      imageUrl.toLowerCase().includes('.png') ||
-      (bytes[0] === 0x89 &&
-        bytes[1] === 0x50 &&
-        bytes[2] === 0x4e &&
-        bytes[3] === 0x47);
-    const isJpeg =
-      contentType.includes('jpeg') ||
-      contentType.includes('jpg') ||
-      imageUrl.toLowerCase().includes('.jpg') ||
-      imageUrl.toLowerCase().includes('.jpeg') ||
-      (bytes[0] === 0xff && bytes[1] === 0xd8);
+    const label = String.fromCharCode(65 + index);
+    url.searchParams.append('markers', `color:0x4f7b62|label:${label}|${comp.address}`);
+    url.searchParams.append('visible', comp.address);
+  });
 
-    if (isPng) {
-      return pdfDoc.embedPng(bytes);
-    }
-
-    if (isJpeg) {
-      return pdfDoc.embedJpg(bytes);
-    }
-
-    const convertedBytes = await sharp(bytes).png().toBuffer();
-    return pdfDoc.embedPng(convertedBytes);
-  } catch {
-    return null;
-  }
-}
-
-function drawBulletList(page, font, items, options) {
-  const { x, y, size = 11, color = rgb(0, 0, 0), maxChars = 42, limit = items.length } = options;
-  let cursor = y;
-
-  for (const item of items.slice(0, limit)) {
-    cursor = drawWrappedText(page, font, `- ${item}`, {
-      x,
-      y: cursor,
-      size,
-      color,
-      maxChars,
-      lineHeight: size * 1.4,
-    }) - 6;
-  }
-
-  return cursor;
-}
-
-function sanitizeFilePart(value, fallback) {
-  return String(value || fallback)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || fallback;
+  return url.toString();
 }
 
 export async function exportPropertyReportPdf({ propertyId }) {
@@ -786,361 +940,19 @@ export async function exportPropertyReportPdf({ propertyId }) {
     throw new Error('Property not found.');
   }
 
-  const report = (await getLatestPropertyReport(propertyId)) || (await generatePropertyReport({ propertyId }));
-  const pdfDoc = await PDFDocument.create();
-  const coverPage = pdfDoc.addPage([612, 792]);
-  const detailPage = pdfDoc.addPage([612, 792]);
-  const visionStoryBlocks = report.payload?.visionStoryBlocks || [];
-  const visionPage = visionStoryBlocks.length ? pdfDoc.addPage([612, 792]) : null;
-  const headingFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const bodyFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const colors = {
-    ink: rgb(0.1, 0.13, 0.17),
-    muted: rgb(0.36, 0.41, 0.38),
-    clay: rgb(0.78, 0.45, 0.28),
-    moss: rgb(0.27, 0.39, 0.31),
-    panel: rgb(0.98, 0.95, 0.91),
-    line: rgb(0.87, 0.82, 0.75),
-    sky: rgb(0.91, 0.95, 0.99),
-  };
-
-  const heroPhoto = report.selectedPhotos?.[0] || null;
-  const embeddedHero = heroPhoto?.imageUrl ? await fetchPdfImage(pdfDoc, heroPhoto.imageUrl) : null;
-  const readinessSummary = report.payload?.readinessSummary || {};
-  const photoSummary = report.payload?.photoSummary || {};
-
-  for (const page of [coverPage, detailPage, visionPage].filter(Boolean)) {
-    page.drawRectangle({
-      x: 30,
-      y: 30,
-      width: 552,
-      height: 732,
-      color: colors.panel,
-      borderColor: colors.line,
-      borderWidth: 1,
-    });
-  }
-
-  coverPage.drawText('WORKSIDE SELLER INTELLIGENCE REPORT', {
-    x: 54,
-    y: 732,
-    size: 11,
-    font: headingFont,
-    color: colors.moss,
-  });
-  coverPage.drawText(report.title, {
-    x: 54,
-    y: 690,
-    size: 24,
-    font: headingFont,
-    color: colors.ink,
-    maxWidth: 340,
+  const report =
+    (await getLatestPropertyReport(propertyId)) ||
+    (await generatePropertyReport({ propertyId }));
+  const filename = `${sanitizeFilePart(property.title, 'property')}-seller-report.pdf`;
+  const { bytes } = await renderPropertySummaryPdf({
+    property,
+    report,
+    filename,
   });
 
-  let coverCursor = drawWrappedText(coverPage, bodyFont, report.executiveSummary, {
-    x: 54,
-    y: 636,
-    size: 12,
-    color: colors.muted,
-    maxChars: 52,
-    lineHeight: 18,
-  });
-
-  coverPage.drawText(`${property.addressLine1}, ${property.city}, ${property.state} ${property.zip}`, {
-    x: 54,
-    y: coverCursor - 18,
-    size: 12,
-    font: bodyFont,
-    color: colors.ink,
-    maxWidth: 300,
-  });
-
-  coverPage.drawRectangle({
-    x: 54,
-    y: 462,
-    width: 250,
-    height: 84,
-    color: colors.sky,
-    borderColor: colors.line,
-    borderWidth: 1,
-  });
-  coverPage.drawText('READINESS SCORE', {
-    x: 72,
-    y: 516,
-    size: 10,
-    font: headingFont,
-    color: colors.moss,
-  });
-  coverPage.drawText(`${readinessSummary.overallScore || 0}/100`, {
-    x: 72,
-    y: 486,
-    size: 24,
-    font: headingFont,
-    color: colors.ink,
-  });
-  coverPage.drawText(readinessSummary.label || 'Needs Work', {
-    x: 170,
-    y: 492,
-    size: 14,
-    font: headingFont,
-    color: colors.clay,
-  });
-
-  if (embeddedHero) {
-    const frame = { x: 370, y: 436, width: 160, height: 220 };
-    const dims = embeddedHero.scale(1);
-    const ratio = Math.min(frame.width / dims.width, frame.height / dims.height);
-    const width = dims.width * ratio;
-    const height = dims.height * ratio;
-
-    coverPage.drawRectangle({
-      x: frame.x,
-      y: frame.y,
-      width: frame.width,
-      height: frame.height,
-      color: rgb(1, 1, 1),
-      borderColor: colors.line,
-      borderWidth: 1,
-    });
-    coverPage.drawImage(embeddedHero, {
-      x: frame.x + (frame.width - width) / 2,
-      y: frame.y + (frame.height - height) / 2,
-      width,
-      height,
-    });
-  }
-
-  coverPage.drawText('REPORT OUTLINE', {
-    x: 54,
-    y: 412,
-    size: 11,
-    font: headingFont,
-    color: colors.moss,
-  });
-  drawBulletList(coverPage, bodyFont, report.payload?.sectionOutline || [], {
-    x: 60,
-    y: 388,
-    size: 10,
-    color: colors.ink,
-    maxChars: 40,
-    limit: 8,
-  });
-
-  detailPage.drawText('REPORT SNAPSHOT', {
-    x: 54,
-    y: 732,
-    size: 12,
-    font: headingFont,
-    color: colors.moss,
-  });
-
-  let detailCursor = 700;
-  detailPage.drawText('Pricing Narrative', {
-    x: 54,
-    y: detailCursor,
-    size: 14,
-    font: headingFont,
-    color: colors.ink,
-  });
-  detailCursor = drawWrappedText(detailPage, bodyFont, report.pricingSummary?.narrative || 'No pricing narrative is currently stored.', {
-    x: 54,
-    y: detailCursor - 22,
-    size: 11,
-    color: colors.muted,
-    maxChars: 42,
-    lineHeight: 16,
-  });
-
-  detailPage.drawText('Photo Summary', {
-    x: 54,
-    y: detailCursor - 10,
-    size: 14,
-    font: headingFont,
-    color: colors.ink,
-  });
-  detailCursor = drawBulletList(detailPage, bodyFont, [
-    photoSummary.summary || 'No photo summary available.',
-    `${photoSummary.totalPhotos || 0} uploaded photo(s)`,
-    `${photoSummary.listingCandidateCount || 0} listing candidate photo(s)`,
-    `${photoSummary.selectedPreferredVariantCount || 0} preferred vision variant(s) in the report set`,
-    `${photoSummary.missingRooms?.length || 0} core room(s) still missing`,
-  ], {
-    x: 60,
-    y: detailCursor - 34,
-    size: 10,
-    color: colors.ink,
-    maxChars: 42,
-    limit: 5,
-  });
-
-  detailPage.drawText('Checklist + Improvements', {
-    x: 54,
-    y: detailCursor - 10,
-    size: 14,
-    font: headingFont,
-    color: colors.ink,
-  });
-  drawBulletList(detailPage, bodyFont, [...(report.checklistItems || []).slice(0, 3), ...(report.improvementItems || []).slice(0, 2)], {
-    x: 60,
-    y: detailCursor - 34,
-    size: 10,
-    color: colors.ink,
-    maxChars: 42,
-    limit: 5,
-  });
-
-  detailPage.drawText('Selected Comps', {
-    x: 330,
-    y: 700,
-    size: 14,
-    font: headingFont,
-    color: colors.ink,
-  });
-  let compCursor = 676;
-  for (const comp of report.selectedComps.slice(0, 4)) {
-    compCursor = drawWrappedText(detailPage, bodyFont, `${comp.address || 'Comparable property'} - ${formatCurrency(comp.price || 0)} - ${(comp.distanceMiles || 0).toFixed(2)} mi`, {
-      x: 330,
-      y: compCursor,
-      size: 10,
-      color: colors.ink,
-      maxChars: 34,
-      lineHeight: 14,
-    }) - 6;
-  }
-
-  detailPage.drawText('Marketing Guidance', {
-    x: 330,
-    y: compCursor - 10,
-    size: 14,
-    font: headingFont,
-    color: colors.ink,
-  });
-  drawWrappedText(detailPage, bodyFont, report.payload?.marketingGuidance?.shortDescription || report.payload?.listingDescriptions?.shortDescription || '', {
-    x: 330,
-    y: compCursor - 34,
-    size: 10,
-    color: colors.muted,
-    maxChars: 34,
-    lineHeight: 14,
-  });
-
-  drawWrappedText(detailPage, bodyFont, report.disclaimer, {
-    x: 54,
-    y: 82,
-    size: 9,
-    color: colors.muted,
-    maxChars: 94,
-    lineHeight: 12,
-  });
-
-  if (visionPage) {
-    visionPage.drawText('VISUAL IMPROVEMENT PREVIEWS', {
-      x: 54,
-      y: 732,
-      size: 12,
-      font: headingFont,
-      color: colors.moss,
-    });
-
-    let storyCursor = 696;
-    for (const storyBlock of visionStoryBlocks.slice(0, 2)) {
-      const embeddedOriginal = await fetchPdfImage(pdfDoc, storyBlock.originalImageUrl);
-      const embeddedVariant = await fetchPdfImage(pdfDoc, storyBlock.variantImageUrl);
-      visionPage.drawText(storyBlock.title || 'Visual Preview', {
-        x: 54,
-        y: storyCursor,
-        size: 14,
-        font: headingFont,
-        color: colors.ink,
-      });
-
-      const imageTop = storyCursor - 22;
-      const imageFrame = { width: 120, height: 92 };
-      const drawImageInFrame = (embeddedImage, x, y) => {
-        visionPage.drawRectangle({
-          x,
-          y,
-          width: imageFrame.width,
-          height: imageFrame.height,
-          color: rgb(1, 1, 1),
-          borderColor: colors.line,
-          borderWidth: 1,
-        });
-
-        if (!embeddedImage) {
-          return;
-        }
-
-        const dims = embeddedImage.scale(1);
-        const ratio = Math.min(imageFrame.width / dims.width, imageFrame.height / dims.height);
-        const width = dims.width * ratio;
-        const height = dims.height * ratio;
-        visionPage.drawImage(embeddedImage, {
-          x: x + (imageFrame.width - width) / 2,
-          y: y + (imageFrame.height - height) / 2,
-          width,
-          height,
-        });
-      };
-
-      drawImageInFrame(embeddedOriginal, 54, imageTop - imageFrame.height);
-      drawImageInFrame(embeddedVariant, 190, imageTop - imageFrame.height);
-      visionPage.drawText('Before', {
-        x: 54,
-        y: imageTop + 4,
-        size: 9,
-        font: headingFont,
-        color: colors.moss,
-      });
-      visionPage.drawText('After', {
-        x: 190,
-        y: imageTop + 4,
-        size: 9,
-        font: headingFont,
-        color: colors.clay,
-      });
-
-      let copyCursor = drawWrappedText(visionPage, bodyFont, `What changed: ${storyBlock.whatChanged}`, {
-        x: 334,
-        y: storyCursor - 2,
-        size: 10,
-        color: colors.ink,
-        maxChars: 34,
-        lineHeight: 14,
-      }) - 4;
-      copyCursor = drawWrappedText(visionPage, bodyFont, `Why it matters: ${storyBlock.whyItMatters}`, {
-        x: 334,
-        y: copyCursor,
-        size: 10,
-        color: colors.muted,
-        maxChars: 34,
-        lineHeight: 14,
-      }) - 4;
-      copyCursor = drawWrappedText(visionPage, bodyFont, `Suggested action: ${storyBlock.suggestedAction}`, {
-        x: 334,
-        y: copyCursor,
-        size: 10,
-        color: colors.ink,
-        maxChars: 34,
-        lineHeight: 14,
-      }) - 4;
-      drawWrappedText(visionPage, bodyFont, storyBlock.disclaimer, {
-        x: 334,
-        y: copyCursor,
-        size: 9,
-        color: colors.muted,
-        maxChars: 34,
-        lineHeight: 12,
-      });
-
-      storyCursor -= 280;
-    }
-  }
-
-  const bytes = await pdfDoc.save();
   return {
     bytes,
-    filename: `${sanitizeFilePart(property.title, 'property')}-seller-report.pdf`,
+    filename,
     report,
   };
 }

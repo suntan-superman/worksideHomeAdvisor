@@ -460,3 +460,19 @@ export function getLatestReport(propertyId) {
 export function getReportExportUrl(propertyId) {
   return `${API_BASE_URL}/api/v1/properties/${propertyId}/report/export.pdf`;
 }
+
+export function getPropertySummaryReport(propertyId) {
+  return request(`/api/v1/reports/property-summary/${propertyId}`);
+}
+
+export function getPropertySummaryReportExportUrl(propertyId) {
+  return `${API_BASE_URL}/api/v1/reports/property-summary/${propertyId}/export.pdf`;
+}
+
+export function getMarketingReport(propertyId) {
+  return request(`/api/v1/reports/marketing/${propertyId}`);
+}
+
+export function getMarketingReportExportUrl(propertyId) {
+  return `${API_BASE_URL}/api/v1/reports/marketing/${propertyId}/export.pdf`;
+}

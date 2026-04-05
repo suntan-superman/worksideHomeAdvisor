@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { normalizeLandingAttribution } from '@workside/utils';
 
 import { AppFrame } from '../../components/AppFrame';
+import { OnboardingGuide } from '../../components/OnboardingGuide';
 import { PasswordInput } from '../../components/PasswordInput';
 import { Toast } from '../../components/Toast';
 import {
@@ -54,27 +55,53 @@ function getRoleStatus(role, mode = 'login') {
   return 'Log in with your email and password to open your seller workspace.';
 }
 
-function buildOnboardingSteps(role) {
-  if (role === 'provider') {
-    return [
-      'Create your provider account',
-      'Verify your email',
-      'Finish marketplace profile and billing',
-    ];
-  }
-
-  if (role === 'agent') {
-    return [
-      'Create your agent login',
-      'Verify your email',
-      'Open the listing workspace and add your first property',
-    ];
-  }
+function buildAuthGuideSteps({ role, mode, email }) {
+  const roleLabel = ROLE_OPTIONS.find((option) => option.value === role)?.label || 'Seller';
+  const emailReady = isValidEmail(email);
+  const isVerificationMode = mode === 'verify';
+  const isSignupMode = mode === 'signup';
 
   return [
-    'Create your seller login',
-    'Verify your email',
-    'Open the guided workspace and create your property',
+    {
+      id: 'choose-role',
+      title: 'Choose your account path',
+      detail: `Use the ${roleLabel.toLowerCase()} path so Workside sends you to the right workspace after login.`,
+      helper: 'If you are signing up, choose the role first so the guided workflow and destination are correct.',
+      status: 'complete',
+    },
+    {
+      id: 'credentials',
+      title: isSignupMode ? 'Create your login' : 'Enter your credentials',
+      detail: isSignupMode
+        ? 'Add the basics for your account so Workside can create the login and send verification.'
+        : 'Use your verified email and password to continue into the workspace.',
+      helper: isSignupMode
+        ? 'Seller and realtor accounts go to the dashboard. Providers continue into the provider workspace.'
+        : 'If the account still needs verification, Workside will move you into the OTP step automatically.',
+      status: isVerificationMode ? 'complete' : 'active',
+    },
+    {
+      id: 'verify-email',
+      title: 'Verify your email',
+      detail: emailReady
+        ? `Enter the OTP sent to ${email} so we can unlock the workspace.`
+        : 'Use the OTP from your inbox to verify the email and finish setup.',
+      helper: 'You can resend the code at any time if the inbox message is delayed.',
+      status: isVerificationMode ? 'active' : isSignupMode ? 'upcoming' : 'upcoming',
+    },
+    {
+      id: 'enter-workspace',
+      title: role === 'provider' ? 'Open your provider workspace' : 'Open your guided workspace',
+      detail:
+        role === 'provider'
+          ? 'Finish marketplace profile, verification, and billing setup once the account is live.'
+          : 'Create the property and let the guided workflow carry pricing, prep, photos, providers, and materials.',
+      helper:
+        role === 'provider'
+          ? 'This is where marketplace profile, verification, and lead routing all come together.'
+          : 'This is where the real pricing, checklist, provider, and marketing workflow begins.',
+      status: 'upcoming',
+    },
   ];
 }
 
@@ -383,13 +410,22 @@ export default function AuthPage() {
       />
       <section className="content-grid">
         <div className="content-card">
-          <span className="label">Auth foundation</span>
-          <h1>Email, password, then OTP verification.</h1>
-          <p>
-            The API scaffold already includes signup, login, resend-OTP, and
-            verify-email endpoints. The UI here is the first shell for wiring
-            the live forms next.
-          </p>
+          <OnboardingGuide
+            eyebrow="Auth foundation"
+            title="Email, password, then OTP verification."
+            intro="Move through account setup in a predictable order, then continue directly into the workspace for your role."
+            steps={buildAuthGuideSteps({
+              role: form.role,
+              mode,
+              email: form.email,
+            })}
+            currentStepId={mode === 'verify' ? 'verify-email' : 'credentials'}
+            footer={
+              attribution?.campaign
+                ? `Campaign context is already attached, so this account will carry the ad attribution into signup and the first workspace steps.`
+                : 'Once the account is live, Workside carries you straight into the next guided workspace instead of leaving you at a dead-end auth screen.'
+            }
+          />
           <div className="mode-switch">
             <button
               type="button"
@@ -419,20 +455,12 @@ export default function AuthPage() {
             ) : null}
           </div>
           <p className="status-copy">{status}</p>
-          <div className="content-subsection">
-            <span className="label">Guided onboarding</span>
-            <div className="plain-list">
-              {buildOnboardingSteps(form.role).map((step) => (
-                <p key={step}>{step}</p>
-              ))}
-            </div>
-            {attribution?.campaign ? (
-              <p className="status-copy">
-                Campaign: <strong>{attribution.campaign}</strong>
-                {attribution.platform ? ` · ${attribution.platform}` : ''}
-              </p>
-            ) : null}
-          </div>
+          {attribution?.campaign ? (
+            <p className="status-copy">
+              Campaign: <strong>{attribution.campaign}</strong>
+              {attribution.platform ? ` · ${attribution.platform}` : ''}
+            </p>
+          ) : null}
         </div>
 
         <form className="form-card" onSubmit={handlePrimaryAction}>

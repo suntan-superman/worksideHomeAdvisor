@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+import { OnboardingGuide } from '../../../components/OnboardingGuide';
 import { PasswordInput } from '../../../components/PasswordInput';
 import {
   createProviderBillingCheckout,
@@ -208,6 +209,12 @@ function isValidUsState(value) {
   return US_STATE_OPTIONS.some((option) => option.value === String(value || '').trim().toUpperCase());
 }
 
+function formatActivationStatusLabel(value) {
+  return String(value || 'attention')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 function sortCategoryOptions(options = []) {
   return [...options].sort((left, right) =>
     String(left?.label || '').localeCompare(String(right?.label || '')),
@@ -225,6 +232,48 @@ function getExistingEmailConflictMessage(message) {
   }
 
   return '';
+}
+
+function buildProviderGuideSteps(stepIndex, signedInProvider = false) {
+  const stepDescriptions = [
+    {
+      title: 'Basic info',
+      detail: signedInProvider
+        ? 'Confirm the business basics for the provider profile you are already signed into.'
+        : 'Create the provider account and define the business identity that sellers will see first.',
+      helper: signedInProvider
+        ? 'Because you are already signed in, Workside will skip account creation and move straight into provider setup.'
+        : 'Business name, category, email, and password set the foundation for the marketplace profile.',
+    },
+    {
+      title: 'Coverage',
+      detail: 'Define where this provider actually works so matching and map coverage stay realistic.',
+      helper: 'ZIP coverage and radius drive marketplace matching, provider map placement, and seller-facing discovery.',
+    },
+    {
+      title: 'Business details',
+      detail: 'Add the service story, trust profile, and differentiators that make the provider credible.',
+      helper: 'This is where sellers learn what the provider does, how fast they work, and what trust signals already exist.',
+    },
+    {
+      title: 'Lead preferences',
+      detail: 'Choose how lead notifications arrive so routing does not break once sellers start requesting help.',
+      helper: 'This step controls who gets the lead, where it goes, and whether SMS consent exists.',
+    },
+    {
+      title: 'Plan',
+      detail: 'Pick the marketplace plan, then continue into billing or verification handoff.',
+      helper: 'This final step decides whether the profile stays basic or moves into the paid placement path.',
+    },
+  ];
+
+  return stepDescriptions.map((step, index) => ({
+    id: `provider-onboarding-${index}`,
+    title: step.title,
+    detail: step.detail,
+    helper: step.helper,
+    status: index < stepIndex ? 'complete' : index === stepIndex ? 'active' : 'upcoming',
+  }));
 }
 
 export function ProviderSignupClient({
@@ -780,6 +829,33 @@ export function ProviderSignupClient({
           <div className="form-card">
             <span className="label">Next steps</span>
             <h2>What happens next</h2>
+            {createdProvider.activation ? (
+              <div className="provider-activation-list">
+                {pendingVerificationEmail ? (
+                  <article className="provider-activation-item">
+                    <div className="provider-activation-item-header">
+                      <strong>Email verification</strong>
+                      <span className="checklist-chip checklist-chip-high">Action needed</span>
+                    </div>
+                    <p>
+                      Verify {pendingVerificationEmail} first. Billing and marketplace activation stay on hold
+                      until the provider email is confirmed.
+                    </p>
+                  </article>
+                ) : null}
+                {createdProvider.activation.items?.map((item) => (
+                  <article key={item.key} className="provider-activation-item">
+                    <div className="provider-activation-item-header">
+                      <strong>{item.label}</strong>
+                      <span className={`checklist-chip checklist-chip-${item.status === 'complete' ? 'low' : item.status === 'in_progress' ? 'medium' : 'high'}`}>
+                        {formatActivationStatusLabel(item.status)}
+                      </span>
+                    </div>
+                    <p>{item.detail}</p>
+                  </article>
+                ))}
+              </div>
+            ) : null}
             <ul className="plain-list">
               {pendingVerificationEmail ? (
                 <>
@@ -853,24 +929,18 @@ export function ProviderSignupClient({
       <Toast tone={toast?.tone} title={toast?.title} message={toast?.message} onClose={() => setToast(null)} />
       <section className="content-grid onboarding-shell">
         <div className="content-card">
-          <span className="label">Provider onboarding</span>
-          <h1>List your business and start receiving seller workflow leads.</h1>
-          <p>
-            This onboarding is designed to stay fast, mobile-friendly, and low-friction. Finish the
-            core profile now, then move into billing and activation next.
-          </p>
-
-          <div className="onboarding-progress">
-            {STEP_TITLES.map((title, index) => (
-              <div
-                key={title}
-                className={index === stepIndex ? 'onboarding-step active' : index < stepIndex ? 'onboarding-step complete' : 'onboarding-step'}
-              >
-                <strong>{index + 1}</strong>
-                <span>{title}</span>
-              </div>
-            ))}
-          </div>
+          <OnboardingGuide
+            eyebrow="Provider onboarding"
+            title="List your business and start receiving seller workflow leads."
+            intro="This flow stays fast and practical: set the core profile first, then move into verification, billing, and activation without guessing what comes next."
+            steps={buildProviderGuideSteps(stepIndex, signedInProvider)}
+            currentStepId={`provider-onboarding-${stepIndex}`}
+            footer={
+              stepIndex === STEP_TITLES.length - 1
+                ? 'Once the profile is submitted, Workside moves the provider into the billing and activation path instead of leaving setup unfinished.'
+                : 'Each step here feeds the matching logic, trust profile, billing readiness, and provider portal experience that follow.'
+            }
+          />
 
           <div className="status-copy">
             Current step: <strong>{STEP_TITLES[stepIndex]}</strong>

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
@@ -100,6 +100,12 @@ function formatVerificationLabel(value) {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function formatActivationStatusLabel(value) {
+  return String(value || 'attention')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 function formatDate(value) {
   if (!value) {
     return 'Not yet';
@@ -139,6 +145,7 @@ export function ProviderPortalClient({
   const [appSession, setAppSession] = useState(null);
   const [appSessionReady, setAppSessionReady] = useState(false);
   const [uploadingDocumentType, setUploadingDocumentType] = useState('');
+  const profileFormRef = useRef(null);
   const portalSessionQueryKey = [
     'provider-portal-session',
     providerId,
@@ -577,6 +584,31 @@ export function ProviderPortalClient({
     }
   }
 
+  function handleActivationAction(item) {
+    if (!item?.actionKey) {
+      return;
+    }
+
+    if (item.actionKey === 'billing') {
+      handleContinueBilling();
+      return;
+    }
+
+    if (item.actionKey === 'verification') {
+      handleSubmitVerification();
+      return;
+    }
+
+    if (item.actionKey === 'profile') {
+      profileFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
+    if (item.actionKey === 'support' && typeof window !== 'undefined') {
+      window.location.href = 'mailto:support@worksidesoftware.com';
+    }
+  }
+
   async function handleContinueBilling() {
     const provider = dashboard?.provider;
     if (!provider) {
@@ -657,6 +689,7 @@ export function ProviderPortalClient({
   const summary = dashboard.summary || {};
   const leads = dashboard.leads || [];
   const verification = provider.verification || {};
+  const activation = provider.activation || { items: [], blockers: [], nextStep: null, readyPercent: 0 };
   const billingNeedsAction =
     provider.subscription?.planCode &&
     provider.subscription?.planCode !== 'provider_basic' &&
@@ -707,6 +740,45 @@ export function ProviderPortalClient({
         </div>
 
         <div className="form-card provider-portal-sidecard">
+          <span className="label">Activation</span>
+          <h2>Marketplace readiness</h2>
+          <div className="provider-activation-summary">
+            <strong>{activation.readyPercent || 0}% ready</strong>
+            <span>
+              {activation.live
+                ? 'This provider is live for marketplace matching.'
+                : `${activation.completeCount || 0}/${activation.totalCount || 0} activation checks complete.`}
+            </span>
+          </div>
+          {activation.nextStep ? (
+            <div className="provider-activation-next">
+              <strong>Next step: {activation.nextStep.label}</strong>
+              <p>{activation.nextStep.detail}</p>
+              {activation.nextStep.actionKey ? (
+                <button
+                  type="button"
+                  className="button-secondary"
+                  disabled={busy}
+                  onClick={() => handleActivationAction(activation.nextStep)}
+                >
+                  {activation.nextStep.actionLabel || 'Open next step'}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="provider-activation-list">
+            {(activation.items || []).map((item) => (
+              <article key={item.key} className="provider-activation-item">
+                <div className="provider-activation-item-header">
+                  <strong>{item.label}</strong>
+                  <span className={`checklist-chip checklist-chip-${item.status === 'complete' ? 'low' : item.status === 'in_progress' ? 'medium' : 'high'}`}>
+                    {formatActivationStatusLabel(item.status)}
+                  </span>
+                </div>
+                <p>{item.detail}</p>
+              </article>
+            ))}
+          </div>
           <span className="label">Quick actions</span>
           <h2>Marketplace controls</h2>
           <div className="button-stack">
@@ -751,7 +823,7 @@ export function ProviderPortalClient({
       </section>
 
       <section className="content-grid provider-portal-shell">
-        <form className="form-card provider-portal-profile" onSubmit={handleSaveProfile}>
+        <form ref={profileFormRef} className="form-card provider-portal-profile" onSubmit={handleSaveProfile}>
           <span className="label">Marketplace profile</span>
           <h2>Keep your listing current</h2>
           <label>

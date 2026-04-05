@@ -625,6 +625,187 @@ function buildVerificationProfile(providerDocument, categoryDocument = null) {
   };
 }
 
+function isValidEmailAddress(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeString(value));
+}
+
+function hasValidLeadPhone(value) {
+  return normalizePhoneNumber(value).length >= 10;
+}
+
+function buildProviderActivationChecklist(providerDocument, verificationProfile, categoryDocument = null) {
+  const provider = providerDocument || {};
+  const serviceArea = provider.serviceArea || {};
+  const leadRouting = provider.leadRouting || {};
+  const subscription = provider.subscription || {};
+  const compliance = provider.compliance || {};
+  const verification = verificationProfile || buildVerificationProfile(provider, categoryDocument);
+  const verificationRequirements = verification.requirements || buildVerificationRequirements(categoryDocument);
+  const planCode = subscription.planCode || 'provider_basic';
+  const isPaidPlan = planCode !== 'provider_basic';
+  const billingReady = !isPaidPlan || ['active', 'trialing', 'past_due', 'paid'].includes(subscription.status || '');
+  const wantsSms = ['sms', 'sms_and_email'].includes(leadRouting.deliveryMode || 'sms_and_email');
+  const wantsEmail = ['email', 'sms_and_email'].includes(leadRouting.deliveryMode || 'sms_and_email');
+  const leadPhoneReady = !wantsSms || hasValidLeadPhone(leadRouting.notifyPhone);
+  const leadEmailReady = !wantsEmail || isValidEmailAddress(leadRouting.notifyEmail || provider.email);
+  const profileMissing = [];
+  if (!normalizeString(provider.categoryKey)) profileMissing.push('business type');
+  if (!normalizeString(provider.description)) profileMissing.push('description');
+  if (!normalizeString(serviceArea.city)) profileMissing.push('city');
+  if (!normalizeString(serviceArea.state)) profileMissing.push('state');
+  if (!(serviceArea.zipCodes || []).length) profileMissing.push('ZIP coverage');
+  if (!Number(serviceArea.radiusMiles || 0)) profileMissing.push('service radius');
+  const profileReady = !profileMissing.length;
+  const leadRoutingIssues = [];
+  if (wantsSms && !leadPhoneReady) leadRoutingIssues.push('valid SMS phone');
+  if (wantsEmail && !leadEmailReady) leadRoutingIssues.push('valid lead email');
+  const leadRoutingReady = !leadRoutingIssues.length;
+  const verificationRecommended = Object.values(verificationRequirements).some(Boolean);
+  const hasVerificationDetails = Boolean(
+    verification.insurance?.carrier ||
+      verification.insurance?.policyNumber ||
+      verification.insurance?.expirationDate ||
+      verification.insurance?.certificateDocument?.storageKey ||
+      verification.license?.licenseNumber ||
+      verification.license?.state ||
+      verification.license?.document?.storageKey ||
+      verification.bonding?.hasBond,
+  );
+
+  const items = [
+    {
+      key: 'profile',
+      label: 'Marketplace profile',
+      status: profileReady ? 'complete' : 'attention',
+      blocking: !profileReady,
+      actionKey: 'profile',
+      actionLabel: 'Finish profile',
+      detail: profileReady
+        ? 'Business type, service area, and description are filled in.'
+        : `Still needed: ${profileMissing.join(', ')}.`,
+    },
+    {
+      key: 'routing',
+      label: 'Lead routing',
+      status: leadRoutingReady ? 'complete' : 'attention',
+      blocking: !leadRoutingReady,
+      actionKey: 'profile',
+      actionLabel: 'Fix lead routing',
+      detail: leadRoutingReady
+        ? 'Lead contact channels are valid for the selected delivery mode.'
+        : `Still needed: ${leadRoutingIssues.join(', ')}.`,
+    },
+    {
+      key: 'verification',
+      label: 'Trust verification',
+      status:
+        verification.review?.reviewStatus === 'verified'
+          ? 'complete'
+          : verification.review?.reviewStatus === 'submitted'
+            ? 'in_progress'
+            : verification.review?.reviewStatus === 'rejected'
+              ? 'blocked'
+              : hasVerificationDetails
+                ? 'attention'
+                : verificationRecommended
+                  ? 'attention'
+                  : 'complete',
+      blocking: verification.review?.reviewStatus === 'rejected',
+      actionKey: 'verification',
+      actionLabel:
+        verification.review?.reviewStatus === 'verified'
+          ? 'Verified'
+          : verification.review?.reviewStatus === 'submitted'
+            ? 'Awaiting review'
+            : 'Submit verification',
+      detail:
+        verification.review?.reviewStatus === 'verified'
+          ? 'Trust details have been verified by Workside.'
+          : verification.review?.reviewStatus === 'submitted'
+            ? 'Verification details were submitted and are waiting on admin review.'
+            : verification.review?.reviewStatus === 'rejected'
+              ? 'Admin review requested changes before verification can be approved.'
+              : hasVerificationDetails
+                ? 'Verification details are saved, but still need to be submitted for review.'
+                : verificationRecommended
+                  ? 'Add trust details and submit them for review to strengthen marketplace trust.'
+                  : 'Verification is optional for this business type and can be added later.',
+    },
+    {
+      key: 'billing',
+      label: 'Billing',
+      status: billingReady ? 'complete' : 'attention',
+      blocking: !billingReady,
+      actionKey: 'billing',
+      actionLabel: billingReady ? 'Billing ready' : 'Continue billing',
+      detail: billingReady
+        ? isPaidPlan
+          ? 'Billing is active for the selected paid plan.'
+          : 'Basic plan does not require billing before review.'
+        : 'A paid plan was selected, so billing must finish before marketplace activation.',
+    },
+    {
+      key: 'approval',
+      label: 'Admin approval',
+      status:
+        compliance.approvalStatus === 'approved'
+          ? 'complete'
+          : ['review', 'submitted'].includes(compliance.approvalStatus || '')
+            ? 'in_progress'
+            : 'attention',
+      blocking: compliance.approvalStatus !== 'approved',
+      actionKey: 'support',
+      actionLabel: compliance.approvalStatus === 'approved' ? 'Approved' : 'Awaiting approval',
+      detail:
+        compliance.approvalStatus === 'approved'
+          ? 'Workside has approved this provider for marketplace participation.'
+          : 'Workside review is still required before the provider can go live in the marketplace.',
+    },
+    {
+      key: 'live',
+      label: 'Marketplace live',
+      status: provider.status === 'active' ? 'complete' : 'blocked',
+      blocking: provider.status !== 'active',
+      actionKey: 'status',
+      actionLabel: provider.status === 'active' ? 'Live now' : 'Not live yet',
+      detail:
+        provider.status === 'active'
+          ? 'This provider can be matched to sellers right now.'
+          : 'The provider is not yet live. Billing, review, or approval still needs attention first.',
+    },
+  ];
+
+  const completeCount = items.filter((item) => item.status === 'complete').length;
+  const blockers = items.filter((item) => item.blocking && item.status !== 'complete');
+  const nextStep =
+    items.find((item) => item.status === 'attention' || item.status === 'blocked' || item.status === 'in_progress') ||
+    items[items.length - 1];
+
+  return {
+    readyPercent: Math.round((completeCount / items.length) * 100),
+    completeCount,
+    totalCount: items.length,
+    live: provider.status === 'active',
+    blockers: blockers.map((item) => ({
+      key: item.key,
+      label: item.label,
+      detail: item.detail,
+      actionKey: item.actionKey,
+      actionLabel: item.actionLabel,
+    })),
+    nextStep: nextStep
+      ? {
+          key: nextStep.key,
+          label: nextStep.label,
+          detail: nextStep.detail,
+          actionKey: nextStep.actionKey,
+          actionLabel: nextStep.actionLabel,
+        }
+      : null,
+    items,
+  };
+}
+
 function getProviderVerificationDocument(providerDocument, documentType) {
   if (documentType === 'insurance_certificate') {
     return providerDocument.verification?.insurance?.certificateDocument || null;
@@ -1183,6 +1364,7 @@ function serializeProvider(document, extras = {}) {
   const { categoryDocument, ...restExtras } = extras;
   const category = categoryDocument || null;
   const verification = buildVerificationProfile(document, category);
+  const activation = buildProviderActivationChecklist(document, verification, category);
 
   return {
     id: document._id?.toString?.() || String(document._id),
@@ -1227,6 +1409,7 @@ function serializeProvider(document, extras = {}) {
       reviewedBy: document.compliance?.reviewedBy || '',
     },
     verification,
+    activation,
     createdAt: document.createdAt || null,
     updatedAt: document.updatedAt || null,
     ...restExtras,

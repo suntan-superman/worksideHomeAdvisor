@@ -7,6 +7,7 @@ import { authRoutes } from './modules/auth/auth.routes.js';
 import { billingRoutes } from './modules/billing/billing.routes.js';
 import { dashboardRoutes } from './modules/dashboard/dashboard.routes.js';
 import { documentsRoutes } from './modules/documents/documents.routes.js';
+import { reportsRoutes } from './modules/documents/reports.routes.js';
 import { aiRoutes } from './modules/ai/ai.routes.js';
 import { mediaRoutes } from './modules/media/media.routes.js';
 import { marketplaceSmsRoutes } from './modules/marketplace-sms/marketplace-sms.routes.js';
@@ -49,6 +50,7 @@ export function buildApp() {
   app.register(workflowRoutes, { prefix: '/api/v1/properties' });
   app.register(dashboardRoutes, { prefix: '/api/v1/properties' });
   app.register(documentsRoutes, { prefix: '/api/v1/properties' });
+  app.register(reportsRoutes, { prefix: '/api/v1/reports' });
   app.register(aiRoutes, { prefix: '/api/v1/ai' });
 
   return app;
