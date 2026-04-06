@@ -175,7 +175,6 @@ export function RootScreen() {
   const queryClient = useQueryClient();
   const [authMode, setAuthMode] = useState('login');
   const [showPassword, setShowPassword] = useState(false);
-  const [propertyDetailsCollapsed, setPropertyDetailsCollapsed] = useState(false);
   const [propertySection, setPropertySection] = useState('overview');
   const [busyState, setBusyState] = useState(false);
   const [status, setStatus] = useState('Sign in with the same verified seller account you use on the web.');
@@ -190,7 +189,7 @@ export function RootScreen() {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [pendingVisionJobType, setPendingVisionJobType] = useState('');
   const [rememberedEmail, setRememberedEmail] = useState('');
-  const [showSettings, setShowSettings] = useState(false);
+  const [appScreen, setAppScreen] = useState('home');
   const [showVisionDetails, setShowVisionDetails] = useState(false);
   const [showCompletedTasks, setShowCompletedTasks] = useState(false);
   const [form, setForm] = useState({
@@ -607,6 +606,7 @@ export function RootScreen() {
     queryClient.removeQueries({ queryKey: ['mobile-workflow'] });
     queryClient.removeQueries({ queryKey: ['mobile-media-variants'] });
     setSession(null);
+    setAppScreen('home');
     setPropertyId('');
     setSelectedAssetId('');
     setSelectedVariantId('');
@@ -658,8 +658,8 @@ export function RootScreen() {
 
     try {
       setPropertyId(nextPropertyId);
-      setPropertyDetailsCollapsed(false);
       setPropertySection('overview');
+      setAppScreen('property');
       const nextProperty = properties.find((property) => property.id === nextPropertyId);
       setStatus(nextProperty ? `Loaded ${nextProperty.title}.` : 'Property loaded.');
     } catch (requestError) {
@@ -887,757 +887,756 @@ export function RootScreen() {
     }
   }
 
-  if (session?.user) {
+  const propertyAddress = selectedProperty
+    ? [
+        selectedProperty.addressLine1,
+        [selectedProperty.city, selectedProperty.state, selectedProperty.zip].filter(Boolean).join(' '),
+      ]
+        .filter(Boolean)
+        .join(', ')
+    : '';
+
+  const screenTitle =
+    appScreen === 'settings'
+      ? 'Settings'
+      : appScreen === 'property'
+        ? selectedProperty?.title || 'Property workspace'
+        : 'Home Advisor';
+
+  function renderPropertyWorkspaceContent() {
     return (
-      <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <View style={styles.card}>
-            <Text style={styles.kicker}>Mobile Workspace</Text>
-            <Text style={styles.title}>Workside Home Advisor</Text>
-            <Text style={styles.body}>
-              Pricing, photos, checklist progress, and seller guidance stay connected here across every property.
+      <>
+        {workflow ? (
+          <View style={styles.workflowGuideCard}>
+            <Text style={styles.label}>Your progress</Text>
+            <Text style={styles.taskSummaryValue}>{workflow.completionPercent}% complete</Text>
+            <Text style={styles.taskSummaryText}>
+              {workflow.currentPhaseLabel} · {viewerRole === 'agent' ? 'Realtor guide' : 'Seller guide'}
             </Text>
-
-            <View style={styles.userCard}>
-              <View style={styles.userCardHeader}>
-                <View style={styles.userCardCopy}>
-                  <Text style={styles.label}>Signed in as</Text>
-                  <Text style={styles.userName}>{getDisplayName(session.user)}</Text>
-                  <Text style={styles.userEmail}>{session.user.email}</Text>
-                </View>
-                <Pressable
-                  onPress={() => setShowSettings((current) => !current)}
-                  style={[styles.chipButton, showSettings ? styles.chipButtonActive : null]}
-                >
-                  <Text style={showSettings ? styles.chipButtonTextActive : styles.chipButtonText}>
-                    {showSettings ? 'Close settings' : 'Settings'}
-                  </Text>
-                </Pressable>
+            <Text style={styles.taskSummaryText}>
+              Market-ready {workflow.marketReadyScore}/100
+            </Text>
+            {workflow.nextStep ? (
+              <View style={styles.workflowNextCard}>
+                <Text style={styles.workflowNextLabel}>Next step</Text>
+                <Text style={styles.taskTitle}>{workflow.nextStep.title}</Text>
+                <Text style={styles.taskDetail}>{workflow.nextStep.description}</Text>
+                {workflow.nextStep.helperText ? (
+                  <Text style={styles.workflowHelperText}>{workflow.nextStep.helperText}</Text>
+                ) : null}
               </View>
+            ) : null}
+            <View style={styles.workflowPhaseRow}>
+              {(workflow.phases || []).map((phase) => (
+                <View
+                  key={phase.key}
+                  style={[
+                    styles.workflowPhaseChip,
+                    phase.status === 'complete'
+                      ? styles.workflowPhaseChipComplete
+                      : phase.status === 'in_progress'
+                        ? styles.workflowPhaseChipActive
+                        : null,
+                  ]}
+                >
+                  <Text style={styles.workflowPhaseChipLabel}>{phase.label}</Text>
+                  <Text style={styles.workflowPhaseChipMeta}>
+                    {phase.completedSteps}/{phase.totalSteps}
+                  </Text>
+                </View>
+              ))}
             </View>
+          </View>
+        ) : null}
 
-            {showSettings ? (
-              <View style={styles.settingsCard}>
-                <Text style={styles.label}>Settings</Text>
-                <Text style={styles.body}>
-                  Manage your account, reach support, and review Workside policy links.
+        <View style={styles.sectionChipRow}>
+          {[
+            ['overview', 'Overview'],
+            ['capture', 'Capture'],
+            ['gallery', 'Gallery'],
+            ['vision', 'Vision'],
+            ['tasks', 'Tasks'],
+          ].map(([value, label]) => (
+            <Pressable
+              key={value}
+              onPress={() => setPropertySection(value)}
+              style={[
+                styles.sectionChip,
+                value !== propertySection && value === recommendedSection ? styles.sectionChipRecommended : null,
+                value !== propertySection &&
+                ((value === 'overview' && Boolean(dashboard?.pricing)) ||
+                  (value === 'capture' && capturedRoomCount >= ROOM_LABEL_OPTIONS.length) ||
+                  (value === 'gallery' && gallery.length > 0) ||
+                  (value === 'vision' &&
+                    (mediaVariants.some((variant) => variant.isSelected) ||
+                      gallery.some((asset) => Boolean(asset.selectedVariant)))) ||
+                  (value === 'tasks' && checklistItems.length > 0 && openChecklistItems.length === 0))
+                  ? styles.sectionChipComplete
+                  : null,
+                value === propertySection ? styles.sectionChipActive : null,
+              ]}
+            >
+              <Text
+                style={
+                  propertySection === value
+                    ? styles.sectionChipLabelActive
+                    : value === recommendedSection
+                      ? styles.sectionChipLabelRecommended
+                      : styles.sectionChipLabel
+                }
+              >
+                {label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {propertySection === 'overview' ? (
+          <>
+            {dashboard?.pricing ? (
+              <View style={styles.pricingCard}>
+                <Text style={styles.label}>Recommended price band</Text>
+                <Text style={styles.priceBand}>
+                  {formatCurrency(dashboard.pricing.low)} to {formatCurrency(dashboard.pricing.high)}
                 </Text>
-                <View style={styles.settingsActionList}>
-                  <Pressable onPress={() => openExternalLink(SUPPORT_URL)} style={[styles.button, styles.buttonSecondary]}>
-                    <Text style={styles.buttonSecondaryText}>Contact support</Text>
-                  </Pressable>
-                  <Pressable onPress={() => openExternalLink(PRIVACY_URL)} style={[styles.button, styles.buttonSecondary]}>
-                    <Text style={styles.buttonSecondaryText}>Privacy notice</Text>
-                  </Pressable>
-                  <Pressable onPress={() => openExternalLink(TERMS_URL)} style={[styles.button, styles.buttonSecondary]}>
-                    <Text style={styles.buttonSecondaryText}>Terms of service</Text>
-                  </Pressable>
-                  <Pressable onPress={handleSignOut} style={[styles.button, styles.buttonSecondary]}>
-                    <Text style={styles.buttonSecondaryText}>Log out</Text>
-                  </Pressable>
-                  <Pressable onPress={handleDeleteAccount} style={[styles.button, styles.buttonDanger]} disabled={busy}>
-                    <Text style={styles.buttonText}>Delete account</Text>
-                  </Pressable>
+                <View style={styles.summaryBulletList}>
+                  <Text style={styles.summaryBullet}>
+                    Midpoint {formatCurrency(dashboard.pricing.mid)} with{' '}
+                    {Math.round((dashboard.pricing.confidence || 0) * 100)}% confidence.
+                  </Text>
+                  <Text style={styles.summaryBullet}>
+                    Chosen price stays aligned with your marketing brochure and seller report.
+                  </Text>
                 </View>
               </View>
             ) : null}
 
-            <Text style={styles.label}>Properties</Text>
-            <View style={styles.propertyList}>
-              {properties.length ? (
-                properties.map((property) => (
-                  <Pressable
-                    key={property.id}
-                    onPress={() => handleSelectProperty(property.id)}
-                    style={[
-                      styles.propertyCard,
-                      property.id === propertyId ? styles.propertyCardActive : null,
-                    ]}
-                  >
-                    <Text style={styles.propertyTitle}>{property.title}</Text>
-                    <Text style={styles.propertyMeta}>
-                      {[property.city, property.state].filter(Boolean).join(', ')}
-                    </Text>
-                  </Pressable>
-                ))
-              ) : (
-                <Text style={styles.body}>
-                  {propertiesQuery.isLoading
-                    ? 'Loading your properties...'
-                    : 'No properties were found for this account yet.'}
-                </Text>
-              )}
+            {pricingHighlights.length ? (
+              <View style={styles.overviewInsightCard}>
+                <Text style={styles.label}>Latest analysis</Text>
+                {pricingHighlights.map((highlight) => (
+                  <Text key={highlight} style={styles.summaryBullet}>
+                    {`\u2022 ${highlight}`}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+          </>
+        ) : null}
+
+        {propertySection === 'capture' ? (
+          <View style={styles.captureCard}>
+            <Text style={styles.label}>Photo capture</Text>
+            <Text style={styles.body}>
+              {workflow?.nextStep?.key === 'capture_photos'
+                ? workflow.nextStep.description
+                : 'Capture or select the next room photo and save it to this property.'}
+            </Text>
+            <View style={styles.taskSummaryCard}>
+              <Text style={styles.taskSummaryText}>
+                {capturedRoomCount} of {ROOM_LABEL_OPTIONS.length} core rooms complete
+              </Text>
+              <Text style={styles.taskSummaryText}>
+                Next focus: {nextMissingRoom}. {workflow?.nextStep?.helperText || 'Stand in the corner. Keep the camera level.'}
+              </Text>
             </View>
 
-            {selectedProperty ? (
-              <View style={styles.workspaceCard}>
-                <View style={styles.workspaceHeaderRow}>
-                  <View style={styles.workspaceHeaderCopy}>
-                    <Text style={styles.label}>Selected property</Text>
-                    <Text style={styles.userName}>{selectedProperty.title}</Text>
-                    <Text style={styles.userEmail}>
-                      {[
-                        selectedProperty.addressLine1,
-                        [selectedProperty.city, selectedProperty.state, selectedProperty.zip].filter(Boolean).join(' '),
-                      ]
-                        .filter(Boolean)
-                        .join(', ')}
+            <View style={styles.roomChipRow}>
+              {ROOM_LABEL_OPTIONS.map((room) => (
+                <Pressable
+                  key={room}
+                  onPress={() => updateField('roomLabel', room)}
+                  style={[
+                    styles.roomChip,
+                    room === nextMissingRoom && !roomCoverage.find((item) => item.roomLabel === room)?.captured
+                      ? styles.roomChipRecommended
+                      : null,
+                    roomCoverage.find((item) => item.roomLabel === room)?.captured
+                      ? styles.roomChipDone
+                      : null,
+                    form.roomLabel === room ? styles.roomChipActive : null,
+                  ]}
+                >
+                  <Text
+                    style={
+                      form.roomLabel === room
+                        ? styles.roomChipLabelActive
+                        : roomCoverage.find((item) => item.roomLabel === room)?.captured
+                          ? styles.roomChipLabelDone
+                          : styles.roomChipLabel
+                    }
+                  >
+                    {room}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <View style={styles.actionRow}>
+              <Pressable
+                onPress={() => handlePickImage('camera')}
+                style={[styles.button, styles.buttonPrimary, styles.flexButton]}
+              >
+                <Text style={styles.buttonText}>Use camera</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => handlePickImage('library')}
+                style={[styles.button, styles.buttonSecondary, styles.flexButton]}
+              >
+                <Text style={styles.buttonSecondaryText}>Choose from library</Text>
+              </Pressable>
+            </View>
+
+            {photoAsset ? (
+              <View style={styles.photoPreviewCard}>
+                <Image source={{ uri: photoAsset.uri }} style={styles.photoPreview} />
+                <Text style={styles.body}>
+                  Ready to save as {form.roomLabel.toLowerCase()} for this property.
+                </Text>
+                <Pressable
+                  onPress={handleSavePhoto}
+                  style={[styles.button, busy ? styles.buttonDisabled : styles.buttonPrimary]}
+                  disabled={busy}
+                >
+                  <Text style={styles.buttonText}>Save photo</Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        {propertySection === 'gallery' ? (
+          <View style={styles.galleryCard}>
+            <Text style={styles.label}>Saved photo gallery</Text>
+            <Text style={styles.body}>
+              Saved photos stay attached to this property and can feed later flyer and vision workflows.
+            </Text>
+
+            {gallery.length ? (
+              <>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.galleryRail}>
+                  {gallery.map((asset) => (
+                    <Pressable
+                      key={asset.id}
+                      onPress={() => setSelectedAssetId(asset.id)}
+                      style={[styles.galleryTile, asset.id === selectedAsset?.id ? styles.galleryTileActive : null]}
+                    >
+                      <Image source={{ uri: asset.imageUrl }} style={styles.galleryTileImage} />
+                      <Text style={styles.galleryTileLabel} numberOfLines={1}>
+                        {asset.roomLabel}
+                      </Text>
+                      {asset.selectedVariant ? (
+                        <Text style={styles.galleryTileTag} numberOfLines={1}>
+                          {asset.selectedVariant.label || 'Vision preferred'}
+                        </Text>
+                      ) : null}
+                    </Pressable>
+                  ))}
+                </ScrollView>
+
+                {selectedAsset ? (
+                  <View style={styles.selectedAssetCard}>
+                    <Image source={{ uri: selectedAsset.imageUrl }} style={styles.selectedAssetImage} />
+                    <Text style={styles.selectedAssetTitle}>{selectedAsset.roomLabel}</Text>
+                    <Text style={styles.selectedAssetMeta}>
+                      Saved {formatCreatedAt(selectedAsset.createdAt) || 'recently'}
+                      {selectedAsset.analysis?.roomGuess
+                        ? ` · AI sees ${selectedAsset.analysis.roomGuess.toLowerCase()}`
+                        : ''}
+                    </Text>
+                    {selectedAsset.analysis?.summary ? (
+                      <Text style={styles.body}>{selectedAsset.analysis.summary}</Text>
+                    ) : null}
+                    {typeof selectedAsset.analysis?.overallQualityScore === 'number' ? (
+                      <Text style={styles.assetScore}>
+                        Quality score {selectedAsset.analysis.overallQualityScore}/100
+                        {selectedAsset.analysis?.retakeRecommended ? ' · Retake suggested' : ''}
+                      </Text>
+                    ) : null}
+                    {selectedAsset.listingCandidate ? (
+                      <Text style={styles.listingCandidateTag}>Listing candidate selected</Text>
+                    ) : null}
+                    {selectedAsset.selectedVariant ? (
+                      <Text style={styles.preferredVariantTag}>
+                        Preferred vision variant: {selectedAsset.selectedVariant.label || 'Vision-ready version'}
+                      </Text>
+                    ) : null}
+                    <View style={styles.actionRow}>
+                      <Pressable
+                        onPress={handleToggleListingCandidate}
+                        style={[
+                          styles.button,
+                          selectedAsset.listingCandidate ? styles.buttonSecondary : styles.buttonPrimary,
+                          styles.flexButton,
+                        ]}
+                        disabled={busy}
+                      >
+                        <Text
+                          style={
+                            selectedAsset.listingCandidate
+                              ? styles.buttonSecondaryText
+                              : styles.buttonText
+                          }
+                        >
+                          {selectedAsset.listingCandidate ? 'Remove candidate' : 'Mark candidate'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    <TextInput
+                      placeholder="Add a listing note for this photo"
+                      placeholderTextColor="#7d8a8f"
+                      style={[styles.input, styles.noteInput]}
+                      value={listingNoteDraft}
+                      onChangeText={setListingNoteDraft}
+                      multiline
+                    />
+                    <Pressable onPress={handleSaveListingNote} style={[styles.button, styles.buttonSecondary]} disabled={busy}>
+                      <Text style={styles.buttonSecondaryText}>Save note</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </>
+            ) : (
+              <Text style={styles.body}>No saved photos yet for this property.</Text>
+            )}
+          </View>
+        ) : null}
+
+        {propertySection === 'vision' ? (
+          <View style={styles.sectionPanel}>
+            <Text style={styles.label}>Vision</Text>
+            <Text style={styles.body}>Generate the best listing-ready version of a saved photo.</Text>
+            <Pressable onPress={() => setShowVisionDetails((current) => !current)} style={styles.learnMoreButton}>
+              <Text style={styles.learnMoreButtonText}>{showVisionDetails ? 'Hide details' : 'Learn more'}</Text>
+            </Pressable>
+            {showVisionDetails ? (
+              <Text style={styles.body}>
+                Enhance improves presentation while keeping the room believable. Declutter is best when the room feels busy or distracting.
+              </Text>
+            ) : null}
+            <View style={styles.coverageList}>
+              {roomCoverage.map((item) => (
+                <View key={item.roomLabel} style={styles.coverageRow}>
+                  <Text style={styles.coverageRoom}>{item.roomLabel}</Text>
+                  <Text style={item.captured ? styles.coverageDone : styles.coverageMissing}>
+                    {item.captured ? 'Captured' : 'Missing'}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            {selectedAsset ? (
+              <View style={styles.visionPanel}>
+                <Text style={styles.label}>Selected photo</Text>
+                <Image source={{ uri: selectedAsset.imageUrl }} style={styles.visionImage} />
+                {selectedAsset.selectedVariant ? (
+                  <Text style={styles.preferredVariantTag}>
+                    Materials currently prefer {selectedAsset.selectedVariant.label || 'the saved vision variant'} for this photo.
+                  </Text>
+                ) : null}
+                {createVariantMutation.isPending ? (
+                  <View style={styles.visionJobCard}>
+                    <View style={styles.visionJobHeader}>
+                      <ActivityIndicator color="#d28859" />
+                      <Text style={styles.visionJobTitle}>{getVisionJobLabel(pendingVisionJobType)}</Text>
+                    </View>
+                    <Text style={styles.variantHint}>
+                      Workside is processing this image now. Your updated version will appear below automatically.
                     </Text>
                   </View>
+                ) : null}
+                <View style={[styles.actionRow, styles.visionActionRow]}>
                   <Pressable
-                    onPress={() => setPropertyDetailsCollapsed((current) => !current)}
-                    style={styles.collapseButton}
+                    onPress={() => handleGenerateVariant('enhance_listing_quality')}
+                    style={[
+                      styles.button,
+                      recommendedVisionAction === 'enhance_listing_quality' ? styles.buttonPrimary : styles.buttonSecondary,
+                      styles.flexButton,
+                      styles.visionActionButton,
+                    ]}
+                    disabled={busy}
                   >
-                    <Text style={styles.collapseButtonText}>
-                      {propertyDetailsCollapsed ? 'Expand' : 'Collapse'}
+                    <Text
+                      style={[
+                        recommendedVisionAction === 'enhance_listing_quality' ? styles.buttonText : styles.buttonSecondaryText,
+                        styles.visionActionButtonText,
+                      ]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.85}
+                    >
+                      {pendingVisionJobType === 'enhance_listing_quality' && createVariantMutation.isPending
+                        ? 'Enhancing...'
+                        : 'Enhance'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => handleGenerateVariant('declutter_preview')}
+                    style={[
+                      styles.button,
+                      recommendedVisionAction === 'declutter_preview' ? styles.buttonPrimary : styles.buttonSecondary,
+                      styles.flexButton,
+                      styles.visionActionButton,
+                    ]}
+                    disabled={busy}
+                  >
+                    <Text
+                      style={[
+                        recommendedVisionAction === 'declutter_preview' ? styles.buttonText : styles.buttonSecondaryText,
+                        styles.visionActionButtonText,
+                      ]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.85}
+                    >
+                      {pendingVisionJobType === 'declutter_preview' && createVariantMutation.isPending
+                        ? 'Decluttering...'
+                        : 'Declutter'}
                     </Text>
                   </Pressable>
                 </View>
-
-                {!propertyDetailsCollapsed ? (
+                {selectedVariant ? (
                   <>
-                    {workflow ? (
-                      <View style={styles.workflowGuideCard}>
-                        <Text style={styles.label}>Your progress</Text>
-                        <Text style={styles.taskSummaryValue}>{workflow.completionPercent}% complete</Text>
-                        <Text style={styles.taskSummaryText}>
-                          {workflow.currentPhaseLabel} · {viewerRole === 'agent' ? 'Realtor guide' : 'Seller guide'}
-                        </Text>
-                        <Text style={styles.taskSummaryText}>
-                          Market-ready {workflow.marketReadyScore}/100
-                        </Text>
-                        {workflow.nextStep ? (
-                          <View style={styles.workflowNextCard}>
-                            <Text style={styles.workflowNextLabel}>Next step</Text>
-                            <Text style={styles.taskTitle}>{workflow.nextStep.title}</Text>
-                            <Text style={styles.taskDetail}>{workflow.nextStep.description}</Text>
-                            {workflow.nextStep.helperText ? (
-                              <Text style={styles.workflowHelperText}>{workflow.nextStep.helperText}</Text>
-                            ) : null}
+                    <Text style={styles.label}>Vision output</Text>
+                    <Text style={styles.variantSummary}>{getVariantSummary(selectedVariant)}</Text>
+                    <Image source={{ uri: selectedVariant.imageUrl }} style={styles.visionImage} />
+                    {visibleVisionEffects.length ? (
+                      <View style={styles.effectList}>
+                        {visibleVisionEffects.map((effect) => (
+                          <View key={effect} style={styles.effectChip}>
+                            <Text style={styles.effectChipText}>{effect}</Text>
+                          </View>
+                        ))}
+                        {hiddenVisionEffectCount ? (
+                          <View style={styles.effectChip}>
+                            <Text style={styles.effectChipText}>+{hiddenVisionEffectCount} more</Text>
                           </View>
                         ) : null}
-                        <View style={styles.workflowPhaseRow}>
-                          {(workflow.phases || []).map((phase) => (
-                            <View key={phase.key} style={[
-                              styles.workflowPhaseChip,
-                              phase.status === 'complete'
-                                ? styles.workflowPhaseChipComplete
-                                : phase.status === 'in_progress'
-                                  ? styles.workflowPhaseChipActive
-                                  : null,
-                            ]}>
-                              <Text style={styles.workflowPhaseChipLabel}>{phase.label}</Text>
-                              <Text style={styles.workflowPhaseChipMeta}>
-                                {phase.completedSteps}/{phase.totalSteps}
-                              </Text>
-                            </View>
-                          ))}
-                        </View>
                       </View>
                     ) : null}
-
-                    <View style={styles.sectionChipRow}>
-                      {[
-                        ['overview', 'Overview'],
-                        ['capture', 'Capture'],
-                        ['gallery', 'Gallery'],
-                        ['vision', 'Vision'],
-                        ['tasks', 'Tasks'],
-                      ].map(([value, label]) => (
+                    {selectedVariant.metadata?.differenceHint ? (
+                      <Text style={styles.variantHint}>{selectedVariant.metadata.differenceHint}</Text>
+                    ) : null}
+                    {selectedVariant.metadata?.warning ? (
+                      <Text style={styles.body}>{selectedVariant.metadata.warning}</Text>
+                    ) : null}
+                    <View style={styles.variantList}>
+                      {mediaVariants.map((variant) => (
                         <Pressable
-                          key={value}
-                          onPress={() => setPropertySection(value)}
-                          style={[
-                            styles.sectionChip,
-                            value !== propertySection && value === recommendedSection ? styles.sectionChipRecommended : null,
-                            value !== propertySection &&
-                            ((value === 'overview' && Boolean(dashboard?.pricing)) ||
-                              (value === 'capture' && capturedRoomCount >= ROOM_LABEL_OPTIONS.length) ||
-                              (value === 'gallery' && gallery.length > 0) ||
-                              (value === 'vision' &&
-                                (mediaVariants.some((variant) => variant.isSelected) ||
-                                  gallery.some((asset) => Boolean(asset.selectedVariant)))) ||
-                              (value === 'tasks' && checklistItems.length > 0 && openChecklistItems.length === 0))
-                              ? styles.sectionChipComplete
-                              : null,
-                            value === propertySection ? styles.sectionChipActive : null,
-                          ]}
+                          key={variant.id}
+                          onPress={() => setSelectedVariantId(variant.id)}
+                          style={[styles.taskActionChip, variant.id === selectedVariant?.id ? styles.taskActionChipActive : null]}
                         >
                           <Text
                             style={
-                              propertySection === value
-                                ? styles.sectionChipLabelActive
-                                : value === recommendedSection
-                                  ? styles.sectionChipLabelRecommended
-                                  : styles.sectionChipLabel
+                              variant.id === selectedVariant?.id
+                                ? styles.taskActionChipTextActive
+                                : styles.taskActionChipText
                             }
                           >
-                            {label}
+                            {variant.label}
+                            {variant.isSelected ? ' · Preferred' : ''}
                           </Text>
                         </Pressable>
                       ))}
                     </View>
-
-                    {propertySection === 'overview' ? (
-                      <>
-                        {dashboard?.pricing ? (
-                          <View style={styles.pricingCard}>
-                            <Text style={styles.label}>Recommended price band</Text>
-                            <Text style={styles.priceBand}>
-                              {formatCurrency(dashboard.pricing.low)} to {formatCurrency(dashboard.pricing.high)}
-                            </Text>
-                            <View style={styles.summaryBulletList}>
-                              <Text style={styles.summaryBullet}>
-                                Midpoint {formatCurrency(dashboard.pricing.mid)} with{' '}
-                                {Math.round((dashboard.pricing.confidence || 0) * 100)}% confidence.
-                              </Text>
-                              <Text style={styles.summaryBullet}>
-                                Chosen price stays aligned with your marketing brochure and seller report.
-                              </Text>
-                            </View>
-                          </View>
-                        ) : null}
-
-                        {pricingHighlights.length ? (
-                          <View style={styles.overviewInsightCard}>
-                            <Text style={styles.label}>Latest analysis</Text>
-                            {pricingHighlights.map((highlight) => (
-                              <Text key={highlight} style={styles.summaryBullet}>
-                                {`\u2022 ${highlight}`}
-                              </Text>
-                            ))}
-                          </View>
-                        ) : null}
-                      </>
-                    ) : null}
-
-                    {propertySection === 'capture' ? (
-                      <View style={styles.captureCard}>
-                        <Text style={styles.label}>Photo capture</Text>
-                        <Text style={styles.body}>
-                          {workflow?.nextStep?.key === 'capture_photos'
-                            ? workflow.nextStep.description
-                            : 'Capture or select the next room photo and save it to this property.'}
-                        </Text>
-                        <View style={styles.taskSummaryCard}>
-                          <Text style={styles.taskSummaryText}>
-                            {capturedRoomCount} of {ROOM_LABEL_OPTIONS.length} core rooms complete
-                          </Text>
-                          <Text style={styles.taskSummaryText}>
-                            Next focus: {nextMissingRoom}. {workflow?.nextStep?.helperText || 'Stand in the corner. Keep the camera level.'}
-                          </Text>
-                        </View>
-
-                        <View style={styles.roomChipRow}>
-                          {ROOM_LABEL_OPTIONS.map((room) => (
-                            <Pressable
-                              key={room}
-                              onPress={() => updateField('roomLabel', room)}
-                              style={[
-                                styles.roomChip,
-                                room === nextMissingRoom && !roomCoverage.find((item) => item.roomLabel === room)?.captured
-                                  ? styles.roomChipRecommended
-                                  : null,
-                                roomCoverage.find((item) => item.roomLabel === room)?.captured
-                                  ? styles.roomChipDone
-                                  : null,
-                                form.roomLabel === room ? styles.roomChipActive : null,
-                              ]}
-                            >
-                              <Text
-                                style={
-                                  form.roomLabel === room
-                                    ? styles.roomChipLabelActive
-                                    : roomCoverage.find((item) => item.roomLabel === room)?.captured
-                                      ? styles.roomChipLabelDone
-                                      : styles.roomChipLabel
-                                }
-                              >
-                                {room}
-                              </Text>
-                            </Pressable>
-                          ))}
-                        </View>
-
-                        <View style={styles.actionRow}>
-                          <Pressable
-                            onPress={() => handlePickImage('camera')}
-                            style={[styles.button, styles.buttonPrimary, styles.flexButton]}
-                          >
-                            <Text style={styles.buttonText}>Use camera</Text>
-                          </Pressable>
-                          <Pressable
-                            onPress={() => handlePickImage('library')}
-                            style={[styles.button, styles.buttonSecondary, styles.flexButton]}
-                          >
-                            <Text style={styles.buttonSecondaryText}>Choose from library</Text>
-                          </Pressable>
-                        </View>
-
-                        {photoAsset ? (
-                          <View style={styles.photoPreviewCard}>
-                            <Image source={{ uri: photoAsset.uri }} style={styles.photoPreview} />
-                            <Text style={styles.body}>
-                              Ready to save as {form.roomLabel.toLowerCase()} for this property.
-                            </Text>
-                            <Pressable
-                              onPress={handleSavePhoto}
-                              style={[styles.button, busy ? styles.buttonDisabled : styles.buttonPrimary]}
-                              disabled={busy}
-                            >
-                              <Text style={styles.buttonText}>Save photo</Text>
-                            </Pressable>
-                          </View>
-                        ) : null}
-                      </View>
-                    ) : null}
-
-                    {propertySection === 'gallery' ? (
-                      <View style={styles.galleryCard}>
-                        <Text style={styles.label}>Saved photo gallery</Text>
-                        <Text style={styles.body}>
-                          Saved photos stay attached to this property and can feed later flyer and vision workflows.
-                        </Text>
-
-                        {gallery.length ? (
-                          <>
-                            <ScrollView
-                              horizontal
-                              showsHorizontalScrollIndicator={false}
-                              contentContainerStyle={styles.galleryRail}
-                            >
-                              {gallery.map((asset) => (
-                                <Pressable
-                                  key={asset.id}
-                                  onPress={() => setSelectedAssetId(asset.id)}
-                                  style={[
-                                    styles.galleryTile,
-                                    asset.id === selectedAsset?.id ? styles.galleryTileActive : null,
-                                  ]}
-                                >
-                                  <Image source={{ uri: asset.imageUrl }} style={styles.galleryTileImage} />
-                                  <Text style={styles.galleryTileLabel} numberOfLines={1}>
-                                    {asset.roomLabel}
-                                  </Text>
-                                  {asset.selectedVariant ? (
-                                    <Text style={styles.galleryTileTag} numberOfLines={1}>
-                                      {asset.selectedVariant.label || 'Vision preferred'}
-                                    </Text>
-                                  ) : null}
-                                </Pressable>
-                              ))}
-                            </ScrollView>
-
-                            {selectedAsset ? (
-                              <View style={styles.selectedAssetCard}>
-                                <Image source={{ uri: selectedAsset.imageUrl }} style={styles.selectedAssetImage} />
-                                <Text style={styles.selectedAssetTitle}>{selectedAsset.roomLabel}</Text>
-                                <Text style={styles.selectedAssetMeta}>
-                                  Saved {formatCreatedAt(selectedAsset.createdAt) || 'recently'}
-                                  {selectedAsset.analysis?.roomGuess
-                                    ? ` · AI sees ${selectedAsset.analysis.roomGuess.toLowerCase()}`
-                                    : ''}
-                                </Text>
-                                {selectedAsset.analysis?.summary ? (
-                                  <Text style={styles.body}>{selectedAsset.analysis.summary}</Text>
-                                ) : null}
-                                {typeof selectedAsset.analysis?.overallQualityScore === 'number' ? (
-                                  <Text style={styles.assetScore}>
-                                    Quality score {selectedAsset.analysis.overallQualityScore}/100
-                                    {selectedAsset.analysis?.retakeRecommended ? ' · Retake suggested' : ''}
-                                  </Text>
-                                ) : null}
-                                {selectedAsset.listingCandidate ? (
-                                  <Text style={styles.listingCandidateTag}>Listing candidate selected</Text>
-                                ) : null}
-                                {selectedAsset.selectedVariant ? (
-                                  <Text style={styles.preferredVariantTag}>
-                                    Preferred vision variant: {selectedAsset.selectedVariant.label || 'Vision-ready version'}
-                                  </Text>
-                                ) : null}
-                                <View style={styles.actionRow}>
-                                  <Pressable
-                                    onPress={handleToggleListingCandidate}
-                                    style={[
-                                      styles.button,
-                                      selectedAsset.listingCandidate ? styles.buttonSecondary : styles.buttonPrimary,
-                                      styles.flexButton,
-                                    ]}
-                                    disabled={busy}
-                                  >
-                                    <Text
-                                      style={
-                                        selectedAsset.listingCandidate
-                                          ? styles.buttonSecondaryText
-                                          : styles.buttonText
-                                      }
-                                    >
-                                      {selectedAsset.listingCandidate ? 'Remove candidate' : 'Mark candidate'}
-                                    </Text>
-                                  </Pressable>
-                                </View>
-                                <TextInput
-                                  placeholder="Add a listing note for this photo"
-                                  placeholderTextColor="#7d8a8f"
-                                  style={[styles.input, styles.noteInput]}
-                                  value={listingNoteDraft}
-                                  onChangeText={setListingNoteDraft}
-                                  multiline
-                                />
-                                <Pressable
-                                  onPress={handleSaveListingNote}
-                                  style={[styles.button, styles.buttonSecondary]}
-                                  disabled={busy}
-                                >
-                                  <Text style={styles.buttonSecondaryText}>Save note</Text>
-                                </Pressable>
-                              </View>
-                            ) : null}
-                          </>
-                        ) : (
-                          <Text style={styles.body}>No saved photos yet for this property.</Text>
-                        )}
-                      </View>
-                    ) : null}
-
-                    {propertySection === 'vision' ? (
-                      <View style={styles.sectionPanel}>
-                        <Text style={styles.label}>Vision</Text>
-                        <Text style={styles.body}>
-                          Generate the best listing-ready version of a saved photo.
-                        </Text>
-                        <Pressable
-                          onPress={() => setShowVisionDetails((current) => !current)}
-                          style={styles.learnMoreButton}
-                        >
-                          <Text style={styles.learnMoreButtonText}>
-                            {showVisionDetails ? 'Hide details' : 'Learn more'}
-                          </Text>
-                        </Pressable>
-                        {showVisionDetails ? (
-                          <Text style={styles.body}>
-                            Enhance improves presentation while keeping the room believable. Declutter is best when the room feels busy or distracting.
-                          </Text>
-                        ) : null}
-                        <View style={styles.coverageList}>
-                          {roomCoverage.map((item) => (
-                            <View key={item.roomLabel} style={styles.coverageRow}>
-                              <Text style={styles.coverageRoom}>{item.roomLabel}</Text>
-                              <Text style={item.captured ? styles.coverageDone : styles.coverageMissing}>
-                                {item.captured ? 'Captured' : 'Missing'}
-                              </Text>
-                            </View>
-                          ))}
-                        </View>
-                        {selectedAsset ? (
-                          <View style={styles.visionPanel}>
-                            <Text style={styles.label}>Selected photo</Text>
-                            <Image source={{ uri: selectedAsset.imageUrl }} style={styles.visionImage} />
-                            {selectedAsset.selectedVariant ? (
-                              <Text style={styles.preferredVariantTag}>
-                                Materials currently prefer {selectedAsset.selectedVariant.label || 'the saved vision variant'} for this photo.
-                              </Text>
-                            ) : null}
-                            {createVariantMutation.isPending ? (
-                              <View style={styles.visionJobCard}>
-                                <View style={styles.visionJobHeader}>
-                                  <ActivityIndicator color="#d28859" />
-                                  <Text style={styles.visionJobTitle}>
-                                    {getVisionJobLabel(pendingVisionJobType)}
-                                  </Text>
-                                </View>
-                                <Text style={styles.variantHint}>
-                                  Workside is processing this image now. Your updated version will appear below automatically.
-                                </Text>
-                              </View>
-                            ) : null}
-                            <View style={[styles.actionRow, styles.visionActionRow]}>
-                              <Pressable
-                                onPress={() => handleGenerateVariant('enhance_listing_quality')}
-                                style={[
-                                  styles.button,
-                                  recommendedVisionAction === 'enhance_listing_quality'
-                                    ? styles.buttonPrimary
-                                    : styles.buttonSecondary,
-                                  styles.flexButton,
-                                  styles.visionActionButton,
-                                ]}
-                                disabled={busy}
-                              >
-                                <Text
-                                  style={[
-                                    recommendedVisionAction === 'enhance_listing_quality'
-                                      ? styles.buttonText
-                                      : styles.buttonSecondaryText,
-                                    styles.visionActionButtonText,
-                                  ]}
-                                  numberOfLines={1}
-                                  adjustsFontSizeToFit
-                                  minimumFontScale={0.85}
-                                >
-                                  {pendingVisionJobType === 'enhance_listing_quality' && createVariantMutation.isPending
-                                    ? 'Enhancing...'
-                                    : 'Enhance'}
-                                </Text>
-                              </Pressable>
-                              <Pressable
-                                onPress={() => handleGenerateVariant('declutter_preview')}
-                                style={[
-                                  styles.button,
-                                  recommendedVisionAction === 'declutter_preview'
-                                    ? styles.buttonPrimary
-                                    : styles.buttonSecondary,
-                                  styles.flexButton,
-                                  styles.visionActionButton,
-                                ]}
-                                disabled={busy}
-                              >
-                                <Text
-                                  style={[
-                                    recommendedVisionAction === 'declutter_preview'
-                                      ? styles.buttonText
-                                      : styles.buttonSecondaryText,
-                                    styles.visionActionButtonText,
-                                  ]}
-                                  numberOfLines={1}
-                                  adjustsFontSizeToFit
-                                  minimumFontScale={0.85}
-                                >
-                                  {pendingVisionJobType === 'declutter_preview' && createVariantMutation.isPending
-                                    ? 'Decluttering...'
-                                    : 'Declutter'}
-                                </Text>
-                              </Pressable>
-                            </View>
-                            {selectedVariant ? (
-                              <>
-                                <Text style={styles.label}>Vision output</Text>
-                                <Text style={styles.variantSummary}>{getVariantSummary(selectedVariant)}</Text>
-                                <Image source={{ uri: selectedVariant.imageUrl }} style={styles.visionImage} />
-                                {visibleVisionEffects.length ? (
-                                  <View style={styles.effectList}>
-                                    {visibleVisionEffects.map((effect) => (
-                                      <View key={effect} style={styles.effectChip}>
-                                        <Text style={styles.effectChipText}>{effect}</Text>
-                                      </View>
-                                    ))}
-                                    {hiddenVisionEffectCount ? (
-                                      <View style={styles.effectChip}>
-                                        <Text style={styles.effectChipText}>+{hiddenVisionEffectCount} more</Text>
-                                      </View>
-                                    ) : null}
-                                  </View>
-                                ) : null}
-                                {selectedVariant.metadata?.differenceHint ? (
-                                  <Text style={styles.variantHint}>{selectedVariant.metadata.differenceHint}</Text>
-                                ) : null}
-                                {selectedVariant.metadata?.warning ? (
-                                  <Text style={styles.body}>{selectedVariant.metadata.warning}</Text>
-                                ) : null}
-                                <View style={styles.variantList}>
-                                  {mediaVariants.map((variant) => (
-                                    <Pressable
-                                      key={variant.id}
-                                      onPress={() => setSelectedVariantId(variant.id)}
-                                      style={[
-                                        styles.taskActionChip,
-                                        variant.id === selectedVariant?.id ? styles.taskActionChipActive : null,
-                                      ]}
-                                    >
-                                      <Text
-                                        style={
-                                          variant.id === selectedVariant?.id
-                                            ? styles.taskActionChipTextActive
-                                            : styles.taskActionChipText
-                                        }
-                                      >
-                                        {variant.label}
-                                        {variant.isSelected ? ' · Preferred' : ''}
-                                      </Text>
-                                    </Pressable>
-                                  ))}
-                                </View>
-                                <Pressable
-                                  onPress={() => handleSelectVariant(selectedVariant.id)}
-                                  style={[styles.button, styles.buttonSecondary]}
-                                  disabled={busy || selectedVariant.isSelected}
-                                >
-                                  <Text style={styles.buttonSecondaryText}>
-                                    {selectedVariant.isSelected
-                                      ? 'Preferred variant selected'
-                                      : 'Use this variant in materials'}
-                                  </Text>
-                                </Pressable>
-                              </>
-                            ) : null}
-                          </View>
-                        ) : null}
-                        <View style={styles.candidateList}>
-                          {bestCandidates.length ? (
-                            bestCandidates.map((asset, index) => (
-                              <View key={asset.id} style={styles.candidateCard}>
-                                <Text style={styles.candidateRank}>#{index + 1}</Text>
-                                <View style={styles.candidateCopy}>
-                                  <Text style={styles.candidateTitle}>{asset.roomLabel}</Text>
-                                  <Text style={styles.candidateMeta}>
-                                    Quality {asset.analysis?.overallQualityScore || 0}/100
-                                    {asset.analysis?.bestUse ? ` · ${asset.analysis.bestUse}` : ''}
-                                  </Text>
-                                  {asset.listingCandidate ? (
-                                    <Text style={styles.candidateSelectedTag}>
-                                      Seller selected{asset.listingNote ? ` · ${asset.listingNote}` : ''}
-                                    </Text>
-                                  ) : null}
-                                  {asset.selectedVariant ? (
-                                    <Text style={styles.preferredVariantTag}>
-                                      {asset.selectedVariant.label || 'Vision preferred for materials'}
-                                    </Text>
-                                  ) : null}
-                                </View>
-                              </View>
-                            ))
-                          ) : (
-                            <Text style={styles.body}>
-                              Save a few reviewed photos and the strongest listing candidates will show here.
-                            </Text>
-                          )}
-                        </View>
-                      </View>
-                    ) : null}
-
-                    {propertySection === 'tasks' ? (
-                      <View style={styles.sectionPanel}>
-                        <Text style={styles.label}>Tasks</Text>
-                        <Text style={styles.body}>
-                          Shared seller checklist progress now syncs with the web workspace and report.
-                        </Text>
-                        <View style={styles.taskSummaryCard}>
-                          <Text style={styles.taskSummaryValue}>
-                            {checklist?.summary?.progressPercent ?? 0}% ready
-                          </Text>
-                          <Text style={styles.taskSummaryText}>
-                            {checklist?.summary?.completedCount ?? 0} completed · {checklist?.summary?.openCount ?? 0} open
-                          </Text>
-                          <Text style={styles.taskSummaryText}>
-                            Next: {checklist?.nextTask?.title || 'No open tasks right now'}
-                          </Text>
-                        </View>
-                        <View style={styles.taskList}>
-                          {openChecklistItems.length ? (
-                            openChecklistItems.map((task) => (
-                              <View
-                                key={task.id}
-                                style={[
-                                  styles.taskCard,
-                                  task.status === 'in_progress' ? styles.taskCardWorking : null,
-                                ]}
-                              >
-                                <View style={styles.taskMetaRow}>
-                                  <Text
-                                    style={
-                                      task.status === 'done'
-                                        ? styles.taskDone
-                                        : task.status === 'in_progress'
-                                          ? styles.taskWorking
-                                          : styles.taskOpen
-                                    }
-                                  >
-                                    {formatChecklistStatus(task.status)}
-                                  </Text>
-                                  <Text style={styles.taskCategory}>
-                                    {String(task.category || 'custom').replace(/_/g, ' ')}
-                                  </Text>
-                                </View>
-                                <Text style={styles.taskTitle}>{task.title}</Text>
-                                <Text style={styles.taskDetail}>{task.detail}</Text>
-                                <Pressable
-                                  onPress={() => handleUpdateChecklistStatus(task.id, getNextChecklistStatus(task.status))}
-                                  style={[styles.button, styles.buttonSecondary, styles.taskStatusButton]}
-                                  disabled={busy}
-                                >
-                                  <Text style={styles.buttonSecondaryText}>
-                                    {task.status === 'todo'
-                                      ? 'Start task'
-                                      : task.status === 'in_progress'
-                                        ? 'Mark done'
-                                        : 'Reopen task'}
-                                  </Text>
-                                </Pressable>
-                              </View>
-                            ))
-                          ) : (
-                            <Text style={styles.body}>
-                              {checklistItems.length
-                                ? 'All current checklist items are complete.'
-                                : 'No checklist items yet for this property.'}
-                            </Text>
-                          )}
-                        </View>
-                        {completedChecklistItems.length ? (
-                          <View style={styles.completedTasksCard}>
-                            <Pressable
-                              onPress={() => setShowCompletedTasks((current) => !current)}
-                              style={styles.completedTasksToggle}
-                            >
-                              <Text style={styles.completedTasksTitle}>
-                                Completed tasks ({completedChecklistItems.length})
-                              </Text>
-                              <Text style={styles.completedTasksToggleText}>
-                                {showCompletedTasks ? 'Hide' : 'Show'}
-                              </Text>
-                            </Pressable>
-                            {showCompletedTasks
-                              ? completedChecklistItems.map((task) => (
-                                  <View key={task.id} style={[styles.taskCard, styles.taskCardComplete]}>
-                                    <View style={styles.taskMetaRow}>
-                                      <Text style={styles.taskDone}>{formatChecklistStatus(task.status)}</Text>
-                                      <Text style={styles.taskCategory}>
-                                        {String(task.category || 'custom').replace(/_/g, ' ')}
-                                      </Text>
-                                    </View>
-                                    <Text style={styles.taskTitle}>{task.title}</Text>
-                                    <Text style={styles.taskDetail}>{task.detail}</Text>
-                                    <Pressable
-                                      onPress={() => handleUpdateChecklistStatus(task.id, 'todo')}
-                                      style={[styles.button, styles.buttonSecondary, styles.taskStatusButton]}
-                                      disabled={busy}
-                                    >
-                                      <Text style={styles.buttonSecondaryText}>Reopen task</Text>
-                                    </Pressable>
-                                  </View>
-                                ))
-                              : null}
-                          </View>
-                        ) : null}
-                        <View style={styles.customTaskComposer}>
-                          <TextInput
-                            placeholder="Add a custom seller task"
-                            placeholderTextColor="#7d8a8f"
-                            style={[styles.input, styles.customTaskInput]}
-                            value={customTaskTitle}
-                            onChangeText={setCustomTaskTitle}
-                          />
-                          <Pressable
-                            onPress={handleCreateCustomTask}
-                            style={[styles.button, styles.buttonPrimary, styles.customTaskButton]}
-                            disabled={busy}
-                          >
-                            <Text style={styles.buttonText}>Add task</Text>
-                          </Pressable>
-                        </View>
-                      </View>
-                    ) : null}
+                    <Pressable
+                      onPress={() => handleSelectVariant(selectedVariant.id)}
+                      style={[styles.button, styles.buttonSecondary]}
+                      disabled={busy || selectedVariant.isSelected}
+                    >
+                      <Text style={styles.buttonSecondaryText}>
+                        {selectedVariant.isSelected ? 'Preferred variant selected' : 'Use this variant in materials'}
+                      </Text>
+                    </Pressable>
                   </>
-                ) : (
-                  <Text style={styles.body}>Property details are collapsed. Expand when you want pricing and capture tools.</Text>
-                )}
+                ) : null}
               </View>
             ) : null}
-
-            {status ? <Text style={styles.status}>{status}</Text> : null}
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-            {busy || refreshing ? <ActivityIndicator color="#d28859" style={styles.spinner} /> : null}
+            <View style={styles.candidateList}>
+              {bestCandidates.length ? (
+                bestCandidates.map((asset, index) => (
+                  <View key={asset.id} style={styles.candidateCard}>
+                    <Text style={styles.candidateRank}>#{index + 1}</Text>
+                    <View style={styles.candidateCopy}>
+                      <Text style={styles.candidateTitle}>{asset.roomLabel}</Text>
+                      <Text style={styles.candidateMeta}>
+                        Quality {asset.analysis?.overallQualityScore || 0}/100
+                        {asset.analysis?.bestUse ? ` · ${asset.analysis.bestUse}` : ''}
+                      </Text>
+                      {asset.listingCandidate ? (
+                        <Text style={styles.candidateSelectedTag}>
+                          Seller selected{asset.listingNote ? ` · ${asset.listingNote}` : ''}
+                        </Text>
+                      ) : null}
+                      {asset.selectedVariant ? (
+                        <Text style={styles.preferredVariantTag}>
+                          {asset.selectedVariant.label || 'Vision preferred for materials'}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.body}>
+                  Save a few reviewed photos and the strongest listing candidates will show here.
+                </Text>
+              )}
+            </View>
           </View>
+        ) : null}
+
+        {propertySection === 'tasks' ? (
+          <View style={styles.sectionPanel}>
+            <Text style={styles.label}>Tasks</Text>
+            <Text style={styles.body}>Shared seller checklist progress now syncs with the web workspace and report.</Text>
+            <View style={styles.taskSummaryCard}>
+              <Text style={styles.taskSummaryValue}>{checklist?.summary?.progressPercent ?? 0}% ready</Text>
+              <Text style={styles.taskSummaryText}>
+                {checklist?.summary?.completedCount ?? 0} completed · {checklist?.summary?.openCount ?? 0} open
+              </Text>
+              <Text style={styles.taskSummaryText}>Next: {checklist?.nextTask?.title || 'No open tasks right now'}</Text>
+            </View>
+            <View style={styles.taskList}>
+              {openChecklistItems.length ? (
+                openChecklistItems.map((task) => (
+                  <View
+                    key={task.id}
+                    style={[styles.taskCard, task.status === 'in_progress' ? styles.taskCardWorking : null]}
+                  >
+                    <View style={styles.taskMetaRow}>
+                      <Text
+                        style={
+                          task.status === 'done'
+                            ? styles.taskDone
+                            : task.status === 'in_progress'
+                              ? styles.taskWorking
+                              : styles.taskOpen
+                        }
+                      >
+                        {formatChecklistStatus(task.status)}
+                      </Text>
+                      <Text style={styles.taskCategory}>{String(task.category || 'custom').replace(/_/g, ' ')}</Text>
+                    </View>
+                    <Text style={styles.taskTitle}>{task.title}</Text>
+                    <Text style={styles.taskDetail}>{task.detail}</Text>
+                    <Pressable
+                      onPress={() => handleUpdateChecklistStatus(task.id, getNextChecklistStatus(task.status))}
+                      style={[styles.button, styles.buttonSecondary, styles.taskStatusButton]}
+                      disabled={busy}
+                    >
+                      <Text style={styles.buttonSecondaryText}>
+                        {task.status === 'todo'
+                          ? 'Start task'
+                          : task.status === 'in_progress'
+                            ? 'Mark done'
+                            : 'Reopen task'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.body}>
+                  {checklistItems.length
+                    ? 'All current checklist items are complete.'
+                    : 'No checklist items yet for this property.'}
+                </Text>
+              )}
+            </View>
+            {completedChecklistItems.length ? (
+              <View style={styles.completedTasksCard}>
+                <Pressable
+                  onPress={() => setShowCompletedTasks((current) => !current)}
+                  style={styles.completedTasksToggle}
+                >
+                  <Text style={styles.completedTasksTitle}>Completed tasks ({completedChecklistItems.length})</Text>
+                  <Text style={styles.completedTasksToggleText}>{showCompletedTasks ? 'Hide' : 'Show'}</Text>
+                </Pressable>
+                {showCompletedTasks
+                  ? completedChecklistItems.map((task) => (
+                      <View key={task.id} style={[styles.taskCard, styles.taskCardComplete]}>
+                        <View style={styles.taskMetaRow}>
+                          <Text style={styles.taskDone}>{formatChecklistStatus(task.status)}</Text>
+                          <Text style={styles.taskCategory}>{String(task.category || 'custom').replace(/_/g, ' ')}</Text>
+                        </View>
+                        <Text style={styles.taskTitle}>{task.title}</Text>
+                        <Text style={styles.taskDetail}>{task.detail}</Text>
+                        <Pressable
+                          onPress={() => handleUpdateChecklistStatus(task.id, 'todo')}
+                          style={[styles.button, styles.buttonSecondary, styles.taskStatusButton]}
+                          disabled={busy}
+                        >
+                          <Text style={styles.buttonSecondaryText}>Reopen task</Text>
+                        </Pressable>
+                      </View>
+                    ))
+                  : null}
+              </View>
+            ) : null}
+            <View style={styles.customTaskComposer}>
+              <TextInput
+                placeholder="Add a custom seller task"
+                placeholderTextColor="#7d8a8f"
+                style={[styles.input, styles.customTaskInput]}
+                value={customTaskTitle}
+                onChangeText={setCustomTaskTitle}
+              />
+              <Pressable
+                onPress={handleCreateCustomTask}
+                style={[styles.button, styles.buttonPrimary, styles.customTaskButton]}
+                disabled={busy}
+              >
+                <Text style={styles.buttonText}>Add task</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+      </>
+    );
+  }
+
+  if (session?.user) {
+    return (
+      <View style={styles.screen}>
+        <ScrollView contentContainerStyle={styles.mobileShell}>
+          <View style={styles.mobileTopBar}>
+            {appScreen === 'property' || appScreen === 'settings' ? (
+              <Pressable onPress={() => setAppScreen('home')} style={styles.topIconButton}>
+                <Text style={styles.topIconButtonText}>{'\u2039'}</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.topIconPlaceholder} />
+            )}
+            <View style={styles.mobileHeaderCopy}>
+              {appScreen === 'home' ? (
+                <>
+                  <Text style={styles.mobileTitle}>Home Advisor</Text>
+                  <Text style={styles.mobilePoweredBy}>powered by</Text>
+                  <Text style={styles.mobileBrand}>Workside Software</Text>
+                  <Text style={styles.mobileSubtitle}>Stay Connected Across Every Property</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.mobileScreenTitle}>{screenTitle}</Text>
+                  <Text style={styles.mobileScreenSubtitle}>
+                    {appScreen === 'settings'
+                      ? 'Manage account, support, and legal settings.'
+                      : propertyAddress || 'Property workspace'}
+                  </Text>
+                </>
+              )}
+            </View>
+            <View style={styles.topActionRow}>
+              {appScreen !== 'settings' ? (
+                <Pressable onPress={() => setAppScreen('settings')} style={styles.topIconButton}>
+                  <Text style={styles.topIconButtonText}>Settings</Text>
+                </Pressable>
+              ) : null}
+              {appScreen === 'home' ? (
+                <Pressable onPress={handleSignOut} style={styles.topIconButton}>
+                  <Text style={styles.topIconButtonText}>Logout</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+
+          {appScreen === 'home' ? (
+            <View style={styles.mobileCard}>
+              <Text style={styles.homeWelcomeTitle}>Welcome, {session.user.firstName || 'there'}</Text>
+              <Text style={styles.homeWelcomeMeta}>
+                {properties.length} {properties.length === 1 ? 'property' : 'properties'} connected
+              </Text>
+              <Text style={styles.sectionListLabel}>Properties</Text>
+              <View style={styles.homePropertyList}>
+                {properties.length ? (
+                  properties.map((property) => (
+                    <Pressable key={property.id} onPress={() => handleSelectProperty(property.id)} style={styles.homePropertyCard}>
+                      <View style={styles.homePropertyCopy}>
+                        <Text style={styles.homePropertyTitle}>{property.title}</Text>
+                        <Text style={styles.homePropertyMeta}>
+                          {[property.city, property.state].filter(Boolean).join(', ')}
+                        </Text>
+                      </View>
+                      <Text style={styles.homePropertyArrow}>{'\u203A'}</Text>
+                    </Pressable>
+                  ))
+                ) : (
+                  <Text style={styles.body}>
+                    {propertiesQuery.isLoading ? 'Loading your properties...' : 'No properties were found for this account yet.'}
+                  </Text>
+                )}
+              </View>
+            </View>
+          ) : null}
+
+          {appScreen === 'settings' ? (
+            <View style={styles.mobileCard}>
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionLabel}>Account</Text>
+                <View style={styles.settingsInfoCard}>
+                  <Text style={styles.settingsInfoLabel}>Name</Text>
+                  <Text style={styles.settingsInfoValue}>{getDisplayName(session.user)}</Text>
+                </View>
+                <View style={styles.settingsInfoCard}>
+                  <Text style={styles.settingsInfoLabel}>Email</Text>
+                  <Text style={styles.settingsInfoValue}>{session.user.email}</Text>
+                </View>
+                <View style={styles.settingsInfoCard}>
+                  <Text style={styles.settingsInfoLabel}>Account Type</Text>
+                  <Text style={styles.settingsInfoValue}>{viewerRole === 'agent' ? 'Realtor / Agent' : 'Seller'}</Text>
+                </View>
+              </View>
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionLabel}>App Info & Legal</Text>
+                <Pressable onPress={() => openExternalLink(SUPPORT_URL)} style={styles.settingsRowButton}>
+                  <Text style={styles.settingsRowTitle}>Contact Support</Text>
+                  <Text style={styles.settingsRowMeta}>support@worksideadvisor.com</Text>
+                </Pressable>
+                <Pressable onPress={() => openExternalLink(PRIVACY_URL)} style={styles.settingsRowButton}>
+                  <Text style={styles.settingsRowTitle}>Privacy Notice</Text>
+                  <Text style={styles.settingsRowMeta}>Review how Workside handles your data.</Text>
+                </Pressable>
+                <Pressable onPress={() => openExternalLink(TERMS_URL)} style={styles.settingsRowButton}>
+                  <Text style={styles.settingsRowTitle}>Terms of Service</Text>
+                  <Text style={styles.settingsRowMeta}>Read the current mobile and web terms.</Text>
+                </Pressable>
+              </View>
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionLabel}>Danger Zone</Text>
+                <Pressable onPress={handleDeleteAccount} style={styles.settingsDangerCard} disabled={busy}>
+                  <Text style={styles.settingsDangerTitle}>Delete Account</Text>
+                  <Text style={styles.settingsDangerMeta}>Permanently delete your account and all related property data.</Text>
+                </Pressable>
+                <Pressable onPress={handleSignOut} style={[styles.button, styles.buttonSecondary]}>
+                  <Text style={styles.buttonSecondaryText}>Sign Out</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+
+          {appScreen === 'property' && selectedProperty ? (
+            <View style={styles.mobileCard}>
+              <View style={styles.propertyHeroCard}>
+                <Text style={styles.propertyHeroTitle}>{selectedProperty.title}</Text>
+                <Text style={styles.propertyHeroMeta}>{propertyAddress}</Text>
+                {workflow ? (
+                  <View style={styles.propertyHeroStats}>
+                    <View style={styles.propertyHeroStatChip}>
+                      <Text style={styles.propertyHeroStatText}>{workflow.marketReadyScore}/100 ready</Text>
+                    </View>
+                    <View style={styles.propertyHeroStatChip}>
+                      <Text style={styles.propertyHeroStatText}>{workflow.completionPercent}% complete</Text>
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+              {renderPropertyWorkspaceContent()}
+            </View>
+          ) : null}
+
+          {status ? <Text style={styles.status}>{status}</Text> : null}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {busy || refreshing ? <ActivityIndicator color="#d28859" style={styles.spinner} /> : null}
+          <Text style={styles.mobileFooter}>Copyright 2026 Workside Software LLC</Text>
         </ScrollView>
       </View>
     );
@@ -1657,11 +1656,10 @@ export function RootScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.card}>
-          <Text style={styles.kicker}>Seller Access</Text>
-          <Text style={styles.title}>Workside Home Advisor</Text>
-          <Text style={styles.body}>
-            Sign in with your verified Workside account to manage pricing, prep, photos, and listing readiness on the go.
-          </Text>
+          <Text style={styles.title}>Home Advisor</Text>
+          <Text style={styles.authPoweredBy}>powered by</Text>
+          <Text style={styles.authBrand}>Workside Software</Text>
+          <Text style={styles.authTagline}>Stay Connected Across Every Property</Text>
 
           <View style={styles.authModeCard}>
             <Text style={styles.authModeTitle}>
@@ -1750,7 +1748,7 @@ export function RootScreen() {
         </View>
 
         <View style={styles.authFooter}>
-          <Text style={styles.authFooterCopy}>Copyright 2026 Workside Home Advisor LLC.</Text>
+          <Text style={styles.authFooterCopy}>Copyright 2026 Workside Software LLC.</Text>
           <View style={styles.authFooterLinks}>
             <Pressable onPress={() => openExternalLink(TERMS_URL)}>
               <Text style={styles.authFooterLink}>Terms of Service</Text>
@@ -1783,6 +1781,243 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     paddingBottom: 160,
   },
+  mobileShell: {
+    flexGrow: 1,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 28,
+    gap: 16,
+  },
+  mobileTopBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  topIconButton: {
+    minWidth: 42,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  topIconButtonText: {
+    color: '#f8f1e6',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  topIconPlaceholder: {
+    width: 42,
+  },
+  mobileHeaderCopy: {
+    flex: 1,
+    gap: 2,
+    paddingTop: 2,
+  },
+  topActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  mobileCard: {
+    backgroundColor: 'rgba(38, 50, 61, 0.82)',
+    borderRadius: 24,
+    padding: 18,
+    gap: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(126, 145, 160, 0.22)',
+    shadowColor: '#000000',
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  mobileTitle: {
+    color: '#f8f1e6',
+    fontSize: 32,
+    fontWeight: '800',
+    lineHeight: 38,
+  },
+  mobilePoweredBy: {
+    color: '#93a982',
+    fontSize: 12,
+    letterSpacing: 1.8,
+    textTransform: 'uppercase',
+  },
+  mobileBrand: {
+    color: '#d7c6af',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  mobileSubtitle: {
+    marginTop: 8,
+    color: '#c8b9a7',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  mobileScreenTitle: {
+    color: '#f8f1e6',
+    fontSize: 28,
+    fontWeight: '800',
+    lineHeight: 34,
+  },
+  mobileScreenSubtitle: {
+    marginTop: 4,
+    color: '#b9af9f',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  homeWelcomeTitle: {
+    color: '#f8f1e6',
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  homeWelcomeMeta: {
+    color: '#93a982',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  sectionListLabel: {
+    color: '#93a982',
+    fontSize: 12,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginTop: 4,
+  },
+  homePropertyList: {
+    gap: 12,
+  },
+  homePropertyCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 18,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  homePropertyCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  homePropertyTitle: {
+    color: '#f8f1e6',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  homePropertyMeta: {
+    color: '#b9af9f',
+    fontSize: 14,
+    lineHeight: 19,
+  },
+  homePropertyArrow: {
+    color: '#d28859',
+    fontSize: 26,
+    fontWeight: '700',
+  },
+  settingsSection: {
+    gap: 10,
+  },
+  settingsSectionLabel: {
+    color: '#93a982',
+    fontSize: 12,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginTop: 4,
+  },
+  settingsInfoCard: {
+    gap: 4,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: '#1f2a33',
+    borderWidth: 1,
+    borderColor: '#34434f',
+  },
+  settingsInfoLabel: {
+    color: '#93a982',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  settingsInfoValue: {
+    color: '#f8f1e6',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  settingsRowButton: {
+    gap: 4,
+    paddingVertical: 15,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  settingsRowTitle: {
+    color: '#f8f1e6',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  settingsRowMeta: {
+    color: '#b9af9f',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  settingsDangerCard: {
+    gap: 4,
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: 'rgba(131, 33, 33, 0.24)',
+    borderWidth: 1,
+    borderColor: '#b85d4c',
+  },
+  settingsDangerTitle: {
+    color: '#ffcdc5',
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  settingsDangerMeta: {
+    color: '#f1c0b7',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  propertyHeroCard: {
+    gap: 8,
+    paddingBottom: 2,
+  },
+  propertyHeroTitle: {
+    color: '#f8f1e6',
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  propertyHeroMeta: {
+    color: '#b9af9f',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  propertyHeroStats: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 4,
+  },
+  propertyHeroStatChip: {
+    borderRadius: 999,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  propertyHeroStatText: {
+    color: '#93a982',
+    fontSize: 13,
+    fontWeight: '800',
+  },
   card: {
     backgroundColor: 'rgba(38, 50, 61, 0.78)',
     borderRadius: 24,
@@ -1805,6 +2040,25 @@ const styles = StyleSheet.create({
     color: '#f8f1e6',
     fontSize: 32,
     fontWeight: '800',
+  },
+  authPoweredBy: {
+    color: '#93a982',
+    fontSize: 12,
+    letterSpacing: 1.8,
+    textTransform: 'uppercase',
+    marginTop: -2,
+  },
+  authBrand: {
+    color: '#d7c6af',
+    fontSize: 19,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  authTagline: {
+    color: '#dbcbb7',
+    fontSize: 16,
+    lineHeight: 24,
+    marginBottom: 6,
   },
   body: {
     color: '#dbcbb7',
@@ -2701,4 +2955,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  mobileFooter: {
+    color: '#8f9aa0',
+    fontSize: 12,
+    textAlign: 'center',
+    paddingVertical: 8,
+  },
 });
+

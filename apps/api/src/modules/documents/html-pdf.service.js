@@ -263,6 +263,72 @@ function renderHighlightGrid(items = [], emptyText = '') {
   `;
 }
 
+function renderFeatureIconGrid(items = [], emptyText = '') {
+  const safeItems = items.filter(Boolean);
+  if (!safeItems.length) {
+    return emptyText ? `<div class="empty-card">${escapeHtml(emptyText)}</div>` : '';
+  }
+
+  return `
+    <div class="feature-icon-grid">
+      ${safeItems
+        .map((item, index) => `
+          <div class="feature-icon-card">
+            <div class="feature-icon-badge">${index + 1}</div>
+            <div class="feature-icon-copy">${escapeHtml(item)}</div>
+          </div>
+        `)
+        .join('')}
+    </div>
+  `;
+}
+
+function getProviderIconLabel(categoryLabel = '') {
+  const normalized = String(categoryLabel || '').trim().toLowerCase();
+  if (normalized.includes('photograph')) {
+    return 'PH';
+  }
+  if (normalized.includes('inspect')) {
+    return 'IN';
+  }
+  if (normalized.includes('clean')) {
+    return 'CL';
+  }
+  if (normalized.includes('title')) {
+    return 'TT';
+  }
+  if (normalized.includes('attorney')) {
+    return 'AT';
+  }
+  if (normalized.includes('notar')) {
+    return 'NO';
+  }
+  return String(categoryLabel || 'PR')
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join('') || 'PR';
+}
+
+function medianCompSummary(comps = []) {
+  if (!comps.length) {
+    return '';
+  }
+
+  const comparableRows = comps.slice(0, 6);
+  const medianPrice = comparableRows
+    .map((comp) => Number(comp.price || 0))
+    .filter((value) => value > 0)
+    .sort((left, right) => left - right);
+
+  if (!medianPrice.length) {
+    return '';
+  }
+
+  const medianPriceValue = medianPrice[Math.floor(medianPrice.length / 2)];
+  return `Median nearby comparable price ${formatCurrency(medianPriceValue)}.`;
+}
+
 function renderSuggestedCategoryCards(items = []) {
   const safeItems = items.filter(Boolean);
   if (!safeItems.length) {
@@ -321,8 +387,13 @@ function renderProviderCards(items = []) {
         .map(
           (provider) => `
             <article class="provider-card">
-              <div class="provider-category">${escapeHtml(provider.categoryLabel || 'Provider')}</div>
-              <h4>${escapeHtml(provider.businessName || 'Provider recommendation')}</h4>
+              <div class="provider-card-head">
+                <div class="provider-icon">${escapeHtml(getProviderIconLabel(provider.categoryLabel || 'Provider'))}</div>
+                <div>
+                  <div class="provider-category">${escapeHtml(provider.categoryLabel || 'Provider')}</div>
+                  <h4>${escapeHtml(provider.businessName || 'Provider recommendation')}</h4>
+                </div>
+              </div>
               <p class="provider-reason">${escapeHtml(provider.reason || provider.coverageLabel || '')}</p>
               <div class="provider-meta">
                 ${provider.coverageLabel ? `<span>${escapeHtml(provider.coverageLabel)}</span>` : ''}
@@ -574,6 +645,8 @@ function renderHtmlDocument({ title, body }) {
       .photo-tile figcaption span { font-size: 12px; color: var(--muted); }
       .provider-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
       .provider-card { padding: 16px; }
+      .provider-card-head { display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: start; }
+      .provider-icon { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(47,95,143,0.12); color: var(--brand-blue); font-size: 12px; font-weight: 800; border: 1px solid rgba(47,95,143,0.18); }
       .provider-category { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--moss); margin-bottom: 8px; }
       .provider-reason { font-size: 13px; color: var(--muted); line-height: 1.5; min-height: 54px; }
       .provider-meta, .provider-contact { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 10px; font-size: 12px; color: var(--muted); }
@@ -669,6 +742,10 @@ function renderHtmlDocument({ title, body }) {
       .highlight-card { display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: start; padding: 14px 16px; border-radius: 18px; border: 1px solid rgba(79,123,98,0.16); background: rgba(255,255,255,0.92); }
       .highlight-index { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(200,116,71,0.14); color: var(--accent); font-weight: 800; }
       .highlight-copy { font-size: 14px; line-height: 1.5; color: var(--ink); }
+      .feature-icon-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+      .feature-icon-card { display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: start; padding: 14px 16px; border-radius: 18px; border: 1px solid rgba(47,95,143,0.16); background: rgba(244,248,252,0.96); box-shadow: 0 8px 18px rgba(19,32,43,0.05); }
+      .feature-icon-badge { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 14px; background: linear-gradient(135deg, rgba(47,95,143,0.14), rgba(200,116,71,0.14)); color: var(--brand-blue); font-size: 15px; font-weight: 800; }
+      .feature-icon-copy { font-size: 14px; line-height: 1.5; color: var(--ink); font-weight: 600; }
       .hero-signal-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
       .hero-signal-chip { padding: 10px 12px; border-radius: 14px; font-size: 12px; line-height: 1.45; font-weight: 600; border: 1px solid transparent; }
       .hero-signal-chip-blue { background: var(--brand-blue-soft); color: var(--brand-blue); border-color: rgba(47,95,143,0.18); }
@@ -679,19 +756,19 @@ function renderHtmlDocument({ title, body }) {
       .suggested-category-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--brand-blue); margin-bottom: 8px; }
       .seller-cover-grid { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 18px; align-items: start; }
       .score-hero { border-radius: 24px; padding: 24px 24px 22px; border: 1px solid rgba(200,116,71,0.24); background: linear-gradient(145deg, rgba(47,95,143,0.08), rgba(200,116,71,0.16) 62%, rgba(255,250,244,0.98) 100%); text-align: center; }
-      .score-hero-value { font-size: 84px; line-height: 0.88; font-weight: 800; margin-top: 10px; letter-spacing: -0.06em; }
+      .score-hero-value { font-size: 96px; line-height: 0.84; font-weight: 800; margin-top: 10px; letter-spacing: -0.06em; }
       .score-status { display: inline-flex; margin-top: 10px; padding: 8px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
       .score-status-ready { background: rgba(79,123,98,0.16); color: var(--moss); }
       .score-status-almost { background: rgba(200,116,71,0.16); color: #9a5a33; }
       .score-status-needs-work { background: rgba(176,108,99,0.16); color: #96554a; }
       .brochure-cover { position: relative; min-height: 5.2in; border-radius: 28px; overflow: hidden; border: 1px solid var(--line); background: linear-gradient(135deg, #304f72 0%, #203245 100%); }
       .brochure-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-      .brochure-cover::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(16,24,32,0.14) 0%, rgba(16,24,32,0.58) 44%, rgba(16,24,32,0.86) 100%); }
+      .brochure-cover::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(16,24,32,0.08) 0%, rgba(30,57,84,0.40) 30%, rgba(16,24,32,0.72) 68%, rgba(16,24,32,0.9) 100%); }
       .brochure-cover-overlay { position: relative; z-index: 1; min-height: 5.2in; padding: 30px 30px 26px; color: #ffffff; display: flex; flex-direction: column; justify-content: flex-end; }
       .brochure-cover-overlay .brand-kicker { color: rgba(255,255,255,0.78); }
-      .brochure-cover-overlay h1 { color: #ffffff; font-size: 54px; line-height: 0.98; max-width: 5.9in; }
+      .brochure-cover-overlay h1 { color: #ffffff; font-size: 60px; line-height: 0.96; max-width: 6.2in; text-shadow: 0 10px 24px rgba(0,0,0,0.18); }
       .brochure-cover-overlay .lede { color: rgba(255,255,255,0.88); max-width: 5.4in; }
-      .brochure-price { display: inline-flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 10px 14px; border-radius: 999px; background: rgba(255,255,255,0.14); color: #ffffff; border: 1px solid rgba(255,255,255,0.24); font-weight: 700; backdrop-filter: blur(2px); }
+      .brochure-price { display: inline-flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 12px 18px; border-radius: 999px; background: rgba(255,255,255,0.18); color: #ffffff; border: 1px solid rgba(255,255,255,0.26); font-weight: 800; font-size: 15px; backdrop-filter: blur(3px); box-shadow: 0 12px 26px rgba(0,0,0,0.12); }
       .brochure-cover-facts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
       .brochure-cover-fact { padding: 8px 12px; border-radius: 999px; background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.22); font-size: 12px; color: #fff; }
       .brochure-cover-lower { display: grid; grid-template-columns: 1fr 0.9fr; gap: 18px; margin-top: 18px; }
@@ -762,13 +839,29 @@ function buildPropertySummaryHtml({ property, report }) {
   const shouldRenderCompMap = Boolean(compMapImageUrl && (report.selectedComps || []).length);
   const shouldRenderProviders = providerRecommendations.length > 0;
   const shouldRenderBuyerPersona = hasMeaningfulValue(buyerPersonaSummary.buyerPersona) || topReasonsToBuy.length > 0;
+  const coverNarrative = shortenNarrative(executiveSummaryText, 1);
   const pricingInsightLines = pickMeaningfulLines([
     shortenNarrative(report.pricingSummary?.strategy, 1),
     ...(report.pricingSummary?.strengths || []),
     hasMeaningfulValue(riskOpportunity.biggestOpportunity) ? `Opportunity: ${riskOpportunity.biggestOpportunity}` : '',
   ], 4);
+  const executiveSummaryBullets = pickMeaningfulLines([
+    coverNarrative,
+    coverPricingSignal,
+    coverKeyInsight,
+    hasMeaningfulValue(report.payload?.listingDescriptions?.shortDescription)
+      ? report.payload.listingDescriptions.shortDescription
+      : '',
+  ], 3);
+  const pricingRationaleBullets = pickMeaningfulLines([
+    report.pricingSummary?.strategy,
+    ...(report.pricingSummary?.strengths || []),
+    hasMeaningfulValue(report.pricingSummary?.confidence)
+      ? `${Math.round(report.pricingSummary.confidence * 100)}% pricing confidence based on the selected comparable set.`
+      : '',
+    medianCompSummary(report.selectedComps || []),
+  ], 4);
   const readinessTone = getReadinessTone({ score: readinessSummary.overallScore, label: readinessSummary.label });
-  const coverNarrative = shortenNarrative(executiveSummaryText, 1);
   const coverPricingSignal = property?.selectedListPrice
     ? `Pricing signal: positioned at ${formatCurrency(property.selectedListPrice)}.`
     : '';
@@ -802,7 +895,7 @@ function buildPropertySummaryHtml({ property, report }) {
         <div class="hero-signal-row">
           ${coverPricingSignal ? `<div class="hero-signal-chip hero-signal-chip-blue">${escapeHtml(coverPricingSignal)}</div>` : ''}
           ${coverKeyInsight ? `<div class="hero-signal-chip hero-signal-chip-orange">${escapeHtml(coverKeyInsight)}</div>` : ''}
-          ${coverNarrative ? `<div class="hero-signal-chip hero-signal-chip-green">${escapeHtml(coverNarrative)}</div>` : ''}
+          ${hasMeaningfulValue(readinessSummary.label) ? `<div class="hero-signal-chip hero-signal-chip-green">${escapeHtml(`Launch status: ${readinessSummary.label}`)}</div>` : ''}
         </div>
         <div class="kpi-strip">
           ${renderMetricCard('Selected price', property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set', report.pricingSummary?.mid ? `Suggested midpoint ${formatCurrency(report.pricingSummary.mid)}` : 'Pricing guidance available below')}
@@ -823,6 +916,11 @@ function buildPropertySummaryHtml({ property, report }) {
               <div class="metric-label">Value protection</div>
               <strong>${escapeHtml(economicsSummary || 'Use this report to coordinate a confident, disciplined launch.')}</strong>
             </div>
+          </div>
+          <div class="content-card">
+            <div class="section-kicker">Key insights</div>
+            <h3>What matters most right now</h3>
+            ${renderInsightList(executiveSummaryBullets, 'Use this report to identify the clearest launch priorities.')}
           </div>
           <div class="cta-band">
             <div class="cta-label">Report date</div>
@@ -876,8 +974,8 @@ function buildPropertySummaryHtml({ property, report }) {
         ` : ''}
         <div class="sidebar-card">
           <div class="section-kicker">Pricing rationale</div>
-          <h3>${escapeHtml(report.payload?.listingDescriptions?.shortDescription || 'Pricing recommendation')}</h3>
-          ${renderInsightList(pricingInsightLines, '')}
+          <h3>Comparable-based rationale</h3>
+          ${renderBulletList(pricingRationaleBullets, 'Comparable-based pricing guidance will appear here once the pricing analysis is refreshed.')}
           <div class="page-spacer"></div>
           <div class="section-kicker">Pricing callouts</div>
           <div class="badge-row">
@@ -1041,6 +1139,11 @@ function buildMarketingReportHtml({ property, flyer }) {
     ? shortenNarrative(flyer.summary, 2)
     : 'A buyer-facing brochure designed to spotlight the home’s strongest features, neighborhood appeal, and showing-ready presentation.';
   const lifestyleContext = buildNeighborhoodContext(property);
+  const featureGridItems = pickMeaningfulLines([
+    ...featureTags,
+    property?.selectedListPrice ? `Seller-confirmed list price ${formatCurrency(property.selectedListPrice)}` : '',
+    lifestyleContext,
+  ], 6);
   const shouldRenderMapPage = Boolean(neighborhoodMapImageUrl && galleryPhotos.length >= 4);
   const brochureFactBadges = pickMeaningfulLines([
     property?.bedrooms ? `${property.bedrooms} bedrooms` : '',
@@ -1068,9 +1171,9 @@ function buildMarketingReportHtml({ property, flyer }) {
       </div>
       <div class="brochure-cover-lower">
         <div class="content-card">
-          <div class="section-kicker">Top reasons to buy</div>
+          <div class="section-kicker">Buyer appeal</div>
           <h3>Why this home stands out</h3>
-          ${renderHighlightGrid(topReasonsToBuy, 'Top selling points will appear here once the brochure guidance is finalized.')}
+          ${renderFeatureIconGrid(featureGridItems, 'Top selling points will appear here once the brochure guidance is finalized.')}
         </div>
         <div class="brochure-cta-card">
           <div class="section-kicker">Call to action</div>
@@ -1117,8 +1220,8 @@ function buildMarketingReportHtml({ property, flyer }) {
         <div class="brochure-bottom-grid">
           <div class="content-card">
             <div class="section-kicker">Key features</div>
-            <h3>Top reasons to buy</h3>
-            ${renderHighlightGrid(topReasonsToBuy, 'Top reasons to buy will appear here once pricing and marketing positioning are finalized.')}
+            <h3>Most marketable highlights</h3>
+            ${renderFeatureIconGrid(featureTags.length ? featureTags : topReasonsToBuy, 'Top reasons to buy will appear here once pricing and marketing positioning are finalized.')}
           </div>
           <div class="content-card">
             <div class="section-kicker">Pricing positioning</div>
@@ -1203,7 +1306,7 @@ function buildMarketingReportHtml({ property, flyer }) {
                 </div>
                 <div class="closing-band">
                   <div class="section-kicker">Final push</div>
-                  <p class="compact-copy" style="margin-top:6px;">Homes that combine clear pricing, polished photography, and a strong first showing impression create more confident buyer momentum.</p>
+                  <p class="compact-copy" style="margin-top:6px;">Homes that combine clear pricing, polished photography, and a strong first showing impression create more confident buyer momentum. Schedule the showing window while buyer interest is fresh.</p>
                 </div>
                 <div class="brochure-cta-button">Request the full property package</div>
               </div>
