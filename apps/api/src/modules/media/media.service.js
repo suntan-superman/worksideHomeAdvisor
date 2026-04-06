@@ -4,13 +4,13 @@ import { analyzePropertyPhoto } from '../../services/photoAnalysisService.js';
 import {
   buildMediaAssetUrl,
   buildMediaVariantUrl,
-  deleteStoredAsset,
   saveImageBuffer,
 } from '../../services/storageService.js';
 import { assertPropertyEditableById, getPropertyById } from '../properties/property.service.js';
 import { ImageJobModel } from './image-job.model.js';
 import { MediaAssetModel } from './media.model.js';
 import { MediaVariantModel } from './media-variant.model.js';
+import { deleteStoredAssetIfUnreferenced } from './storage-reference.service.js';
 
 function serializeMediaAsset(document, selectedVariant = null) {
   if (!document) {
@@ -207,14 +207,16 @@ export async function deleteMediaAsset(assetId) {
   ];
 
   await Promise.all([
-    deleteStoredAsset({
+    deleteStoredAssetIfUnreferenced({
       storageProvider: asset.storageProvider,
       storageKey: asset.storageKey,
+      excludeAssetId: asset._id,
     }),
     ...variants.map((variant) =>
-      deleteStoredAsset({
+      deleteStoredAssetIfUnreferenced({
         storageProvider: variant.storageProvider,
         storageKey: variant.storageKey,
+        excludeVariantId: variant._id,
       }),
     ),
   ]);

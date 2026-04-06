@@ -1,9 +1,9 @@
 import mongoose from 'mongoose';
 
 import { env } from '../../config/env.js';
-import { deleteStoredAsset } from '../../services/storageService.js';
 import { ImageJobModel } from './image-job.model.js';
 import { MediaVariantModel } from './media-variant.model.js';
+import { deleteStoredAssetIfUnreferenced } from './storage-reference.service.js';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
@@ -98,9 +98,10 @@ export async function cleanupExpiredMediaVariants({
 
   for (const variant of expiredVariants) {
     try {
-      await deleteStoredAsset({
+      await deleteStoredAssetIfUnreferenced({
         storageProvider: variant.storageProvider,
         storageKey: variant.storageKey,
+        excludeVariantId: variant._id,
       });
       deletedVariantIds.push(variant._id);
     } catch (error) {

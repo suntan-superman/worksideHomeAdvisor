@@ -4,7 +4,6 @@ import { normalizeLandingAttribution } from '@workside/utils';
 
 import { env } from '../../config/env.js';
 import { sendOtpEmail, sendWelcomeEmail } from '../../services/emailService.js';
-import { deleteStoredAsset } from '../../services/storageService.js';
 import { signSessionToken } from '../../services/sessionService.js';
 import { BillingSubscriptionModel } from '../billing/billing.model.js';
 import { FlyerModel } from '../documents/flyer.model.js';
@@ -12,6 +11,7 @@ import { ReportModel } from '../documents/report.model.js';
 import { ImageJobModel } from '../media/image-job.model.js';
 import { MediaAssetModel } from '../media/media.model.js';
 import { MediaVariantModel } from '../media/media-variant.model.js';
+import { deleteStoredAssetIfUnreferenced } from '../media/storage-reference.service.js';
 import { PricingAnalysisModel } from '../pricing/pricing.model.js';
 import { PropertyModel } from '../properties/property.model.js';
 import {
@@ -75,10 +75,10 @@ async function deleteUserOwnedProperties(propertyIds = []) {
 
   const [mediaAssets, mediaVariants, leadRequests] = await Promise.all([
     MediaAssetModel.find({ propertyId: { $in: propertyIds } })
-      .select({ storageProvider: 1, storageKey: 1 })
+      .select({ _id: 1, storageProvider: 1, storageKey: 1 })
       .lean(),
     MediaVariantModel.find({ propertyId: { $in: propertyIds } })
-      .select({ storageProvider: 1, storageKey: 1 })
+      .select({ _id: 1, storageProvider: 1, storageKey: 1 })
       .lean(),
     LeadRequestModel.find({ propertyId: { $in: propertyIds } })
       .select({ _id: 1 })
@@ -94,11 +94,16 @@ async function deleteUserOwnedProperties(propertyIds = []) {
   const leadDispatchIds = leadDispatches.map((dispatch) => dispatch._id);
 
   await Promise.all(
-    [...mediaAssets, ...mediaVariants].map(async (asset) => {
+    [
+      ...mediaAssets.map((asset) => ({ kind: 'asset', ...asset })),
+      ...mediaVariants.map((variant) => ({ kind: 'variant', ...variant })),
+    ].map(async (asset) => {
       try {
-        await deleteStoredAsset({
+        await deleteStoredAssetIfUnreferenced({
           storageProvider: asset.storageProvider,
           storageKey: asset.storageKey,
+          excludeAssetId: asset.kind === 'asset' ? asset._id : null,
+          excludeVariantId: asset.kind === 'variant' ? asset._id : null,
         });
       } catch {
         // Continue deleting account data even if a file/object is already gone.

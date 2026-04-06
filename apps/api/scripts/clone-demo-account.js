@@ -227,25 +227,21 @@ async function cloneMediaAssets(propertyId, nextPropertyId) {
       clonedAsset.imageUrl = buildMediaAssetUrl(clonedAsset._id.toString());
       await clonedAsset.save();
     } catch (error) {
-      const externalUrl =
-        buildCloneFallbackUrls([
-          sourceAsset.imageUrl,
-          sourceAsset._id ? buildMediaAssetUrl(sourceAsset._id.toString()) : '',
-        ])[0] || '';
       console.warn(
-        `Could not duplicate media asset ${sourceAsset._id.toString()}. Preserving it as an external reference instead.`,
+        `Could not duplicate media asset ${sourceAsset._id.toString()}. Preserving a shared storage reference instead.`,
       );
 
       clonedAsset = await MediaAssetModel.create({
         ...cloneDocument(sourceAsset, {
           propertyId: nextPropertyId,
-          storageProvider: 'external',
-          storageKey: null,
-          byteSize: sourceAsset.byteSize || null,
-          imageDataUrl: null,
+          storageProvider: sourceAsset.storageProvider,
+          storageKey: sourceAsset.storageKey,
         }),
-        imageUrl: externalUrl,
+        imageUrl: '',
       });
+
+      clonedAsset.imageUrl = buildMediaAssetUrl(clonedAsset._id.toString());
+      await clonedAsset.save();
     }
 
     assetIdMap.set(sourceAsset._id.toString(), clonedAsset._id);
@@ -330,10 +326,22 @@ async function cloneMediaVariants(propertyId, nextPropertyId, assetIdMap, jobIdM
 
       variantIdMap.set(sourceVariant._id.toString(), clonedVariant._id);
     } catch (error) {
-      skippedVariants += 1;
       console.warn(
-        `Could not duplicate media variant ${sourceVariant._id.toString()}. Skipping that derived variant.`,
+        `Could not duplicate media variant ${sourceVariant._id.toString()}. Preserving a shared storage reference instead.`,
       );
+
+      const clonedVariant = await MediaVariantModel.create({
+        ...cloneDocument(sourceVariant, {
+          propertyId: nextPropertyId,
+          mediaId: nextMediaId,
+          visionJobId: nextVisionJobId,
+          storageProvider: sourceVariant.storageProvider,
+          storageKey: sourceVariant.storageKey,
+          byteSize: sourceVariant.byteSize || null,
+        }),
+      });
+
+      variantIdMap.set(sourceVariant._id.toString(), clonedVariant._id);
     }
   }
 
