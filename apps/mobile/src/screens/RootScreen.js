@@ -1049,7 +1049,6 @@ export function RootScreen() {
                           onPress={() => setPropertySection(value)}
                           style={[
                             styles.sectionChip,
-                            value === propertySection ? styles.sectionChipActive : null,
                             value !== propertySection && value === recommendedSection ? styles.sectionChipRecommended : null,
                             value !== propertySection &&
                             ((value === 'overview' && Boolean(dashboard?.pricing)) ||
@@ -1061,6 +1060,7 @@ export function RootScreen() {
                               (value === 'tasks' && checklistItems.length > 0 && openChecklistItems.length === 0))
                               ? styles.sectionChipComplete
                               : null,
+                            value === propertySection ? styles.sectionChipActive : null,
                           ]}
                         >
                           <Text
@@ -1135,13 +1135,13 @@ export function RootScreen() {
                               onPress={() => updateField('roomLabel', room)}
                               style={[
                                 styles.roomChip,
-                                form.roomLabel === room ? styles.roomChipActive : null,
                                 room === nextMissingRoom && !roomCoverage.find((item) => item.roomLabel === room)?.captured
                                   ? styles.roomChipRecommended
                                   : null,
                                 roomCoverage.find((item) => item.roomLabel === room)?.captured
                                   ? styles.roomChipDone
                                   : null,
+                                form.roomLabel === room ? styles.roomChipActive : null,
                               ]}
                             >
                               <Text
@@ -1816,6 +1816,30 @@ const styles = StyleSheet.create({
     gap: 10,
     marginTop: 8,
   },
+  authModeCard: {
+    gap: 6,
+    marginTop: 8,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  authModeTitle: {
+    color: '#f8f1e6',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  authModeCopy: {
+    color: '#dbcbb7',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  rememberedEmailNote: {
+    color: '#93a982',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   actionRow: {
     flexDirection: 'row',
     gap: 10,
@@ -1894,6 +1918,9 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.7,
   },
+  buttonDanger: {
+    backgroundColor: '#b85d4c',
+  },
   buttonText: {
     color: '#fff7ee',
     fontSize: 17,
@@ -1908,6 +1935,10 @@ const styles = StyleSheet.create({
     color: '#f3a56a',
     fontSize: 15,
     fontWeight: '700',
+  },
+  authSecondaryActions: {
+    gap: 10,
+    alignItems: 'flex-start',
   },
   status: {
     color: '#93a982',
@@ -1944,6 +1975,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#425563',
   },
+  userCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  userCardCopy: {
+    flex: 1,
+    gap: 4,
+  },
   userName: {
     color: '#f8f1e6',
     fontSize: 20,
@@ -1958,6 +1999,40 @@ const styles = StyleSheet.create({
   },
   flexButton: {
     flex: 1,
+  },
+  chipButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  chipButtonActive: {
+    backgroundColor: '#d28859',
+    borderColor: '#d28859',
+  },
+  chipButtonText: {
+    color: '#f8f1e6',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  chipButtonTextActive: {
+    color: '#fff7ee',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  settingsCard: {
+    gap: 12,
+    marginTop: 6,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  settingsActionList: {
+    gap: 10,
   },
   propertyCard: {
     borderRadius: 18,
@@ -2001,12 +2076,12 @@ const styles = StyleSheet.create({
     gap: 6,
     padding: 12,
     borderRadius: 14,
-    backgroundColor: '#31404d',
+    backgroundColor: '#3a3128',
     borderWidth: 1,
-    borderColor: '#425563',
+    borderColor: '#d28859',
   },
   workflowNextLabel: {
-    color: '#93a982',
+    color: '#f0c6a4',
     fontSize: 11,
     letterSpacing: 1,
     textTransform: 'uppercase',
@@ -2067,10 +2142,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#d28859',
     borderColor: '#d28859',
   },
+  sectionChipRecommended: {
+    backgroundColor: '#3d3325',
+    borderColor: '#d9a14e',
+  },
+  sectionChipComplete: {
+    backgroundColor: '#22342d',
+    borderColor: '#4f6b5b',
+  },
   sectionChipLabel: {
     color: '#dbcbb7',
     fontSize: 13,
     fontWeight: '700',
+  },
+  sectionChipLabelRecommended: {
+    color: '#f7d7b7',
+    fontSize: 13,
+    fontWeight: '800',
   },
   sectionChipLabelActive: {
     color: '#fff7ee',
@@ -2119,6 +2207,22 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     lineHeight: 34,
   },
+  overviewInsightCard: {
+    gap: 8,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  summaryBulletList: {
+    gap: 8,
+  },
+  summaryBullet: {
+    color: '#dbcbb7',
+    fontSize: 14,
+    lineHeight: 20,
+  },
   captureCard: {
     gap: 12,
     marginTop: 8,
@@ -2147,6 +2251,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#d28859',
     borderColor: '#d28859',
   },
+  roomChipRecommended: {
+    backgroundColor: '#3d3325',
+    borderColor: '#d9a14e',
+  },
+  roomChipDone: {
+    backgroundColor: '#22342d',
+    borderColor: '#4f6b5b',
+  },
   roomChipLabel: {
     color: '#dbcbb7',
     fontSize: 14,
@@ -2155,6 +2267,12 @@ const styles = StyleSheet.create({
   },
   roomChipLabelActive: {
     color: '#fff7ee',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  roomChipLabelDone: {
+    color: '#d8ead8',
     fontSize: 14,
     fontWeight: '800',
     textAlign: 'center',
@@ -2273,7 +2391,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
     paddingHorizontal: 14,
     borderRadius: 14,
     backgroundColor: '#24303a',
@@ -2341,6 +2459,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#3d4e5b',
   },
+  learnMoreButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  learnMoreButtonText: {
+    color: '#93a982',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   visionJobCard: {
     gap: 8,
     padding: 12,
@@ -2402,9 +2534,9 @@ const styles = StyleSheet.create({
     gap: 6,
     padding: 14,
     borderRadius: 16,
-    backgroundColor: '#24303a',
+    backgroundColor: '#2c3440',
     borderWidth: 1,
-    borderColor: '#3d4e5b',
+    borderColor: '#d28859',
   },
   taskSummaryValue: {
     color: '#fff7ee',
@@ -2423,6 +2555,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#24303a',
     borderWidth: 1,
     borderColor: '#3d4e5b',
+  },
+  taskCardWorking: {
+    borderColor: '#d9a14e',
+    borderLeftWidth: 4,
+    backgroundColor: '#2d3336',
+  },
+  taskCardComplete: {
+    opacity: 0.76,
   },
   taskMetaRow: {
     flexDirection: 'row',
@@ -2493,6 +2633,52 @@ const styles = StyleSheet.create({
     color: '#fff7ee',
     fontSize: 13,
     fontWeight: '800',
+  },
+  taskStatusButton: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
+  },
+  completedTasksCard: {
+    gap: 10,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#1f2a33',
+    borderWidth: 1,
+    borderColor: '#34434f',
+  },
+  completedTasksToggle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  completedTasksTitle: {
+    color: '#f8f1e6',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  completedTasksToggleText: {
+    color: '#93a982',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  customTaskComposer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: '#24303a',
+    borderWidth: 1,
+    borderColor: '#3d4e5b',
+  },
+  customTaskInput: {
+    flex: 1,
+    backgroundColor: '#31404d',
+    marginBottom: 0,
+  },
+  customTaskButton: {
+    minWidth: 108,
   },
   authFooter: {
     gap: 10,
