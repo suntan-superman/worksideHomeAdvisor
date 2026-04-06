@@ -10,10 +10,10 @@ async function run() {
   });
 
   const user = await UserModel.findOneAndUpdate(
-    { email: 'seller-demo@workside.software' },
+    { email: 'seller-demo@worksideadvisor.com' },
     {
       $setOnInsert: {
-        email: 'seller-demo@workside.software',
+        email: 'seller-demo@worksideadvisor.com',
         passwordHash: '$2a$12$yXQmeu5N9gmgx9v2jYH8AOW8xOLnQxV8cp8mbn1gS0cNjm0v7odxu',
         firstName: 'Jamie',
         lastName: 'Seller',

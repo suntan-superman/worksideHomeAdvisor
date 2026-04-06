@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { BRANDING } from '@workside/branding';
 
 import { OnboardingGuide } from '../../../components/OnboardingGuide';
 import { PasswordInput } from '../../../components/PasswordInput';
@@ -866,7 +867,7 @@ export function ProviderSignupClient({
                   Verify and log in
                 </Link>
               ) : (
-                <a className="button-primary" href="mailto:support@worksidesoftware.com">
+                <a className="button-primary" href={`mailto:${BRANDING.supportEmail}`}>
                   Contact support
                 </a>
               )}
@@ -1281,7 +1282,7 @@ export function ProviderSignupClient({
                   onChange={(event) => updateField('smsOptIn', event.target.checked)}
                 />
                 <span>
-                  I agree to receive transactional SMS messages from Workside Software regarding
+                  I agree to receive transactional SMS messages from Workside Home Advisor regarding
                   provider lead notifications and account-related updates. Message frequency varies.
                   Message and data rates may apply. Reply STOP to opt out or HELP for assistance.
                 </span>

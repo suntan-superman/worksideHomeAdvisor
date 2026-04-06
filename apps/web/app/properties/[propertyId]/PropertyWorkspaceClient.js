@@ -3386,9 +3386,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </div>
             </div>
             <ProviderResultsMap
-              property={property}
-              providers={providerMapViewportProviders}
-              mapsApiKey={mapsApiKey}
+              propertyId={property?.id}
+              categoryKey={providerSuggestionTask?.providerCategoryKey || providerSource?.categoryKey || ''}
+              taskKey={providerSuggestionTask?.systemKey || providerSuggestionTask?.id || ''}
+              includeExternal={providerMapScope === 'all'}
               googleMapsUrl={providerGoogleSearchUrl}
               frameClassName="property-map-frame-expanded"
             />

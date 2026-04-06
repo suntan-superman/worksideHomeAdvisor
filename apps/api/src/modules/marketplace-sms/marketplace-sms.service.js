@@ -1,4 +1,5 @@
 import { env } from '../../config/env.js';
+import { BRANDING } from '@workside/branding';
 import {
   LeadDispatchModel,
   LeadRequestModel,
@@ -71,7 +72,7 @@ function buildReplySmsBody(type) {
     return 'No problem - we marked this Workside lead as declined. You will keep receiving future eligible requests unless you opt out.';
   }
   if (type === 'help') {
-    return 'Workside provider SMS: Reply YES to accept a lead, NO to decline, STOP to opt out. Support: support@worksidesoftware.com.';
+    return `Workside provider SMS: Reply YES to accept a lead, NO to decline, STOP to opt out. Support: ${BRANDING.supportEmail}.`;
   }
   if (type === 'opted_out') {
     return 'You have been opted out of Workside provider SMS notifications. Reply START later when re-enable support is added.';

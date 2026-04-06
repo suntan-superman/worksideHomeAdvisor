@@ -1,9 +1,10 @@
 import puppeteer from 'puppeteer';
+import { BRANDING } from '@workside/branding';
 import { formatCurrency } from '@workside/utils';
 
 import { env } from '../../config/env.js';
 
-const SUPPORT_EMAIL = 'support@worksidesoftware.com';
+const SUPPORT_EMAIL = BRANDING.supportEmail;
 
 function escapeHtml(value) {
   return String(value ?? '')

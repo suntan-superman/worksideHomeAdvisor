@@ -132,15 +132,15 @@ export function AppFrame({ children, busy = false }) {
 
       <main>{children}</main>
       <footer className="site-footer">
-        <span>Copyright 2026 Workside Software LLC.</span>
+        <span>Copyright 2026 {BRANDING.companyName} LLC.</span>
         <Link href="/terms">Terms of Service</Link>
         <Link href="/privacy">Privacy Notice</Link>
         <Link href="/sms-consent">SMS Consent</Link>
         <Link href="/providers/join">List your business</Link>
         <Link href="/providers/portal">Provider portal</Link>
-        <a href="mailto:support@worksidesoftware.com">support@worksidesoftware.com</a>
-        <a href="mailto:sales@worksidesoftware.com">sales@worksidesoftware.com</a>
-        <a href="mailto:feedback@worksidesoftware.com">feedback@worksidesoftware.com</a>
+        <a href={`mailto:${BRANDING.supportEmail}`}>{BRANDING.supportEmail}</a>
+        <a href={`mailto:${BRANDING.salesEmail}`}>{BRANDING.salesEmail}</a>
+        <a href={`mailto:${BRANDING.feedbackEmail}`}>{BRANDING.feedbackEmail}</a>
       </footer>
     </div>
   );

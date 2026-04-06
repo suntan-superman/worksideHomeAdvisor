@@ -256,7 +256,7 @@ No problem — we’ve marked this Workside lead as declined. You’ll continue 
 # 9.7 Help Response
 
 ```text
-Workside provider SMS: Reply YES to accept a lead, NO to decline, STOP to opt out. For support, contact support@worksidesoftware.com.
+Workside provider SMS: Reply YES to accept a lead, NO to decline, STOP to opt out. For support, contact support@worksideadvisor.com.
 ```
 
 Replace support contact as needed.

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 
 export default function AdminLoginPage() {
   const [nextPath, setNextPath] = useState('/');
-  const [email, setEmail] = useState('admin@workside.software');
+  const [email, setEmail] = useState('sroy@worksidesoftware.com');
   const [password, setPassword] = useState('');
   const [status, setStatus] = useState('Sign in with an admin account from the main Workside auth system.');
   const [error, setError] = useState('');

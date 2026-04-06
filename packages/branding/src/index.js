@@ -1,10 +1,13 @@
 export const BRANDING = {
   productName: 'Workside Home Seller Assistant',
   shortProductName: 'Workside Home Seller',
-  companyName: 'Workside Software',
-  supportEmail: 'support@workside.software',
-  poweredBy: 'Powered by Workside Software',
-  footerCopy: '© Workside Software',
+  companyName: 'Workside Home Advisor',
+  supportEmail: 'support@worksideadvisor.com',
+  salesEmail: 'sales@worksideadvisor.com',
+  feedbackEmail: 'feedback@worksideadvisor.com',
+  publicWebUrl: 'https://worksideadvisor.com',
+  poweredBy: 'Powered by Workside Home Advisor',
+  footerCopy: '© Workside Home Advisor',
   tagline: 'AI guidance for pricing, prep, marketing, and sale readiness.',
 };
 

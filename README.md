@@ -168,7 +168,7 @@ cd ..
 then open Xcode here:
 open ios/*.xcworkspace
 /////////////////////////////////////////////////////////////
-https://worksidehomeadvisor.netlify.app/
+https://worksideadvisor.com/
 https://worksidehomeadvisoradmin.netlify.app/login
 /////////////////////////////////////////////////////////////
 

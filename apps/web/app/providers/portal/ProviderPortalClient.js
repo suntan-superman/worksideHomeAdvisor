@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { BRANDING } from '@workside/branding';
 
 import {
   createProviderBillingCheckout,
@@ -605,7 +606,7 @@ export function ProviderPortalClient({
     }
 
     if (item.actionKey === 'support' && typeof window !== 'undefined') {
-      window.location.href = 'mailto:support@worksidesoftware.com';
+      window.location.href = `mailto:${BRANDING.supportEmail}`;
     }
   }
 
@@ -675,7 +676,7 @@ export function ProviderPortalClient({
               <Link href="/providers/join" className="button-primary">
                 Open provider onboarding
               </Link>
-              <a className="button-secondary" href="mailto:support@worksidesoftware.com">
+              <a className="button-secondary" href={`mailto:${BRANDING.supportEmail}`}>
                 Contact support
               </a>
             </div>
@@ -795,7 +796,7 @@ export function ProviderPortalClient({
             <Link href="/providers/join" className="button-secondary">
               Review onboarding
             </Link>
-            <a href="mailto:support@worksidesoftware.com" className="button-primary">
+            <a href={`mailto:${BRANDING.supportEmail}`} className="button-primary">
               Contact support
             </a>
           </div>

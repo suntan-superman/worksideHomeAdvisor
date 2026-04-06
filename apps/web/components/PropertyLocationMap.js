@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import { getProviderMapImageUrl } from '../lib/api';
+
 let googleMapsLoaderPromise = null;
 let googleMapsReadyResolver = null;
 
@@ -420,42 +422,26 @@ export function PropertyLocationMap({
 }
 
 export function ProviderResultsMap({
-  property,
-  providers = [],
-  mapsApiKey = '',
+  propertyId = '',
+  categoryKey = '',
+  taskKey = '',
+  includeExternal = false,
   googleMapsUrl = '',
   frameClassName = '',
 }) {
-  const mapRef = useRef(null);
-  const mapInstanceRef = useRef(null);
-  const mapsRef = useRef(null);
-  const infoWindowRef = useRef(null);
-  const propertyMarkerRef = useRef(null);
-  const providerMarkersRef = useRef([]);
-  const fittedZoomRef = useRef(null);
-  const paintCheckTimerRef = useRef(null);
+  const imageObjectUrlRef = useRef('');
   const [mapError, setMapError] = useState('');
   const [mapZoomMode, setMapZoomMode] = useState('fit');
+  const [zoomOffset, setZoomOffset] = useState(0);
   const [isLoadingMap, setIsLoadingMap] = useState(false);
+  const [mapImageUrl, setMapImageUrl] = useState('');
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
 
-    function clearProviderMarkers() {
-      providerMarkersRef.current.forEach((marker) => marker.setMap(null));
-      providerMarkersRef.current = [];
-      if (propertyMarkerRef.current) {
-        propertyMarkerRef.current.setMap(null);
-        propertyMarkerRef.current = null;
-      }
-      if (infoWindowRef.current) {
-        infoWindowRef.current.close();
-      }
-    }
-
-    async function renderProviderMap() {
-      const propertyAddress = buildAddressQuery(property);
-      if (!mapRef.current || !propertyAddress) {
+    async function loadProviderMapImage() {
+      if (!propertyId) {
+        setMapImageUrl('');
         return;
       }
 
@@ -463,217 +449,88 @@ export function ProviderResultsMap({
       setIsLoadingMap(true);
 
       try {
-        await waitForNextPaint();
-        const maps = await loadGoogleMapsApi(mapsApiKey);
-        if (cancelled || !mapRef.current) {
-          return;
-        }
-
-        mapsRef.current = maps;
-        const geocoder = new maps.Geocoder();
-        const propertyLocation = await geocodeAddress(geocoder, propertyAddress);
-        if (cancelled || !mapRef.current) {
-          return;
-        }
-
-        if (!mapInstanceRef.current) {
-          mapInstanceRef.current = new maps.Map(mapRef.current, {
-            ...buildMapOptions(maps, 12),
-            center: propertyLocation,
-            fullscreenControl: false,
-          });
-        }
-        const map = mapInstanceRef.current;
-
-        if (!infoWindowRef.current) {
-          infoWindowRef.current = new maps.InfoWindow();
-        }
-
-        clearProviderMarkers();
-
-        if (paintCheckTimerRef.current) {
-          window.clearTimeout(paintCheckTimerRef.current);
-        }
-        paintCheckTimerRef.current = scheduleMapPaintCheck(mapRef, () => {
-          if (!cancelled) {
-            setMapError('The in-app provider map did not finish rendering. You can still use Open map search.');
-          }
+        const requestUrl = getProviderMapImageUrl(propertyId, {
+          categoryKey,
+          taskKey,
+          includeExternal,
+          zoomOffset,
         });
-
-        const bounds = new maps.LatLngBounds();
-
-        const propertyMarker = new maps.Marker({
-          map,
-          position: propertyLocation,
-          title: property?.title || propertyAddress,
-          label: {
-            text: 'H',
-            color: '#ffffff',
-          },
-          icon: {
-            path: maps.SymbolPath.CIRCLE,
-            fillColor: '#c87447',
-            fillOpacity: 1,
-            strokeColor: '#19212a',
-            strokeWeight: 1,
-              scale: 13,
-          },
+        const response = await fetch(requestUrl, {
+          cache: 'no-store',
+          signal: controller.signal,
         });
-        propertyMarkerRef.current = propertyMarker;
-        propertyMarker.addListener('click', () => {
-          infoWindowRef.current?.setContent(
-            `<div style="max-width:240px;"><strong>${property?.title || 'Subject property'}</strong><br/>${propertyAddress}</div>`,
-          );
-          infoWindowRef.current?.open({ anchor: propertyMarker, map });
-        });
-        bounds.extend(propertyLocation);
+        const contentType = response.headers.get('content-type') || '';
 
-        const coordinateBucketTotals = new Map();
-        const resolvedProviders = [];
-
-        for (const provider of providers || []) {
-          let basePosition = null;
-
-          if (
-            typeof provider.latitude === 'number' &&
-            Number.isFinite(provider.latitude) &&
-            typeof provider.longitude === 'number' &&
-            Number.isFinite(provider.longitude)
-          ) {
-            basePosition = { lat: provider.latitude, lng: provider.longitude };
+        if (!response.ok) {
+          let errorMessage = `Provider map request failed (${response.status}).`;
+          if (contentType.includes('application/json')) {
+            const payload = await response.json().catch(() => null);
+            if (payload?.message) {
+              errorMessage = payload.message;
+            }
           } else {
-            const providerQuery = buildProviderAddressQuery(provider);
-            if (!providerQuery) {
-              continue;
-            }
-
-            try {
-              const resolved = await geocodeAddress(geocoder, providerQuery);
-              basePosition = {
-                lat: resolved.lat(),
-                lng: resolved.lng(),
-              };
-            } catch {
-              continue;
+            const text = await response.text().catch(() => '');
+            if (text.trim()) {
+              errorMessage = text.trim();
             }
           }
-
-          if (!basePosition || cancelled) {
-            continue;
-          }
-
-          const bucketKey = createCoordinateBucketKey(basePosition);
-          resolvedProviders.push({
-            provider,
-            basePosition,
-            bucketKey,
-          });
-          coordinateBucketTotals.set(bucketKey, (coordinateBucketTotals.get(bucketKey) || 0) + 1);
+          throw new Error(errorMessage);
         }
 
-        const coordinateBucketIndexes = new Map();
-        resolvedProviders.forEach(({ provider, basePosition, bucketKey }, index) => {
-          const overlapIndex = coordinateBucketIndexes.get(bucketKey) || 0;
-          coordinateBucketIndexes.set(bucketKey, overlapIndex + 1);
-          const position = offsetMarkerPosition(
-            basePosition,
-            overlapIndex,
-            coordinateBucketTotals.get(bucketKey) || 1,
+        if (!contentType.startsWith('image/')) {
+          let unexpectedBody = '';
+          if (contentType.includes('application/json')) {
+            const payload = await response.json().catch(() => null);
+            unexpectedBody = payload?.message || '';
+          } else {
+            unexpectedBody = await response.text().catch(() => '');
+          }
+          throw new Error(
+            unexpectedBody || 'The provider map endpoint did not return an image.',
           );
-          const markerLabel = String(index + 1);
-          const marker = new maps.Marker({
-            map,
-            position,
-            title: provider.businessName,
-            label: {
-              text: markerLabel,
-              color: '#ffffff',
-            },
-            icon: {
-              path: maps.SymbolPath.CIRCLE,
-              fillColor: provider.isExternalFallback ? '#c87447' : '#2e7d32',
-              fillOpacity: provider.isExternalFallback ? 0.92 : 1,
-              strokeColor: '#19212a',
-              strokeWeight: 1,
-              scale: 11,
-            },
-          });
-          providerMarkersRef.current.push(marker);
-
-          marker.addListener('click', () => {
-            infoWindowRef.current?.setContent(formatProviderMapInfoWindow(provider, markerLabel));
-            infoWindowRef.current?.open({ anchor: marker, map });
-          });
-          bounds.extend(position);
-        });
-
-        if (!bounds.isEmpty()) {
-          map.fitBounds(bounds, {
-            top: 80,
-            bottom: 80,
-            left: 80,
-            right: 80,
-          });
-          window.setTimeout(() => {
-            if (cancelled) {
-              return;
-            }
-            maps.event?.trigger?.(map, 'resize');
-            if (typeof map.getZoom === 'function') {
-              const fittedZoom = map.getZoom();
-              if (Number.isFinite(fittedZoom)) {
-                fittedZoomRef.current = fittedZoom;
-              }
-            }
-            setMapZoomMode('fit');
-          }, 300);
         }
+
+        const blob = await response.blob();
+        if (imageObjectUrlRef.current) {
+          URL.revokeObjectURL(imageObjectUrlRef.current);
+        }
+        const objectUrl = URL.createObjectURL(blob);
+        imageObjectUrlRef.current = objectUrl;
+        setMapImageUrl(objectUrl);
       } catch (error) {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
+          if (imageObjectUrlRef.current) {
+            URL.revokeObjectURL(imageObjectUrlRef.current);
+            imageObjectUrlRef.current = '';
+          }
+          setMapImageUrl('');
           setMapError(
             error?.message ||
               'The in-app provider map could not be loaded. You can still use Open map search.',
           );
         }
       } finally {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setIsLoadingMap(false);
         }
       }
     }
 
-    renderProviderMap();
+    loadProviderMapImage();
 
     return () => {
-      cancelled = true;
-      if (paintCheckTimerRef.current) {
-        window.clearTimeout(paintCheckTimerRef.current);
-        paintCheckTimerRef.current = null;
-      }
+      controller.abort();
     };
-  }, [mapsApiKey, property, providers]);
+  }, [categoryKey, includeExternal, propertyId, taskKey, zoomOffset]);
 
   useEffect(() => {
-    const map = mapInstanceRef.current;
-    const fittedZoom = fittedZoomRef.current;
-    if (!map || !Number.isFinite(fittedZoom) || typeof map.setZoom !== 'function') {
-      return;
-    }
-
-    if (mapZoomMode === 'fit') {
-      map.setZoom(fittedZoom);
-      return;
-    }
-
-    if (mapZoomMode === 'closer') {
-      map.setZoom(Math.min(16, fittedZoom + 1));
-      return;
-    }
-
-    if (mapZoomMode === 'wider') {
-      map.setZoom(Math.max(8, fittedZoom - 1));
-    }
-  }, [mapZoomMode]);
+    return () => {
+      if (imageObjectUrlRef.current) {
+        URL.revokeObjectURL(imageObjectUrlRef.current);
+        imageObjectUrlRef.current = '';
+      }
+    };
+  }, []);
 
   return (
     <div className="property-map-shell">
@@ -688,7 +545,10 @@ export function ProviderResultsMap({
         <button
           type="button"
           className="button-secondary inline-button"
-          onClick={() => setMapZoomMode('wider')}
+          onClick={() => {
+            setMapZoomMode('wider');
+            setZoomOffset((current) => Math.max(-5, current - 1));
+          }}
           disabled={mapZoomMode === 'wider'}
         >
           Wider
@@ -696,7 +556,10 @@ export function ProviderResultsMap({
         <button
           type="button"
           className="button-secondary inline-button"
-          onClick={() => setMapZoomMode('closer')}
+          onClick={() => {
+            setMapZoomMode('closer');
+            setZoomOffset((current) => Math.min(5, current + 1));
+          }}
           disabled={mapZoomMode === 'closer'}
         >
           Closer
@@ -704,18 +567,30 @@ export function ProviderResultsMap({
         <button
           type="button"
           className="button-secondary inline-button"
-          onClick={() => setMapZoomMode('fit')}
+          onClick={() => {
+            setMapZoomMode('fit');
+            setZoomOffset(0);
+          }}
           disabled={mapZoomMode === 'fit'}
         >
           Reset
         </button>
       </div>
       <div className="property-map-frame-shell">
-        <div
-          ref={mapRef}
-          className={`property-map-frame property-map-frame-js provider-static-map-frame${frameClassName ? ` ${frameClassName}` : ''}`}
-        />
-        {isLoadingMap ? <div className="property-map-loading-overlay">Loading provider map…</div> : null}
+        <div className={`property-map-frame provider-static-map-frame${frameClassName ? ` ${frameClassName}` : ''}`}>
+          {mapImageUrl ? (
+            <img
+              src={mapImageUrl}
+              alt="Provider map"
+              className="provider-static-map-image"
+              onError={() => {
+                setMapImageUrl('');
+                setMapError('The in-app provider map image could not be loaded. You can still use Open map search.');
+              }}
+            />
+          ) : null}
+          {isLoadingMap ? <div className="property-map-loading-overlay">Loading provider map…</div> : null}
+        </div>
       </div>
       {mapError ? (
         <div className="property-map-fallback">

@@ -200,7 +200,7 @@ export async function listAdminUsers({ limit = 50 } = {}) {
       users: [
         {
           id: 'demo-admin',
-          email: 'admin@workside.software',
+          email: 'sroy@worksidesoftware.com',
           role: 'admin',
           propertyCount: 0,
           activePlanKey: 'admin_bypass',

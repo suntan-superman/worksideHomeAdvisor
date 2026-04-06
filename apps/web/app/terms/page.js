@@ -1,3 +1,5 @@
+import { BRANDING } from '@workside/branding';
+
 import { AppFrame } from '../../components/AppFrame';
 
 const sections = [
@@ -99,7 +101,7 @@ export default function TermsPage() {
       <section className="panel-card legal-page">
         <div className="section-eyebrow">Legal</div>
         <h1>Terms of Service</h1>
-        <p className="legal-meta">Workside Software LLC • Effective Date: March 29, 2026</p>
+        <p className="legal-meta">{BRANDING.companyName} LLC • Effective Date: March 29, 2026</p>
         <p>
           These Terms of Service (&ldquo;Terms&rdquo;) govern your access to and use of Workside
           Home Advisor and related websites, applications, and services operated by Workside
@@ -131,17 +133,17 @@ export default function TermsPage() {
         <div className="legal-section">
           <h2>20. Contact</h2>
           <p>
-            If you have questions about these Terms, contact Workside Software LLC at{' '}
-            <a href="mailto:support@worksidesoftware.com">support@worksidesoftware.com</a>.
+            If you have questions about these Terms, contact {BRANDING.companyName} LLC at{' '}
+            <a href={`mailto:${BRANDING.supportEmail}`}>{BRANDING.supportEmail}</a>.
           </p>
         </div>
 
         <p className="legal-footer">
-          © 2026 Workside Software LLC. All rights reserved.
+          © 2026 {BRANDING.companyName} LLC. All rights reserved.
           <br />
           8612 Mainsail Drive, Bakersfield, CA 93312
           <br />
-          Email: support@worksidesoftware.com
+          Email: {BRANDING.supportEmail}
         </p>
       </section>
     </AppFrame>

@@ -39,10 +39,10 @@ import {
 
 const ROOM_LABEL_OPTIONS = ['Living room', 'Kitchen', 'Primary bedroom', 'Bathroom', 'Exterior'];
 const LAST_LOGIN_EMAIL_KEY = 'workside.lastLoginEmail';
-const WEB_BASE_URL = 'https://worksidehomeadvisor.netlify.app';
+const WEB_BASE_URL = 'https://worksideadvisor.com';
 const TERMS_URL = `${WEB_BASE_URL}/terms`;
 const PRIVACY_URL = `${WEB_BASE_URL}/privacy`;
-const SUPPORT_URL = 'mailto:support@worksidesoftware.com';
+const SUPPORT_URL = 'mailto:support@worksideadvisor.com';
 
 function getDisplayName(user) {
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
@@ -1489,7 +1489,7 @@ export function RootScreen() {
         </View>
 
         <View style={styles.authFooter}>
-          <Text style={styles.authFooterCopy}>Copyright 2026 Workside Software LLC.</Text>
+          <Text style={styles.authFooterCopy}>Copyright 2026 Workside Home Advisor LLC.</Text>
           <View style={styles.authFooterLinks}>
             <Pressable onPress={() => openExternalLink(TERMS_URL)}>
               <Text style={styles.authFooterLink}>Terms of Service</Text>

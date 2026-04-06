@@ -23,7 +23,7 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('7d'),
   BCRYPT_SALT_ROUNDS: z.coerce.number().default(12),
   EMAIL_PROVIDER: z.enum(['console', 'smtp', 'sendgrid']).default('console'),
-  EMAIL_FROM: z.string().email().default('hello@workside.software'),
+  EMAIL_FROM: z.string().email().default('hello@worksideadvisor.com'),
   ADMIN_ALERT_EMAIL: z.string().email().optional(),
   SMTP_HOST: z.string().default('localhost'),
   SMTP_PORT: z.coerce.number().default(1025),

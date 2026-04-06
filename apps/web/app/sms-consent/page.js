@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { BRANDING } from '@workside/branding';
 
 import { AppFrame } from '../../components/AppFrame';
 
@@ -18,7 +19,7 @@ const sections = [
       'The consent control is not preselected. A user or provider must take an affirmative action to opt in before SMS messaging is enabled.',
     ],
     quote:
-      'I agree to receive SMS messages from Workside Software regarding account verification, service updates, provider lead notifications, and related transactional communications. Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for assistance.',
+      'I agree to receive SMS messages from Workside Home Advisor regarding account verification, service updates, provider lead notifications, and related transactional communications. Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for assistance.',
   },
   {
     title: '3. Message Terms',
@@ -34,7 +35,7 @@ const sections = [
     title: '4. Consent Records',
     paragraphs: [
       'Opt-in events may be logged with timestamp, phone number, account or provider reference, and other audit details necessary to demonstrate consent and support compliance.',
-      'Workside Software does not send SMS messages without an appropriate consent basis for the applicable use case.',
+      'Workside Home Advisor does not send SMS messages without an appropriate consent basis for the applicable use case.',
     ],
   },
   {
@@ -48,7 +49,7 @@ const sections = [
     title: '6. Privacy and Data Use',
     paragraphs: [
       'Mobile phone numbers and consent records are used to operate the Workside service, support transactional communications, and maintain compliance records.',
-      'Workside Software does not sell, rent, or share mobile phone numbers for third-party marketing purposes.',
+      'Workside Home Advisor does not sell, rent, or share mobile phone numbers for third-party marketing purposes.',
     ],
   },
 ];
@@ -64,9 +65,9 @@ export default function SmsConsentPage() {
       <section className="panel-card legal-page">
         <div className="section-eyebrow">Legal</div>
         <h1>SMS Consent &amp; Messaging Disclosure</h1>
-        <p className="legal-meta">Workside Software LLC • Effective Date: March 29, 2026</p>
+        <p className="legal-meta">{BRANDING.companyName} LLC • Effective Date: March 29, 2026</p>
         <p>
-          This page explains how Workside Software collects consent for SMS messaging used in
+          This page explains how Workside Home Advisor collects consent for SMS messaging used in
           Workside Home Advisor and related provider-marketplace workflows.
         </p>
 
@@ -112,16 +113,16 @@ export default function SmsConsentPage() {
           <h2>8. Contact</h2>
           <p>
             Questions about SMS consent, opt-out requests, or messaging support can be sent to{' '}
-            <a href="mailto:support@worksidesoftware.com">support@worksidesoftware.com</a>.
+            <a href={`mailto:${BRANDING.supportEmail}`}>{BRANDING.supportEmail}</a>.
           </p>
         </div>
 
         <p className="legal-footer">
-          © 2026 Workside Software LLC. All rights reserved.
+          © 2026 {BRANDING.companyName} LLC. All rights reserved.
           <br />
           8612 Mainsail Drive, Bakersfield, CA 93312
           <br />
-          Email: support@worksidesoftware.com
+          Email: {BRANDING.supportEmail}
         </p>
       </section>
     </AppFrame>

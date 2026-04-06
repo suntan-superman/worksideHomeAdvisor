@@ -178,7 +178,7 @@ gcloud run deploy SERVICE `
   --cpu 1 `
   --concurrency 80 `
   --timeout 300 `
-  --set-env-vars NODE_ENV=production,MONGODB_DB_NAME=workside-home-seller,PUBLIC_API_URL=https://SERVICE-URL,PUBLIC_WEB_URL=https://your-netlify-site.netlify.app,EMAIL_PROVIDER=console,EMAIL_FROM=hello@workside.software,MARKET_DATA_PROVIDER=rentcast,RENTCAST_BASE_URL=https://api.rentcast.io/v1,STORAGE_PROVIDER=gcs,GCS_PROJECT_ID=PROJECT_ID,GCS_BUCKET_NAME=your-media-bucket,GCS_UPLOAD_PREFIX=media-assets `
+  --set-env-vars NODE_ENV=production,MONGODB_DB_NAME=workside-home-seller,PUBLIC_API_URL=https://SERVICE-URL,PUBLIC_WEB_URL=https://worksideadvisor.com,EMAIL_PROVIDER=console,EMAIL_FROM=hello@worksideadvisor.com,MARKET_DATA_PROVIDER=rentcast,RENTCAST_BASE_URL=https://api.rentcast.io/v1,STORAGE_PROVIDER=gcs,GCS_PROJECT_ID=PROJECT_ID,GCS_BUCKET_NAME=your-media-bucket,GCS_UPLOAD_PREFIX=media-assets `
   --set-secrets MONGODB_URI=workside-mongodb-uri:latest,JWT_SECRET=workside-jwt-secret:latest,OPENAI_API_KEY=workside-openai-api-key:latest,RENTCAST_API_KEY=workside-rentcast-api-key:latest
 ```
 
@@ -271,7 +271,7 @@ gcloud run deploy workside-api `
   --cpu 1 `
   --concurrency 80 `
   --timeout 300 `
-  --set-env-vars NODE_ENV=production,MONGODB_DB_NAME=workside-home-seller,PUBLIC_API_URL=https://YOUR_CLOUD_RUN_URL,PUBLIC_WEB_URL=https://your-netlify-site.netlify.app,EMAIL_PROVIDER=console,EMAIL_FROM=hello@workside.software,MARKET_DATA_PROVIDER=rentcast,RENTCAST_BASE_URL=https://api.rentcast.io/v1,STORAGE_PROVIDER=gcs,GCS_PROJECT_ID=PROJECT_ID,GCS_BUCKET_NAME=your-media-bucket,GCS_UPLOAD_PREFIX=media-assets `
+  --set-env-vars NODE_ENV=production,MONGODB_DB_NAME=workside-home-seller,PUBLIC_API_URL=https://YOUR_CLOUD_RUN_URL,PUBLIC_WEB_URL=https://worksideadvisor.com,EMAIL_PROVIDER=console,EMAIL_FROM=hello@worksideadvisor.com,MARKET_DATA_PROVIDER=rentcast,RENTCAST_BASE_URL=https://api.rentcast.io/v1,STORAGE_PROVIDER=gcs,GCS_PROJECT_ID=PROJECT_ID,GCS_BUCKET_NAME=your-media-bucket,GCS_UPLOAD_PREFIX=media-assets `
   --set-secrets MONGODB_URI=workside-mongodb-uri:latest,JWT_SECRET=workside-jwt-secret:latest,OPENAI_API_KEY=workside-openai-api-key:latest,RENTCAST_API_KEY=workside-rentcast-api-key:latest
 ```
 

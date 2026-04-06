@@ -2,7 +2,7 @@ param(
   [string]$PricesCsvPath = "",
   [string]$ProductsCsvPath = "",
   [string]$EnvPath = ".env",
-  [string]$PublicWebUrl = "https://worksidehomeadvisor.netlify.app",
+  [string]$PublicWebUrl = "https://worksideadvisor.com",
   [string]$CloudRunService = "workside-api",
   [string]$CloudRunRegion = "us-central1",
   [switch]$PrintCloudRunCommand

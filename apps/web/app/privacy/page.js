@@ -1,3 +1,5 @@
+import { BRANDING } from '@workside/branding';
+
 import { AppFrame } from '../../components/AppFrame';
 
 const sections = [
@@ -92,9 +94,9 @@ export default function PrivacyPage() {
       <section className="panel-card legal-page">
         <div className="section-eyebrow">Legal</div>
         <h1>Privacy Policy</h1>
-        <p className="legal-meta">Workside Software LLC • Effective Date: March 29, 2026</p>
+        <p className="legal-meta">{BRANDING.companyName} LLC • Effective Date: March 29, 2026</p>
         <p>
-          This Privacy Policy explains how Workside Software (&ldquo;Workside,&rdquo; &ldquo;we,&rdquo;
+          This Privacy Policy explains how Workside Home Advisor (&ldquo;Workside,&rdquo; &ldquo;we,&rdquo;
           &ldquo;our,&rdquo; or &ldquo;us&rdquo;) collects, uses, discloses, and protects information in
           connection with Workside Home Advisor and related websites, applications, and services.
         </p>
@@ -122,17 +124,17 @@ export default function PrivacyPage() {
         <div className="legal-section">
           <h2>16. Contact</h2>
           <p>
-            If you have questions about this Privacy Policy or your information, contact Workside
-            Software LLC at <a href="mailto:support@worksidesoftware.com">support@worksidesoftware.com</a>.
+            If you have questions about this Privacy Policy or your information, contact {BRANDING.companyName}
+            LLC at <a href={`mailto:${BRANDING.supportEmail}`}>{BRANDING.supportEmail}</a>.
           </p>
         </div>
 
         <p className="legal-footer">
-          © 2026 Workside Software LLC. All rights reserved.
+          © 2026 {BRANDING.companyName} LLC. All rights reserved.
           <br />
           8612 Mainsail Drive, Bakersfield, CA 93312
           <br />
-          Email: support@worksidesoftware.com
+          Email: {BRANDING.supportEmail}
         </p>
       </section>
     </AppFrame>
