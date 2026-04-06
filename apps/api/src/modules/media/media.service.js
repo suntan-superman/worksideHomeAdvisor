@@ -12,6 +12,20 @@ import { MediaAssetModel } from './media.model.js';
 import { MediaVariantModel } from './media-variant.model.js';
 import { deleteStoredAssetIfUnreferenced } from './storage-reference.service.js';
 
+function shouldIgnorePersistedMediaUrl(url) {
+  if (!url) {
+    return true;
+  }
+
+  const normalized = String(url).trim().toLowerCase();
+  return (
+    !normalized ||
+    normalized.includes('localhost') ||
+    normalized.includes('127.0.0.1') ||
+    normalized.includes('0.0.0.0')
+  );
+}
+
 function serializeMediaAsset(document, selectedVariant = null) {
   if (!document) {
     return null;
@@ -32,8 +46,11 @@ function serializeMediaAsset(document, selectedVariant = null) {
     storageKey: document.storageKey || null,
     byteSize: document.byteSize || null,
     imageUrl:
-      document.imageUrl ||
-      (document._id ? buildMediaAssetUrl(document._id.toString()) : null),
+      !shouldIgnorePersistedMediaUrl(document.imageUrl) && document.imageUrl
+        ? document.imageUrl
+        : document._id
+          ? buildMediaAssetUrl(document._id.toString())
+          : null,
     imageDataUrl: document.imageDataUrl || null,
     listingCandidate: Boolean(document.listingCandidate),
     listingNote: document.listingNote || '',
@@ -50,8 +67,9 @@ function serializeMediaAsset(document, selectedVariant = null) {
           variantCategory: selectedVariant.variantCategory || 'enhancement',
           label: selectedVariant.label,
           imageUrl:
-            selectedVariant.imageUrl ||
-            buildMediaVariantUrl(selectedVariant._id?.toString?.() || selectedVariant.id),
+            !shouldIgnorePersistedMediaUrl(selectedVariant.imageUrl) && selectedVariant.imageUrl
+              ? selectedVariant.imageUrl
+              : buildMediaVariantUrl(selectedVariant._id?.toString?.() || selectedVariant.id),
           lifecycleState:
             selectedVariant.lifecycleState ||
             (selectedVariant.isSelected ? 'selected' : 'temporary'),

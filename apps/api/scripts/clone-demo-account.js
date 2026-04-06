@@ -26,8 +26,6 @@ import { PublicFunnelEventModel } from '../src/modules/public/public.model.js';
 import { BillingSubscriptionModel } from '../src/modules/billing/billing.model.js';
 import { env } from '../src/config/env.js';
 import {
-  buildMediaAssetUrl,
-  buildMediaVariantUrl,
   readStoredAsset,
   saveBinaryBuffer,
 } from '../src/services/storageService.js';
@@ -66,12 +64,15 @@ function parseArgs(argv = []) {
 }
 
 function configureCloneStorage() {
-  if (env.STORAGE_PROVIDER === 'gcs' && !env.GCS_BUCKET_NAME) {
+  if (env.STORAGE_PROVIDER !== 'gcs' || !env.GCS_BUCKET_NAME) {
     console.warn(
-      'GCS_BUCKET_NAME is not configured locally. Cloned media will be written to local storage for this run.',
+      'Managed media storage is not configured for clone writes in this environment. Media will fall back to shared source storage references when needed.',
     );
-    env.STORAGE_PROVIDER = 'local';
   }
+}
+
+function canWriteManagedCloneMedia() {
+  return env.STORAGE_PROVIDER === 'gcs' && Boolean(env.GCS_BUCKET_NAME);
 }
 
 function startProgress(message = 'Cloning workspace data') {
@@ -200,32 +201,43 @@ async function cloneMediaAssets(propertyId, nextPropertyId) {
     let clonedAsset;
 
     try {
-      const { buffer } = await readCloneSourceBuffer({
-        storageProvider: sourceAsset.storageProvider,
-        storageKey: sourceAsset.storageKey,
-        fallbackUrls: [
-          sourceAsset.imageUrl,
-          sourceAsset._id ? buildMediaAssetUrl(sourceAsset._id.toString()) : '',
-        ],
-      });
-      const storedImage = await saveBinaryBuffer({
-        propertyId: nextPropertyId.toString(),
-        mimeType: sourceAsset.mimeType,
-        buffer,
-      });
+      if (canWriteManagedCloneMedia()) {
+        const { buffer } = await readCloneSourceBuffer({
+          storageProvider: sourceAsset.storageProvider,
+          storageKey: sourceAsset.storageKey,
+          fallbackUrls: [
+            sourceAsset.imageUrl,
+            sourceAsset._id ? buildMediaAssetUrl(sourceAsset._id.toString()) : '',
+          ],
+        });
+        const storedImage = await saveBinaryBuffer({
+          propertyId: nextPropertyId.toString(),
+          mimeType: sourceAsset.mimeType,
+          buffer,
+        });
 
-      clonedAsset = await MediaAssetModel.create({
-        ...cloneDocument(sourceAsset, {
-          propertyId: nextPropertyId,
-          storageProvider: storedImage.storageProvider,
-          storageKey: storedImage.storageKey,
-          byteSize: storedImage.byteSize,
-        }),
-        imageUrl: '',
-      });
-
-      clonedAsset.imageUrl = buildMediaAssetUrl(clonedAsset._id.toString());
-      await clonedAsset.save();
+        clonedAsset = await MediaAssetModel.create({
+          ...cloneDocument(sourceAsset, {
+            propertyId: nextPropertyId,
+            storageProvider: storedImage.storageProvider,
+            storageKey: storedImage.storageKey,
+            byteSize: storedImage.byteSize,
+          }),
+          imageUrl: '',
+          imageDataUrl: null,
+        });
+      } else {
+        clonedAsset = await MediaAssetModel.create({
+          ...cloneDocument(sourceAsset, {
+            propertyId: nextPropertyId,
+            storageProvider: sourceAsset.storageProvider,
+            storageKey: sourceAsset.storageKey,
+            byteSize: sourceAsset.byteSize || null,
+          }),
+          imageUrl: '',
+          imageDataUrl: null,
+        });
+      }
     } catch (error) {
       console.warn(
         `Could not duplicate media asset ${sourceAsset._id.toString()}. Preserving a shared storage reference instead.`,
@@ -238,10 +250,8 @@ async function cloneMediaAssets(propertyId, nextPropertyId) {
           storageKey: sourceAsset.storageKey,
         }),
         imageUrl: '',
+        imageDataUrl: null,
       });
-
-      clonedAsset.imageUrl = buildMediaAssetUrl(clonedAsset._id.toString());
-      await clonedAsset.save();
     }
 
     assetIdMap.set(sourceAsset._id.toString(), clonedAsset._id);
@@ -299,30 +309,48 @@ async function cloneMediaVariants(propertyId, nextPropertyId, assetIdMap, jobIdM
     }
 
     try {
-      const { buffer } = await readCloneSourceBuffer({
-        storageProvider: sourceVariant.storageProvider,
-        storageKey: sourceVariant.storageKey,
-        fallbackUrls: [
-          sourceVariant.imageUrl,
-          sourceVariant._id ? buildMediaVariantUrl(sourceVariant._id.toString()) : '',
-        ],
-      });
-      const storedImage = await saveBinaryBuffer({
-        propertyId: nextPropertyId.toString(),
-        mimeType: sourceVariant.mimeType,
-        buffer,
-      });
+      let clonedVariant;
+      if (canWriteManagedCloneMedia()) {
+        const { buffer } = await readCloneSourceBuffer({
+          storageProvider: sourceVariant.storageProvider,
+          storageKey: sourceVariant.storageKey,
+          fallbackUrls: [
+            sourceVariant.imageUrl,
+            sourceVariant._id ? buildMediaVariantUrl(sourceVariant._id.toString()) : '',
+          ],
+        });
+        const storedImage = await saveBinaryBuffer({
+          propertyId: nextPropertyId.toString(),
+          mimeType: sourceVariant.mimeType,
+          buffer,
+        });
 
-      const clonedVariant = await MediaVariantModel.create({
-        ...cloneDocument(sourceVariant, {
-          propertyId: nextPropertyId,
-          mediaId: nextMediaId,
-          visionJobId: nextVisionJobId,
-          storageProvider: storedImage.storageProvider,
-          storageKey: storedImage.storageKey,
-          byteSize: storedImage.byteSize,
-        }),
-      });
+        clonedVariant = await MediaVariantModel.create({
+          ...cloneDocument(sourceVariant, {
+            propertyId: nextPropertyId,
+            mediaId: nextMediaId,
+            visionJobId: nextVisionJobId,
+            storageProvider: storedImage.storageProvider,
+            storageKey: storedImage.storageKey,
+            byteSize: storedImage.byteSize,
+          }),
+          imageUrl: '',
+          imageDataUrl: null,
+        });
+      } else {
+        clonedVariant = await MediaVariantModel.create({
+          ...cloneDocument(sourceVariant, {
+            propertyId: nextPropertyId,
+            mediaId: nextMediaId,
+            visionJobId: nextVisionJobId,
+            storageProvider: sourceVariant.storageProvider,
+            storageKey: sourceVariant.storageKey,
+            byteSize: sourceVariant.byteSize || null,
+          }),
+          imageUrl: '',
+          imageDataUrl: null,
+        });
+      }
 
       variantIdMap.set(sourceVariant._id.toString(), clonedVariant._id);
     } catch (error) {
@@ -339,6 +367,8 @@ async function cloneMediaVariants(propertyId, nextPropertyId, assetIdMap, jobIdM
           storageKey: sourceVariant.storageKey,
           byteSize: sourceVariant.byteSize || null,
         }),
+        imageUrl: '',
+        imageDataUrl: null,
       });
 
       variantIdMap.set(sourceVariant._id.toString(), clonedVariant._id);
