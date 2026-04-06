@@ -22,6 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import {
   createChecklistItem,
   createImageEnhancementJob,
+  deleteAccount,
   getChecklist,
   getDashboard,
   getWorkflow,
@@ -116,6 +117,60 @@ function getVisionJobLabel(jobType) {
   return 'Enhancing photo';
 }
 
+function getNextChecklistStatus(currentStatus) {
+  if (currentStatus === 'todo') {
+    return 'in_progress';
+  }
+
+  if (currentStatus === 'in_progress') {
+    return 'done';
+  }
+
+  return 'todo';
+}
+
+function summarizePricing(pricingSummary) {
+  if (!pricingSummary) {
+    return [];
+  }
+
+  return String(pricingSummary)
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function getRecommendedVisionAction(asset) {
+  const summary = String(asset?.analysis?.summary || '').toLowerCase();
+  const hasDeclutterSignal =
+    asset?.analysis?.retakeRecommended ||
+    /clutter|declutter|distraction|tidy|retake|busy|remove/i.test(summary);
+
+  return hasDeclutterSignal ? 'declutter_preview' : 'enhance_listing_quality';
+}
+
+function getRecommendedSection(nextStepKey) {
+  switch (nextStepKey) {
+    case 'capture_photos':
+    case 'capture_core_listing_rooms':
+      return 'capture';
+    case 'review_listing_photos':
+    case 'choose_listing_candidate_photos':
+      return 'gallery';
+    case 'improve_listing_photos':
+    case 'select_preferred_vision_variant':
+      return 'vision';
+    case 'complete_checklist':
+    case 'prepare_home':
+    case 'provider_help':
+      return 'tasks';
+    case 'review_pricing':
+    default:
+      return 'overview';
+  }
+}
+
 export function RootScreen() {
   const queryClient = useQueryClient();
   const [authMode, setAuthMode] = useState('login');
@@ -134,6 +189,10 @@ export function RootScreen() {
   const [photoAsset, setPhotoAsset] = useState(null);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [pendingVisionJobType, setPendingVisionJobType] = useState('');
+  const [rememberedEmail, setRememberedEmail] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
+  const [showVisionDetails, setShowVisionDetails] = useState(false);
+  const [showCompletedTasks, setShowCompletedTasks] = useState(false);
   const [form, setForm] = useState({
     email: '',
     password: '',
@@ -227,6 +286,16 @@ export function RootScreen() {
     )
     .slice(0, 3);
   const checklistItems = checklist?.items || [];
+  const capturedRoomCount =
+    workflow?.metrics?.roomCoverageCount ?? roomCoverage.filter((item) => item.captured).length;
+  const nextMissingRoom = roomCoverage.find((item) => !item.captured)?.roomLabel || ROOM_LABEL_OPTIONS[0];
+  const recommendedSection = getRecommendedSection(workflow?.nextStep?.key);
+  const pricingHighlights = summarizePricing(dashboard?.pricingSummary);
+  const recommendedVisionAction = getRecommendedVisionAction(selectedAsset);
+  const visibleVisionEffects = (selectedVariant?.metadata?.effects || []).slice(0, 2);
+  const hiddenVisionEffectCount = Math.max((selectedVariant?.metadata?.effects || []).length - 2, 0);
+  const openChecklistItems = checklistItems.filter((task) => task.status !== 'done');
+  const completedChecklistItems = checklistItems.filter((task) => task.status === 'done');
 
   useEffect(() => {
     setListingNoteDraft(selectedAsset?.listingNote || '');
@@ -286,10 +355,7 @@ export function RootScreen() {
       try {
         const rememberedEmail = await AsyncStorage.getItem(LAST_LOGIN_EMAIL_KEY);
         if (active && rememberedEmail) {
-          setForm((current) => ({
-            ...current,
-            email: current.email || rememberedEmail,
-          }));
+          setRememberedEmail(rememberedEmail);
         }
       } catch (storageError) {
         // Keep auth usable even if local storage is unavailable.
@@ -523,6 +589,16 @@ export function RootScreen() {
     }
   }
 
+  function handleSwitchAuthMode(nextMode) {
+    setAuthMode(nextMode);
+    setError('');
+    setStatus(
+      nextMode === 'verify'
+        ? 'Enter the email code we sent you to finish sign-in.'
+        : 'Sign in with the same verified seller account you use on the web.',
+    );
+  }
+
   function handleSignOut() {
     queryClient.removeQueries({ queryKey: ['mobile-properties'] });
     queryClient.removeQueries({ queryKey: ['mobile-dashboard'] });
@@ -542,6 +618,39 @@ export function RootScreen() {
     setCustomTaskTitle('');
     setError('');
     setStatus('Signed out. Sign in again to continue.');
+  }
+
+  function handleDeleteAccount() {
+    if (!session?.token) {
+      setError('Your session is missing account-delete authorization. Please sign in again.');
+      return;
+    }
+
+    Alert.alert(
+      'Delete account?',
+      'This permanently removes your Workside mobile account data, properties, media, and exports. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete account',
+          style: 'destructive',
+          onPress: async () => {
+            setBusyState(true);
+            setError('');
+
+            try {
+              await deleteAccount(session.token);
+              handleSignOut();
+              setStatus('Your account has been deleted.');
+            } catch (requestError) {
+              setError(requestError.message);
+            } finally {
+              setBusyState(false);
+            }
+          },
+        },
+      ],
+    );
   }
 
   async function handleSelectProperty(nextPropertyId) {
@@ -790,10 +899,48 @@ export function RootScreen() {
             </Text>
 
             <View style={styles.userCard}>
-              <Text style={styles.label}>Signed in as</Text>
-              <Text style={styles.userName}>{getDisplayName(session.user)}</Text>
-              <Text style={styles.userEmail}>{session.user.email}</Text>
+              <View style={styles.userCardHeader}>
+                <View style={styles.userCardCopy}>
+                  <Text style={styles.label}>Signed in as</Text>
+                  <Text style={styles.userName}>{getDisplayName(session.user)}</Text>
+                  <Text style={styles.userEmail}>{session.user.email}</Text>
+                </View>
+                <Pressable
+                  onPress={() => setShowSettings((current) => !current)}
+                  style={[styles.chipButton, showSettings ? styles.chipButtonActive : null]}
+                >
+                  <Text style={showSettings ? styles.chipButtonTextActive : styles.chipButtonText}>
+                    {showSettings ? 'Close settings' : 'Settings'}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
+
+            {showSettings ? (
+              <View style={styles.settingsCard}>
+                <Text style={styles.label}>Settings</Text>
+                <Text style={styles.body}>
+                  Manage your account, reach support, and review Workside policy links.
+                </Text>
+                <View style={styles.settingsActionList}>
+                  <Pressable onPress={() => openExternalLink(SUPPORT_URL)} style={[styles.button, styles.buttonSecondary]}>
+                    <Text style={styles.buttonSecondaryText}>Contact support</Text>
+                  </Pressable>
+                  <Pressable onPress={() => openExternalLink(PRIVACY_URL)} style={[styles.button, styles.buttonSecondary]}>
+                    <Text style={styles.buttonSecondaryText}>Privacy notice</Text>
+                  </Pressable>
+                  <Pressable onPress={() => openExternalLink(TERMS_URL)} style={[styles.button, styles.buttonSecondary]}>
+                    <Text style={styles.buttonSecondaryText}>Terms of service</Text>
+                  </Pressable>
+                  <Pressable onPress={handleSignOut} style={[styles.button, styles.buttonSecondary]}>
+                    <Text style={styles.buttonSecondaryText}>Log out</Text>
+                  </Pressable>
+                  <Pressable onPress={handleDeleteAccount} style={[styles.button, styles.buttonDanger]} disabled={busy}>
+                    <Text style={styles.buttonText}>Delete account</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
 
             <Text style={styles.label}>Properties</Text>
             <View style={styles.propertyList}>
@@ -902,14 +1049,27 @@ export function RootScreen() {
                           onPress={() => setPropertySection(value)}
                           style={[
                             styles.sectionChip,
-                            propertySection === value ? styles.sectionChipActive : null,
+                            value === propertySection ? styles.sectionChipActive : null,
+                            value !== propertySection && value === recommendedSection ? styles.sectionChipRecommended : null,
+                            value !== propertySection &&
+                            ((value === 'overview' && Boolean(dashboard?.pricing)) ||
+                              (value === 'capture' && capturedRoomCount >= ROOM_LABEL_OPTIONS.length) ||
+                              (value === 'gallery' && gallery.length > 0) ||
+                              (value === 'vision' &&
+                                (mediaVariants.some((variant) => variant.isSelected) ||
+                                  gallery.some((asset) => Boolean(asset.selectedVariant)))) ||
+                              (value === 'tasks' && checklistItems.length > 0 && openChecklistItems.length === 0))
+                              ? styles.sectionChipComplete
+                              : null,
                           ]}
                         >
                           <Text
                             style={
                               propertySection === value
                                 ? styles.sectionChipLabelActive
-                                : styles.sectionChipLabel
+                                : value === recommendedSection
+                                  ? styles.sectionChipLabelRecommended
+                                  : styles.sectionChipLabel
                             }
                           >
                             {label}
@@ -926,18 +1086,27 @@ export function RootScreen() {
                             <Text style={styles.priceBand}>
                               {formatCurrency(dashboard.pricing.low)} to {formatCurrency(dashboard.pricing.high)}
                             </Text>
-                            <Text style={styles.body}>
-                              Midpoint {formatCurrency(dashboard.pricing.mid)} with{' '}
-                              {Math.round((dashboard.pricing.confidence || 0) * 100)}% confidence.
-                            </Text>
+                            <View style={styles.summaryBulletList}>
+                              <Text style={styles.summaryBullet}>
+                                Midpoint {formatCurrency(dashboard.pricing.mid)} with{' '}
+                                {Math.round((dashboard.pricing.confidence || 0) * 100)}% confidence.
+                              </Text>
+                              <Text style={styles.summaryBullet}>
+                                Chosen price stays aligned with your marketing brochure and seller report.
+                              </Text>
+                            </View>
                           </View>
                         ) : null}
 
-                        {dashboard?.pricingSummary ? (
-                          <>
+                        {pricingHighlights.length ? (
+                          <View style={styles.overviewInsightCard}>
                             <Text style={styles.label}>Latest analysis</Text>
-                            <Text style={styles.body}>{dashboard.pricingSummary}</Text>
-                          </>
+                            {pricingHighlights.map((highlight) => (
+                              <Text key={highlight} style={styles.summaryBullet}>
+                                {`\u2022 ${highlight}`}
+                              </Text>
+                            ))}
+                          </View>
                         ) : null}
                       </>
                     ) : null}
@@ -952,10 +1121,10 @@ export function RootScreen() {
                         </Text>
                         <View style={styles.taskSummaryCard}>
                           <Text style={styles.taskSummaryText}>
-                            {workflow?.metrics?.roomCoverageCount ?? roomCoverage.filter((item) => item.captured).length} of {ROOM_LABEL_OPTIONS.length} core rooms complete
+                            {capturedRoomCount} of {ROOM_LABEL_OPTIONS.length} core rooms complete
                           </Text>
                           <Text style={styles.taskSummaryText}>
-                            {workflow?.nextStep?.helperText || 'Stand in the corner. Keep the camera level.'}
+                            Next focus: {nextMissingRoom}. {workflow?.nextStep?.helperText || 'Stand in the corner. Keep the camera level.'}
                           </Text>
                         </View>
 
@@ -967,9 +1136,23 @@ export function RootScreen() {
                               style={[
                                 styles.roomChip,
                                 form.roomLabel === room ? styles.roomChipActive : null,
+                                room === nextMissingRoom && !roomCoverage.find((item) => item.roomLabel === room)?.captured
+                                  ? styles.roomChipRecommended
+                                  : null,
+                                roomCoverage.find((item) => item.roomLabel === room)?.captured
+                                  ? styles.roomChipDone
+                                  : null,
                               ]}
                             >
-                              <Text style={form.roomLabel === room ? styles.roomChipLabelActive : styles.roomChipLabel}>
+                              <Text
+                                style={
+                                  form.roomLabel === room
+                                    ? styles.roomChipLabelActive
+                                    : roomCoverage.find((item) => item.roomLabel === room)?.captured
+                                      ? styles.roomChipLabelDone
+                                      : styles.roomChipLabel
+                                }
+                              >
                                 {room}
                               </Text>
                             </Pressable>
@@ -979,15 +1162,15 @@ export function RootScreen() {
                         <View style={styles.actionRow}>
                           <Pressable
                             onPress={() => handlePickImage('camera')}
-                            style={[styles.button, styles.buttonSecondary, styles.flexButton]}
+                            style={[styles.button, styles.buttonPrimary, styles.flexButton]}
                           >
-                            <Text style={styles.buttonSecondaryText}>Use camera</Text>
+                            <Text style={styles.buttonText}>Use camera</Text>
                           </Pressable>
                           <Pressable
                             onPress={() => handlePickImage('library')}
                             style={[styles.button, styles.buttonSecondary, styles.flexButton]}
                           >
-                            <Text style={styles.buttonSecondaryText}>Photo library</Text>
+                            <Text style={styles.buttonSecondaryText}>Choose from library</Text>
                           </Pressable>
                         </View>
 
@@ -1121,8 +1304,21 @@ export function RootScreen() {
                       <View style={styles.sectionPanel}>
                         <Text style={styles.label}>Vision</Text>
                         <Text style={styles.body}>
-                          Generate first-pass image variants and choose which version should feed materials.
+                          Generate the best listing-ready version of a saved photo.
                         </Text>
+                        <Pressable
+                          onPress={() => setShowVisionDetails((current) => !current)}
+                          style={styles.learnMoreButton}
+                        >
+                          <Text style={styles.learnMoreButtonText}>
+                            {showVisionDetails ? 'Hide details' : 'Learn more'}
+                          </Text>
+                        </Pressable>
+                        {showVisionDetails ? (
+                          <Text style={styles.body}>
+                            Enhance improves presentation while keeping the room believable. Declutter is best when the room feels busy or distracting.
+                          </Text>
+                        ) : null}
                         <View style={styles.coverageList}>
                           {roomCoverage.map((item) => (
                             <View key={item.roomLabel} style={styles.coverageRow}>
@@ -1158,11 +1354,23 @@ export function RootScreen() {
                             <View style={[styles.actionRow, styles.visionActionRow]}>
                               <Pressable
                                 onPress={() => handleGenerateVariant('enhance_listing_quality')}
-                                style={[styles.button, styles.buttonSecondary, styles.flexButton, styles.visionActionButton]}
+                                style={[
+                                  styles.button,
+                                  recommendedVisionAction === 'enhance_listing_quality'
+                                    ? styles.buttonPrimary
+                                    : styles.buttonSecondary,
+                                  styles.flexButton,
+                                  styles.visionActionButton,
+                                ]}
                                 disabled={busy}
                               >
                                 <Text
-                                  style={[styles.buttonSecondaryText, styles.visionActionButtonText]}
+                                  style={[
+                                    recommendedVisionAction === 'enhance_listing_quality'
+                                      ? styles.buttonText
+                                      : styles.buttonSecondaryText,
+                                    styles.visionActionButtonText,
+                                  ]}
                                   numberOfLines={1}
                                   adjustsFontSizeToFit
                                   minimumFontScale={0.85}
@@ -1174,11 +1382,23 @@ export function RootScreen() {
                               </Pressable>
                               <Pressable
                                 onPress={() => handleGenerateVariant('declutter_preview')}
-                                style={[styles.button, styles.buttonSecondary, styles.flexButton, styles.visionActionButton]}
+                                style={[
+                                  styles.button,
+                                  recommendedVisionAction === 'declutter_preview'
+                                    ? styles.buttonPrimary
+                                    : styles.buttonSecondary,
+                                  styles.flexButton,
+                                  styles.visionActionButton,
+                                ]}
                                 disabled={busy}
                               >
                                 <Text
-                                  style={[styles.buttonSecondaryText, styles.visionActionButtonText]}
+                                  style={[
+                                    recommendedVisionAction === 'declutter_preview'
+                                      ? styles.buttonText
+                                      : styles.buttonSecondaryText,
+                                    styles.visionActionButtonText,
+                                  ]}
                                   numberOfLines={1}
                                   adjustsFontSizeToFit
                                   minimumFontScale={0.85}
@@ -1194,13 +1414,18 @@ export function RootScreen() {
                                 <Text style={styles.label}>Vision output</Text>
                                 <Text style={styles.variantSummary}>{getVariantSummary(selectedVariant)}</Text>
                                 <Image source={{ uri: selectedVariant.imageUrl }} style={styles.visionImage} />
-                                {selectedVariant.metadata?.effects?.length ? (
+                                {visibleVisionEffects.length ? (
                                   <View style={styles.effectList}>
-                                    {selectedVariant.metadata.effects.map((effect) => (
+                                    {visibleVisionEffects.map((effect) => (
                                       <View key={effect} style={styles.effectChip}>
                                         <Text style={styles.effectChipText}>{effect}</Text>
                                       </View>
                                     ))}
+                                    {hiddenVisionEffectCount ? (
+                                      <View style={styles.effectChip}>
+                                        <Text style={styles.effectChipText}>+{hiddenVisionEffectCount} more</Text>
+                                      </View>
+                                    ) : null}
                                   </View>
                                 ) : null}
                                 {selectedVariant.metadata?.differenceHint ? (
@@ -1298,9 +1523,15 @@ export function RootScreen() {
                           </Text>
                         </View>
                         <View style={styles.taskList}>
-                          {checklistItems.length ? (
-                            checklistItems.map((task) => (
-                              <View key={task.id} style={styles.taskCard}>
+                          {openChecklistItems.length ? (
+                            openChecklistItems.map((task) => (
+                              <View
+                                key={task.id}
+                                style={[
+                                  styles.taskCard,
+                                  task.status === 'in_progress' ? styles.taskCardWorking : null,
+                                ]}
+                              >
                                 <View style={styles.taskMetaRow}>
                                   <Text
                                     style={
@@ -1319,55 +1550,81 @@ export function RootScreen() {
                                 </View>
                                 <Text style={styles.taskTitle}>{task.title}</Text>
                                 <Text style={styles.taskDetail}>{task.detail}</Text>
-                                <View style={styles.taskActionRow}>
-                                  {[
-                                    ['todo', 'To do'],
-                                    ['in_progress', 'Working'],
-                                    ['done', 'Done'],
-                                  ].map(([nextStatus, label]) => (
-                                    <Pressable
-                                      key={`${task.id}-${nextStatus}`}
-                                      onPress={() => handleUpdateChecklistStatus(task.id, nextStatus)}
-                                      style={[
-                                        styles.taskActionChip,
-                                        task.status === nextStatus ? styles.taskActionChipActive : null,
-                                      ]}
-                                      disabled={busy}
-                                    >
-                                      <Text
-                                        style={
-                                          task.status === nextStatus
-                                            ? styles.taskActionChipTextActive
-                                            : styles.taskActionChipText
-                                        }
-                                      >
-                                        {label}
-                                      </Text>
-                                    </Pressable>
-                                  ))}
-                                </View>
+                                <Pressable
+                                  onPress={() => handleUpdateChecklistStatus(task.id, getNextChecklistStatus(task.status))}
+                                  style={[styles.button, styles.buttonSecondary, styles.taskStatusButton]}
+                                  disabled={busy}
+                                >
+                                  <Text style={styles.buttonSecondaryText}>
+                                    {task.status === 'todo'
+                                      ? 'Start task'
+                                      : task.status === 'in_progress'
+                                        ? 'Mark done'
+                                        : 'Reopen task'}
+                                  </Text>
+                                </Pressable>
                               </View>
                             ))
                           ) : (
                             <Text style={styles.body}>
-                              No checklist items yet for this property.
+                              {checklistItems.length
+                                ? 'All current checklist items are complete.'
+                                : 'No checklist items yet for this property.'}
                             </Text>
                           )}
                         </View>
-                        <TextInput
-                          placeholder="Add a custom seller task"
-                          placeholderTextColor="#7d8a8f"
-                          style={styles.input}
-                          value={customTaskTitle}
-                          onChangeText={setCustomTaskTitle}
-                        />
-                        <Pressable
-                          onPress={handleCreateCustomTask}
-                          style={[styles.button, styles.buttonSecondary]}
-                          disabled={busy}
-                        >
-                          <Text style={styles.buttonSecondaryText}>Add task</Text>
-                        </Pressable>
+                        {completedChecklistItems.length ? (
+                          <View style={styles.completedTasksCard}>
+                            <Pressable
+                              onPress={() => setShowCompletedTasks((current) => !current)}
+                              style={styles.completedTasksToggle}
+                            >
+                              <Text style={styles.completedTasksTitle}>
+                                Completed tasks ({completedChecklistItems.length})
+                              </Text>
+                              <Text style={styles.completedTasksToggleText}>
+                                {showCompletedTasks ? 'Hide' : 'Show'}
+                              </Text>
+                            </Pressable>
+                            {showCompletedTasks
+                              ? completedChecklistItems.map((task) => (
+                                  <View key={task.id} style={[styles.taskCard, styles.taskCardComplete]}>
+                                    <View style={styles.taskMetaRow}>
+                                      <Text style={styles.taskDone}>{formatChecklistStatus(task.status)}</Text>
+                                      <Text style={styles.taskCategory}>
+                                        {String(task.category || 'custom').replace(/_/g, ' ')}
+                                      </Text>
+                                    </View>
+                                    <Text style={styles.taskTitle}>{task.title}</Text>
+                                    <Text style={styles.taskDetail}>{task.detail}</Text>
+                                    <Pressable
+                                      onPress={() => handleUpdateChecklistStatus(task.id, 'todo')}
+                                      style={[styles.button, styles.buttonSecondary, styles.taskStatusButton]}
+                                      disabled={busy}
+                                    >
+                                      <Text style={styles.buttonSecondaryText}>Reopen task</Text>
+                                    </Pressable>
+                                  </View>
+                                ))
+                              : null}
+                          </View>
+                        ) : null}
+                        <View style={styles.customTaskComposer}>
+                          <TextInput
+                            placeholder="Add a custom seller task"
+                            placeholderTextColor="#7d8a8f"
+                            style={[styles.input, styles.customTaskInput]}
+                            value={customTaskTitle}
+                            onChangeText={setCustomTaskTitle}
+                          />
+                          <Pressable
+                            onPress={handleCreateCustomTask}
+                            style={[styles.button, styles.buttonPrimary, styles.customTaskButton]}
+                            disabled={busy}
+                          >
+                            <Text style={styles.buttonText}>Add task</Text>
+                          </Pressable>
+                        </View>
                       </View>
                     ) : null}
                   </>
@@ -1380,9 +1637,6 @@ export function RootScreen() {
             {status ? <Text style={styles.status}>{status}</Text> : null}
             {error ? <Text style={styles.error}>{error}</Text> : null}
             {busy || refreshing ? <ActivityIndicator color="#d28859" style={styles.spinner} /> : null}
-            <Pressable onPress={handleSignOut} style={[styles.button, styles.buttonSecondary]}>
-              <Text style={styles.buttonSecondaryText}>Sign out</Text>
-            </Pressable>
           </View>
         </ScrollView>
       </View>
@@ -1409,30 +1663,26 @@ export function RootScreen() {
             Sign in with your verified Workside account to manage pricing, prep, photos, and listing readiness on the go.
           </Text>
 
-          <View style={styles.segmentRow}>
-            <Pressable
-              onPress={() => setAuthMode('login')}
-              style={[styles.segmentButton, authMode === 'login' ? styles.segmentButtonActive : null]}
-            >
-              <Text style={authMode === 'login' ? styles.segmentLabelActive : styles.segmentLabel}>
-                Log in
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setAuthMode('verify')}
-              style={[styles.segmentButton, authMode === 'verify' ? styles.segmentButtonActive : null]}
-            >
-              <Text style={authMode === 'verify' ? styles.segmentLabelActive : styles.segmentLabel}>
-                Verify OTP
-              </Text>
-            </Pressable>
+          <View style={styles.authModeCard}>
+            <Text style={styles.authModeTitle}>
+              {authMode === 'login' ? 'Sign in to continue' : 'Verify your email code'}
+            </Text>
+            <Text style={styles.authModeCopy}>
+              {authMode === 'login'
+                ? 'Use your main Workside password first. Only switch to code verification if you already have an email code.'
+                : 'Enter the code from your email to finish secure access on mobile.'}
+            </Text>
           </View>
+
+          {rememberedEmail && !form.email ? (
+            <Text style={styles.rememberedEmailNote}>Last used: {rememberedEmail}</Text>
+          ) : null}
 
           <TextInput
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="email-address"
-            placeholder="Email"
+            placeholder="Email address"
             placeholderTextColor="#7d8a8f"
             style={styles.input}
             value={form.email}
@@ -1473,15 +1723,26 @@ export function RootScreen() {
             disabled={busy}
           >
             <Text style={styles.buttonText}>
-              {busy ? 'Working...' : authMode === 'login' ? 'Continue' : 'Verify email'}
+              {busy ? 'Working...' : authMode === 'login' ? 'Log in to workspace' : 'Verify email code'}
             </Text>
           </Pressable>
 
-          {authMode === 'verify' ? (
-            <Pressable onPress={handleResendOtp} disabled={busy}>
-              <Text style={styles.inlineLink}>Resend OTP</Text>
-            </Pressable>
-          ) : null}
+          <View style={styles.authSecondaryActions}>
+            {authMode === 'login' ? (
+              <Pressable onPress={() => handleSwitchAuthMode('verify')} disabled={busy}>
+                <Text style={styles.inlineLink}>Already have a code? Verify instead</Text>
+              </Pressable>
+            ) : (
+              <>
+                <Pressable onPress={handleResendOtp} disabled={busy}>
+                  <Text style={styles.inlineLink}>Resend code</Text>
+                </Pressable>
+                <Pressable onPress={() => handleSwitchAuthMode('login')} disabled={busy}>
+                  <Text style={styles.inlineLink}>Back to password login</Text>
+                </Pressable>
+              </>
+            )}
+          </View>
 
           {status ? <Text style={styles.status}>{status}</Text> : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}

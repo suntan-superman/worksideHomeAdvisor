@@ -519,12 +519,12 @@ function renderHtmlDocument({ title, body }) {
         color: var(--moss);
       }
       h1, h2, h3, h4, p { margin: 0; }
-      h1 { font-family: Georgia, "Times New Roman", serif; font-size: 34px; line-height: 1.05; margin-top: 10px; }
+      h1 { font-family: Georgia, "Times New Roman", serif; font-size: 38px; line-height: 1.03; margin-top: 10px; }
       h2 { font-family: Georgia, "Times New Roman", serif; font-size: 28px; line-height: 1.1; margin-bottom: 8px; }
       h3 { font-size: 19px; margin-bottom: 8px; }
       h4 { font-size: 15px; margin-bottom: 6px; }
       .lede { font-size: 15px; line-height: 1.65; color: var(--muted); }
-      .muted { color: var(--muted); font-size: 13px; line-height: 1.55; }
+      .muted { color: var(--muted); font-size: 12px; line-height: 1.5; }
       .hero-photo, .map-frame {
         width: 100%;
         border-radius: 22px;
@@ -669,12 +669,17 @@ function renderHtmlDocument({ title, body }) {
       .highlight-card { display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: start; padding: 14px 16px; border-radius: 18px; border: 1px solid rgba(79,123,98,0.16); background: rgba(255,255,255,0.92); }
       .highlight-index { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(200,116,71,0.14); color: var(--accent); font-weight: 800; }
       .highlight-copy { font-size: 14px; line-height: 1.5; color: var(--ink); }
+      .hero-signal-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+      .hero-signal-chip { padding: 10px 12px; border-radius: 14px; font-size: 12px; line-height: 1.45; font-weight: 600; border: 1px solid transparent; }
+      .hero-signal-chip-blue { background: var(--brand-blue-soft); color: var(--brand-blue); border-color: rgba(47,95,143,0.18); }
+      .hero-signal-chip-green { background: var(--moss-soft); color: var(--moss); border-color: rgba(79,123,98,0.18); }
+      .hero-signal-chip-orange { background: var(--accent-soft); color: #9a5a33; border-color: rgba(200,116,71,0.18); }
       .suggested-category-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
       .suggested-category-card { padding: 14px 16px; border-radius: 18px; border: 1px solid rgba(47,95,143,0.16); background: rgba(244,248,252,0.96); }
       .suggested-category-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--brand-blue); margin-bottom: 8px; }
       .seller-cover-grid { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 18px; align-items: start; }
       .score-hero { border-radius: 24px; padding: 24px 24px 22px; border: 1px solid rgba(200,116,71,0.24); background: linear-gradient(145deg, rgba(47,95,143,0.08), rgba(200,116,71,0.16) 62%, rgba(255,250,244,0.98) 100%); text-align: center; }
-      .score-hero-value { font-size: 72px; line-height: 0.9; font-weight: 800; margin-top: 10px; letter-spacing: -0.05em; }
+      .score-hero-value { font-size: 84px; line-height: 0.88; font-weight: 800; margin-top: 10px; letter-spacing: -0.06em; }
       .score-status { display: inline-flex; margin-top: 10px; padding: 8px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
       .score-status-ready { background: rgba(79,123,98,0.16); color: var(--moss); }
       .score-status-almost { background: rgba(200,116,71,0.16); color: #9a5a33; }
@@ -684,7 +689,7 @@ function renderHtmlDocument({ title, body }) {
       .brochure-cover::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(16,24,32,0.14) 0%, rgba(16,24,32,0.58) 44%, rgba(16,24,32,0.86) 100%); }
       .brochure-cover-overlay { position: relative; z-index: 1; min-height: 5.2in; padding: 30px 30px 26px; color: #ffffff; display: flex; flex-direction: column; justify-content: flex-end; }
       .brochure-cover-overlay .brand-kicker { color: rgba(255,255,255,0.78); }
-      .brochure-cover-overlay h1 { color: #ffffff; font-size: 48px; line-height: 1.01; max-width: 5.8in; }
+      .brochure-cover-overlay h1 { color: #ffffff; font-size: 54px; line-height: 0.98; max-width: 5.9in; }
       .brochure-cover-overlay .lede { color: rgba(255,255,255,0.88); max-width: 5.4in; }
       .brochure-price { display: inline-flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 10px 14px; border-radius: 999px; background: rgba(255,255,255,0.14); color: #ffffff; border: 1px solid rgba(255,255,255,0.24); font-weight: 700; backdrop-filter: blur(2px); }
       .brochure-cover-facts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
@@ -694,6 +699,7 @@ function renderHtmlDocument({ title, body }) {
       .brochure-cta-button { display: inline-block; margin-top: 12px; padding: 12px 18px; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 700; }
       .legend-note { margin-top: 10px; font-size: 11px; line-height: 1.45; color: var(--muted); }
       .marketing-gallery-card { padding: 14px 16px; }
+      .closing-band { margin-top: 14px; padding: 14px 16px; border-radius: 18px; background: linear-gradient(135deg, rgba(47,95,143,0.10), rgba(200,116,71,0.12)); border: 1px solid rgba(47,95,143,0.14); }
     </style>
   </head>
   <body>${body}</body>
@@ -763,11 +769,12 @@ function buildPropertySummaryHtml({ property, report }) {
   ], 4);
   const readinessTone = getReadinessTone({ score: readinessSummary.overallScore, label: readinessSummary.label });
   const coverNarrative = shortenNarrative(executiveSummaryText, 1);
-  const coverSignals = pickMeaningfulLines([
-    coverNarrative,
-    property?.selectedListPrice ? `Pricing signal: positioned at ${formatCurrency(property.selectedListPrice)}.` : '',
-    Number(photoSummary.retakeCount || 0) > 0 ? `Key insight: ${photoSummary.retakeCount} photo retake${Number(photoSummary.retakeCount || 0) === 1 ? '' : 's'} still need attention.` : '',
-  ], 2);
+  const coverPricingSignal = property?.selectedListPrice
+    ? `Pricing signal: positioned at ${formatCurrency(property.selectedListPrice)}.`
+    : '';
+  const coverKeyInsight = Number(photoSummary.retakeCount || 0) > 0
+    ? `Key insight: ${photoSummary.retakeCount} photo retake${Number(photoSummary.retakeCount || 0) === 1 ? '' : 's'} still need attention.`
+    : `${checklistSummary.openCount || 0} checklist items still need closure before launch.`;
   const suggestedProviderCategories = pickMeaningfulLines([
     photoSummary.retakeCount || photoSummary.roomCoverageCount < 5 ? 'Professional photography' : '',
     Number(checklistSummary.openCount || 0) > 0 ? 'Cleaning and prep support' : '',
@@ -792,7 +799,11 @@ function buildPropertySummaryHtml({ property, report }) {
             ], 3),
           )}
         </div>
-        ${renderInsightList(coverSignals, '')}
+        <div class="hero-signal-row">
+          ${coverPricingSignal ? `<div class="hero-signal-chip hero-signal-chip-blue">${escapeHtml(coverPricingSignal)}</div>` : ''}
+          ${coverKeyInsight ? `<div class="hero-signal-chip hero-signal-chip-orange">${escapeHtml(coverKeyInsight)}</div>` : ''}
+          ${coverNarrative ? `<div class="hero-signal-chip hero-signal-chip-green">${escapeHtml(coverNarrative)}</div>` : ''}
+        </div>
         <div class="kpi-strip">
           ${renderMetricCard('Selected price', property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set', report.pricingSummary?.mid ? `Suggested midpoint ${formatCurrency(report.pricingSummary.mid)}` : 'Pricing guidance available below')}
           ${renderMetricCard('Photo coverage', `${photoSummary.roomCoverageCount || 0}/5 rooms`, `${photoSummary.listingCandidateCount || 0} listing-ready · ${photoSummary.retakeCount || 0} retakes`)}
@@ -1047,6 +1058,9 @@ function buildMarketingReportHtml({ property, flyer }) {
           <div class="brochure-price">${escapeHtml(property?.selectedListPrice ? `Starting at ${formatCurrency(property.selectedListPrice)}` : flyer.priceText || 'Pricing on request')}</div>
           <h1>${escapeHtml(flyer.headline || property.title || 'Marketing brochure')}</h1>
           <p class="lede" style="margin-top:12px;">${escapeHtml(flyer.subheadline || brochureSummary)}</p>
+          <div class="hero-signal-row" style="margin-top:14px;">
+            <div class="hero-signal-chip hero-signal-chip-orange">${escapeHtml('Private showings and property-package requests available now.')}</div>
+          </div>
           <div class="brochure-cover-facts">
             ${brochureFactBadges.map((item) => `<div class="brochure-cover-fact">${escapeHtml(item)}</div>`).join('')}
           </div>
@@ -1109,11 +1123,15 @@ function buildMarketingReportHtml({ property, flyer }) {
           <div class="content-card">
             <div class="section-kicker">Pricing positioning</div>
             <h3>${escapeHtml(flyer.priceText || 'Pricing on request')}</h3>
-            <p class="muted" style="margin-top:8px;">${escapeHtml(
-              property?.selectedListPrice
-                ? `Competitively positioned at ${formatCurrency(property.selectedListPrice)} to balance value perception and buyer demand.`
-                : 'Positioned to align with recent comparable sales and current buyer demand.',
-            )}</p>
+            ${renderInsightList(
+              pickMeaningfulLines([
+                property?.selectedListPrice
+                  ? `Competitively positioned at ${formatCurrency(property.selectedListPrice)} to balance value perception and buyer demand.`
+                  : 'Positioned to align with recent comparable sales and current buyer demand.',
+                topReasonsToBuy[0] ? `Buyer signal: ${topReasonsToBuy[0]}` : '',
+              ], 3),
+              '',
+            )}
             <div class="page-spacer"></div>
             <div class="section-kicker">Neighborhood context</div>
             <p class="compact-copy" style="margin-top:8px;">${escapeHtml(lifestyleContext)}</p>
@@ -1182,6 +1200,10 @@ function buildMarketingReportHtml({ property, flyer }) {
                 <div class="badge-row">
                   <div class="badge">${escapeHtml(SUPPORT_EMAIL)}</div>
                   <div class="badge">${escapeHtml(PUBLIC_WEB_URL)}</div>
+                </div>
+                <div class="closing-band">
+                  <div class="section-kicker">Final push</div>
+                  <p class="compact-copy" style="margin-top:6px;">Homes that combine clear pricing, polished photography, and a strong first showing impression create more confident buyer momentum.</p>
                 </div>
                 <div class="brochure-cta-button">Request the full property package</div>
               </div>

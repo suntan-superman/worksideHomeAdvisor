@@ -70,6 +70,15 @@ export function requestOtp(payload) {
   });
 }
 
+export function deleteAccount(token) {
+  return request('/api/v1/auth/account', {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
 export function listProperties(ownerUserId) {
   const search = ownerUserId ? `?ownerUserId=${encodeURIComponent(ownerUserId)}` : '';
   return request(`/api/v1/properties${search}`);
