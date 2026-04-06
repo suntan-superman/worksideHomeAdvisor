@@ -570,7 +570,12 @@ function renderHtmlDocument({ title, body }) {
         font-family: "Segoe UI", "Aptos", "Helvetica Neue", Arial, sans-serif;
         color: var(--ink);
         background: #f4efe5;
+        white-space: normal;
+        word-break: keep-all;
+        overflow-wrap: break-word;
+        hyphens: none;
       }
+      p, span, div, li, strong, h1, h2, h3, h4 { white-space: normal; word-break: keep-all; overflow-wrap: break-word; hyphens: none; }
       .page {
         width: 8.5in;
         min-height: 11in;
@@ -754,13 +759,24 @@ function renderHtmlDocument({ title, body }) {
       .suggested-category-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
       .suggested-category-card { padding: 14px 16px; border-radius: 18px; border: 1px solid rgba(47,95,143,0.16); background: rgba(244,248,252,0.96); }
       .suggested-category-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--brand-blue); margin-bottom: 8px; }
-      .seller-cover-grid { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 18px; align-items: start; }
-      .score-hero { border-radius: 24px; padding: 24px 24px 22px; border: 1px solid rgba(200,116,71,0.24); background: linear-gradient(145deg, rgba(47,95,143,0.08), rgba(200,116,71,0.16) 62%, rgba(255,250,244,0.98) 100%); text-align: center; }
-      .score-hero-value { font-size: 96px; line-height: 0.84; font-weight: 800; margin-top: 10px; letter-spacing: -0.06em; }
+      .seller-cover-grid { display: grid; grid-template-columns: 1.08fr 0.92fr; gap: 18px; align-items: start; }
+      .cover-right-stack { display: grid; gap: 12px; }
+      .score-hero { border-radius: 28px; padding: 28px 26px 24px; border: 1px solid rgba(200,116,71,0.24); background: linear-gradient(145deg, rgba(47,95,143,0.08), rgba(200,116,71,0.16) 62%, rgba(255,250,244,0.98) 100%); text-align: left; min-height: 3.9in; display: flex; flex-direction: column; justify-content: center; }
+      .score-hero-value { font-size: 124px; line-height: 0.82; font-weight: 800; margin-top: 10px; letter-spacing: -0.07em; }
       .score-status { display: inline-flex; margin-top: 10px; padding: 8px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
       .score-status-ready { background: rgba(79,123,98,0.16); color: var(--moss); }
       .score-status-almost { background: rgba(200,116,71,0.16); color: #9a5a33; }
       .score-status-needs-work { background: rgba(176,108,99,0.16); color: #96554a; }
+      .score-hero-note { margin-top: 12px; font-size: 14px; line-height: 1.55; color: var(--muted); max-width: 4.2in; }
+      .compact-metric-stack { display: grid; gap: 12px; }
+      .compact-metric-card { border: 1px solid var(--line); background: rgba(255,255,255,0.92); border-radius: 18px; padding: 16px 18px; }
+      .compact-metric-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--moss); margin-bottom: 8px; }
+      .compact-metric-value { font-size: 28px; line-height: 1.05; font-weight: 800; }
+      .compact-metric-support { margin-top: 6px; font-size: 12px; line-height: 1.45; color: var(--muted); }
+      .full-page-grid { display: grid; gap: 18px; align-content: start; min-height: 9.2in; }
+      .summary-shell { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 18px; align-items: start; }
+      .dense-two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+      .recommendation-grid { display: grid; gap: 14px; }
       .brochure-cover { position: relative; min-height: 5.2in; border-radius: 28px; overflow: hidden; border: 1px solid var(--line); background: linear-gradient(135deg, #304f72 0%, #203245 100%); }
       .brochure-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
       .brochure-cover::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(16,24,32,0.08) 0%, rgba(30,57,84,0.40) 30%, rgba(16,24,32,0.72) 68%, rgba(16,24,32,0.9) 100%); }
@@ -877,75 +893,152 @@ function buildPropertySummaryHtml({ property, report }) {
   const body = `
     <section class="page hero-page">
       <div class="seller-cover-grid">
-      <div>
-        <div class="brand-kicker">Workside Home Advisor · Seller Intelligence Report</div>
-        <h1>${escapeHtml(report.title || property.title || 'Property Summary Report')}</h1>
-        <div class="score-hero">
-          <div class="metric-label">Readiness score</div>
-          <div class="score-hero-value">${escapeHtml(`${readinessSummary.overallScore || 0}/100`)}</div>
-          <div class="score-status score-status-${escapeHtml(readinessTone)}">${escapeHtml(readinessSummary.label || 'Needs work')}</div>
-          ${renderInsightList(
-            pickMeaningfulLines([
-              `Photo coverage ${photoSummary.roomCoverageCount || 0}/5 core rooms.`,
-              `${checklistSummary.completedCount || 0} checklist items complete with ${checklistSummary.openCount || 0} still open.`,
-              property?.selectedListPrice ? `Chosen list price ${formatCurrency(property.selectedListPrice)}.` : '',
-            ], 3),
-          )}
+        <div>
+          <div class="brand-kicker">Workside Home Advisor · Seller Intelligence Report</div>
+          <h1>${escapeHtml(report.title || property.title || 'Property Summary Report')}</h1>
+          <div class="score-hero">
+            <div class="metric-label">Readiness score</div>
+            <div class="score-hero-value">${escapeHtml(`${readinessSummary.overallScore || 0}/100`)}</div>
+            <div class="score-status score-status-${escapeHtml(readinessTone)}">${escapeHtml(readinessSummary.label || 'Needs work')}</div>
+            <p class="score-hero-note">${escapeHtml(coverNarrative || 'This report turns property data into a clear launch decision and next-step sequence.')}</p>
+          </div>
+          <div class="hero-signal-row">
+            ${coverPricingSignal ? `<div class="hero-signal-chip hero-signal-chip-blue">${escapeHtml(coverPricingSignal)}</div>` : ''}
+            ${coverKeyInsight ? `<div class="hero-signal-chip hero-signal-chip-orange">${escapeHtml(coverKeyInsight)}</div>` : ''}
+          </div>
         </div>
-        <div class="hero-signal-row">
-          ${coverPricingSignal ? `<div class="hero-signal-chip hero-signal-chip-blue">${escapeHtml(coverPricingSignal)}</div>` : ''}
-          ${coverKeyInsight ? `<div class="hero-signal-chip hero-signal-chip-orange">${escapeHtml(coverKeyInsight)}</div>` : ''}
-          ${hasMeaningfulValue(readinessSummary.label) ? `<div class="hero-signal-chip hero-signal-chip-green">${escapeHtml(`Launch status: ${readinessSummary.label}`)}</div>` : ''}
-        </div>
-        <div class="kpi-strip">
-          ${renderMetricCard('Selected price', property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set', report.pricingSummary?.mid ? `Suggested midpoint ${formatCurrency(report.pricingSummary.mid)}` : 'Pricing guidance available below')}
-          ${renderMetricCard('Photo coverage', `${photoSummary.roomCoverageCount || 0}/5 rooms`, `${photoSummary.listingCandidateCount || 0} listing-ready · ${photoSummary.retakeCount || 0} retakes`)}
-          ${renderMetricCard('Checklist progress', `${checklistSummary.progressPercent || 0}%`, `${checklistSummary.completedCount || 0} complete · ${checklistSummary.openCount || 0} open`)}
-        </div>
-        <div class="executive-summary-shell">
-          <div class="executive-callouts">
-            <div class="callout-chip callout-chip-opportunity">
-              <div class="metric-label">Top opportunity</div>
-              <strong>${escapeHtml(summaryOpportunity)}</strong>
+        <div class="cover-right-stack">
+          <div class="compact-metric-stack">
+            <div class="compact-metric-card">
+              <div class="compact-metric-label">Price</div>
+              <div class="compact-metric-value">${escapeHtml(property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set')}</div>
+              <div class="compact-metric-support">${escapeHtml(report.pricingSummary?.mid ? `Suggested midpoint ${formatCurrency(report.pricingSummary.mid)}` : 'Pricing guidance available below')}</div>
             </div>
-            <div class="callout-chip callout-chip-risk">
-              <div class="metric-label">Top risk</div>
-              <strong>${escapeHtml(summaryRisk)}</strong>
+            <div class="compact-metric-card">
+              <div class="compact-metric-label">Photo coverage</div>
+              <div class="compact-metric-value">${escapeHtml(`${photoSummary.roomCoverageCount || 0}/5`)}</div>
+              <div class="compact-metric-support">${escapeHtml(`${photoSummary.listingCandidateCount || 0} listing-ready · ${photoSummary.retakeCount || 0} retakes`)}</div>
             </div>
-            <div class="callout-chip callout-chip-value">
-              <div class="metric-label">Value protection</div>
-              <strong>${escapeHtml(economicsSummary || 'Use this report to coordinate a confident, disciplined launch.')}</strong>
+            <div class="compact-metric-card">
+              <div class="compact-metric-label">Checklist</div>
+              <div class="compact-metric-value">${escapeHtml(`${checklistSummary.progressPercent || 0}%`)}</div>
+              <div class="compact-metric-support">${escapeHtml(`${checklistSummary.completedCount || 0} complete · ${checklistSummary.openCount || 0} open`)}</div>
             </div>
           </div>
           <div class="content-card">
-            <div class="section-kicker">Key insights</div>
-            <h3>What matters most right now</h3>
+            <div class="section-kicker">Key insight</div>
+            <h3>Pricing signal and launch focus</h3>
             ${renderInsightList(executiveSummaryBullets, 'Use this report to identify the clearest launch priorities.')}
           </div>
-          <div class="cta-band">
-            <div class="cta-label">Report date</div>
-            <p class="lede">${escapeHtml(formatDateLabel(report.updatedAt || report.createdAt || new Date()))}</p>
-            ${renderBulletList(
+          <div class="hero-photo">
+            ${heroPhoto?.imageUrl ? `<img src="${escapeHtml(heroPhoto.imageUrl)}" alt="${escapeHtml(heroPhoto.roomLabel || 'Property photo')}" />` : ''}
+          </div>
+          <p class="muted">${escapeHtml(buildPropertyAddress(property))}</p>
+        </div>
+      </div>
+      ${renderFooter('Property Summary Report · Cover')}
+    </section>
+
+    <section class="page">
+      <div class="brand-bar">
+        <div>
+          <div class="section-kicker">KPI overview</div>
+          <h2>Core metrics and property snapshot</h2>
+          <p class="muted">The key numbers and facts that define current launch readiness.</p>
+        </div>
+      </div>
+      <div class="metric-grid">
+        ${renderMetricCard('Selected price', property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set', report.pricingSummary?.mid ? `Suggested midpoint ${formatCurrency(report.pricingSummary.mid)}` : 'Pricing guidance available')}
+        ${renderMetricCard('Suggested range', report.pricingSummary?.low && report.pricingSummary?.high ? `${formatCurrency(report.pricingSummary.low)} - ${formatCurrency(report.pricingSummary.high)}` : 'Unavailable', 'Market-aligned range')}
+        ${renderMetricCard('Photo coverage', `${photoSummary.roomCoverageCount || 0}/5`, `${photoSummary.listingCandidateCount || 0} listing-ready`)}
+        ${renderMetricCard('Checklist', `${checklistSummary.completedCount || 0}/${checklistSummary.totalCount || 0}`, `${checklistSummary.openCount || 0} open items`)}
+      </div>
+      <div class="dense-two-col" style="margin-top:18px;">
+        <div class="content-card">
+          <div class="section-kicker">Property facts</div>
+          <h3>Snapshot</h3>
+          <div class="fact-grid">
+            ${propertyFacts
+              .map(
+                (fact) => `
+                  <div class="fact-row">
+                    <div class="fact-row-label">${escapeHtml(fact.label)}</div>
+                    <div>${escapeHtml(fact.value)}</div>
+                  </div>
+                `,
+              )
+              .join('')}
+          </div>
+        </div>
+        <div class="content-card">
+          <div class="section-kicker">Status summary</div>
+          <h3>Current launch picture</h3>
+          ${renderHighlightGrid(
+            pickMeaningfulLines([
+              coverKeyInsight,
+              hasMeaningfulValue(readinessSummary.label) ? `Launch status: ${readinessSummary.label}` : '',
+              photoSummary.summary,
+              checklistSummary.totalCount ? `${checklistSummary.completedCount || 0} of ${checklistSummary.totalCount} checklist items are complete.` : '',
+            ], 4),
+            'Current launch signals will appear here once property analysis is refreshed.',
+          )}
+        </div>
+      </div>
+      ${renderFooter('Property Summary Report · KPI')}
+    </section>
+
+    <section class="page">
+      <div class="brand-bar">
+        <div>
+          <div class="section-kicker">Summary</div>
+          <h2>Executive summary, insights, and recommendations</h2>
+          <p class="muted">A seller-facing readout of the strongest signals, risks, and next opportunities.</p>
+        </div>
+      </div>
+      <div class="summary-shell">
+        <div class="content-card">
+          <div class="section-kicker">Key insights</div>
+          <h3>What matters most right now</h3>
+          ${renderInsightList(executiveSummaryBullets, 'Use this report to identify the clearest launch priorities.')}
+          <div class="page-spacer"></div>
+          <div class="section-kicker">Recommendations</div>
+          ${renderBulletList(
+            pickMeaningfulLines([
+              report.payload?.improvementGuidance?.summary,
+              ...(report.improvementItems || []).slice(0, 4),
+              summaryOpportunity,
+            ], 6),
+            'Use the guided workflow to continue improving readiness and launch confidence.',
+          )}
+        </div>
+        <div class="recommendation-grid">
+          <div class="callout-chip callout-chip-opportunity">
+            <div class="metric-label">Top opportunity</div>
+            <strong>${escapeHtml(summaryOpportunity)}</strong>
+          </div>
+          <div class="callout-chip callout-chip-risk">
+            <div class="metric-label">Top risk</div>
+            <strong>${escapeHtml(summaryRisk)}</strong>
+          </div>
+          <div class="callout-chip callout-chip-value">
+            <div class="metric-label">Budget / ROI</div>
+            <strong>${escapeHtml(economicsSummary || 'Use this report to coordinate a confident, disciplined launch.')}</strong>
+          </div>
+          <div class="content-card">
+            <div class="section-kicker">Launch status</div>
+            <h3>${escapeHtml(readinessSummary.label || 'Needs work')}</h3>
+            ${renderHighlightGrid(
               pickMeaningfulLines([
-                report.payload?.improvementGuidance?.summary,
-                ...(report.improvementItems || []).slice(0, 3),
+                photoSummary.summary,
+                checklistSummary.totalCount ? `${checklistSummary.completedCount || 0} of ${checklistSummary.totalCount} checklist items are complete.` : '',
+                property?.selectedListPrice ? `Chosen list price ${formatCurrency(property.selectedListPrice)}.` : '',
               ], 4),
-              'Use the guided workflow to continue improving readiness and launch confidence.',
+              'Launch status details will appear here once the analysis is refreshed.',
             )}
           </div>
         </div>
       </div>
-      <div>
-        <div class="hero-photo">
-          ${heroPhoto?.imageUrl ? `<img src="${escapeHtml(heroPhoto.imageUrl)}" alt="${escapeHtml(heroPhoto.roomLabel || 'Property photo')}" />` : ''}
-        </div>
-        <p class="muted" style="margin-top:10px;">${escapeHtml(buildPropertyAddress(property))}</p>
-        <div class="feature-grid">
-          ${featureTags.map((tag) => `<div class="feature-pill">${escapeHtml(tag)}</div>`).join('')}
-        </div>
-      </div>
-      </div>
-      ${renderFooter('Property Summary Report · Cover')}
+      ${renderFooter('Property Summary Report · Summary')}
     </section>
 
     <section class="page">
@@ -962,16 +1055,7 @@ function buildPropertySummaryHtml({ property, report }) {
         ${renderMetricCard('Chosen price', property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set', property?.selectedListPrice ? 'Seller-confirmed' : 'Set in pricing tab')}
         ${renderMetricCard('Selected comps', String((report.selectedComps || []).length), 'Top market references included')}
       </div>
-      <div class="section-grid">
-        ${shouldRenderCompMap ? `
-          <div class="content-card">
-            <div class="section-kicker">Comp map</div>
-            <div class="map-frame" style="margin-top:12px;">
-              <img src="${escapeHtml(compMapImageUrl)}" alt="Comparable properties map" />
-            </div>
-            <div class="legend-note">Markers use S for the subject property and A-${String.fromCharCode(64 + Math.min((report.selectedComps || []).length, 6))} for the comparable sales listed below.</div>
-          </div>
-        ` : ''}
+      <div class="dense-two-col" style="margin-top:18px;">
         <div class="sidebar-card">
           <div class="section-kicker">Pricing rationale</div>
           <h3>Comparable-based rationale</h3>
@@ -984,17 +1068,39 @@ function buildPropertySummaryHtml({ property, report }) {
             ${report.pricingSummary?.confidence ? `<div class="badge">${escapeHtml(`${Math.round(report.pricingSummary.confidence * 100)}% pricing confidence`)}</div>` : ''}
           </div>
         </div>
-      </div>
-      ${(report.selectedComps || []).length ? `
-        <div class="content-card" style="margin-top:18px;">
-          <div class="section-kicker">Comparable properties</div>
-          <h3>Recent nearby comps</h3>
-          <div class="page-spacer"></div>
-          ${renderCompRows(report.selectedComps || [])}
+        <div class="content-card">
+          <div class="section-kicker">Key insights</div>
+          <h3>What the comp set is signaling</h3>
+          ${renderHighlightGrid(pricingInsightLines, 'Pricing insight rows will appear here once the comparable analysis is refreshed.')}
         </div>
-      ` : ''}
+      </div>
       ${renderFooter('Property Summary Report · Pricing & Comps')}
     </section>
+
+    ${(report.selectedComps || []).length ? `
+      <section class="page">
+        <div class="brand-bar">
+          <div>
+            <div class="section-kicker">Comparable sales</div>
+            <h2>Recent nearby comps</h2>
+            <p class="muted">The selected comp set and its supporting local map.</p>
+          </div>
+        </div>
+        ${shouldRenderCompMap ? `
+          <div class="content-card">
+            <div class="section-kicker">Comp map</div>
+            <div class="map-frame" style="margin-top:12px;">
+              <img src="${escapeHtml(compMapImageUrl)}" alt="Comparable properties map" />
+            </div>
+            <div class="legend-note">Markers use S for the subject property and A-${String.fromCharCode(64 + Math.min((report.selectedComps || []).length, 6))} for the comparable sales listed below.</div>
+          </div>
+        ` : ''}
+        <div class="content-card" style="margin-top:18px;">
+          ${renderCompRows(report.selectedComps || [])}
+        </div>
+        ${renderFooter('Property Summary Report · Comparable Sales')}
+      </section>
+    ` : ''}
 
     <section class="page">
       <div class="brand-bar">
@@ -1112,6 +1218,45 @@ function buildPropertySummaryHtml({ property, report }) {
         </div>
       </div>
       ${renderFooter('Property Summary Report · Action Plan')}
+    </section>
+
+    <section class="page">
+      <div class="brand-bar">
+        <div>
+          <div class="section-kicker">Final steps</div>
+          <h2>Final launch checklist</h2>
+          <p class="muted">A final seller-facing page that closes the report with clear next actions.</p>
+        </div>
+      </div>
+      <div class="dense-two-col">
+        <div class="content-card">
+          <div class="section-kicker">Ordered launch steps</div>
+          <h3>What to do next</h3>
+          ${renderChecklistItems(
+            buildDefaultLaunchChecklist({
+              checklistSummary,
+              photoSummary,
+              improvementItems: report.improvementItems || [],
+              hasSelectedPrice: Boolean(property?.selectedListPrice),
+            }),
+            'Use the guided workflow to build the launch sequence.',
+          )}
+        </div>
+        <div class="content-card">
+          <div class="section-kicker">Seller guidance</div>
+          <h3>How to use this report</h3>
+          ${renderBulletList(
+            pickMeaningfulLines([
+              'Review pricing, photos, and checklist progress together before launch.',
+              'Use nearby provider support if any prep item is slowing the listing launch.',
+              'Regenerate the brochure and seller report after major pricing or photo updates.',
+              'Treat this report as the operating plan for the next showing-ready phase.',
+            ], 6),
+            '',
+          )}
+        </div>
+      </div>
+      ${renderFooter('Property Summary Report · Final Steps')}
     </section>
   `;
 

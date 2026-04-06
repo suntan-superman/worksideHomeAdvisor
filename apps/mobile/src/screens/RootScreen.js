@@ -50,6 +50,15 @@ function getDisplayName(user) {
   return fullName || user?.email || 'Signed-in user';
 }
 
+function truncateMiddle(value, maxLength = 28) {
+  if (!value || value.length <= maxLength) {
+    return value || '';
+  }
+
+  const keep = Math.max(8, Math.floor((maxLength - 3) / 2));
+  return `${value.slice(0, keep)}...${value.slice(-keep)}`;
+}
+
 function formatCurrency(value) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -598,7 +607,7 @@ export function RootScreen() {
     );
   }
 
-  function handleSignOut() {
+  function performSignOut() {
     queryClient.removeQueries({ queryKey: ['mobile-properties'] });
     queryClient.removeQueries({ queryKey: ['mobile-dashboard'] });
     queryClient.removeQueries({ queryKey: ['mobile-checklist'] });
@@ -618,6 +627,17 @@ export function RootScreen() {
     setCustomTaskTitle('');
     setError('');
     setStatus('Signed out. Sign in again to continue.');
+  }
+
+  function handleSignOut() {
+    Alert.alert('Log out?', 'Are you sure you want to log out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Confirm',
+        style: 'destructive',
+        onPress: performSignOut,
+      },
+    ]);
   }
 
   function handleDeleteAccount() {
@@ -900,7 +920,7 @@ export function RootScreen() {
     appScreen === 'settings'
       ? 'Settings'
       : appScreen === 'property'
-        ? selectedProperty?.title || 'Property workspace'
+        ? 'Property'
         : 'Home Advisor';
 
   function renderPropertyWorkspaceContent() {
@@ -1501,7 +1521,7 @@ export function RootScreen() {
           <View style={styles.mobileTopBar}>
             {appScreen === 'property' || appScreen === 'settings' ? (
               <Pressable onPress={() => setAppScreen('home')} style={styles.topIconButton}>
-                <Text style={styles.topIconButtonText}>{'\u2039'}</Text>
+                <Text style={styles.topIconGlyph}>{'\u2039'}</Text>
               </Pressable>
             ) : (
               <View style={styles.topIconPlaceholder} />
@@ -1509,7 +1529,9 @@ export function RootScreen() {
             <View style={styles.mobileHeaderCopy}>
               {appScreen === 'home' ? (
                 <>
-                  <Text style={styles.mobileTitle}>Home Advisor</Text>
+                  <Text style={styles.mobileTitle} numberOfLines={1}>
+                    Home Advisor
+                  </Text>
                   <Text style={styles.mobilePoweredBy}>powered by</Text>
                   <Text style={styles.mobileBrand}>Workside Software</Text>
                   <Text style={styles.mobileSubtitle}>Stay Connected Across Every Property</Text>
@@ -1528,12 +1550,12 @@ export function RootScreen() {
             <View style={styles.topActionRow}>
               {appScreen !== 'settings' ? (
                 <Pressable onPress={() => setAppScreen('settings')} style={styles.topIconButton}>
-                  <Text style={styles.topIconButtonText}>Settings</Text>
+                  <Text style={styles.topIconGlyph}>{'\u2699'}</Text>
                 </Pressable>
               ) : null}
               {appScreen === 'home' ? (
                 <Pressable onPress={handleSignOut} style={styles.topIconButton}>
-                  <Text style={styles.topIconButtonText}>Logout</Text>
+                  <Text style={styles.topIconGlyph}>{'\u21AA'}</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -1545,7 +1567,6 @@ export function RootScreen() {
               <Text style={styles.homeWelcomeMeta}>
                 {properties.length} {properties.length === 1 ? 'property' : 'properties'} connected
               </Text>
-              <Text style={styles.sectionListLabel}>Properties</Text>
               <View style={styles.homePropertyList}>
                 {properties.length ? (
                   properties.map((property) => (
@@ -1574,15 +1595,21 @@ export function RootScreen() {
                 <Text style={styles.settingsSectionLabel}>Account</Text>
                 <View style={styles.settingsInfoCard}>
                   <Text style={styles.settingsInfoLabel}>Name</Text>
-                  <Text style={styles.settingsInfoValue}>{getDisplayName(session.user)}</Text>
+                  <Text style={styles.settingsInfoValue} numberOfLines={1}>
+                    {getDisplayName(session.user)}
+                  </Text>
                 </View>
                 <View style={styles.settingsInfoCard}>
                   <Text style={styles.settingsInfoLabel}>Email</Text>
-                  <Text style={styles.settingsInfoValue}>{session.user.email}</Text>
+                  <Text style={styles.settingsInfoValue} numberOfLines={1}>
+                    {truncateMiddle(session.user.email)}
+                  </Text>
                 </View>
                 <View style={styles.settingsInfoCard}>
                   <Text style={styles.settingsInfoLabel}>Account Type</Text>
-                  <Text style={styles.settingsInfoValue}>{viewerRole === 'agent' ? 'Realtor / Agent' : 'Seller'}</Text>
+                  <Text style={styles.settingsInfoValue} numberOfLines={1}>
+                    {viewerRole === 'agent' ? 'Realtor / Agent' : 'Seller'}
+                  </Text>
                 </View>
               </View>
               <View style={styles.settingsSection}>
@@ -1616,7 +1643,6 @@ export function RootScreen() {
           {appScreen === 'property' && selectedProperty ? (
             <View style={styles.mobileCard}>
               <View style={styles.propertyHeroCard}>
-                <Text style={styles.propertyHeroTitle}>{selectedProperty.title}</Text>
                 <Text style={styles.propertyHeroMeta}>{propertyAddress}</Text>
                 {workflow ? (
                   <View style={styles.propertyHeroStats}>
@@ -1633,7 +1659,7 @@ export function RootScreen() {
             </View>
           ) : null}
 
-          {status ? <Text style={styles.status}>{status}</Text> : null}
+          {!session?.user ? null : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
           {busy || refreshing ? <ActivityIndicator color="#d28859" style={styles.spinner} /> : null}
           <Text style={styles.mobileFooter}>Copyright 2026 Workside Software LLC</Text>
@@ -1783,49 +1809,50 @@ const styles = StyleSheet.create({
   },
   mobileShell: {
     flexGrow: 1,
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     paddingTop: 18,
-    paddingBottom: 28,
-    gap: 16,
+    paddingBottom: 24,
+    gap: 14,
   },
   mobileTopBar: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 12,
+    gap: 10,
   },
   topIconButton: {
-    minWidth: 42,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 14,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     backgroundColor: '#24303a',
     borderWidth: 1,
     borderColor: '#3d4e5b',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  topIconButtonText: {
+  topIconGlyph: {
     color: '#f8f1e6',
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '800',
   },
   topIconPlaceholder: {
-    width: 42,
+    width: 40,
+    height: 40,
   },
   mobileHeaderCopy: {
     flex: 1,
     gap: 2,
     paddingTop: 2,
+    minWidth: 0,
   },
   topActionRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
   },
   mobileCard: {
     backgroundColor: 'rgba(38, 50, 61, 0.82)',
-    borderRadius: 24,
-    padding: 18,
-    gap: 14,
+    borderRadius: 22,
+    padding: 16,
+    gap: 12,
     borderWidth: 1,
     borderColor: 'rgba(126, 145, 160, 0.22)',
     shadowColor: '#000000',
@@ -1835,9 +1862,9 @@ const styles = StyleSheet.create({
   },
   mobileTitle: {
     color: '#f8f1e6',
-    fontSize: 32,
+    fontSize: 27,
     fontWeight: '800',
-    lineHeight: 38,
+    lineHeight: 31,
   },
   mobilePoweredBy: {
     color: '#93a982',
@@ -1847,54 +1874,47 @@ const styles = StyleSheet.create({
   },
   mobileBrand: {
     color: '#d7c6af',
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
   },
   mobileSubtitle: {
-    marginTop: 8,
+    marginTop: 6,
     color: '#c8b9a7',
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 18,
   },
   mobileScreenTitle: {
     color: '#f8f1e6',
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: '800',
-    lineHeight: 34,
+    lineHeight: 24,
   },
   mobileScreenSubtitle: {
     marginTop: 4,
     color: '#b9af9f',
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 16,
   },
   homeWelcomeTitle: {
     color: '#f8f1e6',
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: '800',
   },
   homeWelcomeMeta: {
     color: '#93a982',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
   },
-  sectionListLabel: {
-    color: '#93a982',
-    fontSize: 12,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    marginTop: 4,
-  },
   homePropertyList: {
-    gap: 12,
+    gap: 10,
   },
   homePropertyCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 16,
     backgroundColor: '#24303a',
     borderWidth: 1,
     borderColor: '#3d4e5b',
@@ -1905,21 +1925,21 @@ const styles = StyleSheet.create({
   },
   homePropertyTitle: {
     color: '#f8f1e6',
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '800',
   },
   homePropertyMeta: {
     color: '#b9af9f',
-    fontSize: 14,
-    lineHeight: 19,
+    fontSize: 13,
+    lineHeight: 17,
   },
   homePropertyArrow: {
     color: '#d28859',
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '700',
   },
   settingsSection: {
-    gap: 10,
+    gap: 8,
   },
   settingsSectionLabel: {
     color: '#93a982',
@@ -1930,9 +1950,9 @@ const styles = StyleSheet.create({
   },
   settingsInfoCard: {
     gap: 4,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 14,
     backgroundColor: '#1f2a33',
     borderWidth: 1,
     borderColor: '#34434f',
@@ -1944,33 +1964,34 @@ const styles = StyleSheet.create({
   },
   settingsInfoValue: {
     color: '#f8f1e6',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
+    flexShrink: 1,
   },
   settingsRowButton: {
     gap: 4,
-    paddingVertical: 15,
-    paddingHorizontal: 14,
-    borderRadius: 16,
+    paddingVertical: 13,
+    paddingHorizontal: 12,
+    borderRadius: 14,
     backgroundColor: '#24303a',
     borderWidth: 1,
     borderColor: '#3d4e5b',
   },
   settingsRowTitle: {
     color: '#f8f1e6',
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
   },
   settingsRowMeta: {
     color: '#b9af9f',
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 16,
   },
   settingsDangerCard: {
     gap: 4,
-    paddingVertical: 16,
-    paddingHorizontal: 14,
-    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 14,
     backgroundColor: 'rgba(131, 33, 33, 0.24)',
     borderWidth: 1,
     borderColor: '#b85d4c',
@@ -1986,7 +2007,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   propertyHeroCard: {
-    gap: 8,
+    gap: 6,
     paddingBottom: 2,
   },
   propertyHeroTitle: {
@@ -1996,13 +2017,13 @@ const styles = StyleSheet.create({
   },
   propertyHeroMeta: {
     color: '#b9af9f',
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 18,
   },
   propertyHeroStats: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
     marginTop: 4,
   },
   propertyHeroStatChip: {
@@ -2320,7 +2341,7 @@ const styles = StyleSheet.create({
   },
   workflowGuideCard: {
     gap: 10,
-    padding: 14,
+    padding: 12,
     borderRadius: 16,
     backgroundColor: '#24303a',
     borderWidth: 1,
@@ -2350,13 +2371,13 @@ const styles = StyleSheet.create({
   workflowPhaseRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 6,
   },
   workflowPhaseChip: {
     gap: 2,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 14,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 12,
     backgroundColor: '#1f2a33',
     borderWidth: 1,
     borderColor: '#3d4e5b',
@@ -2371,22 +2392,22 @@ const styles = StyleSheet.create({
   },
   workflowPhaseChipLabel: {
     color: '#f8f1e6',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
   },
   workflowPhaseChipMeta: {
     color: '#b9af9f',
-    fontSize: 12,
+    fontSize: 11,
   },
   sectionChipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 6,
     marginTop: 4,
   },
   sectionChip: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderRadius: 999,
     backgroundColor: '#24303a',
     borderWidth: 1,
@@ -2406,17 +2427,17 @@ const styles = StyleSheet.create({
   },
   sectionChipLabel: {
     color: '#dbcbb7',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
   },
   sectionChipLabelRecommended: {
     color: '#f7d7b7',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
   },
   sectionChipLabelActive: {
     color: '#fff7ee',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
   },
   sectionPanel: {

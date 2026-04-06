@@ -20,6 +20,7 @@ import {
   drawSectionEyebrow,
   drawWrappedText,
   fetchPdfImage,
+  PDF_PAGE_WIDTH,
   PDF_PAGE_HEIGHT,
   PDF_PAGE_MARGIN,
   sanitizeFilePart,
