@@ -125,6 +125,8 @@ npm run admin:user --workspace=@workside/api
 //////////////////////////////////////////////////////////
 To deploy backend:
 
+git add .;git commit -m "Update Home Advisor Interface and Backend";git push
+
 gcloud builds submit . `
   --config infrastructure/gcp/cloudbuild.api.yaml `
   --substitutions "_AR_HOST=us-central1-docker.pkg.dev,_AR_REPO=homeadvisor-api,_IMAGE_NAME=workside-api,_IMAGE_TAG=latest"
@@ -171,4 +173,5 @@ open ios/*.xcworkspace
 https://worksideadvisor.com/
 https://worksidehomeadvisoradmin.netlify.app/login
 /////////////////////////////////////////////////////////////
-
+npm run clone:demo --workspace=@workside/api -- --source=demo@worksidesoftware.com --target=demo@worksideadvisor.com
+////////////////////////////////////////////////////////////

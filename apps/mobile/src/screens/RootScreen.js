@@ -361,9 +361,17 @@ export function RootScreen() {
 
     async function loadRememberedEmail() {
       try {
-        const rememberedEmail = await AsyncStorage.getItem(LAST_LOGIN_EMAIL_KEY);
-        if (active && rememberedEmail) {
-          setRememberedEmail(rememberedEmail);
+        const storedEmail = await AsyncStorage.getItem(LAST_LOGIN_EMAIL_KEY);
+        if (active && storedEmail) {
+          setRememberedEmail(storedEmail);
+          setForm((current) =>
+            current.email
+              ? current
+              : {
+                  ...current,
+                  email: storedEmail,
+                },
+          );
         }
       } catch (storageError) {
         // Keep auth usable even if local storage is unavailable.
@@ -592,6 +600,32 @@ export function RootScreen() {
       setStatus('A fresh OTP was sent to your email.');
     } catch (requestError) {
       setError(requestError.message);
+    } finally {
+      setBusyState(false);
+    }
+  }
+
+  async function handleForgotPasswordSendCode() {
+    const email = String(form.email || rememberedEmail || '').trim();
+    if (!email) {
+      setError('Enter your email address first so we know where to send the code.');
+      return;
+    }
+
+    setBusyState(true);
+    setError('');
+
+    try {
+      await requestOtp({ email });
+      await rememberEmail(email);
+      updateField('email', email);
+      setAuthMode('verify');
+      setStatus('Check your email for a sign-in code, then enter it below.');
+    } catch (requestError) {
+      setError(
+        requestError.message ||
+          "We couldn't send a code to that email. Please double-check it and try again.",
+      );
     } finally {
       setBusyState(false);
     }
@@ -1711,7 +1745,7 @@ export function RootScreen() {
           <Text style={styles.title}>Home Advisor</Text>
           <Text style={styles.authPoweredBy}>powered by</Text>
           <Text style={styles.authBrand}>Workside Software</Text>
-          <Text style={styles.authTagline}>Stay Connected Across Every Property</Text>
+          <Text style={styles.authTagline}>Stay Connected.</Text>
 
           <View style={styles.authModeCard}>
             <Text style={styles.authModeTitle}>
@@ -1719,14 +1753,10 @@ export function RootScreen() {
             </Text>
             <Text style={styles.authModeCopy}>
               {authMode === 'login'
-                ? 'Use your main Workside password first. Only switch to code verification if you already have an email code.'
+                ? 'Use your Workside password to sign in.'
                 : 'Enter the code from your email to finish secure access on mobile.'}
             </Text>
           </View>
-
-          {rememberedEmail && !form.email ? (
-            <Text style={styles.rememberedEmailNote}>Last used: {rememberedEmail}</Text>
-          ) : null}
 
           <TextInput
             autoCapitalize="none"
@@ -1779,8 +1809,8 @@ export function RootScreen() {
 
           <View style={styles.authSecondaryActions}>
             {authMode === 'login' ? (
-              <Pressable onPress={() => handleSwitchAuthMode('verify')} disabled={busy}>
-                <Text style={styles.inlineLink}>Already have a code? Verify instead</Text>
+              <Pressable onPress={handleForgotPasswordSendCode} disabled={busy}>
+                <Text style={styles.inlineLink}>Forget password? Send code.</Text>
               </Pressable>
             ) : (
               <>
@@ -1825,13 +1855,14 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    padding: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
     justifyContent: 'center',
-    gap: 18,
+    gap: 12,
   },
   scrollContentKeyboard: {
     justifyContent: 'flex-start',
-    paddingBottom: 160,
+    paddingBottom: 96,
   },
   mobileContent: {
     flex: 1,
@@ -2085,8 +2116,8 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: 'rgba(38, 50, 61, 0.78)',
     borderRadius: 24,
-    padding: 24,
-    gap: 12,
+    padding: 20,
+    gap: 10,
     borderWidth: 1,
     borderColor: 'rgba(126, 145, 160, 0.28)',
     shadowColor: '#000000',
@@ -2102,27 +2133,31 @@ const styles = StyleSheet.create({
   },
   title: {
     color: '#f8f1e6',
-    fontSize: 32,
+    fontSize: 30,
     fontWeight: '800',
+    textAlign: 'center',
   },
   authPoweredBy: {
     color: '#93a982',
-    fontSize: 12,
+    fontSize: 10,
     letterSpacing: 1.8,
     textTransform: 'uppercase',
     marginTop: -2,
+    textAlign: 'center',
   },
   authBrand: {
     color: '#d7c6af',
-    fontSize: 19,
+    fontSize: 18,
     fontWeight: '700',
-    marginBottom: 4,
+    marginBottom: 2,
+    textAlign: 'center',
   },
   authTagline: {
     color: '#dbcbb7',
-    fontSize: 16,
-    lineHeight: 24,
-    marginBottom: 6,
+    fontSize: 15,
+    lineHeight: 22,
+    marginBottom: 2,
+    textAlign: 'center',
   },
   body: {
     color: '#dbcbb7',
@@ -2136,8 +2171,8 @@ const styles = StyleSheet.create({
   },
   authModeCard: {
     gap: 6,
-    marginTop: 8,
-    padding: 14,
+    marginTop: 4,
+    padding: 12,
     borderRadius: 16,
     backgroundColor: '#24303a',
     borderWidth: 1,
@@ -2145,18 +2180,15 @@ const styles = StyleSheet.create({
   },
   authModeTitle: {
     color: '#f8f1e6',
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '800',
+    textAlign: 'center',
   },
   authModeCopy: {
     color: '#dbcbb7',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  rememberedEmailNote: {
-    color: '#93a982',
     fontSize: 13,
-    fontWeight: '700',
+    lineHeight: 18,
+    textAlign: 'center',
   },
   actionRow: {
     flexDirection: 'row',
@@ -2255,8 +2287,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   authSecondaryActions: {
-    gap: 10,
-    alignItems: 'flex-start',
+    gap: 8,
+    alignItems: 'center',
   },
   status: {
     color: '#93a982',
@@ -2999,13 +3031,13 @@ const styles = StyleSheet.create({
     minWidth: 108,
   },
   authFooter: {
-    gap: 10,
+    gap: 8,
     alignItems: 'center',
-    paddingBottom: 12,
+    paddingBottom: 6,
   },
   authFooterCopy: {
     color: '#b9af9f',
-    fontSize: 12,
+    fontSize: 11,
     textAlign: 'center',
   },
   authFooterLinks: {
@@ -3016,7 +3048,7 @@ const styles = StyleSheet.create({
   },
   authFooterLink: {
     color: '#93a982',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
   mobileFooter: {

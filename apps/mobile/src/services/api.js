@@ -11,6 +11,10 @@ function formatApiErrorMessage(message, status) {
       : 'Something went wrong. Please try again.';
   }
 
+  if (status === 404) {
+    return "We couldn't find an account for that email. Please check the address and try again.";
+  }
+
   if (/route\s+(get|post|patch|put|delete)/i.test(raw) || /cannot\s+(get|post|patch|put|delete)/i.test(raw)) {
     return 'This feature is temporarily unavailable. Please try again in a moment.';
   }

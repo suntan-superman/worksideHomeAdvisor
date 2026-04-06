@@ -298,6 +298,7 @@ function buildProviderSourceSummary(providerSource) {
 export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const queryClient = useQueryClient();
   const flyerPreviewRef = useRef(null);
+  const reportPreviewRef = useRef(null);
   const visionCompareRef = useRef(null);
   const visionGalleryRef = useRef(null);
   const workspaceBodyMainRef = useRef(null);
@@ -685,6 +686,21 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     });
   }
 
+  function scrollWorkspaceSectionIntoView(targetRef) {
+    if (!targetRef?.current || typeof window === 'undefined') {
+      scrollWorkspaceBodyToTop();
+      return;
+    }
+
+    const stickyOffset = 132;
+    const top = targetRef.current.getBoundingClientRect().top + window.scrollY - stickyOffset;
+
+    window.scrollTo({
+      top: Math.max(0, top),
+      behavior: 'smooth',
+    });
+  }
+
   function openWorkflowStep(step) {
     if (!step || (!step.actionTarget && !step.actionHref)) {
       return;
@@ -785,7 +801,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        scrollWorkspaceBodyToTop();
+        if (pendingWorkspaceScrollTarget === 'flyer-preview') {
+          scrollWorkspaceSectionIntoView(flyerPreviewRef);
+        } else if (pendingWorkspaceScrollTarget === 'report-preview') {
+          scrollWorkspaceSectionIntoView(reportPreviewRef);
+        } else {
+          scrollWorkspaceBodyToTop();
+        }
         setPendingWorkspaceScrollTarget('');
       });
     });
@@ -1750,7 +1772,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         kind,
         title: 'Flyer ready',
         message: 'Your flyer finished generating. Would you like to review it here or download the PDF now?',
-        viewLabel: 'Review flyer',
+        viewLabel: 'Jump to preview',
         downloadLabel: 'Download PDF',
       });
       return;
@@ -1760,7 +1782,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       kind,
       title: 'Seller report ready',
       message: 'Your seller intelligence report finished generating. Would you like to review it here or download the PDF now?',
-      viewLabel: 'Review report',
+      viewLabel: 'Jump to preview',
       downloadLabel: 'Download report PDF',
     });
   }
@@ -1770,7 +1792,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       return;
     }
 
-    setActiveTab(generationPrompt.kind === 'flyer' ? 'brochure' : 'report');
+    const targetTab = generationPrompt.kind === 'flyer' ? 'brochure' : 'report';
+    const targetScroll =
+      generationPrompt.kind === 'flyer' ? 'flyer-preview' : 'report-preview';
+
+    setPendingWorkspaceScrollTarget(targetScroll);
+    setActiveTab(targetTab);
     setGenerationPrompt(null);
   }
 
@@ -2670,7 +2697,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         </div>
       </div>
 
-      <div className="content-card">
+      <div ref={reportPreviewRef} className="content-card">
         <span className="label">Report preview</span>
         {latestReport ? (
           <div className="report-preview">
