@@ -923,6 +923,13 @@ export function RootScreen() {
         ? 'Property'
         : 'Home Advisor';
 
+  const headerSubtitle =
+    appScreen === 'settings'
+      ? 'Manage account, support, and legal settings.'
+      : appScreen === 'property'
+        ? propertyAddress
+        : 'Stay Connected Across Every Property';
+
   function renderPropertyWorkspaceContent() {
     return (
       <>
@@ -1520,43 +1527,46 @@ export function RootScreen() {
         <View style={styles.mobileContent}>
         <ScrollView contentContainerStyle={styles.mobileShell}>
           <View style={styles.mobileTopBar}>
-            {appScreen === 'property' || appScreen === 'settings' ? (
-              <Pressable onPress={() => setAppScreen('home')} style={styles.topIconButton}>
-                <Text style={styles.topIconGlyph}>{'\u2039'}</Text>
-              </Pressable>
-            ) : (
-              <View style={styles.topIconPlaceholder} />
-            )}
+            <View style={styles.topBarSide}>
+              {appScreen === 'home' ? (
+                <Pressable onPress={() => setAppScreen('settings')} style={styles.topIconButton}>
+                  <Text style={styles.topIconGlyph}>{'\u2699'}</Text>
+                </Pressable>
+              ) : appScreen === 'property' || appScreen === 'settings' ? (
+                <Pressable onPress={() => setAppScreen('home')} style={styles.topIconButton}>
+                  <Text style={styles.topIconGlyph}>{'\u2039'}</Text>
+                </Pressable>
+              ) : (
+                <View style={styles.topIconPlaceholder} />
+              )}
+            </View>
             <View style={styles.mobileHeaderCopy}>
               {appScreen === 'home' ? (
                 <>
-                  <Text style={styles.mobileTitle} numberOfLines={1}>
-                    Home Advisor
-                  </Text>
+                  <Text style={styles.mobileTitle}>Home Advisor</Text>
                   <Text style={styles.mobilePoweredBy}>powered by</Text>
                   <Text style={styles.mobileBrand}>Workside Software</Text>
-                  <Text style={styles.mobileSubtitle}>Stay Connected Across Every Property</Text>
+                  <Text style={styles.mobileSubtitle}>{headerSubtitle}</Text>
                 </>
               ) : (
                 <>
                   <Text style={styles.mobileScreenTitle}>{screenTitle}</Text>
-                  {appScreen === 'settings' ? (
-                    <Text style={styles.mobileScreenSubtitle}>Manage account, support, and legal settings.</Text>
-                  ) : null}
+                  {headerSubtitle ? <Text style={styles.mobileScreenSubtitle}>{headerSubtitle}</Text> : null}
                 </>
               )}
             </View>
-            <View style={styles.topActionRow}>
-              {appScreen !== 'settings' ? (
+            <View style={styles.topBarSide}>
+              {appScreen === 'home' ? (
+                <Pressable onPress={handleSignOut} style={styles.topIconButton}>
+                  <Text style={styles.topIconGlyph}>{'\u21B1'}</Text>
+                </Pressable>
+              ) : appScreen === 'property' ? (
                 <Pressable onPress={() => setAppScreen('settings')} style={styles.topIconButton}>
                   <Text style={styles.topIconGlyph}>{'\u2699'}</Text>
                 </Pressable>
-              ) : null}
-              {appScreen === 'home' ? (
-                <Pressable onPress={handleSignOut} style={styles.topIconButton}>
-                  <Text style={styles.topIconGlyph}>{'\u21AA'}</Text>
-                </Pressable>
-              ) : null}
+              ) : (
+                <View style={styles.topIconPlaceholder} />
+              )}
             </View>
           </View>
 
@@ -1821,7 +1831,13 @@ const styles = StyleSheet.create({
   mobileTopBar: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    justifyContent: 'space-between',
     gap: 10,
+  },
+  topBarSide: {
+    width: 40,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
   },
   topIconButton: {
     width: 40,
@@ -1847,10 +1863,7 @@ const styles = StyleSheet.create({
     gap: 2,
     paddingTop: 2,
     minWidth: 0,
-  },
-  topActionRow: {
-    flexDirection: 'row',
-    gap: 6,
+    alignItems: 'center',
   },
   mobileCard: {
     backgroundColor: 'rgba(38, 50, 61, 0.82)',
@@ -1869,35 +1882,41 @@ const styles = StyleSheet.create({
     fontSize: 27,
     fontWeight: '800',
     lineHeight: 31,
+    textAlign: 'center',
   },
   mobilePoweredBy: {
     color: '#93a982',
-    fontSize: 12,
+    fontSize: 10,
     letterSpacing: 1.8,
     textTransform: 'uppercase',
+    textAlign: 'center',
   },
   mobileBrand: {
     color: '#d7c6af',
     fontSize: 17,
     fontWeight: '700',
+    textAlign: 'center',
   },
   mobileSubtitle: {
     marginTop: 6,
     color: '#c8b9a7',
     fontSize: 13,
     lineHeight: 18,
+    textAlign: 'center',
   },
   mobileScreenTitle: {
     color: '#f8f1e6',
     fontSize: 20,
     fontWeight: '800',
     lineHeight: 24,
+    textAlign: 'center',
   },
   mobileScreenSubtitle: {
     marginTop: 4,
     color: '#b9af9f',
     fontSize: 12,
     lineHeight: 16,
+    textAlign: 'center',
   },
   homeWelcomeTitle: {
     color: '#f8f1e6',

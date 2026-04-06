@@ -348,6 +348,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [showMoreVisionVariants, setShowMoreVisionVariants] = useState(false);
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState(null);
   const [showExpandedMap, setShowExpandedMap] = useState(false);
+  const [generationPrompt, setGenerationPrompt] = useState(null);
   const [guidedWorkflow, setGuidedWorkflow] = useState(null);
   const [workflowPreviewStepKey, setWorkflowPreviewStepKey] = useState('');
   const [checklistSummaryMode, setChecklistSummaryMode] = useState('open');
@@ -1266,6 +1267,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
     setStatus(`Generating ${flyerType} flyer...`);
     setToast(null);
+    setGenerationPrompt(null);
     try {
       const response = await generateFlyer(propertyId, flyerType, {
         headline: flyerHeadlineDraft,
@@ -1276,10 +1278,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       });
       setLatestFlyer(response.flyer);
       await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
-      setToast({ tone: 'success', title: 'Flyer generated', message: 'A fresh flyer draft is ready below.' });
-      requestAnimationFrame(() => {
-        flyerPreviewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
+      setToast({ tone: 'success', title: 'Flyer generated', message: 'The flyer is ready. You can review it here or download the PDF now.' });
+      openGenerationPrompt('flyer');
     } catch (requestError) {
       if (requestError.status === 402 && requestError.details?.suggestedPlan) {
         const session = getStoredSession();
@@ -1310,6 +1310,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
     setStatus('Generating seller intelligence report...');
     setToast(null);
+    setGenerationPrompt(null);
     try {
       const response = await generateReport(propertyId, {
         title: reportTitleDraft,
@@ -1320,7 +1321,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       });
       setLatestReport(response.report);
       await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
-      setToast({ tone: 'success', title: 'Report generated', message: 'A fresh property report preview is ready below.' });
+      setToast({ tone: 'success', title: 'Report generated', message: 'The seller intelligence report is ready. You can review it here or download the PDF now.' });
+      openGenerationPrompt('report');
     } catch (requestError) {
       if (requestError.status === 402 && requestError.details?.suggestedPlan) {
         const session = getStoredSession();
@@ -1740,6 +1742,50 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   function handleDownloadReportPdf() {
     const exportUrl = getReportExportUrl(propertyId);
     window.open(exportUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  function openGenerationPrompt(kind) {
+    if (kind === 'flyer') {
+      setGenerationPrompt({
+        kind,
+        title: 'Flyer ready',
+        message: 'Your flyer finished generating. Would you like to review it here or download the PDF now?',
+        viewLabel: 'Review flyer',
+        downloadLabel: 'Download PDF',
+      });
+      return;
+    }
+
+    setGenerationPrompt({
+      kind,
+      title: 'Seller report ready',
+      message: 'Your seller intelligence report finished generating. Would you like to review it here or download the PDF now?',
+      viewLabel: 'Review report',
+      downloadLabel: 'Download report PDF',
+    });
+  }
+
+  function handleReviewGeneratedDocument() {
+    if (!generationPrompt) {
+      return;
+    }
+
+    setActiveTab(generationPrompt.kind === 'flyer' ? 'brochure' : 'report');
+    setGenerationPrompt(null);
+  }
+
+  function handleDownloadGeneratedDocument() {
+    if (!generationPrompt) {
+      return;
+    }
+
+    if (generationPrompt.kind === 'flyer') {
+      handleDownloadFlyerPdf();
+    } else {
+      handleDownloadReportPdf();
+    }
+
+    setGenerationPrompt(null);
   }
 
   function handleDownloadProviderReferenceSheet() {
@@ -3324,6 +3370,33 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </button>
               <button type="button" className="button-secondary button-danger" onClick={handleDeleteSelectedPhoto} disabled={Boolean(status)}>
                 {status === 'Deleting photo...' ? 'Deleting...' : 'Delete photo'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {generationPrompt ? (
+        <div className="workspace-modal-backdrop" role="presentation" onClick={() => setGenerationPrompt(null)}>
+          <div
+            className="workspace-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="generation-prompt-title"
+            aria-describedby="generation-prompt-description"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="label">{generationPrompt.kind === 'flyer' ? 'Brochure output' : 'Seller report'}</span>
+            <h2 id="generation-prompt-title">{generationPrompt.title}</h2>
+            <p id="generation-prompt-description">{generationPrompt.message}</p>
+            <div className="workspace-modal-actions">
+              <button type="button" className="button-secondary" onClick={() => setGenerationPrompt(null)}>
+                Stay here
+              </button>
+              <button type="button" className="button-secondary" onClick={handleReviewGeneratedDocument}>
+                {generationPrompt.viewLabel}
+              </button>
+              <button type="button" className="button-primary" onClick={handleDownloadGeneratedDocument}>
+                {generationPrompt.downloadLabel}
               </button>
             </div>
           </div>

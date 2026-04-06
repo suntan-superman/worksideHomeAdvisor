@@ -870,6 +870,12 @@ function buildPropertySummaryHtml({ property, report }) {
     ...(report.pricingSummary?.strengths || []),
     hasMeaningfulValue(riskOpportunity.biggestOpportunity) ? `Opportunity: ${riskOpportunity.biggestOpportunity}` : '',
   ], 4);
+  const coverPricingSignal = property?.selectedListPrice
+    ? `Pricing signal: positioned at ${formatCurrency(property.selectedListPrice)}.`
+    : '';
+  const coverKeyInsight = Number(photoSummary.retakeCount || 0) > 0
+    ? `Key insight: ${photoSummary.retakeCount} photo retake${Number(photoSummary.retakeCount || 0) === 1 ? '' : 's'} still need attention.`
+    : `${checklistSummary.openCount || 0} checklist items still need closure before launch.`;
   const executiveSummaryBullets = pickMeaningfulLines([
     coverNarrative,
     coverPricingSignal,
@@ -887,12 +893,6 @@ function buildPropertySummaryHtml({ property, report }) {
     medianCompSummary(report.selectedComps || []),
   ], 4);
   const readinessTone = getReadinessTone({ score: readinessSummary.overallScore, label: readinessSummary.label });
-  const coverPricingSignal = property?.selectedListPrice
-    ? `Pricing signal: positioned at ${formatCurrency(property.selectedListPrice)}.`
-    : '';
-  const coverKeyInsight = Number(photoSummary.retakeCount || 0) > 0
-    ? `Key insight: ${photoSummary.retakeCount} photo retake${Number(photoSummary.retakeCount || 0) === 1 ? '' : 's'} still need attention.`
-    : `${checklistSummary.openCount || 0} checklist items still need closure before launch.`;
   const suggestedProviderCategories = pickMeaningfulLines([
     photoSummary.retakeCount || photoSummary.roomCoverageCount < 5 ? 'Professional photography' : '',
     Number(checklistSummary.openCount || 0) > 0 ? 'Cleaning and prep support' : '',
