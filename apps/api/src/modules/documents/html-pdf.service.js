@@ -263,6 +263,28 @@ function renderHighlightGrid(items = [], emptyText = '') {
   `;
 }
 
+function renderSuggestedCategoryCards(items = []) {
+  const safeItems = items.filter(Boolean);
+  if (!safeItems.length) {
+    return '';
+  }
+
+  return `
+    <div class="suggested-category-grid">
+      ${safeItems
+        .map(
+          (item) => `
+            <div class="suggested-category-card">
+              <div class="suggested-category-label">Recommended support</div>
+              <strong>${escapeHtml(item)}</strong>
+            </div>
+          `,
+        )
+        .join('')}
+    </div>
+  `;
+}
+
 function renderPhotoTiles(photos = [], limit = 4) {
   const selected = photos.filter((photo) => photo?.imageUrl).slice(0, limit);
   if (!selected.length) {
@@ -462,10 +484,14 @@ function renderHtmlDocument({ title, body }) {
         --line: #d8d6cc;
         --card: #fffdfa;
         --soft: #f6f3ea;
+        --brand-blue: #2f5f8f;
+        --brand-blue-soft: #dbe8f4;
         --accent: #c87447;
         --accent-soft: #f2d6c2;
         --moss: #4f7b62;
         --moss-soft: #dce8df;
+        --risk: #b06254;
+        --risk-soft: #f4dfda;
       }
       * { box-sizing: border-box; }
       body {
@@ -617,6 +643,9 @@ function renderHtmlDocument({ title, body }) {
       .executive-summary-shell { display: grid; gap: 18px; margin-top: 18px; }
       .executive-callouts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
       .callout-chip { border: 1px solid var(--line); background: rgba(255,255,255,0.9); border-radius: 18px; padding: 14px 16px; }
+      .callout-chip-opportunity { border-color: rgba(79,123,98,0.24); background: rgba(244,251,246,0.96); }
+      .callout-chip-risk { border-color: rgba(176,98,84,0.26); background: rgba(255,246,245,0.96); }
+      .callout-chip-value { border-color: rgba(47,95,143,0.2); background: rgba(244,248,252,0.96); }
       .callout-chip strong { display: block; margin-top: 6px; font-size: 14px; }
       .fact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
       .fact-row { border: 1px solid var(--line); background: rgba(255,255,255,0.9); border-radius: 16px; padding: 12px 14px; }
@@ -640,9 +669,12 @@ function renderHtmlDocument({ title, body }) {
       .highlight-card { display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: start; padding: 14px 16px; border-radius: 18px; border: 1px solid rgba(79,123,98,0.16); background: rgba(255,255,255,0.92); }
       .highlight-index { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(200,116,71,0.14); color: var(--accent); font-weight: 800; }
       .highlight-copy { font-size: 14px; line-height: 1.5; color: var(--ink); }
+      .suggested-category-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+      .suggested-category-card { padding: 14px 16px; border-radius: 18px; border: 1px solid rgba(47,95,143,0.16); background: rgba(244,248,252,0.96); }
+      .suggested-category-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--brand-blue); margin-bottom: 8px; }
       .seller-cover-grid { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 18px; align-items: start; }
-      .score-hero { border-radius: 24px; padding: 20px 22px; border: 1px solid rgba(200,116,71,0.24); background: linear-gradient(140deg, rgba(200,116,71,0.15), rgba(255,250,244,0.98)); }
-      .score-hero-value { font-size: 58px; line-height: 0.95; font-weight: 800; margin-top: 8px; letter-spacing: -0.04em; }
+      .score-hero { border-radius: 24px; padding: 24px 24px 22px; border: 1px solid rgba(200,116,71,0.24); background: linear-gradient(145deg, rgba(47,95,143,0.08), rgba(200,116,71,0.16) 62%, rgba(255,250,244,0.98) 100%); text-align: center; }
+      .score-hero-value { font-size: 72px; line-height: 0.9; font-weight: 800; margin-top: 10px; letter-spacing: -0.05em; }
       .score-status { display: inline-flex; margin-top: 10px; padding: 8px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
       .score-status-ready { background: rgba(79,123,98,0.16); color: var(--moss); }
       .score-status-almost { background: rgba(200,116,71,0.16); color: #9a5a33; }
@@ -652,7 +684,7 @@ function renderHtmlDocument({ title, body }) {
       .brochure-cover::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(16,24,32,0.14) 0%, rgba(16,24,32,0.58) 44%, rgba(16,24,32,0.86) 100%); }
       .brochure-cover-overlay { position: relative; z-index: 1; min-height: 5.2in; padding: 30px 30px 26px; color: #ffffff; display: flex; flex-direction: column; justify-content: flex-end; }
       .brochure-cover-overlay .brand-kicker { color: rgba(255,255,255,0.78); }
-      .brochure-cover-overlay h1 { color: #ffffff; font-size: 44px; line-height: 1.02; max-width: 5.8in; }
+      .brochure-cover-overlay h1 { color: #ffffff; font-size: 48px; line-height: 1.01; max-width: 5.8in; }
       .brochure-cover-overlay .lede { color: rgba(255,255,255,0.88); max-width: 5.4in; }
       .brochure-price { display: inline-flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 10px 14px; border-radius: 999px; background: rgba(255,255,255,0.14); color: #ffffff; border: 1px solid rgba(255,255,255,0.24); font-weight: 700; backdrop-filter: blur(2px); }
       .brochure-cover-facts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
@@ -661,6 +693,7 @@ function renderHtmlDocument({ title, body }) {
       .brochure-cta-card { padding: 18px 20px; border-radius: 18px; border: 1px solid rgba(200,116,71,0.24); background: rgba(255,255,255,0.92); }
       .brochure-cta-button { display: inline-block; margin-top: 12px; padding: 12px 18px; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 700; }
       .legend-note { margin-top: 10px; font-size: 11px; line-height: 1.45; color: var(--muted); }
+      .marketing-gallery-card { padding: 14px 16px; }
     </style>
   </head>
   <body>${body}</body>
@@ -734,6 +767,11 @@ function buildPropertySummaryHtml({ property, report }) {
     coverNarrative,
     property?.selectedListPrice ? `Pricing signal: positioned at ${formatCurrency(property.selectedListPrice)}.` : '',
     Number(photoSummary.retakeCount || 0) > 0 ? `Key insight: ${photoSummary.retakeCount} photo retake${Number(photoSummary.retakeCount || 0) === 1 ? '' : 's'} still need attention.` : '',
+  ], 2);
+  const suggestedProviderCategories = pickMeaningfulLines([
+    photoSummary.retakeCount || photoSummary.roomCoverageCount < 5 ? 'Professional photography' : '',
+    Number(checklistSummary.openCount || 0) > 0 ? 'Cleaning and prep support' : '',
+    hasMeaningfulValue(riskOpportunity.biggestOpportunity) ? 'Staging or presentation support' : '',
   ], 3);
 
   const body = `
@@ -762,15 +800,15 @@ function buildPropertySummaryHtml({ property, report }) {
         </div>
         <div class="executive-summary-shell">
           <div class="executive-callouts">
-            <div class="callout-chip">
+            <div class="callout-chip callout-chip-opportunity">
               <div class="metric-label">Top opportunity</div>
               <strong>${escapeHtml(summaryOpportunity)}</strong>
             </div>
-            <div class="callout-chip">
+            <div class="callout-chip callout-chip-risk">
               <div class="metric-label">Top risk</div>
               <strong>${escapeHtml(summaryRisk)}</strong>
             </div>
-            <div class="callout-chip">
+            <div class="callout-chip callout-chip-value">
               <div class="metric-label">Value protection</div>
               <strong>${escapeHtml(economicsSummary || 'Use this report to coordinate a confident, disciplined launch.')}</strong>
             </div>
@@ -936,7 +974,10 @@ function buildPropertySummaryHtml({ property, report }) {
         <div class="section-kicker">Provider recommendations</div>
         <h3>Marketplace support nearby</h3>
         <div class="page-spacer"></div>
-        ${shouldRenderProviders ? renderProviderCards(providerRecommendations) : `<div class="empty-card">No providers matched yet. Add local provider relationships or use the marketplace discovery tools to build your recommended vendor sheet.</div>`}
+        ${shouldRenderProviders ? renderProviderCards(providerRecommendations) : `
+          <div class="empty-card">No providers matched yet. Add local provider relationships or use the marketplace discovery tools to build your recommended vendor sheet.</div>
+          ${renderSuggestedCategoryCards(suggestedProviderCategories)}
+        `}
       </div>
       <div class="two-col" style="margin-top:18px;">
         <div class="content-card">
@@ -1040,7 +1081,7 @@ function buildMarketingReportHtml({ property, flyer }) {
         </div>
       </div>
       <div class="single-column">
-        <div class="content-card">
+        <div class="content-card marketing-gallery-card">
           <div class="section-kicker">Photo gallery</div>
           <h3>Curated image sequence</h3>
           <div class="page-spacer"></div>
