@@ -689,7 +689,13 @@ async function renderHtmlPdf({ html, filename }) {
   try {
     browser = await puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--font-render-hinting=medium'],
+      executablePath: env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--font-render-hinting=medium',
+      ],
     });
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 1660, deviceScaleFactor: 1 });

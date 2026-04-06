@@ -289,6 +289,101 @@ export async function getLatestPropertyFlyer(propertyId, flyerType) {
   return serializeFlyer(flyer);
 }
 
+async function renderFallbackMarketingFlyerPdf({ property, flyer, filename }) {
+  const pdfDoc = await PDFDocument.create();
+  const headingFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const bodyFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const colors = createPdfPalette();
+  const page = pdfDoc.addPage([PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT]);
+  const heroPhoto = await fetchPdfImage(pdfDoc, flyer.selectedPhotos?.[0]?.imageUrl);
+
+  drawDocumentFrame(page, colors);
+  drawBrandHeader(page, { headingFont, bodyFont }, {
+    title: flyer.headline || property.title || 'Marketing Report',
+    subtitle: flyer.locationLine || [property.addressLine1, property.city, property.state, property.zip].filter(Boolean).join(', '),
+    pageNumber: 1,
+    totalPages: 1,
+    colors,
+  });
+
+  drawContainedImageFrame(page, heroPhoto, {
+    x: PDF_PAGE_MARGIN,
+    y: 430,
+    width: PDF_PAGE_WIDTH - PDF_PAGE_MARGIN * 2,
+    height: 210,
+    colors,
+  });
+
+  drawMetricCard(page, { headingFont, bodyFont }, {
+    x: PDF_PAGE_MARGIN,
+    y: 332,
+    width: 160,
+    label: 'List price',
+    value: flyer.priceText || 'Pricing on request',
+    colors,
+    tone: 'accent',
+  });
+  drawMetricCard(page, { headingFont, bodyFont }, {
+    x: PDF_PAGE_MARGIN + 176,
+    y: 332,
+    width: 160,
+    label: 'Home details',
+    value: `${property?.bedrooms || '--'} bd • ${property?.bathrooms || '--'} ba`,
+    supportText: property?.squareFeet ? `${property.squareFeet} sqft` : '',
+    colors,
+  });
+  drawMetricCard(page, { headingFont, bodyFont }, {
+    x: PDF_PAGE_MARGIN + 352,
+    y: 332,
+    width: 176,
+    label: 'Call to action',
+    value: flyer.callToAction || 'Schedule a showing',
+    colors,
+    tone: 'moss',
+  });
+
+  drawSectionEyebrow(page, { headingFont, bodyFont }, {
+    x: PDF_PAGE_MARGIN,
+    y: 306,
+    text: 'Marketing Summary',
+    colors,
+  });
+  drawWrappedText(page, bodyFont, flyer.summary || 'Marketing summary unavailable.', {
+    x: PDF_PAGE_MARGIN,
+    y: 286,
+    size: 12,
+    color: colors.muted,
+    maxChars: 88,
+    lineHeight: 17,
+  });
+
+  drawSectionEyebrow(page, { headingFont, bodyFont }, {
+    x: PDF_PAGE_MARGIN,
+    y: 180,
+    text: 'Highlights',
+    colors,
+  });
+  drawBulletList(page, bodyFont, flyer.highlights || [], {
+    x: PDF_PAGE_MARGIN,
+    y: 160,
+    size: 11,
+    color: colors.muted,
+    maxChars: 82,
+    limit: 6,
+    gap: 5,
+  });
+
+  drawDocumentFooter(page, { headingFont, bodyFont }, {
+    colors,
+    footerNote: 'Fallback marketing PDF generated because the full browser renderer was unavailable in the current backend environment.',
+  });
+
+  return {
+    bytes: await pdfDoc.save(),
+    filename,
+  };
+}
+
 export async function exportPropertyFlyerPdf({ propertyId, flyerType = 'sale' }) {
   const property = await getPropertyById(propertyId);
   if (!property) {
@@ -302,11 +397,21 @@ export async function exportPropertyFlyerPdf({ propertyId, flyerType = 'sale' })
     flyer.flyerType,
     'flyer',
   )}.pdf`;
-  const { bytes } = await renderMarketingReportPdf({
-    property,
-    flyer,
-    filename,
-  });
+  let bytes;
+  try {
+    ({ bytes } = await renderMarketingReportPdf({
+      property,
+      flyer,
+      filename,
+    }));
+  } catch (error) {
+    console.warn('Falling back to pdf-lib marketing export:', error?.message || error);
+    ({ bytes } = await renderFallbackMarketingFlyerPdf({
+      property,
+      flyer,
+      filename,
+    }));
+  }
 
   return {
     bytes,

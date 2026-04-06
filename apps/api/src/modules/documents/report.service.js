@@ -934,6 +934,219 @@ function buildComparableMapImageUrl(property, comps = []) {
   return url.toString();
 }
 
+async function renderFallbackPropertyReportPdf({ property, report, filename }) {
+  const pdfDoc = await PDFDocument.create();
+  const headingFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const bodyFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const colors = createPdfPalette();
+  const heroPhoto = await fetchPdfImage(pdfDoc, report.selectedPhotos?.[0]?.imageUrl);
+  const compMapImage = await fetchPdfImage(
+    pdfDoc,
+    buildComparableMapImageUrl(property, report.selectedComps || []),
+  );
+  const pageOne = pdfDoc.addPage([PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT]);
+  const pageTwo = pdfDoc.addPage([PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT]);
+
+  drawDocumentFrame(pageOne, colors);
+  drawBrandHeader(pageOne, { headingFont, bodyFont }, {
+    title: report.title || `${property.title} Seller Intelligence Report`,
+    subtitle: [property.addressLine1, property.city, property.state, property.zip].filter(Boolean).join(', '),
+    pageNumber: 1,
+    totalPages: 2,
+    colors,
+  });
+
+  drawSectionEyebrow(pageOne, { headingFont, bodyFont }, {
+    x: PDF_PAGE_MARGIN,
+    y: 646,
+    text: 'Executive Summary',
+    colors,
+  });
+  drawWrappedText(pageOne, bodyFont, report.executiveSummary || 'Seller intelligence summary unavailable.', {
+    x: PDF_PAGE_MARGIN,
+    y: 624,
+    size: 12,
+    color: colors.muted,
+    maxChars: 88,
+    lineHeight: 17,
+  });
+
+  drawMetricCard(pageOne, { headingFont, bodyFont }, {
+    x: PDF_PAGE_MARGIN,
+    y: 494,
+    width: 160,
+    label: 'Suggested range',
+    value:
+      report.pricingSummary?.low && report.pricingSummary?.high
+        ? `${formatCurrency(report.pricingSummary.low)} - ${formatCurrency(report.pricingSummary.high)}`
+        : 'Unavailable',
+    colors,
+  });
+  drawMetricCard(pageOne, { headingFont, bodyFont }, {
+    x: PDF_PAGE_MARGIN + 176,
+    y: 494,
+    width: 160,
+    label: 'Chosen price',
+    value: property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set',
+    colors,
+  });
+  drawMetricCard(pageOne, { headingFont, bodyFont }, {
+    x: PDF_PAGE_MARGIN + 352,
+    y: 494,
+    width: 176,
+    label: 'Readiness',
+    value: `${report.payload?.readinessSummary?.overallScore || 0}/100`,
+    supportText: report.payload?.readinessSummary?.label || 'Needs work',
+    colors,
+    tone: 'moss',
+  });
+
+  drawContainedImageFrame(pageOne, heroPhoto, {
+    x: PDF_PAGE_MARGIN,
+    y: 250,
+    width: 250,
+    height: 210,
+    colors,
+  });
+  drawContainedImageFrame(pageOne, compMapImage, {
+    x: PDF_PAGE_MARGIN + 266,
+    y: 250,
+    width: 264,
+    height: 210,
+    colors,
+  });
+
+  drawSectionEyebrow(pageOne, { headingFont, bodyFont }, {
+    x: PDF_PAGE_MARGIN,
+    y: 222,
+    text: 'Next Steps',
+    colors,
+  });
+  drawBulletList(
+    pageOne,
+    bodyFont,
+    report.payload?.nextSteps?.length
+      ? report.payload.nextSteps.map((step) => `${step.title} (${step.eta}, ${step.owner})`)
+      : report.improvementItems || [],
+    {
+      x: PDF_PAGE_MARGIN,
+      y: 202,
+      size: 11,
+      color: colors.muted,
+      maxChars: 84,
+      limit: 5,
+      gap: 5,
+    },
+  );
+
+  drawDocumentFooter(pageOne, { headingFont, bodyFont }, {
+    colors,
+    footerNote: 'Fallback PDF generated because the full browser renderer was unavailable in the current backend environment.',
+  });
+
+  drawDocumentFrame(pageTwo, colors);
+  drawBrandHeader(pageTwo, { headingFont, bodyFont }, {
+    title: 'Comparable Properties and Recommendations',
+    subtitle: 'A simplified export generated from the latest saved report data.',
+    pageNumber: 2,
+    totalPages: 2,
+    colors,
+  });
+
+  drawSectionEyebrow(pageTwo, { headingFont, bodyFont }, {
+    x: PDF_PAGE_MARGIN,
+    y: 646,
+    text: 'Comparable Properties',
+    colors,
+  });
+  let compCursorY = 624;
+  const compRows = (report.selectedComps || []).slice(0, 5);
+  if (!compRows.length) {
+    drawWrappedText(pageTwo, bodyFont, 'No comparable properties were available in the saved report.', {
+      x: PDF_PAGE_MARGIN,
+      y: compCursorY,
+      size: 11,
+      color: colors.muted,
+      maxChars: 88,
+      lineHeight: 15,
+    });
+    compCursorY -= 24;
+  } else {
+    for (const comp of compRows) {
+      pageTwo.drawRectangle({
+        x: PDF_PAGE_MARGIN,
+        y: compCursorY - 44,
+        width: PDF_PAGE_WIDTH - PDF_PAGE_MARGIN * 2,
+        height: 52,
+        color: colors.white,
+        borderColor: colors.line,
+        borderWidth: 1,
+      });
+      pageTwo.drawText(comp.address || 'Comparable property', {
+        x: PDF_PAGE_MARGIN + 12,
+        y: compCursorY - 16,
+        size: 11,
+        font: headingFont,
+        color: colors.ink,
+      });
+      pageTwo.drawText(comp.price ? formatCurrency(comp.price) : 'Price unavailable', {
+        x: PDF_PAGE_MARGIN + 12,
+        y: compCursorY - 32,
+        size: 10,
+        font: bodyFont,
+        color: colors.muted,
+      });
+      pageTwo.drawText(
+        `${comp.beds || '--'} bd • ${comp.baths || '--'} ba • ${comp.sqft || '--'} sqft • ${Number(comp.distanceMiles || 0).toFixed(2)} mi`,
+        {
+          x: PDF_PAGE_MARGIN + 220,
+          y: compCursorY - 32,
+          size: 10,
+          font: bodyFont,
+          color: colors.muted,
+        },
+      );
+      compCursorY -= 64;
+    }
+  }
+
+  drawSectionEyebrow(pageTwo, { headingFont, bodyFont }, {
+    x: PDF_PAGE_MARGIN,
+    y: Math.max(300, compCursorY - 10),
+    text: 'Provider Recommendations',
+    colors,
+  });
+  drawBulletList(
+    pageTwo,
+    bodyFont,
+    (report.payload?.providerRecommendations || []).length
+      ? report.payload.providerRecommendations.map(
+          (provider) =>
+            `${provider.businessName}${provider.categoryLabel ? ` (${provider.categoryLabel})` : ''}${provider.coverageLabel ? ` - ${provider.coverageLabel}` : ''}`,
+        )
+      : ['No internal provider recommendations were available in this report.'],
+    {
+      x: PDF_PAGE_MARGIN,
+      y: Math.max(280, compCursorY - 30),
+      size: 11,
+      color: colors.muted,
+      maxChars: 84,
+      limit: 5,
+      gap: 5,
+    },
+  );
+
+  drawDocumentFooter(pageTwo, { headingFont, bodyFont }, {
+    colors,
+    footerNote: 'Workside Home Advisor seller intelligence fallback export.',
+  });
+
+  return {
+    bytes: await pdfDoc.save(),
+    filename,
+  };
+}
+
 export async function exportPropertyReportPdf({ propertyId }) {
   const property = await getPropertyById(propertyId);
   if (!property) {
@@ -944,11 +1157,21 @@ export async function exportPropertyReportPdf({ propertyId }) {
     (await getLatestPropertyReport(propertyId)) ||
     (await generatePropertyReport({ propertyId }));
   const filename = `${sanitizeFilePart(property.title, 'property')}-seller-report.pdf`;
-  const { bytes } = await renderPropertySummaryPdf({
-    property,
-    report,
-    filename,
-  });
+  let bytes;
+  try {
+    ({ bytes } = await renderPropertySummaryPdf({
+      property,
+      report,
+      filename,
+    }));
+  } catch (error) {
+    console.warn('Falling back to pdf-lib seller report export:', error?.message || error);
+    ({ bytes } = await renderFallbackPropertyReportPdf({
+      property,
+      report,
+      filename,
+    }));
+  }
 
   return {
     bytes,
