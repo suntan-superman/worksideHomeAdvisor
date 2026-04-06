@@ -9,7 +9,8 @@
     "lint": "node -e \"console.log('api lint placeholder')\"",
     "test": "node --test src/modules/public/public.service.test.js src/modules/providers/providers.service.test.js",
     "seed": "node scripts/seed-demo.js",
-    "admin:user": "node scripts/set-admin-user.js"
+    "admin:user": "node scripts/set-admin-user.js",
+    "clone:demo": "node scripts/clone-demo-account.js"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

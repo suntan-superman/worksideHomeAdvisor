@@ -648,26 +648,38 @@ export function RootScreen() {
 
     Alert.alert(
       'Delete account?',
-      'This permanently removes your Workside mobile account data, properties, media, and exports. This cannot be undone.',
+      'This permanently removes your Workside account, properties, photos, reports, and saved data. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete account',
+          text: 'Continue',
           style: 'destructive',
-          onPress: async () => {
-            setBusyState(true);
-            setError('');
+          onPress: () =>
+            Alert.alert(
+              'Final confirmation',
+              'Are you absolutely sure you want to permanently delete this account and all related data?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete account',
+                  style: 'destructive',
+                  onPress: async () => {
+                    setBusyState(true);
+                    setError('');
 
-            try {
-              await deleteAccount(session.token);
-              handleSignOut();
-              setStatus('Your account has been deleted.');
-            } catch (requestError) {
-              setError(requestError.message);
-            } finally {
-              setBusyState(false);
-            }
-          },
+                    try {
+                      await deleteAccount(session.token);
+                      performSignOut();
+                      setStatus('Your account has been deleted.');
+                    } catch (requestError) {
+                      setError(requestError.message);
+                    } finally {
+                      setBusyState(false);
+                    }
+                  },
+                },
+              ],
+            ),
         },
       ],
     );
@@ -1576,6 +1588,9 @@ export function RootScreen() {
               <Text style={styles.homeWelcomeMeta}>
                 {properties.length} {properties.length === 1 ? 'property' : 'properties'} connected
               </Text>
+              {properties.length ? (
+                <Text style={styles.homeHintText}>Select a property to begin.</Text>
+              ) : null}
               <View style={styles.homePropertyList}>
                 {properties.length ? (
                   properties.map((property) => (
@@ -1927,6 +1942,11 @@ const styles = StyleSheet.create({
     color: '#93a982',
     fontSize: 13,
     fontWeight: '700',
+  },
+  homeHintText: {
+    color: '#b9af9f',
+    fontSize: 14,
+    lineHeight: 20,
   },
   homePropertyList: {
     gap: 10,

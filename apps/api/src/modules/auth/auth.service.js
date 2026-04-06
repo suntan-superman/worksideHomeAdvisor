@@ -8,9 +8,22 @@ import { deleteStoredAsset } from '../../services/storageService.js';
 import { signSessionToken } from '../../services/sessionService.js';
 import { BillingSubscriptionModel } from '../billing/billing.model.js';
 import { FlyerModel } from '../documents/flyer.model.js';
+import { ReportModel } from '../documents/report.model.js';
+import { ImageJobModel } from '../media/image-job.model.js';
 import { MediaAssetModel } from '../media/media.model.js';
+import { MediaVariantModel } from '../media/media-variant.model.js';
 import { PricingAnalysisModel } from '../pricing/pricing.model.js';
 import { PropertyModel } from '../properties/property.model.js';
+import {
+  LeadDispatchModel,
+  LeadRequestModel,
+  ProviderReferenceModel,
+  ProviderResponseModel,
+  ProviderSmsLogModel,
+  SavedProviderModel,
+} from '../providers/provider-leads.model.js';
+import { PublicFunnelEventModel } from '../public/public.model.js';
+import { ChecklistModel } from '../tasks/checklist.model.js';
 import { AnalysisLockModel } from '../usage/analysis-lock.model.js';
 import { RateLimitEventModel } from '../usage/rate-limit.model.js';
 import { UsageTrackingModel } from '../usage/usage-tracking.model.js';
@@ -53,6 +66,148 @@ async function storeVerificationOtp(user) {
 
   await user.save();
   await sendOtpEmail({ to: user.email, code, role: user.role });
+}
+
+async function deleteUserOwnedProperties(propertyIds = []) {
+  if (!propertyIds.length) {
+    return { deletedPropertyCount: 0 };
+  }
+
+  const [mediaAssets, mediaVariants, leadRequests] = await Promise.all([
+    MediaAssetModel.find({ propertyId: { $in: propertyIds } })
+      .select({ storageProvider: 1, storageKey: 1 })
+      .lean(),
+    MediaVariantModel.find({ propertyId: { $in: propertyIds } })
+      .select({ storageProvider: 1, storageKey: 1 })
+      .lean(),
+    LeadRequestModel.find({ propertyId: { $in: propertyIds } })
+      .select({ _id: 1 })
+      .lean(),
+  ]);
+
+  const leadRequestIds = leadRequests.map((request) => request._id);
+  const leadDispatches = leadRequestIds.length
+    ? await LeadDispatchModel.find({ leadRequestId: { $in: leadRequestIds } })
+        .select({ _id: 1 })
+        .lean()
+    : [];
+  const leadDispatchIds = leadDispatches.map((dispatch) => dispatch._id);
+
+  await Promise.all(
+    [...mediaAssets, ...mediaVariants].map(async (asset) => {
+      try {
+        await deleteStoredAsset({
+          storageProvider: asset.storageProvider,
+          storageKey: asset.storageKey,
+        });
+      } catch {
+        // Continue deleting account data even if a file/object is already gone.
+      }
+    }),
+  );
+
+  await Promise.all([
+    MediaVariantModel.deleteMany({ propertyId: { $in: propertyIds } }),
+    ImageJobModel.deleteMany({ propertyId: { $in: propertyIds } }),
+    MediaAssetModel.deleteMany({ propertyId: { $in: propertyIds } }),
+    PricingAnalysisModel.deleteMany({ propertyId: { $in: propertyIds } }),
+    FlyerModel.deleteMany({ propertyId: { $in: propertyIds } }),
+    ReportModel.deleteMany({ propertyId: { $in: propertyIds } }),
+    ChecklistModel.deleteMany({ propertyId: { $in: propertyIds } }),
+    SavedProviderModel.deleteMany({ propertyId: { $in: propertyIds } }),
+    ProviderReferenceModel.deleteMany({ propertyId: { $in: propertyIds } }),
+    PublicFunnelEventModel.deleteMany({ propertyId: { $in: propertyIds } }),
+    PropertyModel.deleteMany({ _id: { $in: propertyIds } }),
+  ]);
+
+  if (leadRequestIds.length) {
+    await Promise.all([
+      ProviderResponseModel.deleteMany({ leadRequestId: { $in: leadRequestIds } }),
+      ProviderSmsLogModel.deleteMany({
+        $or: [
+          { leadRequestId: { $in: leadRequestIds } },
+          leadDispatchIds.length ? { leadDispatchId: { $in: leadDispatchIds } } : null,
+        ].filter(Boolean),
+      }),
+      LeadDispatchModel.deleteMany({ leadRequestId: { $in: leadRequestIds } }),
+      LeadRequestModel.deleteMany({ _id: { $in: leadRequestIds } }),
+    ]);
+  }
+
+  return { deletedPropertyCount: propertyIds.length };
+}
+
+export async function purgeUserAccount(
+  userId,
+  { allowDemoAccount = false, allowAdminAccount = false } = {},
+) {
+  if (mongoose.connection.readyState !== 1) {
+    throw createHttpError(503, 'Database connection is required to delete an account.');
+  }
+
+  const user = await UserModel.findById(userId);
+  if (!user) {
+    throw createHttpError(404, 'User account not found.');
+  }
+
+  if (user.isDemoAccount && !allowDemoAccount) {
+    throw createHttpError(403, 'Demo accounts cannot be deleted.');
+  }
+
+  if ((user.role === 'admin' || user.role === 'super_admin') && !allowAdminAccount) {
+    throw createHttpError(403, 'Admin accounts cannot be deleted.');
+  }
+
+  const ownedProperties = await PropertyModel.find({ ownerUserId: user._id })
+    .select({ _id: 1 })
+    .lean();
+  const propertyIds = ownedProperties.map((property) => property._id);
+  const { deletedPropertyCount } = await deleteUserOwnedProperties(propertyIds);
+  const remainingLeadRequests = await LeadRequestModel.find({ userId: user._id })
+    .select({ _id: 1 })
+    .lean();
+  const remainingLeadRequestIds = remainingLeadRequests.map((request) => request._id);
+  const remainingLeadDispatches = remainingLeadRequestIds.length
+    ? await LeadDispatchModel.find({ leadRequestId: { $in: remainingLeadRequestIds } })
+        .select({ _id: 1 })
+        .lean()
+    : [];
+  const remainingLeadDispatchIds = remainingLeadDispatches.map((dispatch) => dispatch._id);
+
+  if (remainingLeadRequestIds.length) {
+    await Promise.all([
+      ProviderResponseModel.deleteMany({ leadRequestId: { $in: remainingLeadRequestIds } }),
+      ProviderSmsLogModel.deleteMany({
+        $or: [
+          { leadRequestId: { $in: remainingLeadRequestIds } },
+          remainingLeadDispatchIds.length
+            ? { leadDispatchId: { $in: remainingLeadDispatchIds } }
+            : null,
+        ].filter(Boolean),
+      }),
+      LeadDispatchModel.deleteMany({ leadRequestId: { $in: remainingLeadRequestIds } }),
+      LeadRequestModel.deleteMany({ _id: { $in: remainingLeadRequestIds } }),
+    ]);
+  }
+
+  await Promise.all([
+    BillingSubscriptionModel.deleteMany({ userId: user._id }),
+    UsageTrackingModel.deleteMany({ userId: user._id }),
+    AnalysisLockModel.deleteMany({ userId: String(user._id) }),
+    RateLimitEventModel.deleteMany({ userId: String(user._id) }),
+    SavedProviderModel.deleteMany({ userId: user._id }),
+    ProviderReferenceModel.deleteMany({ userId: user._id }),
+    PublicFunnelEventModel.deleteMany({
+      $or: [{ userId: user._id }, { email: user.email }],
+    }),
+    UserModel.deleteOne({ _id: user._id }),
+  ]);
+
+  return {
+    deleted: true,
+    deletedUserId: user._id.toString(),
+    deletedPropertyCount,
+  };
 }
 
 export async function signup(payload) {
@@ -173,59 +328,5 @@ export async function verifyEmailOtp(payload) {
 }
 
 export async function deleteAccount(userId) {
-  if (mongoose.connection.readyState !== 1) {
-    throw createHttpError(503, 'Database connection is required to delete an account.');
-  }
-
-  const user = await UserModel.findById(userId);
-  if (!user) {
-    throw createHttpError(404, 'User account not found.');
-  }
-
-  if (user.isDemoAccount) {
-    throw createHttpError(403, 'Demo accounts cannot be deleted.');
-  }
-
-  if (user.role === 'admin' || user.role === 'super_admin') {
-    throw createHttpError(403, 'Admin accounts cannot be deleted.');
-  }
-
-  const ownedProperties = await PropertyModel.find({ ownerUserId: user._id }).select({ _id: 1 }).lean();
-  const propertyIds = ownedProperties.map((property) => property._id);
-
-  if (propertyIds.length) {
-    const mediaAssets = await MediaAssetModel.find({ propertyId: { $in: propertyIds } })
-      .select({ storageProvider: 1, storageKey: 1 })
-      .lean();
-
-    await Promise.all(
-      mediaAssets.map(async (asset) => {
-        try {
-          await deleteStoredAsset({
-            storageProvider: asset.storageProvider,
-            storageKey: asset.storageKey,
-          });
-        } catch (storageError) {
-          // Continue deleting account data even if a file/object is already gone.
-        }
-      }),
-    );
-
-    await MediaAssetModel.deleteMany({ propertyId: { $in: propertyIds } });
-    await PricingAnalysisModel.deleteMany({ propertyId: { $in: propertyIds } });
-    await FlyerModel.deleteMany({ propertyId: { $in: propertyIds } });
-    await PropertyModel.deleteMany({ _id: { $in: propertyIds } });
-  }
-
-  await BillingSubscriptionModel.deleteMany({ userId: user._id });
-  await UsageTrackingModel.deleteMany({ userId: user._id });
-  await AnalysisLockModel.deleteMany({ userId: String(user._id) });
-  await RateLimitEventModel.deleteMany({ userId: String(user._id) });
-  await UserModel.deleteOne({ _id: user._id });
-
-  return {
-    deleted: true,
-    deletedUserId: user._id.toString(),
-    deletedPropertyCount: propertyIds.length,
-  };
+  return purgeUserAccount(userId);
 }
