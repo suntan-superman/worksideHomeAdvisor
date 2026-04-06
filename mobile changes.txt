@@ -1,0 +1,8 @@
+In the mobile app. Let's do a ittle formatting of the login screen. Center the Header info including "Home Advisor", "Powered by" and Workside software".
+Change "Stay Connected Across Every Property" to "Stay Connected."
+Remove "Only switch to code verification if you already have an email code." 
+Remove "Last used:..." 
+We can store the last email used in local storage instead and populate the email field.
+We should change "Already have a code? Verify instead" to "Forget password? Send code." If selected it sends an email code.
+If email does not exist then we handle all cases elegantly using toast messages. No 404 type messages.
+The goal is t have everything on a single screen without scrolling. 
