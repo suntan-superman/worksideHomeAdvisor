@@ -1517,6 +1517,7 @@ export function RootScreen() {
   if (session?.user) {
     return (
       <View style={styles.screen}>
+        <View style={styles.mobileContent}>
         <ScrollView contentContainerStyle={styles.mobileShell}>
           <View style={styles.mobileTopBar}>
             {appScreen === 'property' || appScreen === 'settings' ? (
@@ -1539,11 +1540,9 @@ export function RootScreen() {
               ) : (
                 <>
                   <Text style={styles.mobileScreenTitle}>{screenTitle}</Text>
-                  <Text style={styles.mobileScreenSubtitle}>
-                    {appScreen === 'settings'
-                      ? 'Manage account, support, and legal settings.'
-                      : propertyAddress || 'Property workspace'}
-                  </Text>
+                  {appScreen === 'settings' ? (
+                    <Text style={styles.mobileScreenSubtitle}>Manage account, support, and legal settings.</Text>
+                  ) : null}
                 </>
               )}
             </View>
@@ -1643,7 +1642,6 @@ export function RootScreen() {
           {appScreen === 'property' && selectedProperty ? (
             <View style={styles.mobileCard}>
               <View style={styles.propertyHeroCard}>
-                <Text style={styles.propertyHeroMeta}>{propertyAddress}</Text>
                 {workflow ? (
                   <View style={styles.propertyHeroStats}>
                     <View style={styles.propertyHeroStatChip}>
@@ -1662,8 +1660,11 @@ export function RootScreen() {
           {!session?.user ? null : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
           {busy || refreshing ? <ActivityIndicator color="#d28859" style={styles.spinner} /> : null}
-          <Text style={styles.mobileFooter}>Copyright 2026 Workside Software LLC</Text>
         </ScrollView>
+        </View>
+        <View style={styles.mobileFooterDock}>
+          <Text style={styles.mobileFooter}>Copyright 2026 Workside Software LLC</Text>
+        </View>
       </View>
     );
   }
@@ -1807,11 +1808,14 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     paddingBottom: 160,
   },
+  mobileContent: {
+    flex: 1,
+  },
   mobileShell: {
     flexGrow: 1,
     paddingHorizontal: 16,
     paddingTop: 18,
-    paddingBottom: 24,
+    paddingBottom: 96,
     gap: 14,
   },
   mobileTopBar: {
@@ -2980,7 +2984,13 @@ const styles = StyleSheet.create({
     color: '#8f9aa0',
     fontSize: 12,
     textAlign: 'center',
-    paddingVertical: 8,
+  },
+  mobileFooterDock: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(126, 145, 160, 0.18)',
+    backgroundColor: 'rgba(22, 32, 39, 0.98)',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
 });
 

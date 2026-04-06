@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { formatCurrency } from '@workside/utils';
 
+import { env } from '../../config/env.js';
 import { generateMarketingInsights } from '../../services/aiWorkflowService.js';
 import { buildMediaVariantUrl } from '../../services/storageService.js';
 import { listMediaAssets } from '../media/media.service.js';
@@ -406,6 +407,11 @@ export async function exportPropertyFlyerPdf({ propertyId, flyerType = 'sale' })
       filename,
     }));
   } catch (error) {
+    if (env.NODE_ENV === 'production') {
+      throw new Error(
+        `Marketing brochure browser render failed in production: ${error?.message || String(error)}`,
+      );
+    }
     console.warn('Falling back to pdf-lib marketing export:', error?.message || error);
     ({ bytes } = await renderFallbackMarketingFlyerPdf({
       property,

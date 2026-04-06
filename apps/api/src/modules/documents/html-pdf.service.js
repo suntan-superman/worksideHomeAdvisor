@@ -1,4 +1,5 @@
 import puppeteer from 'puppeteer';
+import { PDFDocument } from 'pdf-lib';
 import { BRANDING } from '@workside/branding';
 import { formatCurrency } from '@workside/utils';
 
@@ -6,6 +7,14 @@ import { env } from '../../config/env.js';
 
 const SUPPORT_EMAIL = BRANDING.supportEmail;
 const PUBLIC_WEB_URL = BRANDING.publicWebUrl || String(env.PUBLIC_WEB_URL || 'https://worksideadvisor.com');
+
+function logPdfEvent(event, details = {}) {
+  const payload = Object.entries(details)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
+    .join(' ');
+  console.info(`[pdf] ${event}${payload ? ` ${payload}` : ''}`);
+}
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -1481,10 +1490,17 @@ export async function renderMarketingReportPdf({ property, flyer, filename }) {
 
 async function renderHtmlPdf({ html, filename }) {
   let browser;
+  const startedAt = Date.now();
   try {
+    logPdfEvent('launch_start', {
+      filename,
+      executablePath: env.PUPPETEER_EXECUTABLE_PATH || 'bundled',
+      nodeEnv: env.NODE_ENV,
+    });
     browser = await puppeteer.launch({
-      headless: true,
+      headless: 'new',
       executablePath: env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      protocolTimeout: 120000,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -1493,6 +1509,8 @@ async function renderHtmlPdf({ html, filename }) {
       ],
     });
     const page = await browser.newPage();
+    page.setDefaultNavigationTimeout(120000);
+    page.setDefaultTimeout(120000);
     await page.setViewport({ width: 1280, height: 1660, deviceScaleFactor: 1 });
     await page.setContent(html, { waitUntil: 'networkidle0' });
     const bytes = await page.pdf({
@@ -1501,11 +1519,25 @@ async function renderHtmlPdf({ html, filename }) {
       preferCSSPageSize: true,
       margin: { top: '0', right: '0', bottom: '0', left: '0' },
     });
+    const renderedPdf = await PDFDocument.load(bytes);
     await page.close();
+    logPdfEvent('render_success', {
+      filename,
+      durationMs: Date.now() - startedAt,
+      pageCount: renderedPdf.getPageCount(),
+      bytes: bytes.length,
+    });
     return { bytes, filename };
+  } catch (error) {
+    logPdfEvent('render_failure', {
+      filename,
+      durationMs: Date.now() - startedAt,
+      message: error?.message || String(error),
+    });
+    throw error;
   } finally {
     if (browser) {
-      await browser.close();
+      await browser.close().catch(() => {});
     }
   }
 }

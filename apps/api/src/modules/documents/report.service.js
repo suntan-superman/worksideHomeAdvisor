@@ -1166,6 +1166,11 @@ export async function exportPropertyReportPdf({ propertyId }) {
       filename,
     }));
   } catch (error) {
+    if (env.NODE_ENV === 'production') {
+      throw new Error(
+        `Seller report browser render failed in production: ${error?.message || String(error)}`,
+      );
+    }
     console.warn('Falling back to pdf-lib seller report export:', error?.message || error);
     ({ bytes } = await renderFallbackPropertyReportPdf({
       property,

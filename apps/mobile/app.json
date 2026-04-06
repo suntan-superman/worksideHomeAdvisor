@@ -4,15 +4,24 @@
     "slug": "workside-home-seller",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon_1024.png",
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true, 
+      "supportsTablet": true,
+      "icon": "./assets/icon_1024.png",
       "bundleIdentifier": "software.workside.homeseller"
     },
     "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon_512.png",
+        "backgroundColor": "#162027"
+      },
       "package": "software.workside.homeseller"
+    },
+    "web": {
+      "favicon": "./assets/icon_192.png"
     }
   }
 }
