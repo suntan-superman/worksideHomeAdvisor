@@ -5,6 +5,7 @@ import { formatCurrency } from '@workside/utils';
 import { env } from '../../config/env.js';
 
 const SUPPORT_EMAIL = BRANDING.supportEmail;
+const PUBLIC_WEB_URL = BRANDING.publicWebUrl || String(env.PUBLIC_WEB_URL || 'https://worksideadvisor.com');
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -79,9 +80,103 @@ function buildNeighborhoodMapImageUrl(property) {
   return url.toString();
 }
 
-function renderMetricCard(label, value, support = '') {
+function hasMeaningfulValue(value) {
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return false;
+    }
+    return !['--', '—', 'pending', 'risk pending', 'opportunity pending'].includes(trimmed.toLowerCase());
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((item) => hasMeaningfulValue(item));
+  }
+
+  return true;
+}
+
+function titleCaseLabel(value = '') {
+  return String(value)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function formatPercentValue(value, digits = 0) {
+  if (!hasMeaningfulValue(value) && value !== 0) {
+    return '';
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return '';
+  }
+  return `${numeric.toFixed(digits)}%`;
+}
+
+function formatSqftValue(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return '';
+  }
+  return `${numeric.toLocaleString('en-US')} sqft`;
+}
+
+function formatDistanceMiles(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return '';
+  }
+  return `${numeric.toFixed(numeric < 10 ? 2 : 1)} mi`;
+}
+
+function formatPropertyTypeLabel(value) {
+  if (!hasMeaningfulValue(value)) {
+    return '';
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === 'single_family') {
+    return 'Single-family home';
+  }
+  return titleCaseLabel(normalized);
+}
+
+function formatCompactNumber(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return '';
+  }
+  return numeric.toLocaleString('en-US');
+}
+
+function pickMeaningfulLines(items = [], limit = 5) {
+  return (items || [])
+    .flat()
+    .map((item) => String(item ?? '').trim())
+    .filter((item) => hasMeaningfulValue(item))
+    .slice(0, limit);
+}
+
+function getReadinessTone({ score, label }) {
+  const normalizedLabel = String(label || '').toLowerCase();
+  const numericScore = Number(score || 0);
+  if (normalizedLabel.includes('ready') && !normalizedLabel.includes('almost')) {
+    return 'ready';
+  }
+  if (normalizedLabel.includes('almost') || numericScore >= 70) {
+    return 'almost';
+  }
+  return 'needs-work';
+}
+
+function renderMetricCard(label, value, support = '', tone = 'default') {
   return `
-    <div class="metric-card">
+    <div class="metric-card metric-card-${escapeHtml(tone)}">
       <div class="metric-label">${escapeHtml(label)}</div>
       <div class="metric-value">${formatMetricValue(value)}</div>
       ${support ? `<div class="metric-support">${escapeHtml(support)}</div>` : ''}
@@ -129,7 +224,7 @@ function renderPhotoTiles(photos = [], limit = 4) {
 
 function renderProviderCards(items = []) {
   if (!items.length) {
-    return `<div class="empty-card">No internal provider recommendations are ready yet for this property.</div>`;
+    return `<div class="empty-card">Provider recommendations will appear here once nearby marketplace matches or saved local referrals are available.</div>`;
   }
 
   return `
@@ -160,29 +255,63 @@ function renderProviderCards(items = []) {
 
 function renderCompRows(comps = []) {
   if (!comps.length) {
-    return `<div class="empty-card">Comparable properties will appear here once pricing analysis is complete.</div>`;
+    return '';
   }
 
+  const comparableRows = comps.slice(0, 6);
+  const pricePerSqftValues = comparableRows
+    .map((comp) => {
+      const price = Number(comp.price || 0);
+      const sqft = Number(comp.sqft || 0);
+      return price > 0 && sqft > 0 ? price / sqft : null;
+    })
+    .filter((value) => Number.isFinite(value));
+  const medianPrice = comparableRows
+    .map((comp) => Number(comp.price || 0))
+    .filter((value) => value > 0)
+    .sort((left, right) => left - right);
+  const medianPriceValue = medianPrice.length ? medianPrice[Math.floor(medianPrice.length / 2)] : null;
+  const medianPpsf = pricePerSqftValues.length
+    ? pricePerSqftValues.sort((left, right) => left - right)[Math.floor(pricePerSqftValues.length / 2)]
+    : null;
+  const closestComp = comparableRows
+    .map((comp) => ({ ...comp, _distance: Number(comp.distanceMiles || Number.POSITIVE_INFINITY) }))
+    .sort((left, right) => left._distance - right._distance)[0];
+
   return `
+    <div class="comp-summary-row">
+      ${medianPriceValue ? `<div class="badge">Median comp price ${escapeHtml(formatCurrency(medianPriceValue))}</div>` : ''}
+      ${medianPpsf ? `<div class="badge">Median ${escapeHtml(formatCurrency(Math.round(medianPpsf)))}/sqft</div>` : ''}
+      ${closestComp?._distance && Number.isFinite(closestComp._distance) ? `<div class="badge">Closest comp ${escapeHtml(formatDistanceMiles(closestComp._distance))}</div>` : ''}
+      <div class="badge">${escapeHtml(`${comparableRows.length} selected comps`)}</div>
+    </div>
     <div class="comp-table">
       <div class="comp-table-head">
         <span>Comp</span>
         <span>Price</span>
         <span>Details</span>
+        <span>Distance</span>
       </div>
-      ${comps
-        .slice(0, 6)
+      ${comparableRows
         .map(
           (comp, index) => `
-            <div class="comp-row">
+            <div class="comp-row ${index % 2 === 1 ? 'comp-row-alt' : ''}">
               <div>
                 <strong>${String.fromCharCode(65 + index)}. ${escapeHtml(comp.address || 'Comparable property')}</strong>
-                <div class="muted">${escapeHtml(comp.soldDate || comp.listedDate || '')}</div>
+                <div class="muted">${escapeHtml(comp.soldDate || comp.listedDate || 'Recent nearby comparable')}</div>
               </div>
               <div><strong>${escapeHtml(formatCurrency(comp.price || 0))}</strong></div>
               <div class="muted">${escapeHtml(
-                `${comp.beds || '--'} bd • ${comp.baths || '--'} ba • ${comp.sqft || '--'} sqft • ${(Number(comp.distanceMiles || 0)).toFixed(2)} mi`,
+                pickMeaningfulLines([
+                  `${comp.beds || ''} bd`,
+                  `${comp.baths || ''} ba`,
+                  formatSqftValue(comp.sqft),
+                  Number(comp.price || 0) > 0 && Number(comp.sqft || 0) > 0
+                    ? `${formatCurrency(Math.round(Number(comp.price) / Number(comp.sqft)))}/sqft`
+                    : '',
+                ]).join(' • '),
               )}</div>
+              <div class="muted"><strong>${escapeHtml(formatDistanceMiles(comp.distanceMiles) || 'Local')}</strong></div>
             </div>
           `,
         )
@@ -196,7 +325,7 @@ function renderFooter(pageLabel) {
     <footer class="page-footer">
       <div>
         <strong>Workside Home Advisor</strong><br/>
-        ${escapeHtml(String(env.PUBLIC_WEB_URL || 'https://worksideadvisor.com'))}
+        ${escapeHtml(PUBLIC_WEB_URL)}
       </div>
       <div>
         ${escapeHtml(SUPPORT_EMAIL)}<br/>
@@ -204,6 +333,30 @@ function renderFooter(pageLabel) {
       </div>
     </footer>
   `;
+}
+
+function buildDefaultLaunchChecklist({ checklistSummary, photoSummary, improvementItems = [], hasSelectedPrice }) {
+  const steps = [];
+  if (Number(photoSummary?.retakeCount || 0) > 0) {
+    steps.push('Complete the highest-priority photo retakes.');
+  }
+  if (Number(checklistSummary?.openCount || 0) > 0) {
+    steps.push('Finish the remaining open checklist items.');
+  }
+  if (improvementItems[0]) {
+    steps.push(`Address the top preparation issue: ${improvementItems[0]}.`);
+  }
+  steps.push(hasSelectedPrice ? 'Confirm the selected launch price and buyer-facing positioning.' : 'Review pricing and confirm the launch position.');
+  steps.push('Prepare the brochure, report, and showing assets for launch.');
+  return steps.slice(0, 5);
+}
+
+function buildNeighborhoodContext(property) {
+  const city = property?.city ? titleCaseLabel(property.city) : 'the surrounding area';
+  return [
+    `Located in ${city}, this home benefits from an established residential setting that supports everyday convenience and buyer comfort.`,
+    'The surrounding neighborhood context helps reinforce move-in appeal, practical livability, and a stronger showing experience.',
+  ].join(' ');
 }
 
 function renderHtmlDocument({ title, body }) {
@@ -279,7 +432,16 @@ function renderHtmlDocument({ title, body }) {
         background: rgba(255,255,255,0.88);
         border-radius: 18px;
       }
+      .metric-card, .content-card, .sidebar-card, .provider-card, .feature-pill, .empty-card,
+      .cta-band, .hero-photo, .map-frame, .photo-grid, .gallery-strip, .two-col, .summary-grid,
+      .metric-grid, .marketing-cover-grid, .marketing-metrics, .action-card {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
       .metric-card { padding: 14px 16px; }
+      .metric-card-ready { border-color: rgba(79,123,98,0.35); background: rgba(244,251,246,0.96); }
+      .metric-card-almost { border-color: rgba(200,116,71,0.35); background: rgba(255,249,243,0.97); }
+      .metric-card-needs-work { border-color: rgba(176,108,99,0.34); background: rgba(255,246,245,0.97); }
       .metric-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--moss); margin-bottom: 8px; }
       .metric-value { font-size: 22px; font-weight: 700; }
       .metric-support { margin-top: 8px; font-size: 12px; color: var(--muted); line-height: 1.4; }
@@ -302,9 +464,11 @@ function renderHtmlDocument({ title, body }) {
       .provider-reason { font-size: 13px; color: var(--muted); line-height: 1.5; min-height: 54px; }
       .provider-meta, .provider-contact { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 10px; font-size: 12px; color: var(--muted); }
       .comp-table { display: grid; gap: 10px; }
-      .comp-table-head, .comp-row { display: grid; grid-template-columns: 1.35fr 0.55fr 1.1fr; gap: 14px; align-items: start; }
+      .comp-summary-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+      .comp-table-head, .comp-row { display: grid; grid-template-columns: 1.3fr 0.55fr 1fr 0.45fr; gap: 14px; align-items: start; }
       .comp-table-head { padding: 0 4px; text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--moss); }
       .comp-row { border: 1px solid var(--line); background: rgba(255,255,255,0.88); border-radius: 18px; padding: 14px 16px; }
+      .comp-row-alt { background: rgba(252,250,245,0.95); }
       .page-footer {
         position: absolute;
         left: 0.58in;
@@ -339,18 +503,43 @@ function renderHtmlDocument({ title, body }) {
         margin-bottom: 10px;
       }
       .single-column { display: grid; gap: 18px; }
+      .marketing-cover-grid { display: grid; grid-template-columns: 1.02fr 0.98fr; gap: 18px; margin-top: 24px; align-items: start; }
+      .marketing-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+      .action-card {
+        margin-top: 14px;
+        padding: 18px 20px;
+        border-radius: 18px;
+        border: 1px solid rgba(79,123,98,0.2);
+        background: rgba(255,255,255,0.9);
+      }
       .gallery-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
       .gallery-strip img {
         width: 100%;
-        height: 170px;
+        height: 150px;
         object-fit: cover;
         display: block;
         border-radius: 16px;
         border: 1px solid var(--line);
       }
       .two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+      .map-frame.compact { min-height: 220px; }
       .badge-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
       .badge { padding: 8px 12px; border-radius: 999px; background: var(--moss-soft); color: var(--moss); font-size: 12px; font-weight: 600; }
+      .kpi-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+      .executive-summary-shell { display: grid; gap: 18px; margin-top: 18px; }
+      .executive-callouts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+      .callout-chip { border: 1px solid var(--line); background: rgba(255,255,255,0.9); border-radius: 18px; padding: 14px 16px; }
+      .callout-chip strong { display: block; margin-top: 6px; font-size: 14px; }
+      .fact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+      .fact-row { border: 1px solid var(--line); background: rgba(255,255,255,0.9); border-radius: 16px; padding: 12px 14px; }
+      .fact-row-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--moss); margin-bottom: 6px; }
+      .section-intro { margin-top: 6px; max-width: 6.2in; }
+      .cover-price-badge { display: inline-flex; align-items: center; gap: 10px; margin-top: 16px; padding: 10px 14px; border-radius: 999px; background: rgba(79,123,98,0.14); color: var(--moss); font-weight: 700; }
+      .marketing-hero-copy { display: grid; gap: 14px; }
+      .brochure-bottom-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 18px; margin-top: 18px; }
+      .highlight-list li { margin-bottom: 10px; }
+      .gallery-strip.two-up { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .compact-copy { font-size: 13px; line-height: 1.6; color: var(--muted); }
       .page-spacer { height: 14px; }
     </style>
   </head>
@@ -371,31 +560,88 @@ function buildPropertySummaryHtml({ property, report }) {
   const compMapImageUrl = buildComparableMapImageUrl(property, report.selectedComps || []);
   const heroPhoto = report.selectedPhotos?.[0];
   const remainingPhotos = (report.selectedPhotos || []).slice(1);
-  const featureTags = propertyDetails.featureTags || [];
-  const topReasonsToBuy = buyerPersonaSummary.topReasonsToBuy || [];
+  const featureTags = pickMeaningfulLines(propertyDetails.featureTags || [], 6);
+  const topReasonsToBuy = pickMeaningfulLines(buyerPersonaSummary.topReasonsToBuy || [], 5);
+  const executiveSummaryText = hasMeaningfulValue(report.executiveSummary)
+    ? report.executiveSummary
+    : `${property.title || 'This property'} is currently positioned at ${readinessSummary.overallScore || 0}/100 readiness with the strongest opportunity centered on listing preparation and buyer-facing presentation.`;
+  const summaryOpportunity = hasMeaningfulValue(riskOpportunity.biggestOpportunity)
+    ? riskOpportunity.biggestOpportunity
+    : pickMeaningfulLines(report.improvementItems || [], 1)[0] || 'Strengthen buyer confidence with final prep, pricing, and presentation decisions.';
+  const summaryRisk = hasMeaningfulValue(riskOpportunity.biggestRisk)
+    ? riskOpportunity.biggestRisk
+    : Number(photoSummary.retakeCount || 0) > 0
+      ? `${photoSummary.retakeCount} listing photo retake${Number(photoSummary.retakeCount || 0) === 1 ? '' : 's'} remain open.`
+      : 'No single launch risk currently dominates the report.';
+  const economicsSummary = hasMeaningfulValue(improvementEconomics.summary)
+    ? improvementEconomics.summary
+    : pickMeaningfulLines([
+        improvementEconomics.estimatedCost ? `Estimated prep investment ${formatCurrency(improvementEconomics.estimatedCost)}.` : '',
+        improvementEconomics.estimatedRoi ? `Potential value protection ${formatCurrency(improvementEconomics.estimatedRoi)}.` : '',
+      ], 2).join(' ');
+  const pricingNarrative = hasMeaningfulValue(report.pricingSummary?.narrative)
+    ? report.pricingSummary.narrative
+    : 'Pricing guidance is based on the latest comparable sales, home condition, and current market readiness signals.';
+  const marketingMomentum = pickMeaningfulLines(report.marketingHighlights || [], 5);
+  const orderedNextSteps = nextSteps.length
+    ? nextSteps.map((step) => `${step.title}${step.eta ? ` · ${step.eta}` : ''}${step.owner ? ` · ${step.owner}` : ''}`)
+    : buildDefaultLaunchChecklist({
+        checklistSummary,
+        photoSummary,
+        improvementItems: report.improvementItems || [],
+        hasSelectedPrice: Boolean(property?.selectedListPrice),
+      });
+  const propertyFacts = [
+    { label: 'Address', value: buildPropertyAddress(property) },
+    { label: 'Home type', value: formatPropertyTypeLabel(property?.propertyType) },
+    { label: 'Bedrooms', value: hasMeaningfulValue(propertyDetails.bedrooms || property?.bedrooms) ? String(propertyDetails.bedrooms || property?.bedrooms) : '' },
+    { label: 'Bathrooms', value: hasMeaningfulValue(propertyDetails.bathrooms || property?.bathrooms) ? String(propertyDetails.bathrooms || property?.bathrooms) : '' },
+    { label: 'Interior', value: formatSqftValue(propertyDetails.squareFeet || property?.squareFeet) },
+    { label: 'Lot size', value: formatSqftValue(propertyDetails.lotSizeSqFt || property?.lotSizeSqFt) },
+    { label: 'Year built', value: hasMeaningfulValue(propertyDetails.yearBuilt || property?.yearBuilt) ? String(propertyDetails.yearBuilt || property?.yearBuilt) : '' },
+  ].filter((fact) => hasMeaningfulValue(fact.value));
+  const shouldRenderCompMap = Boolean(compMapImageUrl && (report.selectedComps || []).length);
+  const shouldRenderProviders = providerRecommendations.length > 0;
+  const shouldRenderBuyerPersona = hasMeaningfulValue(buyerPersonaSummary.buyerPersona) || topReasonsToBuy.length > 0;
 
   const body = `
     <section class="page hero-page">
       <div>
         <div class="brand-kicker">Workside Home Advisor · Seller Intelligence Report</div>
         <h1>${escapeHtml(report.title || property.title || 'Property Summary Report')}</h1>
-        <p class="lede" style="margin-top:12px;">${escapeHtml(report.executiveSummary || '')}</p>
-        <div class="summary-grid" style="margin-top:22px;">
-          ${renderMetricCard('Readiness', `${readinessSummary.overallScore || 0}/100`, readinessSummary.label || 'Needs Work')}
-          ${renderMetricCard('Selected price', property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set', report.pricingSummary?.mid ? `Suggested midpoint ${formatCurrency(report.pricingSummary.mid)}` : 'Pricing recommendation pending')}
-          ${renderMetricCard('Photo coverage', `${photoSummary.roomCoverageCount || 0}/5 rooms`, `${photoSummary.totalPhotos || 0} photos · ${photoSummary.listingCandidateCount || 0} listing-ready`)}
-          ${renderMetricCard('Checklist', `${checklistSummary.progressPercent || 0}% complete`, `${checklistSummary.completedCount || 0} complete · ${checklistSummary.openCount || 0} open`)}
+        <p class="lede section-intro" style="margin-top:12px;">${escapeHtml(executiveSummaryText)}</p>
+        <div class="kpi-strip">
+          ${renderMetricCard('Readiness score', `${readinessSummary.overallScore || 0}/100`, readinessSummary.label || 'Needs work', getReadinessTone({ score: readinessSummary.overallScore, label: readinessSummary.label }))}
+          ${renderMetricCard('Selected price', property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set', report.pricingSummary?.mid ? `Suggested midpoint ${formatCurrency(report.pricingSummary.mid)}` : 'Pricing guidance available below')}
+          ${renderMetricCard('Photo coverage', `${photoSummary.roomCoverageCount || 0}/5 rooms`, `${photoSummary.listingCandidateCount || 0} listing-ready · ${photoSummary.retakeCount || 0} retakes`)}
+          ${renderMetricCard('Checklist progress', `${checklistSummary.progressPercent || 0}%`, `${checklistSummary.completedCount || 0} complete · ${checklistSummary.openCount || 0} open`)}
         </div>
-        <div class="cta-band">
-          <div class="cta-label">Report date</div>
-          <p class="lede">${escapeHtml(formatDateLabel(report.updatedAt || report.createdAt || new Date()))}</p>
-          ${renderBulletList(
-            [
-              report.payload?.improvementGuidance?.summary,
-              ...(report.improvementItems || []).slice(0, 3),
-            ],
-            'Use the guided workflow to continue improving readiness and launch confidence.',
-          )}
+        <div class="executive-summary-shell">
+          <div class="executive-callouts">
+            <div class="callout-chip">
+              <div class="metric-label">Top opportunity</div>
+              <strong>${escapeHtml(summaryOpportunity)}</strong>
+            </div>
+            <div class="callout-chip">
+              <div class="metric-label">Top risk</div>
+              <strong>${escapeHtml(summaryRisk)}</strong>
+            </div>
+            <div class="callout-chip">
+              <div class="metric-label">Value protection</div>
+              <strong>${escapeHtml(economicsSummary || 'Use this report to coordinate a confident, disciplined launch.')}</strong>
+            </div>
+          </div>
+          <div class="cta-band">
+            <div class="cta-label">Report date</div>
+            <p class="lede">${escapeHtml(formatDateLabel(report.updatedAt || report.createdAt || new Date()))}</p>
+            ${renderBulletList(
+              pickMeaningfulLines([
+                report.payload?.improvementGuidance?.summary,
+                ...(report.improvementItems || []).slice(0, 3),
+              ], 4),
+              'Use the guided workflow to continue improving readiness and launch confidence.',
+            )}
+          </div>
         </div>
       </div>
       <div>
@@ -420,33 +666,40 @@ function buildPropertySummaryHtml({ property, report }) {
       </div>
       <div class="metric-grid">
         ${renderMetricCard('Suggested range', report.pricingSummary?.low && report.pricingSummary?.high ? `${formatCurrency(report.pricingSummary.low)} - ${formatCurrency(report.pricingSummary.high)}` : 'Unavailable', report.pricingSummary?.strategy || 'Market-aligned pricing recommendation')}
-        ${renderMetricCard('Midpoint', report.pricingSummary?.mid ? formatCurrency(report.pricingSummary.mid) : '—', report.pricingSummary?.confidence ? `${Math.round(report.pricingSummary.confidence * 100)}% confidence` : 'Confidence pending')}
+        ${renderMetricCard('Midpoint', report.pricingSummary?.mid ? formatCurrency(report.pricingSummary.mid) : 'Unavailable', report.pricingSummary?.confidence ? `${Math.round(report.pricingSummary.confidence * 100)}% confidence` : 'Confidence score not available')}
         ${renderMetricCard('Chosen price', property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set', property?.selectedListPrice ? 'Seller-confirmed' : 'Set in pricing tab')}
         ${renderMetricCard('Selected comps', String((report.selectedComps || []).length), 'Top market references included')}
       </div>
       <div class="section-grid">
-        <div class="content-card">
-          <div class="section-kicker">Comp map</div>
-          <div class="map-frame" style="margin-top:12px;">
-            ${compMapImageUrl ? `<img src="${escapeHtml(compMapImageUrl)}" alt="Comparable properties map" />` : ''}
+        ${shouldRenderCompMap ? `
+          <div class="content-card">
+            <div class="section-kicker">Comp map</div>
+            <div class="map-frame" style="margin-top:12px;">
+              <img src="${escapeHtml(compMapImageUrl)}" alt="Comparable properties map" />
+            </div>
+          </div>
+        ` : ''}
+        <div class="sidebar-card">
+          <div class="section-kicker">Pricing rationale</div>
+          <h3>${escapeHtml(report.payload?.listingDescriptions?.shortDescription || 'Pricing recommendation')}</h3>
+          <p class="muted" style="margin-top:8px;">${escapeHtml(pricingNarrative)}</p>
+          <div class="page-spacer"></div>
+          <div class="section-kicker">Pricing callouts</div>
+          <div class="badge-row">
+            ${hasMeaningfulValue(riskOpportunity.biggestRisk) ? `<div class="badge">${escapeHtml(riskOpportunity.biggestRisk)}</div>` : ''}
+            ${hasMeaningfulValue(riskOpportunity.biggestOpportunity) ? `<div class="badge">${escapeHtml(riskOpportunity.biggestOpportunity)}</div>` : ''}
+            ${report.pricingSummary?.confidence ? `<div class="badge">${escapeHtml(`${Math.round(report.pricingSummary.confidence * 100)}% pricing confidence`)}</div>` : ''}
           </div>
         </div>
-        <div class="sidebar-card">
-          <div class="section-kicker">Pricing narrative</div>
-          <h3>${escapeHtml(report.payload?.listingDescriptions?.shortDescription || 'Pricing recommendation')}</h3>
-          <p class="muted" style="margin-top:8px;">${escapeHtml(report.pricingSummary?.narrative || 'Pricing narrative is not available yet.')}</p>
+      </div>
+      ${(report.selectedComps || []).length ? `
+        <div class="content-card" style="margin-top:18px;">
+          <div class="section-kicker">Comparable properties</div>
+          <h3>Recent nearby comps</h3>
           <div class="page-spacer"></div>
-          <div class="section-kicker">Risk and opportunity</div>
-          <p class="muted" style="margin-top:8px;"><strong>${escapeHtml(riskOpportunity.biggestRisk || 'Risk pending')}</strong></p>
-          <p class="muted" style="margin-top:8px;">${escapeHtml(riskOpportunity.biggestOpportunity || 'Opportunity pending')}</p>
+          ${renderCompRows(report.selectedComps || [])}
         </div>
-      </div>
-      <div class="content-card" style="margin-top:18px;">
-        <div class="section-kicker">Comparable properties</div>
-        <h3>Recent nearby comps</h3>
-        <div class="page-spacer"></div>
-        ${renderCompRows(report.selectedComps || [])}
-      </div>
+      ` : ''}
       ${renderFooter('Property Summary Report · Pricing & Comps')}
     </section>
 
@@ -479,14 +732,15 @@ function buildPropertySummaryHtml({ property, report }) {
           <div class="sidebar-card">
             <div class="section-kicker">Preparation recommendations</div>
             <h3>Highest-impact improvements</h3>
-            ${renderBulletList(report.improvementItems || [], 'Improvement recommendations will appear as pricing, photos, and checklist inputs mature.')}
+            ${renderBulletList(pickMeaningfulLines(report.improvementItems || [], 5), 'Use the checklist and photo review to identify the next preparation priorities.')}
           </div>
           <div class="sidebar-card">
             <div class="section-kicker">Cost and ROI</div>
-            <h3>${escapeHtml(improvementEconomics.summary || 'Improvement economics pending')}</h3>
+            <h3>${escapeHtml(improvementEconomics.summary || 'Estimated prep investment and value-protection range')}</h3>
             <div class="badge-row">
               ${improvementEconomics.estimatedCost ? `<div class="badge">Est. cost ${escapeHtml(formatCurrency(improvementEconomics.estimatedCost))}</div>` : ''}
               ${improvementEconomics.estimatedRoi ? `<div class="badge">Potential ROI ${escapeHtml(formatCurrency(improvementEconomics.estimatedRoi))}</div>` : ''}
+              ${improvementEconomics.estimatedCost && improvementEconomics.estimatedRoi ? `<div class="badge">${escapeHtml(`Potential upside ${formatCurrency(improvementEconomics.estimatedRoi)} vs. est. prep ${formatCurrency(improvementEconomics.estimatedCost)}`)}</div>` : ''}
             </div>
           </div>
         </div>
@@ -503,44 +757,62 @@ function buildPropertySummaryHtml({ property, report }) {
         </div>
       </div>
       <div class="two-col">
+        ${propertyFacts.length ? `
         <div class="content-card">
           <div class="section-kicker">Property details</div>
           <h3>Core home facts</h3>
-          <div class="metric-grid" style="grid-template-columns:repeat(2, minmax(0,1fr)); margin-top:12px;">
-            ${renderMetricCard('Bedrooms', propertyDetails.bedrooms || '--')}
-            ${renderMetricCard('Bathrooms', propertyDetails.bathrooms || '--')}
-            ${renderMetricCard('Interior', propertyDetails.squareFeet ? `${propertyDetails.squareFeet} sqft` : '--')}
-            ${renderMetricCard('Lot / year', propertyDetails.yearBuilt ? `${propertyDetails.yearBuilt}` : '—', propertyDetails.lotSizeSqFt ? `${propertyDetails.lotSizeSqFt} lot sqft` : '')}
+          <div class="fact-grid">
+            ${propertyFacts
+              .map(
+                (fact) => `
+                  <div class="fact-row">
+                    <div class="fact-row-label">${escapeHtml(fact.label)}</div>
+                    <div>${escapeHtml(fact.value)}</div>
+                  </div>
+                `,
+              )
+              .join('')}
           </div>
         </div>
+        ` : ''}
+        ${shouldRenderBuyerPersona ? `
         <div class="content-card">
           <div class="section-kicker">Buyer persona</div>
           <h3>Who this home should resonate with</h3>
-          <p class="muted" style="margin-top:8px;">${escapeHtml(buyerPersonaSummary.buyerPersona || 'Buyer persona guidance will appear once marketing signals are available.')}</p>
+          <p class="muted" style="margin-top:8px;">${escapeHtml(buyerPersonaSummary.buyerPersona || 'This home should appeal to buyers seeking comfort, livability, and a well-positioned launch price.')}</p>
           <div class="page-spacer"></div>
           <div class="section-kicker">Top reasons to buy</div>
-          ${renderBulletList(topReasonsToBuy, 'Key buyer-facing reasons will appear once pricing and marketing guidance are available.')}
+          ${renderBulletList(topReasonsToBuy, 'The strongest buyer reasons will appear here once pricing and marketing guidance are finalized.')}
         </div>
+        ` : ''}
       </div>
       <div class="content-card" style="margin-top:18px;">
         <div class="section-kicker">Provider recommendations</div>
         <h3>Marketplace support nearby</h3>
         <div class="page-spacer"></div>
-        ${renderProviderCards(providerRecommendations)}
+        ${shouldRenderProviders ? renderProviderCards(providerRecommendations) : `<p class="muted">Provider recommendations will appear here once local marketplace matches are available.</p>`}
       </div>
       <div class="two-col" style="margin-top:18px;">
         <div class="content-card">
           <div class="section-kicker">Next steps</div>
           <h3>Ordered launch plan</h3>
           ${renderBulletList(
-            nextSteps.map((step) => `${step.title} (${step.eta}, ${step.owner})`),
-            'No action plan has been generated yet.',
+            orderedNextSteps,
+            'Use the guided workflow in the app to continue the launch checklist.',
           )}
         </div>
         <div class="content-card">
           <div class="section-kicker">Checklist and marketing</div>
           <h3>Current momentum</h3>
-          ${renderBulletList(report.marketingHighlights || [], 'Marketing highlights will appear here after brochure and report signals are generated.')}
+          ${renderBulletList(
+            marketingMomentum.length
+              ? marketingMomentum
+              : pickMeaningfulLines([
+                  checklistSummary.totalCount ? `${checklistSummary.completedCount || 0} of ${checklistSummary.totalCount} checklist items are complete.` : '',
+                  photoSummary.summary,
+                ], 4),
+            'Current launch momentum will appear here as pricing, photos, and checklist steps are completed.',
+          )}
         </div>
       </div>
       ${renderFooter('Property Summary Report · Action Plan')}
@@ -558,41 +830,59 @@ function buildMarketingReportHtml({ property, flyer }) {
   const neighborhoodMapImageUrl = buildNeighborhoodMapImageUrl(property);
   const selectedPhotos = flyer.selectedPhotos || [];
   const heroPhoto = selectedPhotos[0];
-  const galleryPhotos = selectedPhotos.slice(1, 4);
-  const featureTags = (flyer.highlights || []).filter(Boolean);
+  const galleryPhotos = selectedPhotos.slice(1, 5);
+  const featureTags = pickMeaningfulLines(flyer.highlights || [], 6);
   const topReasonsToBuy = [
     ...(featureTags || []),
     property?.selectedListPrice ? `Positioned at ${formatCurrency(property.selectedListPrice)}` : '',
-    'Designed to convert interest into showings',
+    buildNeighborhoodContext(property),
   ]
     .filter(Boolean)
-    .slice(0, 5);
+    .slice(0, 6);
+  const brochureSummary = hasMeaningfulValue(flyer.summary)
+    ? flyer.summary
+    : 'A buyer-facing brochure designed to spotlight the home’s strongest features, neighborhood appeal, and showing-ready presentation.';
+  const lifestyleContext = buildNeighborhoodContext(property);
+  const shouldRenderMapPage = Boolean(neighborhoodMapImageUrl && galleryPhotos.length >= 4);
 
   const body = `
     <section class="page hero-page">
       <div>
         <div class="brand-kicker">Workside Home Advisor · Marketing Report</div>
         <h1>${escapeHtml(flyer.headline || property.title || 'Marketing brochure')}</h1>
-        <p class="lede" style="margin-top:14px;">${escapeHtml(flyer.subheadline || '')}</p>
-        <div class="summary-grid" style="margin-top:24px;">
-          ${renderMetricCard('List price', flyer.priceText || 'Pricing on request', property?.selectedListPrice ? 'Seller-confirmed list price' : 'Suggested market positioning')}
-          ${renderMetricCard('Highlights', `${property?.bedrooms || '--'} bd · ${property?.bathrooms || '--'} ba`, `${property?.squareFeet || '--'} sqft · ${property?.propertyType || 'Residential home'}`)}
-          ${renderMetricCard('Location', property?.city || 'Property city', property?.state || '')}
-          ${renderMetricCard('CTA', flyer.callToAction || 'Schedule a showing')}
+        <p class="lede section-intro" style="margin-top:14px;">${escapeHtml(flyer.subheadline || brochureSummary)}</p>
+        <div class="cover-price-badge">${escapeHtml(flyer.priceText || 'Pricing on request')}</div>
+        <div class="marketing-cover-grid">
+          <div class="marketing-hero-copy">
+            <div class="marketing-metrics">
+              ${renderMetricCard('List price', flyer.priceText || 'Pricing on request', property?.selectedListPrice ? 'Seller-confirmed list position' : 'Market-aligned positioning')}
+              ${renderMetricCard('Home details', `${property?.bedrooms || '--'} bd · ${property?.bathrooms || '--'} ba`, `${formatSqftValue(property?.squareFeet) || 'Residential home'} · ${formatPropertyTypeLabel(property?.propertyType) || 'Residential home'}`)}
+              ${renderMetricCard('Location', property?.city || 'Property city', property?.state || '')}
+            </div>
+            <div class="feature-grid" style="margin-top:18px;">
+              ${featureTags.map((tag) => `<div class="feature-pill">${escapeHtml(tag)}</div>`).join('')}
+            </div>
+            <div class="cta-band">
+              <div class="cta-label">Property story</div>
+              <p class="lede">${escapeHtml(brochureSummary)}</p>
+            </div>
+            <div class="action-card">
+              <div class="section-kicker">Call to action</div>
+              <h3 style="margin-top:8px;">${escapeHtml(flyer.callToAction || 'Schedule a showing or request the full property package.')}</h3>
+              <p class="compact-copy" style="margin-top:10px;">Prepared by Workside Home Advisor to support a polished listing launch, clearer buyer positioning, and smoother showing conversations.</p>
+              <div class="badge-row">
+                <div class="badge">${escapeHtml(propertyAddress)}</div>
+                <div class="badge">${escapeHtml(SUPPORT_EMAIL)}</div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="hero-photo">
+              ${heroPhoto?.imageUrl ? `<img src="${escapeHtml(heroPhoto.imageUrl)}" alt="${escapeHtml(heroPhoto.roomLabel || 'Hero property photo')}" />` : ''}
+            </div>
+            <p class="muted" style="margin-top:10px;">${escapeHtml(propertyAddress)}</p>
+          </div>
         </div>
-        <div class="feature-grid" style="margin-top:18px;">
-          ${featureTags.map((tag) => `<div class="feature-pill">${escapeHtml(tag)}</div>`).join('')}
-        </div>
-        <div class="cta-band">
-          <div class="cta-label">Lifestyle description</div>
-          <p class="lede">${escapeHtml(flyer.summary || '')}</p>
-        </div>
-      </div>
-      <div>
-        <div class="hero-photo">
-          ${heroPhoto?.imageUrl ? `<img src="${escapeHtml(heroPhoto.imageUrl)}" alt="${escapeHtml(heroPhoto.roomLabel || 'Hero property photo')}" />` : ''}
-        </div>
-        <p class="muted" style="margin-top:10px;">${escapeHtml(propertyAddress)}</p>
       </div>
       ${renderFooter('Marketing Report · Cover')}
     </section>
@@ -613,7 +903,7 @@ function buildMarketingReportHtml({ property, flyer }) {
           ${
             galleryPhotos.length
               ? `
-                <div class="gallery-strip">
+                <div class="gallery-strip ${galleryPhotos.length <= 2 ? 'two-up' : ''}">
                   ${galleryPhotos
                     .map(
                       (photo) =>
@@ -625,13 +915,35 @@ function buildMarketingReportHtml({ property, flyer }) {
               : `<div class="empty-card">More gallery-ready photos will appear here as the listing set is finalized.</div>`
           }
         </div>
-        <div class="two-col">
+        <div class="brochure-bottom-grid">
           <div class="content-card">
             <div class="section-kicker">Key features</div>
             <h3>Top reasons to buy</h3>
-            ${renderBulletList(topReasonsToBuy, 'Top buyer-facing reasons will appear here once the marketing set is finalized.')}
+            <ul class="bullet-list highlight-list">
+              ${topReasonsToBuy.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+            </ul>
           </div>
           <div class="content-card">
+            <div class="section-kicker">Pricing positioning</div>
+            <h3>${escapeHtml(flyer.priceText || 'Pricing on request')}</h3>
+            <p class="muted" style="margin-top:8px;">${escapeHtml(
+              property?.selectedListPrice
+                ? `Competitively positioned at ${formatCurrency(property.selectedListPrice)} to balance value perception and buyer demand.`
+                : 'Positioned to align with recent comparable sales and current buyer demand.',
+            )}</p>
+            <div class="page-spacer"></div>
+            <div class="section-kicker">Neighborhood context</div>
+            <p class="compact-copy" style="margin-top:8px;">${escapeHtml(lifestyleContext)}</p>
+            ${
+              neighborhoodMapImageUrl
+                ? `
+                  <div class="map-frame compact" style="margin-top:14px;">
+                    <img src="${escapeHtml(neighborhoodMapImageUrl)}" alt="Neighborhood map" />
+                  </div>
+                `
+                : ''
+            }
+            <div class="page-spacer"></div>
             <div class="section-kicker">Call to action</div>
             <h3>${escapeHtml(flyer.callToAction || 'Schedule a showing')}</h3>
             <p class="muted" style="margin-top:8px;">Prepared by Workside Home Advisor to support listing-ready marketing collateral and brochure refinement.</p>
@@ -641,31 +953,45 @@ function buildMarketingReportHtml({ property, flyer }) {
             </div>
           </div>
         </div>
-        <div class="two-col">
-          <div class="content-card">
-            <div class="section-kicker">Neighborhood</div>
-            <h3>Local context</h3>
-            <div class="map-frame" style="margin-top:12px;">
-              ${neighborhoodMapImageUrl ? `<img src="${escapeHtml(neighborhoodMapImageUrl)}" alt="Neighborhood map" />` : ''}
-            </div>
-          </div>
-          <div class="content-card">
-            <div class="section-kicker">Pricing positioning</div>
-            <h3>${escapeHtml(flyer.priceText || 'Pricing on request')}</h3>
-            <p class="muted" style="margin-top:8px;">${escapeHtml(
-              property?.selectedListPrice
-                ? 'The marketing brochure uses the seller-confirmed price so buyer-facing materials stay consistent.'
-                : 'This brochure reflects the current pricing recommendation and should be refreshed if the list price changes.',
-            )}</p>
-            <div class="page-spacer"></div>
-            <div class="section-kicker">Contact</div>
-            <p class="muted" style="margin-top:8px;">${escapeHtml(SUPPORT_EMAIL)}</p>
-            <p class="muted">${escapeHtml(String(env.PUBLIC_WEB_URL || 'https://worksideadvisor.com'))}</p>
-          </div>
-        </div>
       </div>
-      ${renderFooter('Marketing Report · Gallery & Positioning')}
+      ${renderFooter('Marketing Report · Gallery & Conversion')}
     </section>
+
+    ${
+      shouldRenderMapPage
+        ? `
+          <section class="page">
+            <div class="brand-bar">
+              <div>
+                <div class="section-kicker">Neighborhood and positioning</div>
+                <h2>Local context and pricing posture</h2>
+                <p class="muted">A cleaner neighborhood view and contact block designed for seller-facing brochure review.</p>
+              </div>
+            </div>
+            <div class="two-col">
+              <div class="content-card">
+                <div class="section-kicker">Neighborhood</div>
+                <h3>Local context</h3>
+                <div class="map-frame compact" style="margin-top:12px;">
+                  <img src="${escapeHtml(neighborhoodMapImageUrl)}" alt="Neighborhood map" />
+                </div>
+                <p class="muted" style="margin-top:10px;">${escapeHtml(propertyAddress)}</p>
+              </div>
+              <div class="content-card">
+                <div class="section-kicker">Prepared for review</div>
+                <h3>Marketing draft guidance</h3>
+                <p class="muted" style="margin-top:8px;">This brochure is a branded marketing draft generated by Workside Home Advisor and should be reviewed before public distribution.</p>
+                <div class="page-spacer"></div>
+                <div class="section-kicker">Contact</div>
+                <p class="muted" style="margin-top:8px;">${escapeHtml(SUPPORT_EMAIL)}</p>
+                <p class="muted">${escapeHtml(PUBLIC_WEB_URL)}</p>
+              </div>
+            </div>
+            ${renderFooter('Marketing Report · Neighborhood & Positioning')}
+          </section>
+        `
+        : ''
+    }
   `;
 
   return renderHtmlDocument({
