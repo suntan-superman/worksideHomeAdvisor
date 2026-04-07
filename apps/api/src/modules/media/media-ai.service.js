@@ -38,6 +38,10 @@ function serializeImageJob(document, variants = []) {
     provider: document.provider,
     providerJobId: document.providerJobId || null,
     presetKey: document.presetKey || document.jobType,
+    mode: document.mode || 'preset',
+    instructions: document.instructions || '',
+    normalizedPlan: document.normalizedPlan || null,
+    originalUrl: document.originalUrl || '',
     roomType: document.roomType || 'unknown',
     promptVersion: Number(document.promptVersion || 1),
     inputHash: document.inputHash || null,
@@ -49,6 +53,7 @@ function serializeImageJob(document, variants = []) {
       document.selectedVariantId?.toString?.() || document.selectedVariantId || null,
     message: document.message || '',
     warning: document.warning || '',
+    outputUrls: variants.map((variant) => variant.imageUrl).filter(Boolean),
     variants,
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
@@ -115,6 +120,34 @@ function normalizeRoomType(value) {
   }
 
   return normalized || 'unknown';
+}
+
+function buildFreeformEnhancementPlan(instructions, roomType) {
+  const normalizedInstructions = String(instructions || '').toLowerCase();
+  const removeObjects = [];
+  const styleChanges = [];
+
+  if (/furniture|couch|sofa|chair|table|bed/.test(normalizedInstructions)) {
+    removeObjects.push('furniture');
+  }
+  if (/clutter|boxes|toys|countertop|counter/.test(normalizedInstructions)) {
+    removeObjects.push('clutter');
+  }
+  if (/light|brighten|brighter/.test(normalizedInstructions)) {
+    styleChanges.push('brighter lighting');
+  }
+
+  const flooringMatch = normalizedInstructions.match(/floor(?:ing)?(?: to| into| as)? ([a-z\s-]{3,40})/i);
+  const wallColorMatch = normalizedInstructions.match(/wall(?:s| color| colours| colors)?(?: to| into| as)? ([a-z\s-]{3,40})/i);
+
+  return {
+    removeObjects: [...new Set(removeObjects)],
+    styleChanges: [...new Set(styleChanges)],
+    roomType: normalizeRoomType(roomType),
+    flooring: flooringMatch?.[1]?.trim() || '',
+    wallColor: wallColorMatch?.[1]?.trim() || '',
+    lighting: /light|brighten|brighter/.test(normalizedInstructions) ? 'brighter' : '',
+  };
 }
 
 function getRoomPromptAddon(roomType) {
@@ -339,6 +372,19 @@ function getProviderSourceUrl(output) {
   }
 
   return null;
+}
+
+function buildFreeformRenderPlan() {
+  return {
+    label: 'Custom Enhancement Preview',
+    warning:
+      'Custom instructions were saved with this enhancement request. Review the output before public marketing use.',
+    summary:
+      'A freeform enhancement request was captured for this photo and processed with the closest available enhancement flow.',
+    differenceHint:
+      'Compare the result against the original and confirm the requested changes still feel truthful and listing-safe.',
+    effects: ['Custom request saved', 'Listing refresh fallback', 'Manual review recommended'],
+  };
 }
 
 export function buildVariantStoryBlock({ asset, variant }) {
@@ -606,6 +652,30 @@ function buildVisionInputHash({ assetId, presetKey, roomType, promptVersion }) {
         presetKey,
         roomType,
         promptVersion,
+        mode: 'preset',
+        instructions: '',
+      }),
+    )
+    .digest('hex');
+}
+
+function buildVisionJobHash({
+  assetId,
+  presetKey,
+  roomType,
+  promptVersion,
+  mode = 'preset',
+  instructions = '',
+}) {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        assetId,
+        presetKey,
+        roomType,
+        promptVersion,
+        mode,
+        instructions: String(instructions || '').trim().toLowerCase(),
       }),
     )
     .digest('hex');
@@ -660,6 +730,8 @@ export async function createImageEnhancementJob({
   jobType = 'enhance_listing_quality',
   presetKey,
   roomType,
+  mode = 'preset',
+  instructions = '',
 }) {
   if (mongoose.connection.readyState !== 1) {
     throw new Error('Database connection is required to generate image variants.');
@@ -670,13 +742,26 @@ export async function createImageEnhancementJob({
     throw new Error('Media asset not found.');
   }
 
-  const preset = resolveVisionPreset(presetKey || jobType);
+  const requestedMode =
+    mode === 'freeform' || String(instructions || '').trim() ? 'freeform' : 'preset';
+  const normalizedInstructions = String(instructions || '').trim().slice(0, 600);
+  const resolvedPresetKey =
+    requestedMode === 'freeform'
+      ? presetKey || jobType || 'combined_listing_refresh'
+      : presetKey || jobType;
+  const preset = resolveVisionPreset(resolvedPresetKey);
   const resolvedRoomType = normalizeRoomType(roomType || asset.roomLabel);
-  const inputHash = buildVisionInputHash({
+  const normalizedPlan =
+    requestedMode === 'freeform'
+      ? buildFreeformEnhancementPlan(normalizedInstructions, resolvedRoomType)
+      : null;
+  const inputHash = buildVisionJobHash({
     assetId: asset._id.toString(),
     presetKey: preset.key,
     roomType: resolvedRoomType,
     promptVersion: preset.promptVersion,
+    mode: requestedMode,
+    instructions: normalizedInstructions,
   });
 
   const cachedJob = await ImageJobModel.findOne({
@@ -712,6 +797,10 @@ export async function createImageEnhancementJob({
     status: 'processing',
     provider: preset.providerPreference || 'local_sharp',
     presetKey: preset.key,
+    mode: requestedMode,
+    instructions: normalizedInstructions,
+    normalizedPlan,
+    originalUrl: asset.imageUrl || '',
     roomType: resolvedRoomType,
     promptVersion: preset.promptVersion,
     inputHash,
@@ -722,15 +811,24 @@ export async function createImageEnhancementJob({
       prompt: preset.basePrompt,
       helperText: preset.helperText,
       recommendedUse: preset.recommendedUse,
+      mode: requestedMode,
+      instructions: normalizedInstructions,
+      normalizedPlan,
     },
   });
 
   try {
-    const renderPlan = buildPresetRenderPlan(preset.key);
+    const renderPlan =
+      requestedMode === 'freeform'
+        ? buildFreeformRenderPlan()
+        : buildPresetRenderPlan(preset.key);
     const roomPromptAddon = getRoomPromptAddon(resolvedRoomType);
     const presetPromptAddon = getPresetPromptAddon(preset.key, resolvedRoomType);
     const fullPrompt = [
       preset.basePrompt,
+      requestedMode === 'freeform'
+        ? `Seller instructions: ${normalizedInstructions}`
+        : '',
       roomPromptAddon,
       presetPromptAddon,
       getUniversalRealismGuardrails(),
@@ -816,6 +914,9 @@ export async function createImageEnhancementJob({
               disclaimerType: preset.disclaimerType,
               roomPromptAddon,
               presetPromptAddon,
+              mode: requestedMode,
+              instructions: normalizedInstructions,
+              normalizedPlan,
               providerSourceUrl: getProviderSourceUrl(output),
               review: {
                 ...review,
@@ -877,6 +978,9 @@ export async function createImageEnhancementJob({
           category: preset.category,
           disclaimerType: preset.disclaimerType,
           roomPromptAddon: rendered.roomPromptAddon,
+          mode: requestedMode,
+          instructions: normalizedInstructions,
+          normalizedPlan,
           review: {
             ...review,
             overallScore,
@@ -892,7 +996,10 @@ export async function createImageEnhancementJob({
     job.outputVariantIds = createdVariants.map((variant) => variant.id);
     job.selectedVariantId = createdVariants[0]?.id || null;
     job.warning = renderPlan.warning;
-    job.message = `${createdVariants.length} ${renderPlan.label.toLowerCase()} variant${createdVariants.length === 1 ? '' : 's'} generated.`;
+    job.message =
+      requestedMode === 'freeform'
+        ? 'Custom enhancement request saved and processed.'
+        : `${createdVariants.length} ${renderPlan.label.toLowerCase()} variant${createdVariants.length === 1 ? '' : 's'} generated.`;
     await job.save();
 
     return {

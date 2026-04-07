@@ -21,12 +21,14 @@ import {
   downloadFile,
   generateFlyer,
   generateReport,
+  generateSocialPack,
   getChecklist,
   getDashboard,
   getFlyerExportUrl,
   getLatestFlyer,
   getLatestPricing,
   getLatestReport,
+  getLatestSocialPack,
   getProperty,
   getProviderReferenceSheetExportUrl,
   getReportExportUrl,
@@ -37,6 +39,7 @@ import {
   listMediaAssets,
   listMediaVariants,
   listVisionPresets,
+  savePhoto,
   saveProvider,
   selectMediaVariant,
   setPropertyPricingDecision,
@@ -54,6 +57,11 @@ const WORKSPACE_TABS = [
   { id: 'brochure', label: 'Brochure' },
   { id: 'report', label: 'Report' },
   { id: 'checklist', label: 'Checklist' },
+];
+
+const PHOTO_IMPORT_SOURCE_OPTIONS = [
+  { value: 'web_upload', label: 'Web upload' },
+  { value: 'third_party_import', label: 'Third-party import' },
 ];
 
 const PROPERTY_WORKSPACE_HIDDEN_WORKFLOW_STEPS = new Set([
@@ -223,6 +231,23 @@ function formatProviderStatusLabel(status) {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function formatProviderLeadStatusLabel(status) {
+  return formatProviderStatusLabel(status || 'open');
+}
+
+function formatDateTimeLabel(value) {
+  if (!value) {
+    return '—';
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return '—';
+  }
+
+  return parsed.toLocaleString();
+}
+
 function formatProviderReferenceAccessLabel(reference) {
   if (reference?.websiteUrl) {
     try {
@@ -296,6 +321,15 @@ function buildProviderSourceSummary(providerSource) {
   return parts.join(' · ');
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error(`Could not read ${file?.name || 'file'}.`));
+    reader.readAsDataURL(file);
+  });
+}
+
 export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const queryClient = useQueryClient();
   const flyerPreviewRef = useRef(null);
@@ -311,6 +345,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [latestPricing, setLatestPricing] = useState(null);
   const [latestFlyer, setLatestFlyer] = useState(null);
   const [latestReport, setLatestReport] = useState(null);
+  const [latestSocialPack, setLatestSocialPack] = useState(null);
   const [mediaAssets, setMediaAssets] = useState([]);
   const [mediaVariants, setMediaVariants] = useState([]);
   const [visionPresets, setVisionPresets] = useState([]);
@@ -333,6 +368,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [selectedListPriceDraft, setSelectedListPriceDraft] = useState('');
   const [selectedListPriceSourceDraft, setSelectedListPriceSourceDraft] = useState('recommended_mid');
   const [listingNoteDraft, setListingNoteDraft] = useState('');
+  const [photoImportSource, setPhotoImportSource] = useState('web_upload');
+  const [photoImportRoomLabel, setPhotoImportRoomLabel] = useState('Living room');
+  const [photoImportNotes, setPhotoImportNotes] = useState('');
+  const [freeformEnhancementInstructions, setFreeformEnhancementInstructions] = useState('');
   const [customChecklistTitle, setCustomChecklistTitle] = useState('');
   const [customChecklistDetail, setCustomChecklistDetail] = useState('');
   const [providerRecommendations, setProviderRecommendations] = useState([]);
@@ -1009,6 +1048,17 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     return response.workflow;
   }
 
+  async function refreshSocialPack() {
+    try {
+      const response = await getLatestSocialPack(propertyId);
+      setLatestSocialPack(response.socialPack || null);
+      return response.socialPack || null;
+    } catch {
+      setLatestSocialPack(null);
+      return null;
+    }
+  }
+
   async function handleBrowseGoogleFallback() {
     try {
       setProviderSearchStatus('Searching Google fallback providers...');
@@ -1177,6 +1227,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         } catch {
           setLatestReport(null);
         }
+        await refreshSocialPack();
         try {
           await refreshMediaAssets();
         } catch {
@@ -1522,6 +1573,111 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Variant generation failed', message: requestError.message });
+    } finally {
+      setStatus('');
+    }
+  }
+
+  async function handleGenerateFreeformVariant() {
+    if (blockArchivedMutation()) {
+      return;
+    }
+    if (!selectedMediaAsset || !freeformEnhancementInstructions.trim()) {
+      setToast({
+        tone: 'error',
+        title: 'Instructions required',
+        message: 'Describe the enhancement you want before generating a custom preview.',
+      });
+      return;
+    }
+
+    setActiveTab('vision');
+    setStatus('Generating custom enhancement preview...');
+    setToast(null);
+    try {
+      const response = await createImageEnhancementJob(selectedMediaAsset.id, {
+        mode: 'freeform',
+        instructions: freeformEnhancementInstructions.trim(),
+        roomType: selectedMediaAsset.roomLabel,
+      });
+      await Promise.all([
+        refreshMediaAssets(selectedMediaAsset.id),
+        refreshMediaVariants(selectedMediaAsset.id),
+        refreshWorkflow(),
+      ]);
+      setSelectedVariantId(response.variant?.id || '');
+      setToast({
+        tone: 'success',
+        title: 'Custom enhancement ready',
+        message: response.job?.warning || 'Your freeform enhancement request was saved and processed.',
+      });
+    } catch (requestError) {
+      setToast({ tone: 'error', title: 'Custom enhancement failed', message: requestError.message });
+    } finally {
+      setStatus('');
+    }
+  }
+
+  async function handleGenerateSocialPack() {
+    if (blockArchivedMutation()) {
+      return;
+    }
+
+    setStatus('Generating social ad pack...');
+    setToast(null);
+    try {
+      const response = await generateSocialPack(propertyId);
+      setLatestSocialPack(response.socialPack);
+      setToast({
+        tone: 'success',
+        title: 'Social ad pack ready',
+        message: 'The latest social export is ready below with headline, caption, CTA, and format guidance.',
+      });
+    } catch (requestError) {
+      setToast({ tone: 'error', title: 'Social pack failed', message: requestError.message });
+    } finally {
+      setStatus('');
+    }
+  }
+
+  async function handleImportPhotoFiles(fileList) {
+    if (blockArchivedMutation()) {
+      return;
+    }
+
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (!files.length) {
+      return;
+    }
+
+    setStatus(`Uploading ${files.length} photo${files.length === 1 ? '' : 's'}...`);
+    setToast(null);
+    try {
+      for (const file of files) {
+        const dataUrl = await readFileAsDataUrl(file);
+        const [, imageBase64 = ''] = dataUrl.split(',');
+        await savePhoto(propertyId, {
+          roomLabel: photoImportRoomLabel,
+          source: photoImportSource,
+          notes: photoImportNotes,
+          mimeType: file.type || 'image/jpeg',
+          imageBase64,
+        });
+      }
+
+      const nextAssets = await refreshMediaAssets();
+      if (nextAssets[0]?.id) {
+        await refreshMediaVariants(nextAssets[0].id);
+      }
+      await Promise.all([refreshDashboardSnapshot(), refreshWorkflow()]);
+      setPhotoImportNotes('');
+      setToast({
+        tone: 'success',
+        title: 'Photos imported',
+        message: `${files.length} photo${files.length === 1 ? '' : 's'} added to this property.`,
+      });
+    } catch (requestError) {
+      setToast({ tone: 'error', title: 'Photo import failed', message: requestError.message });
     } finally {
       setStatus('');
     }
@@ -2097,6 +2253,64 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           <span className="section-header-meta">{mediaAssets.length} saved photo{mediaAssets.length === 1 ? '' : 's'}</span>
         </div>
 
+        <div
+          className="workspace-inner-card brochure-control-card"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            handleImportPhotoFiles(event.dataTransfer?.files);
+          }}
+        >
+          <span className="label">Photo import manager</span>
+          <div className="brochure-control-grid brochure-control-grid-form">
+            <label className="workspace-control-field">
+              <span>Import source</span>
+              <select
+                className="select-input"
+                value={photoImportSource}
+                onChange={(event) => setPhotoImportSource(event.target.value)}
+              >
+                {PHOTO_IMPORT_SOURCE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="workspace-control-field">
+              <span>Room label</span>
+              <input
+                type="text"
+                value={photoImportRoomLabel}
+                onChange={(event) => setPhotoImportRoomLabel(event.target.value)}
+                placeholder="Kitchen"
+              />
+            </label>
+            <label className="workspace-control-field workspace-control-field-full">
+              <span>Notes</span>
+              <textarea
+                value={photoImportNotes}
+                onChange={(event) => setPhotoImportNotes(event.target.value)}
+                placeholder="Add optional context for imported third-party or web-uploaded photos."
+                maxLength={500}
+              />
+            </label>
+          </div>
+          <label className="button-secondary inline-button" style={{ display: 'inline-flex', cursor: 'pointer' }}>
+            Upload or drop photos
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(event) => handleImportPhotoFiles(event.target.files)}
+            />
+          </label>
+          <p className="workspace-control-note">
+            Drag-and-drop works here too. Imports keep their source label so mobile capture, web upload, and third-party assets stay distinguishable.
+          </p>
+        </div>
+
         {listingCandidateAssets.length ? (
           <div className="property-media-candidate-strip">
             <div className="property-media-candidate-header">
@@ -2331,6 +2545,28 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 <button type="button" className="button-primary" onClick={() => handleGenerateVariant(activeVisionPresetKey)} disabled={Boolean(status) || isArchivedProperty}>
                   Generate {activeVisionPreset?.displayName || 'enhancement'}
                 </button>
+              </div>
+              <div className="workspace-inner-card brochure-control-card">
+                <span className="label">Natural-language enhancement</span>
+                <textarea
+                  value={freeformEnhancementInstructions}
+                  onChange={(event) => setFreeformEnhancementInstructions(event.target.value)}
+                  placeholder="Please remove furniture, change flooring to dark hardwood, and brighten the room while keeping it realistic."
+                  maxLength={600}
+                />
+                <div className="workspace-action-column">
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={handleGenerateFreeformVariant}
+                    disabled={Boolean(status) || isArchivedProperty || !freeformEnhancementInstructions.trim()}
+                  >
+                    Generate custom preview
+                  </button>
+                </div>
+                <p className="workspace-control-note">
+                  Freeform requests persist with the job and fall back gracefully when a fully generative edit is not available in the current environment.
+                </p>
               </div>
               <div className="property-media-rail property-photo-grid compact">
                 {mediaAssets.map((asset) => (
@@ -2604,6 +2840,43 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         ) : (
           <p>No flyer draft yet. Generate one to preview brochure output.</p>
         )}
+
+        <div className="report-preview-section" style={{ marginTop: '1.5rem' }}>
+          <strong>Social ad pack</strong>
+          <div className="workspace-action-column" style={{ marginTop: '0.75rem' }}>
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={handleGenerateSocialPack}
+              disabled={Boolean(status) || isArchivedProperty}
+            >
+              Export social ad pack
+            </button>
+          </div>
+          {latestSocialPack ? (
+            <div className="workspace-tab-stack" style={{ marginTop: '1rem' }}>
+              <div className="tag-row">
+                {(latestSocialPack.variants || []).map((variant) => (
+                  <span key={`${variant.format}-${variant.width}-${variant.height}`}>
+                    {variant.width && variant.height ? `${variant.format} ${variant.width}x${variant.height}` : variant.format}
+                  </span>
+                ))}
+              </div>
+              <p><strong>Headline:</strong> {latestSocialPack.headline}</p>
+              <p><strong>Primary text:</strong> {latestSocialPack.primaryText}</p>
+              <p><strong>Short caption:</strong> {latestSocialPack.shortCaption}</p>
+              <p><strong>CTA:</strong> {latestSocialPack.cta}</p>
+              {(latestSocialPack.disclaimers || []).length ? (
+                <ul className="plain-list">
+                  {(latestSocialPack.disclaimers || []).map((item) => <li key={`social-disclaimer-${item}`}>{item}</li>)}
+                </ul>
+              ) : null}
+              <pre className="workspace-control-note" style={{ whiteSpace: 'pre-wrap' }}>{latestSocialPack.markdown}</pre>
+            </div>
+          ) : (
+            <p className="workspace-control-note">Generate a social pack to get square/story guidance plus ad-ready headline, caption, CTA, and markdown copy.</p>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -3364,13 +3637,44 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           {providerLeads.length ? (
             <div className="provider-lead-list">
               <strong>Recent lead requests</strong>
-              <ul className="plain-list">
-                {providerLeads.slice(0, 3).map((lead) => (
-                  <li key={lead.id}>
-                    {lead.categoryKey.replace(/_/g, ' ')}: {lead.status} · {lead.dispatches?.length || 0} provider(s)
-                  </li>
-                ))}
-              </ul>
+              {providerLeads.slice(0, 3).map((lead) => (
+                <article key={lead.id} className="provider-card provider-lead-card">
+                  <div className="provider-card-header">
+                    <div>
+                      <strong>{String(lead.categoryKey || 'provider').replace(/_/g, ' ')}</strong>
+                      <span>
+                        {formatProviderLeadStatusLabel(lead.status)}
+                        {lead.selectedProviderName ? ` · matched with ${lead.selectedProviderName}` : ''}
+                      </span>
+                    </div>
+                    <span className="checklist-chip">
+                      {lead.dispatchSummary?.contacted || lead.dispatches?.length || 0} contacted
+                    </span>
+                  </div>
+                  <div className="provider-quality-row">
+                    <span>
+                      Latest dispatch: {formatProviderLeadStatusLabel(lead.activity?.latestDispatchStatus || 'queued')}
+                    </span>
+                    <span>
+                      Latest reply: {formatProviderLeadStatusLabel(lead.activity?.latestResponseStatus || 'awaiting response')}
+                    </span>
+                    <span>
+                      Seller notified:{' '}
+                      {lead.sellerNotifiedAt
+                        ? `${formatDateTimeLabel(lead.sellerNotifiedAt)}`
+                        : 'Not yet'}
+                    </span>
+                  </div>
+                  <p className="workspace-control-note">
+                    {lead.selectedProviderName
+                      ? `${lead.selectedProviderName} currently holds this lead.`
+                      : 'Provider outreach is still in progress.'}{' '}
+                    {lead.sellerNotificationChannels?.length
+                      ? `Notification channels: ${lead.sellerNotificationChannels.join(', ')}.`
+                      : ''}
+                  </p>
+                </article>
+              ))}
             </div>
           ) : null}
         </div>

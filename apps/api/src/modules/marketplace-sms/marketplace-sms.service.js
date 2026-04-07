@@ -16,6 +16,7 @@ import { ProviderModel } from '../providers/provider.model.js';
 import { parseProviderReply } from './provider-reply-parser.service.js';
 import { buildNormalizedPublicUrl } from './twilio-signature.service.js';
 import { UserModel } from '../auth/auth.model.js';
+import { SmsLogModel } from './sms-log.model.js';
 
 const TEMPLATE_BY_CATEGORY = {
   inspector:
@@ -83,6 +84,22 @@ function isTwilioConfigured() {
   );
 }
 
+function getTwilioFromValue() {
+  return env.TWILIO_MESSAGING_SERVICE_SID || env.TWILIO_FROM_NUMBER || '';
+}
+
+export function getTwilioConfigurationStatus() {
+  return {
+    configured: isTwilioConfigured(),
+    accountSidPresent: Boolean(env.TWILIO_ACCOUNT_SID),
+    authTokenPresent: Boolean(env.TWILIO_AUTH_TOKEN),
+    messagingServiceSidPresent: Boolean(env.TWILIO_MESSAGING_SERVICE_SID),
+    fromNumberPresent: Boolean(env.TWILIO_FROM_NUMBER),
+    inboundWebhookUrl: buildTwilioWebhookUrl('inbound'),
+    statusWebhookUrl: buildTwilioWebhookUrl('status'),
+  };
+}
+
 function buildLeadSmsBody({ leadRequest }) {
   const zip = leadRequest?.propertySnapshot?.zip || 'your area';
   const categoryKey = leadRequest?.categoryKey || '';
@@ -148,6 +165,213 @@ async function sendTwilioMessage({ to, body, statusCallbackUrl = buildTwilioWebh
   }
 
   return data;
+}
+
+async function logSmsMessage({
+  userId = null,
+  propertyId = null,
+  requestId = null,
+  direction = 'outbound',
+  to = '',
+  from = '',
+  body = '',
+  status = '',
+  providerId = null,
+  messageSid = '',
+  metadata = {},
+}) {
+  await SmsLogModel.create({
+    userId,
+    propertyId,
+    requestId,
+    direction,
+    to,
+    from,
+    body,
+    status,
+    providerId,
+    messageSid,
+    metadata,
+  });
+}
+
+function getPropertySmsLabel(property = {}, leadRequest = {}) {
+  return (
+    property?.title ||
+    property?.addressLine1 ||
+    leadRequest?.propertySnapshot?.address ||
+    [leadRequest?.propertySnapshot?.city, leadRequest?.propertySnapshot?.state]
+      .filter(Boolean)
+      .join(', ') ||
+    'your property'
+  );
+}
+
+async function sendSellerSms({
+  user,
+  body,
+  propertyId = null,
+  requestId = null,
+  providerId = null,
+  metadata = {},
+}) {
+  const to = normalizePhoneNumber(user?.mobilePhone);
+  const from = getTwilioFromValue();
+
+  if (!user?.smsOptIn || !to) {
+    await logSmsMessage({
+      userId: user?._id || user?.id || null,
+      propertyId,
+      requestId,
+      direction: 'outbound',
+      to,
+      from,
+      body,
+      status: 'skipped_opt_out',
+      providerId,
+      metadata,
+    });
+    return { sent: false, status: 'skipped_opt_out' };
+  }
+
+  if (!isTwilioConfigured()) {
+    await logSmsMessage({
+      userId: user?._id || user?.id || null,
+      propertyId,
+      requestId,
+      direction: 'outbound',
+      to,
+      from,
+      body,
+      status: 'skipped_not_configured',
+      providerId,
+      metadata,
+    });
+    return { sent: false, status: 'skipped_not_configured' };
+  }
+
+  try {
+    const response = await sendTwilioMessage({ to, body });
+    await logSmsMessage({
+      userId: user?._id || user?.id || null,
+      propertyId,
+      requestId,
+      direction: 'outbound',
+      to,
+      from,
+      body,
+      status: response.status || 'queued',
+      providerId,
+      messageSid: response.sid || '',
+      metadata,
+    });
+    return {
+      sent: true,
+      status: response.status || 'queued',
+      sid: response.sid || '',
+    };
+  } catch (error) {
+    await logSmsMessage({
+      userId: user?._id || user?.id || null,
+      propertyId,
+      requestId,
+      direction: 'outbound',
+      to,
+      from,
+      body,
+      status: 'failed',
+      providerId,
+      metadata: {
+        ...metadata,
+        error: error.message,
+      },
+    });
+    return {
+      sent: false,
+      status: 'failed',
+      error,
+    };
+  }
+}
+
+export async function sendRegistrationConfirmationSms(user) {
+  return sendSellerSms({
+    user,
+    body:
+      'Welcome to Workside Home Advisor. Your account is active and we’ll text you important listing and provider updates here. Reply STOP to opt out.',
+    metadata: {
+      template: 'registration_confirmation',
+    },
+  });
+}
+
+export async function sendSellerProviderPendingSms({
+  user,
+  property,
+  leadRequest,
+  serviceType = '',
+}) {
+  const propertyName = getPropertySmsLabel(property, leadRequest);
+  return sendSellerSms({
+    user,
+    propertyId: property?._id || property?.id || leadRequest?.propertyId || null,
+    requestId: leadRequest?._id || leadRequest?.id || null,
+    body: `Update: your ${serviceType || 'provider'} request for ${propertyName} is still pending. We’ll keep looking and notify you when a provider responds.`,
+    metadata: {
+      template: 'provider_pending',
+      serviceType,
+    },
+  });
+}
+
+export async function sendSellerProviderMatchSms({
+  user,
+  property,
+  leadRequest,
+  provider,
+  serviceType = '',
+}) {
+  const propertyName = getPropertySmsLabel(property, leadRequest);
+  return sendSellerSms({
+    user,
+    propertyId: property?._id || property?.id || leadRequest?.propertyId || null,
+    requestId: leadRequest?._id || leadRequest?.id || null,
+    providerId: provider?._id || provider?.id || null,
+    body: `Good news — a provider has responded to your request for ${serviceType || 'support'} at ${propertyName}. We’ll update your workspace now.`,
+    metadata: {
+      template: 'provider_matched',
+      serviceType,
+    },
+  });
+}
+
+export async function sendTestTwilioSms({
+  to,
+  body = '',
+  statusCallbackUrl = buildTwilioWebhookUrl('status'),
+}) {
+  const normalizedTo = normalizePhoneNumber(to);
+  if (!normalizedTo) {
+    throw new Error('A valid destination phone number is required.');
+  }
+  if (!isTwilioConfigured()) {
+    throw new Error('Twilio is not fully configured. Check TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM_NUMBER.');
+  }
+
+  const messageBody =
+    String(body || '').trim() ||
+    [
+      'Workside Home Advisor test message.',
+      `Inbound webhook: ${buildTwilioWebhookUrl('inbound')}`,
+      `Status callback: ${statusCallbackUrl}`,
+      'Reply YES TEST to confirm inbound SMS is reaching the API.',
+    ].join('\n');
+
+  return sendTwilioMessage({
+    to: normalizedTo,
+    body: messageBody,
+    statusCallbackUrl,
+  });
 }
 
 async function upsertProviderAnalytics(providerId, mutator) {
@@ -269,37 +493,61 @@ async function sendLeadEmail({ provider, leadRequest }) {
 
 async function notifySellerOfProviderMatch({ leadRequest, provider, logger = console }) {
   const seller = await UserModel.findById(leadRequest.userId).lean();
-  if (!seller?.email) {
+  if (!seller) {
     return [];
   }
 
-  try {
-    await sendSellerProviderMatchEmail({
-      to: seller.email,
-      propertyAddress:
-        leadRequest?.propertySnapshot?.address ||
-        [
-          leadRequest?.propertySnapshot?.city,
-          leadRequest?.propertySnapshot?.state,
-          leadRequest?.propertySnapshot?.zip,
-        ]
-          .filter(Boolean)
-          .join(', '),
-      categoryLabel: String(leadRequest?.categoryKey || 'service').replace(/_/g, ' '),
-      providerName: provider?.businessName || 'Provider',
-      providerPhone: provider?.leadRouting?.notifyPhone || provider?.phone || '',
-      providerEmail: provider?.leadRouting?.notifyEmail || provider?.email || '',
-      workspaceUrl: `${env.PUBLIC_WEB_URL}/properties/${leadRequest.propertyId}`,
-    });
+  const propertyName =
+    leadRequest?.propertySnapshot?.address ||
+    [leadRequest?.propertySnapshot?.city, leadRequest?.propertySnapshot?.state, leadRequest?.propertySnapshot?.zip]
+      .filter(Boolean)
+      .join(', ');
+  const categoryLabel = String(leadRequest?.categoryKey || 'service').replace(/_/g, ' ');
+  const channels = ['dashboard'];
 
-    return ['dashboard', 'email'];
-  } catch (error) {
-    logger?.error?.(
-      { err: error, leadRequestId: String(leadRequest._id), providerId: String(provider?._id || '') },
-      'seller provider match notification failed',
-    );
-    return ['dashboard'];
+  if (seller.email) {
+    try {
+      await sendSellerProviderMatchEmail({
+        to: seller.email,
+        propertyAddress: propertyName,
+        categoryLabel,
+        providerName: provider?.businessName || 'Provider',
+        providerPhone: provider?.leadRouting?.notifyPhone || provider?.phone || '',
+        providerEmail: provider?.leadRouting?.notifyEmail || provider?.email || '',
+        workspaceUrl: `${env.PUBLIC_WEB_URL}/properties/${leadRequest.propertyId}`,
+      });
+      channels.push('email');
+    } catch (error) {
+      logger?.error?.(
+        { err: error, leadRequestId: String(leadRequest._id), providerId: String(provider?._id || '') },
+        'seller provider match notification failed',
+      );
+    }
   }
+
+  try {
+    const smsResult = await sendSellerProviderMatchSms({
+      user: seller,
+      leadRequest,
+      property: {
+        id: leadRequest.propertyId,
+        title: '',
+        addressLine1: propertyName,
+      },
+      provider,
+      serviceType: categoryLabel,
+    });
+    if (smsResult.sent) {
+      channels.push('sms');
+    }
+  } catch (error) {
+    logger?.warn?.(
+      { err: error, leadRequestId: String(leadRequest._id), providerId: String(provider?._id || '') },
+      'seller provider match sms failed',
+    );
+  }
+
+  return channels;
 }
 
 function shouldAttemptEmail(provider, requestedDeliveryMode = 'sms_and_email') {
@@ -546,6 +794,26 @@ export async function recordProviderLeadResponse({
     }
 
     await refreshLeadRequestStatus(dispatch.leadRequestId);
+    const refreshedLeadRequest = await LeadRequestModel.findById(dispatch.leadRequestId).lean();
+    if (
+      refreshedLeadRequest &&
+      refreshedLeadRequest.status === 'open' &&
+      !refreshedLeadRequest.selectedProviderId
+    ) {
+      const seller = await UserModel.findById(refreshedLeadRequest.userId).lean();
+      if (seller) {
+        await sendSellerProviderPendingSms({
+          user: seller,
+          leadRequest: refreshedLeadRequest,
+          property: {
+            id: refreshedLeadRequest.propertyId,
+            title: '',
+            addressLine1: refreshedLeadRequest.propertySnapshot?.address || '',
+          },
+          serviceType: String(refreshedLeadRequest.categoryKey || 'service').replace(/_/g, ' '),
+        }).catch(() => null);
+      }
+    }
     return {
       matched: false,
       alreadyMatched: false,

@@ -25,6 +25,53 @@ export function average(numbers) {
   return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
 }
 
+export function normalizePhoneDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+export function normalizeUsPhoneToE164(value) {
+  const digits = normalizePhoneDigits(value);
+
+  if (!digits) {
+    return '';
+  }
+
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
+
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `+${digits}`;
+  }
+
+  return '';
+}
+
+export function isValidUsPhone(value) {
+  return Boolean(normalizeUsPhoneToE164(value));
+}
+
+export function formatPhoneForDisplay(value) {
+  const digits = normalizePhoneDigits(value);
+  const normalized = digits.length === 11 && digits.startsWith('1')
+    ? digits.slice(1)
+    : digits.slice(0, 10);
+
+  if (!normalized) {
+    return '';
+  }
+
+  if (normalized.length < 4) {
+    return `(${normalized}`;
+  }
+
+  if (normalized.length < 7) {
+    return `(${normalized.slice(0, 3)}) ${normalized.slice(3)}`;
+  }
+
+  return `(${normalized.slice(0, 3)}) ${normalized.slice(3, 6)}-${normalized.slice(6, 10)}`;
+}
+
 function normalizeTextToken(value) {
   return String(value || '')
     .trim()

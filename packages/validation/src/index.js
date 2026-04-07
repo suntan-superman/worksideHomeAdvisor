@@ -5,6 +5,8 @@ export const signupSchema = z.object({
   password: z.string().min(8),
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
+  mobilePhone: z.string().min(7).max(40).optional(),
+  smsOptIn: z.boolean().optional(),
   role: z.enum(['seller', 'agent', 'provider']).optional(),
   attribution: z
     .object({

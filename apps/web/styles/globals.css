@@ -1885,6 +1885,10 @@ select {
   gap: 14px;
 }
 
+.provider-lead-card {
+  background: rgba(248, 244, 238, 0.84);
+}
+
 .provider-card {
   display: grid;
   gap: 10px;
@@ -2023,6 +2027,11 @@ select {
   border-radius: 999px;
   background: rgba(70, 99, 79, 0.08);
   color: var(--muted);
+}
+
+.provider-portal-response-note-warn {
+  background: rgba(208, 136, 89, 0.14);
+  color: #84452c;
 }
 
 .provider-portal-stats {
@@ -3499,4 +3508,19 @@ select {
   .landing-step-card {
     padding: 22px;
   }
+}
+.workspace-checkbox-field,
+.dashboard-checkbox-field {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 12px;
+  align-items: start;
+  color: #dbcbb7;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+.workspace-checkbox-field input,
+.dashboard-checkbox-field input {
+  margin-top: 0.2rem;
 }

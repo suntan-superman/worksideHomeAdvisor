@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { formatCurrency } from '@workside/utils';
+import { formatCurrency, formatPhoneForDisplay } from '@workside/utils';
 
 import { AppFrame } from '../../components/AppFrame';
 import { Toast } from '../../components/Toast';
@@ -20,6 +20,7 @@ import {
   restoreProperty as restorePropertyRequest,
   syncBillingSession,
   listProperties,
+  updateUserProfile,
 } from '../../lib/api';
 import { getStoredSession, setStoredSession } from '../../lib/session';
 
@@ -219,6 +220,12 @@ export default function DashboardPage() {
   const [billingSessionId, setBillingSessionId] = useState('');
   const [showCompletedWorkflowSteps, setShowCompletedWorkflowSteps] = useState(false);
   const [focusedWorkflowStepKey, setFocusedWorkflowStepKey] = useState('');
+  const [accountForm, setAccountForm] = useState({
+    firstName: '',
+    lastName: '',
+    mobilePhone: '',
+    smsOptIn: false,
+  });
   const [createForm, setCreateForm] = useState({
     title: '',
     addressLine1: '',
@@ -335,6 +342,15 @@ export default function DashboardPage() {
     const stored = getStoredSession();
     setSession(stored);
   }, []);
+
+  useEffect(() => {
+    setAccountForm({
+      firstName: session?.user?.firstName || '',
+      lastName: session?.user?.lastName || '',
+      mobilePhone: formatPhoneForDisplay(session?.user?.mobilePhone || ''),
+      smsOptIn: Boolean(session?.user?.smsOptIn),
+    });
+  }, [session?.user?.firstName, session?.user?.lastName, session?.user?.mobilePhone, session?.user?.smsOptIn]);
 
   useEffect(() => {
     const landingDraft = loadSellerLandingDraft();
@@ -647,6 +663,47 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleSaveAccountProfile(event) {
+    event.preventDefault();
+    if (!session?.token) {
+      return;
+    }
+
+    setActionState('Saving account profile...');
+    setToast(null);
+
+    try {
+      const response = await updateUserProfile({
+        firstName: accountForm.firstName,
+        lastName: accountForm.lastName,
+        mobilePhone: accountForm.mobilePhone,
+        smsOptIn: accountForm.smsOptIn,
+      }, session.token);
+      const nextSession = {
+        ...session,
+        user: {
+          ...session.user,
+          ...response.user,
+        },
+      };
+      setSession(nextSession);
+      setStoredSession(nextSession);
+      setToast({
+        tone: 'success',
+        title: 'Profile updated',
+        message: 'Your seller contact settings were saved.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not save profile',
+        message: requestError.message,
+      });
+    } finally {
+      setActionState('');
+    }
+  }
+
   async function handleArchiveSelectedProperty() {
     if (!selectedPropertyId || !session?.user?.id) {
       return;
@@ -892,6 +949,60 @@ export default function DashboardPage() {
           </section>
 
           <section className="dashboard-grid">
+            <form className="feature-card" onSubmit={handleSaveAccountProfile}>
+              <span className="label">Seller contact</span>
+              <h3>Mobile updates</h3>
+              <p>Keep your contact settings current so Workside can send listing and provider SMS updates when you opt in.</p>
+              <label>
+                First name
+                <input
+                  type="text"
+                  value={accountForm.firstName}
+                  onChange={(event) => setAccountForm((current) => ({ ...current, firstName: event.target.value }))}
+                />
+              </label>
+              <label>
+                Last name
+                <input
+                  type="text"
+                  value={accountForm.lastName}
+                  onChange={(event) => setAccountForm((current) => ({ ...current, lastName: event.target.value }))}
+                />
+              </label>
+              <label>
+                Mobile number
+                <input
+                  type="tel"
+                  placeholder="(661) 555-1212"
+                  value={accountForm.mobilePhone}
+                  onChange={(event) =>
+                    setAccountForm((current) => ({
+                      ...current,
+                      mobilePhone: formatPhoneForDisplay(event.target.value),
+                    }))
+                  }
+                />
+              </label>
+              <label className="dashboard-checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={accountForm.smsOptIn}
+                  onChange={(event) =>
+                    setAccountForm((current) => ({
+                      ...current,
+                      smsOptIn: event.target.checked,
+                    }))
+                  }
+                />
+                <span>I agree to receive transactional SMS messages about account activity, provider responses, and listing workflow updates.</span>
+              </label>
+              <div className="button-stack">
+                <button type="submit" className="button-primary" disabled={!session?.token || Boolean(actionState)}>
+                  Save contact settings
+                </button>
+              </div>
+            </form>
+
             <article className="feature-card">
               <span className="label">Billing access</span>
               <h3>

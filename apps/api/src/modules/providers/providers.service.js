@@ -5,6 +5,7 @@ import {
   normalizePhoneNumber,
   notifyQueuedLeadDispatches,
   recordProviderLeadResponse,
+  sendSellerProviderPendingSms,
 } from '../marketplace-sms/marketplace-sms.service.js';
 import { env } from '../../config/env.js';
 import { sendAdminProviderProfileChangeAlert } from '../../services/emailService.js';
@@ -1451,7 +1452,40 @@ function serializeProviderReference(document) {
   };
 }
 
-function serializeProviderPortalLead(dispatch, leadRequest) {
+function summarizeLeadActivity(dispatches = [], responses = [], smsLogs = []) {
+  const outboundSms = smsLogs.filter((log) => log.direction === 'outbound').length;
+  const inboundSms = smsLogs.filter((log) => log.direction === 'inbound').length;
+  const statusCallbacks = smsLogs.filter((log) => String(log.messageType || '').startsWith('status_callback')).length;
+  const latestSmsLog = [...smsLogs].sort(
+    (left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime(),
+  )[0];
+  const latestDispatch = [...dispatches].sort((left, right) => {
+    const rightAt = new Date(right.respondedAt || right.smsSentAt || right.sentAt || right.createdAt || 0).getTime();
+    const leftAt = new Date(left.respondedAt || left.smsSentAt || left.sentAt || left.createdAt || 0).getTime();
+    return rightAt - leftAt;
+  })[0];
+  const latestResponse = [...responses].sort(
+    (left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime(),
+  )[0];
+
+  return {
+    outboundSms,
+    inboundSms,
+    statusCallbacks,
+    latestSmsDirection: latestSmsLog?.direction || '',
+    latestSmsDeliveryStatus: latestSmsLog?.deliveryStatus || '',
+    latestSmsParseStatus: latestSmsLog?.parseStatus || '',
+    latestSmsMessageType: latestSmsLog?.messageType || '',
+    latestSmsAt: latestSmsLog?.createdAt || null,
+    latestDispatchStatus: latestDispatch?.status || '',
+    latestResponseStatus: latestDispatch?.responseStatus || latestResponse?.responseStatus || '',
+    latestContactedAt:
+      latestDispatch?.respondedAt || latestDispatch?.smsSentAt || latestDispatch?.sentAt || latestDispatch?.createdAt || null,
+    latestReplyAt: latestResponse?.createdAt || null,
+  };
+}
+
+function serializeProviderPortalLead(dispatch, leadRequest, options = {}) {
   const propertyAddress =
     leadRequest?.propertySnapshot?.address ||
     [leadRequest?.propertySnapshot?.city, leadRequest?.propertySnapshot?.state, leadRequest?.propertySnapshot?.zip]
@@ -1471,7 +1505,19 @@ function serializeProviderPortalLead(dispatch, leadRequest) {
     propertyCity: leadRequest?.propertySnapshot?.city || '',
     propertyState: leadRequest?.propertySnapshot?.state || '',
     propertyZip: leadRequest?.propertySnapshot?.zip || '',
+    selectedProviderId:
+      leadRequest?.selectedProviderId?.toString?.() || String(leadRequest?.selectedProviderId || ''),
+    selectedProviderName: options.selectedProviderName || '',
+    matchedAt: leadRequest?.matchedAt || null,
+    sellerNotifiedAt: leadRequest?.sellerNotifiedAt || null,
+    sellerNotificationChannels: leadRequest?.sellerNotificationChannels || [],
     sentAt: dispatch.sentAt || null,
+    smsSentAt: dispatch.smsSentAt || null,
+    smsMessageSid: dispatch.smsMessageSid || '',
+    smsError: dispatch.smsError || '',
+    emailSentAt: dispatch.emailSentAt || null,
+    emailError: dispatch.emailError || '',
+    deliveryChannels: dispatch.deliveryChannels || [],
     respondedAt: dispatch.respondedAt || null,
     createdAt: dispatch.createdAt || null,
     canRespond: ['queued', 'sent', 'delivered'].includes(dispatch.status),
@@ -1582,8 +1628,21 @@ async function buildProviderPortalDashboard(providerDocument) {
   const leadRequests = leadRequestIds.length
     ? await LeadRequestModel.find({ _id: { $in: leadRequestIds } }).lean()
     : [];
+  const selectedProviderIds = [
+    ...new Set(
+      leadRequests
+        .map((leadRequest) => leadRequest.selectedProviderId?.toString?.() || String(leadRequest.selectedProviderId || ''))
+        .filter(Boolean),
+    ),
+  ];
+  const selectedProviders = selectedProviderIds.length
+    ? await ProviderModel.find({ _id: { $in: selectedProviderIds } }).lean()
+    : [];
   const leadRequestById = new Map(
     leadRequests.map((leadRequest) => [leadRequest._id?.toString?.() || String(leadRequest._id), leadRequest]),
+  );
+  const selectedProviderById = new Map(
+    selectedProviders.map((provider) => [provider._id?.toString?.() || String(provider._id), provider]),
   );
 
   return {
@@ -1616,6 +1675,17 @@ async function buildProviderPortalDashboard(providerDocument) {
       serializeProviderPortalLead(
         dispatch,
         leadRequestById.get(dispatch.leadRequestId?.toString?.() || String(dispatch.leadRequestId)),
+        {
+          selectedProviderName:
+            selectedProviderById.get(
+              leadRequestById.get(dispatch.leadRequestId?.toString?.() || String(dispatch.leadRequestId))
+                ?.selectedProviderId?.toString?.() ||
+                String(
+                  leadRequestById.get(dispatch.leadRequestId?.toString?.() || String(dispatch.leadRequestId))
+                    ?.selectedProviderId || '',
+                ),
+            )?.businessName || '',
+        },
       ),
     ),
   };
@@ -1708,7 +1778,7 @@ function summarizeLeadDispatches(dispatches = []) {
   return summary;
 }
 
-function serializeLeadRequest(document, dispatches = []) {
+function serializeLeadRequest(document, dispatches = [], options = {}) {
   return {
     id: document._id?.toString?.() || String(document._id),
     propertyId: document.propertyId?.toString?.() || String(document.propertyId),
@@ -1719,6 +1789,7 @@ function serializeLeadRequest(document, dispatches = []) {
     sourceRefId: document.sourceRefId || '',
     status: document.status,
     selectedProviderId: document.selectedProviderId?.toString?.() || String(document.selectedProviderId || ''),
+    selectedProviderName: options.selectedProviderName || '',
     selectedDispatchId: document.selectedDispatchId?.toString?.() || String(document.selectedDispatchId || ''),
     matchedAt: document.matchedAt || null,
     sellerNotifiedAt: document.sellerNotifiedAt || null,
@@ -1732,6 +1803,8 @@ function serializeLeadRequest(document, dispatches = []) {
       zip: document.propertySnapshot?.zip || '',
     },
     dispatches,
+    dispatchSummary: options.dispatchSummary || summarizeLeadDispatches(dispatches),
+    activity: options.activity || summarizeLeadActivity(dispatches, options.responses || [], options.smsLogs || []),
     createdAt: document.createdAt || null,
     updatedAt: document.updatedAt || null,
   };
@@ -2382,6 +2455,16 @@ export async function createProviderLeadRequest(propertyId, payload = {}) {
     });
   }
 
+  const seller = await UserModel.findById(property.ownerUserId).lean();
+  if (seller) {
+    await sendSellerProviderPendingSms({
+      user: seller,
+      property,
+      leadRequest,
+      serviceType: resolvedCategoryKey.replace(/_/g, ' '),
+    }).catch(() => null);
+  }
+
   return {
     leadRequestId: leadRequest._id?.toString?.() || String(leadRequest._id),
     status: providerResults.items.length ? 'routing' : 'open',
@@ -2401,13 +2484,25 @@ export async function listProviderLeadsForProperty(propertyId) {
 
   const leadRequests = await LeadRequestModel.find({ propertyId }).sort({ createdAt: -1 }).limit(20).lean();
   const leadRequestIds = leadRequests.map((entry) => entry._id);
-  const dispatches = leadRequestIds.length
-    ? await LeadDispatchModel.find({ leadRequestId: { $in: leadRequestIds } }).lean()
-    : [];
-  const providerIds = [...new Set(dispatches.map((entry) => entry.providerId?.toString?.() || String(entry.providerId)))];
+  const [dispatches, responses, smsLogs] = leadRequestIds.length
+    ? await Promise.all([
+        LeadDispatchModel.find({ leadRequestId: { $in: leadRequestIds } }).lean(),
+        ProviderResponseModel.find({ leadRequestId: { $in: leadRequestIds } }).sort({ createdAt: -1 }).lean(),
+        ProviderSmsLogModel.find({ leadRequestId: { $in: leadRequestIds } }).sort({ createdAt: -1 }).lean(),
+      ])
+    : [[], [], []];
+  const providerIds = [
+    ...new Set(
+      [...dispatches, ...leadRequests]
+        .map((entry) => entry.providerId?.toString?.() || entry.selectedProviderId?.toString?.() || String(entry.providerId || entry.selectedProviderId || ''))
+        .filter(Boolean),
+    ),
+  ];
   const providers = providerIds.length ? await ProviderModel.find({ _id: { $in: providerIds } }).lean() : [];
   const providerById = new Map(providers.map((provider) => [provider._id?.toString?.() || String(provider._id), provider]));
   const dispatchesByLeadId = new Map();
+  const responsesByLeadId = new Map();
+  const smsLogsByLeadId = new Map();
 
   for (const dispatch of dispatches) {
     const leadId = dispatch.leadRequestId?.toString?.() || String(dispatch.leadRequestId);
@@ -2424,7 +2519,22 @@ export async function listProviderLeadsForProperty(propertyId) {
       emailSentAt: dispatch.emailSentAt || null,
       emailError: dispatch.emailError || '',
       respondedAt: dispatch.respondedAt || null,
+      smsSentAt: dispatch.smsSentAt || null,
+      smsMessageSid: dispatch.smsMessageSid || '',
+      smsError: dispatch.smsError || '',
     });
+  }
+
+  for (const response of responses) {
+    const leadId = response.leadRequestId?.toString?.() || String(response.leadRequestId);
+    if (!responsesByLeadId.has(leadId)) responsesByLeadId.set(leadId, []);
+    responsesByLeadId.get(leadId).push(response);
+  }
+
+  for (const log of smsLogs) {
+    const leadId = log.leadRequestId?.toString?.() || String(log.leadRequestId);
+    if (!smsLogsByLeadId.has(leadId)) smsLogsByLeadId.set(leadId, []);
+    smsLogsByLeadId.get(leadId).push(log);
   }
 
   return {
@@ -2432,6 +2542,14 @@ export async function listProviderLeadsForProperty(propertyId) {
       serializeLeadRequest(
         leadRequest,
         dispatchesByLeadId.get(leadRequest._id?.toString?.() || String(leadRequest._id)) || [],
+        {
+          selectedProviderName:
+            providerById.get(
+              leadRequest.selectedProviderId?.toString?.() || String(leadRequest.selectedProviderId || ''),
+            )?.businessName || '',
+          responses: responsesByLeadId.get(leadRequest._id?.toString?.() || String(leadRequest._id)) || [],
+          smsLogs: smsLogsByLeadId.get(leadRequest._id?.toString?.() || String(leadRequest._id)) || [],
+        },
       ),
     ),
   };
@@ -3165,8 +3283,13 @@ export async function listAdminProviderLeads({ limit = 50 } = {}) {
 
   const providerIds = [
     ...new Set(
-      [...dispatches, ...responses, ...smsLogs]
-        .map((record) => record.providerId?.toString?.() || String(record.providerId || ''))
+      [...dispatches, ...responses, ...smsLogs, ...leads]
+        .map(
+          (record) =>
+            record.providerId?.toString?.() ||
+            record.selectedProviderId?.toString?.() ||
+            String(record.providerId || record.selectedProviderId || ''),
+        )
         .filter(Boolean),
     ),
   ];
@@ -3248,6 +3371,14 @@ export async function listAdminProviderLeads({ limit = 50 } = {}) {
         source: lead.source || 'checklist_task',
         sourceRefId: lead.sourceRefId || '',
         requestedByRole: lead.requestedByRole || 'seller',
+        selectedProviderId:
+          lead.selectedProviderId?.toString?.() || String(lead.selectedProviderId || ''),
+        selectedProviderName:
+          providerById.get(lead.selectedProviderId?.toString?.() || String(lead.selectedProviderId || ''))
+            ?.businessName || '',
+        matchedAt: lead.matchedAt || null,
+        sellerNotifiedAt: lead.sellerNotifiedAt || null,
+        sellerNotificationChannels: lead.sellerNotificationChannels || [],
         maxProviders: Number(lead.maxProviders || 0),
         message: lead.message || '',
         propertyAddress,
@@ -3264,6 +3395,7 @@ export async function listAdminProviderLeads({ limit = 50 } = {}) {
         help: counts.help,
         customReplies: counts.customReplies,
         optedOut: counts.optedOut,
+        activity: summarizeLeadActivity(leadDispatches, leadResponses, leadSmsLogs),
         dispatches: leadDispatches.map((dispatch) =>
           serializeLeadDispatch(
             dispatch,

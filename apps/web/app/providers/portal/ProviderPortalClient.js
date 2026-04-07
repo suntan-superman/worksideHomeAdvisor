@@ -1171,7 +1171,25 @@ export function ProviderPortalClient({
                     <span>Lead status: {lead.leadStatus}</span>
                     <span>Sent: {formatDate(lead.sentAt || lead.createdAt)}</span>
                     <span>Response: {lead.responseStatus || 'awaiting response'}</span>
+                    {lead.deliveryChannels?.length ? (
+                      <span>Sent via {lead.deliveryChannels.join(' + ')}</span>
+                    ) : null}
+                    {lead.sellerNotifiedAt ? (
+                      <span>Seller notified {formatDate(lead.sellerNotifiedAt)}</span>
+                    ) : null}
                   </div>
+                  {lead.selectedProviderName ? (
+                    <div className="provider-portal-response-note">
+                      {lead.selectedProviderId === portalSession?.providerId
+                        ? `You currently hold this matched lead${lead.matchedAt ? ` · matched ${formatDate(lead.matchedAt)}` : ''}.`
+                        : `${lead.selectedProviderName} already accepted this lead${lead.matchedAt ? ` · matched ${formatDate(lead.matchedAt)}` : ''}.`}
+                    </div>
+                  ) : null}
+                  {lead.smsError || lead.emailError ? (
+                    <div className="provider-portal-response-note provider-portal-response-note-warn">
+                      Delivery issue: {lead.smsError || lead.emailError}
+                    </div>
+                  ) : null}
                   <div className="provider-card-actions">
                     {lead.canRespond ? (
                       <>
