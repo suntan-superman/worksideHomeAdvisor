@@ -948,42 +948,55 @@ export default function DashboardPage() {
             </article>
           </section>
 
-          <section className="dashboard-grid">
-            <form className="feature-card" onSubmit={handleSaveAccountProfile}>
-              <span className="label">Seller contact</span>
-              <h3>Mobile updates</h3>
-              <p>Keep your contact settings current so Workside can send listing and provider SMS updates when you opt in.</p>
-              <label>
-                First name
-                <input
-                  type="text"
-                  value={accountForm.firstName}
-                  onChange={(event) => setAccountForm((current) => ({ ...current, firstName: event.target.value }))}
-                />
-              </label>
-              <label>
-                Last name
-                <input
-                  type="text"
-                  value={accountForm.lastName}
-                  onChange={(event) => setAccountForm((current) => ({ ...current, lastName: event.target.value }))}
-                />
-              </label>
-              <label>
-                Mobile number
-                <input
-                  type="tel"
-                  placeholder="(661) 555-1212"
-                  value={accountForm.mobilePhone}
-                  onChange={(event) =>
-                    setAccountForm((current) => ({
-                      ...current,
-                      mobilePhone: formatPhoneForDisplay(event.target.value),
-                    }))
-                  }
-                />
-              </label>
-              <label className="dashboard-checkbox-field">
+          <section className="dashboard-grid dashboard-account-grid">
+            <form className="feature-card dashboard-contact-card" onSubmit={handleSaveAccountProfile}>
+              <div className="dashboard-contact-card-header">
+                <div>
+                  <span className="label">Seller contact</span>
+                  <h3>Mobile updates</h3>
+                </div>
+                <span className={`dashboard-contact-status-pill${accountForm.smsOptIn ? ' enabled' : ''}`}>
+                  {accountForm.smsOptIn ? 'SMS enabled' : 'Email only'}
+                </span>
+              </div>
+              <p className="dashboard-contact-card-copy">
+                Keep your contact details current so Workside can send listing, provider, and account updates to the right place.
+              </p>
+
+              <div className="dashboard-contact-grid">
+                <label className="dashboard-contact-field">
+                  <span>First name</span>
+                  <input
+                    type="text"
+                    value={accountForm.firstName}
+                    onChange={(event) => setAccountForm((current) => ({ ...current, firstName: event.target.value }))}
+                  />
+                </label>
+                <label className="dashboard-contact-field">
+                  <span>Last name</span>
+                  <input
+                    type="text"
+                    value={accountForm.lastName}
+                    onChange={(event) => setAccountForm((current) => ({ ...current, lastName: event.target.value }))}
+                  />
+                </label>
+                <label className="dashboard-contact-field dashboard-contact-field-full">
+                  <span>Mobile number</span>
+                  <input
+                    type="tel"
+                    placeholder="(661) 555-1212"
+                    value={accountForm.mobilePhone}
+                    onChange={(event) =>
+                      setAccountForm((current) => ({
+                        ...current,
+                        mobilePhone: formatPhoneForDisplay(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+
+              <label className="dashboard-checkbox-field dashboard-contact-consent">
                 <input
                   type="checkbox"
                   checked={accountForm.smsOptIn}
@@ -994,8 +1007,15 @@ export default function DashboardPage() {
                     }))
                   }
                 />
-                <span>I agree to receive transactional SMS messages about account activity, provider responses, and listing workflow updates.</span>
+                <span>
+                  I agree to receive transactional SMS messages about account activity, provider responses, and listing workflow updates.
+                </span>
               </label>
+
+              <p className="dashboard-contact-footnote">
+                Transactional alerts are only sent when you opt in. Message frequency varies by activity.
+              </p>
+
               <div className="button-stack">
                 <button type="submit" className="button-primary" disabled={!session?.token || Boolean(actionState)}>
                   Save contact settings
@@ -1003,83 +1023,120 @@ export default function DashboardPage() {
               </div>
             </form>
 
-            <article className="feature-card">
-              <span className="label">Billing access</span>
-              <h3>
-                {billingSummary?.access?.planKey === 'free'
-                  ? 'Free access'
-                  : billingSummary?.access?.planKey === 'admin_bypass'
-                    ? 'Admin access'
-                    : billingSummary?.access?.planKey === 'demo_bypass'
-                      ? 'Demo access'
-                    : billingSummary?.subscription?.planKey || 'No active plan'}
-              </h3>
-              <p>
-                {billingSummary?.access?.status
-                  ? `Current status: ${billingSummary.access.status}.`
-                  : 'Load a session to see the current billing state.'}
-              </p>
-              {propertyCapacity ? (
-                <p>
-                  {propertyCapacity.activeLimit === null
-                    ? `Active properties: ${propertyCapacity.activeCount}.`
-                    : `${propertyCapacity.remainingActiveSlots} active slot(s) remaining out of ${propertyCapacity.activeLimit}.`}
-                </p>
-              ) : null}
-              <div className="tag-row">
-                {(billingSummary?.access?.features || []).slice(0, 4).map((feature) => (
-                  <span key={feature}>{feature}</span>
-                ))}
-              </div>
-            </article>
-
-            <article className="feature-card">
-              <span className="label">Stripe checkout</span>
-              <select
-                className="select-input"
-                value={selectedBillingPlan?.planKey || ''}
-                onChange={(event) => setSelectedPlanKey(event.target.value)}
-              >
-                <option value="">Choose a plan</option>
-                {configuredPlans.map((plan) => (
-                  <option key={plan.planKey} value={plan.planKey}>
-                    {plan.displayName}
-                  </option>
-                ))}
-              </select>
-              <p>
-                {selectedBillingPlan?.description ||
-                  'Pick a configured plan to launch Stripe Checkout.'}
-              </p>
-              {selectedBillingPlan ? (
-                <div className="billing-plan-meta">
-                  <span className="billing-pill">
-                    {selectedBillingPlan.mode === 'subscription' ? 'Recurring plan' : 'One-time fee'}
+            <div className="dashboard-account-side-column">
+              <article className="feature-card dashboard-summary-card dashboard-billing-card">
+                <div className="dashboard-card-header">
+                  <div>
+                    <span className="label">Billing access</span>
+                    <h3>
+                      {billingSummary?.access?.planKey === 'free'
+                        ? 'Free access'
+                        : billingSummary?.access?.planKey === 'admin_bypass'
+                          ? 'Admin access'
+                          : billingSummary?.access?.planKey === 'demo_bypass'
+                            ? 'Demo access'
+                            : formatAudienceLabel(billingSummary?.subscription?.planKey || 'No active plan')}
+                    </h3>
+                  </div>
+                  <span className={`dashboard-card-pill${billingSummary?.access?.status ? ' active' : ''}`}>
+                    {billingSummary?.access?.status
+                      ? formatAudienceLabel(billingSummary.access.status)
+                      : 'Status pending'}
                   </span>
-                  <span className="billing-pill">{formatAudienceLabel(selectedBillingPlan.audience)}</span>
-                  <span className="billing-pill">{selectedBillingPlan.priceLabel || selectedBillingPlan.planKey}</span>
                 </div>
-              ) : null}
-              <div className="button-stack">
-                <button
-                  type="button"
-                  className="button-primary"
-                  onClick={handleStartCheckout}
-                  disabled={!session?.user?.id || !selectedBillingPlan || Boolean(actionState)}
-                >
-                  Unlock plan in Stripe
-                </button>
-              </div>
-            </article>
+                <p>
+                  {billingSummary?.access?.status
+                    ? 'Current account access, active workspace capacity, and feature unlocks.'
+                    : 'Load a session to see the current billing state and feature access.'}
+                </p>
+                {propertyCapacity ? (
+                  <div className="dashboard-account-mini-grid">
+                    <div className="dashboard-account-mini-stat">
+                      <strong>Active properties</strong>
+                      <span>{propertyCapacity.activeCount}</span>
+                    </div>
+                    <div className="dashboard-account-mini-stat">
+                      <strong>Remaining capacity</strong>
+                      <span>
+                        {propertyCapacity.activeLimit === null
+                          ? 'Unlimited'
+                          : `${propertyCapacity.remainingActiveSlots} of ${propertyCapacity.activeLimit}`}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="tag-row dashboard-feature-tags">
+                  {(billingSummary?.access?.features || []).slice(0, 4).map((feature) => (
+                    <span key={feature}>{feature}</span>
+                  ))}
+                </div>
+              </article>
 
-            <article className="feature-card">
-              <span className="label">Demo billing notes</span>
-              <h3>Live-flow testing</h3>
-              <p>
-                Use the sample onboarding or sample monthly plans for low-cost live demos. Admin
-                accounts bypass billing, while demo accounts can complete the full Stripe flow.
-              </p>
-            </article>
+              <article className="feature-card dashboard-summary-card dashboard-checkout-card">
+                <div className="dashboard-card-header">
+                  <div>
+                    <span className="label">Stripe checkout</span>
+                    <h3>Unlock the next plan</h3>
+                  </div>
+                  <span className="dashboard-card-pill subtle">
+                    {selectedBillingPlan ? formatAudienceLabel(selectedBillingPlan.audience) : 'Choose a plan'}
+                  </span>
+                </div>
+                <p>
+                  {selectedBillingPlan?.description ||
+                    'Pick a configured plan to launch Stripe Checkout.'}
+                </p>
+                <select
+                  className="select-input"
+                  value={selectedBillingPlan?.planKey || ''}
+                  onChange={(event) => setSelectedPlanKey(event.target.value)}
+                >
+                  <option value="">Choose a plan</option>
+                  {configuredPlans.map((plan) => (
+                    <option key={plan.planKey} value={plan.planKey}>
+                      {plan.displayName}
+                    </option>
+                  ))}
+                </select>
+                {selectedBillingPlan ? (
+                  <div className="billing-plan-meta dashboard-billing-plan-meta">
+                    <span className="billing-pill">
+                      {selectedBillingPlan.mode === 'subscription' ? 'Recurring plan' : 'One-time fee'}
+                    </span>
+                    <span className="billing-pill">{formatAudienceLabel(selectedBillingPlan.audience)}</span>
+                    <span className="billing-pill">{selectedBillingPlan.priceLabel || selectedBillingPlan.planKey}</span>
+                  </div>
+                ) : null}
+                <div className="button-stack dashboard-card-actions">
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={handleStartCheckout}
+                    disabled={!session?.user?.id || !selectedBillingPlan || Boolean(actionState)}
+                  >
+                    Unlock plan in Stripe
+                  </button>
+                </div>
+              </article>
+
+              <article className="feature-card dashboard-summary-card dashboard-demo-card">
+                <div className="dashboard-card-header">
+                  <div>
+                    <span className="label">Demo billing notes</span>
+                    <h3>Live-flow testing</h3>
+                  </div>
+                  <span className="dashboard-card-pill subtle">Demo safe</span>
+                </div>
+                <p>
+                  Use the sample onboarding or sample monthly plans for low-cost live demos. Admin accounts bypass billing, while demo accounts can complete the full Stripe flow.
+                </p>
+                <div className="tag-row dashboard-feature-tags">
+                  <span>Sample onboarding</span>
+                  <span>Sample monthly</span>
+                  <span>Admin bypass</span>
+                </div>
+              </article>
+            </div>
           </section>
 
           {selectedPropertyId && workflow ? (
