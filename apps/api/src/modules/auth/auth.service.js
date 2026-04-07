@@ -52,6 +52,7 @@ function serializeUser(user) {
     mobilePhone: user.mobilePhone || '',
     smsOptIn: Boolean(user.smsOptIn),
     smsOptInAt: user.smsOptInAt || null,
+    signupAttribution: user.signupAttribution || null,
   };
 }
 

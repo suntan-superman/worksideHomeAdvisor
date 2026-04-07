@@ -2040,7 +2040,8 @@ select {
 
 .provider-activation-summary,
 .provider-activation-next,
-.provider-activation-item {
+.provider-activation-item,
+.provider-billing-panel {
   display: grid;
   gap: 8px;
   padding: 14px 16px;
@@ -2051,20 +2052,58 @@ select {
 
 .provider-activation-summary strong,
 .provider-activation-next strong,
-.provider-activation-item strong {
+.provider-activation-item strong,
+.provider-billing-panel strong {
   color: var(--ink);
 }
 
 .provider-activation-summary span,
 .provider-activation-next p,
-.provider-activation-item p {
+.provider-activation-item p,
+.provider-billing-panel p {
   margin: 0;
   color: var(--muted);
+}
+
+.provider-billing-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.provider-billing-panel-header h2 {
+  margin: 4px 0 0;
+}
+
+.provider-billing-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.provider-billing-grid div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(70, 99, 79, 0.06);
+}
+
+.provider-billing-grid span {
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .provider-activation-list {
   display: grid;
   gap: 12px;
+}
+
+@media (max-width: 760px) {
+  .provider-billing-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .provider-activation-item-header {

@@ -304,21 +304,46 @@ function buildProviderSourceSummary(providerSource) {
 
   if (totalMatches > 0) {
     parts.push(
-      `${totalMatches} matching internal provider record(s): ${liveMatches} live${unavailableMatches ? ` · ${unavailableMatches} not yet live` : ''}`,
+      `${totalMatches} matching Workside provider record(s): ${liveMatches} live${unavailableMatches ? ` · ${unavailableMatches} still in setup` : ''}`,
     );
   } else {
-    parts.push('No internal provider records match this category and coverage yet');
+    parts.push('No Workside provider records match this category and coverage yet');
   }
 
   if (externalMatches > 0) {
-    parts.push(`${externalMatches} Google fallback result(s) loaded`);
+    parts.push(`${externalMatches} external Google fallback result(s) loaded separately`);
   } else if (providerSource.googleFallbackEnabled) {
-    parts.push('Google fallback available on demand');
+    parts.push('Google fallback available if you want broader local search');
   } else {
     parts.push('Google fallback unavailable for this browser session');
   }
 
   return parts.join(' · ');
+}
+
+function buildGoogleFallbackSummary(providerSource) {
+  const fallback = providerSource?.googleFallback || null;
+  if (!fallback?.enabled) {
+    return 'Google fallback is not configured yet, so this workspace can only show Workside marketplace coverage.';
+  }
+
+  if (!fallback.triggered) {
+    return 'Google fallback is available if you want to broaden the search beyond Workside providers.';
+  }
+
+  if (fallback.status === 'results') {
+    return `Google fallback found ${fallback.resultCount || 0} result(s) using ${fallback.searchMode === 'places_legacy_textsearch' ? 'legacy text search' : 'Places search'}${fallback.queryUsed ? ` for "${fallback.queryUsed}"` : ''}.`;
+  }
+
+  if (fallback.status === 'no_results') {
+    return `Google fallback did not return structured results${fallback.locationLabel ? ` near ${fallback.locationLabel}` : ''}${fallback.queryUsed ? ` for "${fallback.queryUsed}"` : ''}.`;
+  }
+
+  if (fallback.status === 'error') {
+    return fallback.diagnostic || 'Google fallback search could not be completed at this time.';
+  }
+
+  return providerSource?.googleFallbackDiagnostic || 'Google fallback is available on demand.';
 }
 
 function readFileAsDataUrl(file) {
@@ -649,6 +674,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }, [providerMapProviders, providerMapScope]);
   const hasInternalProviderResults =
     providerRecommendations.length > 0 || unavailableProviderRecommendations.length > 0;
+  const shouldShowExternalProviderSection =
+    Boolean(externalProviderRecommendations.length) &&
+    (showExternalProviderFallback || !hasInternalProviderResults);
+  const shouldShowExternalProviderEmptyState =
+    externalProviderRecommendations.length === 0 &&
+    (showExternalProviderFallback || !hasInternalProviderResults) &&
+    Boolean(providerSource?.googleFallback?.triggered || providerSource?.googleFallbackDiagnostic);
 
   useEffect(() => {
     if (hasInternalProviderResults) {
@@ -3418,124 +3450,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             </div>
           ) : null}
           {providerSearchStatus ? <p className="workspace-control-note">{providerSearchStatus}</p> : null}
-          {showExternalProviderFallback && externalProviderRecommendations.length ? (
-            <div className="provider-card-list">
-              <div className="section-header-tight">
-                <div>
-                  <strong>Google fallback providers</strong>
-                  <p className="workspace-control-note">
-                    External local results shown when you want to broaden the search beyond Workside’s live marketplace.
-                  </p>
-                </div>
-              </div>
-              {externalProviderRecommendations.map((provider) => (
-                <article key={provider.id} className="provider-card provider-card-external">
-                  <div className="provider-card-header">
-                    <div>
-                      <strong>{provider.businessName}</strong>
-                      <span>{provider.description}</span>
-                    </div>
-                    <span className="checklist-chip checklist-chip-medium">Google result</span>
-                  </div>
-                  <div className="provider-quality-row">
-                    {provider.rating ? (
-                      <span>
-                        {provider.rating.toFixed(1)} stars{provider.reviewCount ? ` · ${provider.reviewCount} reviews` : ''}
-                      </span>
-                    ) : null}
-                    {provider.phone ? <span>{provider.phone}</span> : null}
-                    <span>External discovery</span>
-                  </div>
-                  <div className="provider-card-actions">
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      onClick={() => handleSaveProviderReference(provider, 'google_maps')}
-                      disabled={
-                        Boolean(status) ||
-                        isArchivedProperty ||
-                        providerReferenceIds.has(`google_maps:${provider.id}`) ||
-                        providerReferences.length >= 5
-                      }
-                    >
-                      {providerReferenceIds.has(`google_maps:${provider.id}`) ? 'On sheet' : 'Add to sheet'}
-                    </button>
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      onClick={() => setActiveProviderDetails({ ...provider, categoryLabel: providerSource?.categoryLabel || provider.categoryKey?.replace(/_/g, ' ') })}
-                    >
-                      Details
-                    </button>
-                    {provider.mapsUrl ? (
-                      <a href={provider.mapsUrl} target="_blank" rel="noreferrer" className="button-primary inline-button">
-                        Open in Maps
-                      </a>
-                    ) : null}
-                    {provider.websiteUrl ? (
-                      <a href={provider.websiteUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button">
-                        Visit website
-                      </a>
-                    ) : null}
-                  </div>
-                </article>
-              ))}
-            </div>
-          ) : null}
-          {showExternalProviderFallback && externalProviderRecommendations.length === 0 ? (
+          {renderExternalProviderList()}
+          {shouldShowExternalProviderEmptyState ? (
             <p className="workspace-control-note">
-              {providerSource?.googleFallbackDiagnostic ||
-                'Google fallback did not return any results for this category yet.'}
+              {buildGoogleFallbackSummary(providerSource)}
             </p>
-          ) : null}
-          {!hasInternalProviderResults && !showExternalProviderFallback && externalProviderRecommendations.length ? (
-            <div className="provider-card-list">
-              {externalProviderRecommendations.map((provider) => (
-                <article key={provider.id} className="provider-card provider-card-external">
-                  <div className="provider-card-header">
-                    <div>
-                      <strong>{provider.businessName}</strong>
-                      <span>{provider.description}</span>
-                    </div>
-                    <span className="checklist-chip checklist-chip-medium">Google result</span>
-                  </div>
-                  <div className="provider-quality-row">
-                    {provider.rating ? (
-                      <span>
-                        {provider.rating.toFixed(1)} stars{provider.reviewCount ? ` · ${provider.reviewCount} reviews` : ''}
-                      </span>
-                    ) : null}
-                    {provider.phone ? <span>{provider.phone}</span> : null}
-                    <span>External discovery</span>
-                  </div>
-                  <div className="provider-card-actions">
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      onClick={() => handleSaveProviderReference(provider, 'google_maps')}
-                      disabled={
-                        Boolean(status) ||
-                        isArchivedProperty ||
-                        providerReferenceIds.has(`google_maps:${provider.id}`) ||
-                        providerReferences.length >= 5
-                      }
-                    >
-                      {providerReferenceIds.has(`google_maps:${provider.id}`) ? 'On sheet' : 'Add to sheet'}
-                    </button>
-                    {provider.mapsUrl ? (
-                      <a href={provider.mapsUrl} target="_blank" rel="noreferrer" className="button-primary inline-button">
-                        Open in Maps
-                      </a>
-                    ) : null}
-                    {provider.websiteUrl ? (
-                      <a href={provider.websiteUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button">
-                        Visit website
-                      </a>
-                    ) : null}
-                  </div>
-                </article>
-              ))}
-            </div>
           ) : null}
           {!hasInternalProviderResults && !showExternalProviderFallback && !externalProviderRecommendations.length && providerSuggestionTask ? (
             <p className="workspace-control-note">
@@ -3546,6 +3465,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           {providerSource ? (
             <p className="workspace-control-note">
               {buildProviderSourceSummary(providerSource)}
+            </p>
+          ) : null}
+          {providerSource?.googleFallback && !shouldShowExternalProviderEmptyState ? (
+            <p className="workspace-control-note">
+              {buildGoogleFallbackSummary(providerSource)}
             </p>
           ) : null}
           {hasInternalProviderResults ? (
@@ -3681,6 +3605,82 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       </div>
     </div>
   );
+
+  function renderExternalProviderList() {
+    if (!shouldShowExternalProviderSection) {
+      return null;
+    }
+
+    return (
+      <div className="provider-card-list">
+        <div className="section-header-tight">
+          <div>
+            <strong>External Google fallback results</strong>
+            <p className="workspace-control-note">
+              Broaden the search outside the Workside marketplace when you need extra local options or backup contacts.
+            </p>
+          </div>
+        </div>
+        {externalProviderRecommendations.map((provider) => (
+          <article key={provider.id} className="provider-card provider-card-external">
+            <div className="provider-card-header">
+              <div>
+                <strong>{provider.businessName}</strong>
+                <span>{provider.description}</span>
+              </div>
+              <span className="checklist-chip checklist-chip-medium">Google result</span>
+            </div>
+            <div className="provider-quality-row">
+              {provider.rating ? (
+                <span>
+                  {provider.rating.toFixed(1)} stars{provider.reviewCount ? ` · ${provider.reviewCount} reviews` : ''}
+                </span>
+              ) : null}
+              {provider.phone ? <span>{provider.phone}</span> : null}
+              <span>External discovery</span>
+            </div>
+            <div className="provider-card-actions">
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => handleSaveProviderReference(provider, 'google_maps')}
+                disabled={
+                  Boolean(status) ||
+                  isArchivedProperty ||
+                  providerReferenceIds.has(`google_maps:${provider.id}`) ||
+                  providerReferences.length >= 5
+                }
+              >
+                {providerReferenceIds.has(`google_maps:${provider.id}`) ? 'On sheet' : 'Add to sheet'}
+              </button>
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() =>
+                  setActiveProviderDetails({
+                    ...provider,
+                    categoryLabel: providerSource?.categoryLabel || provider.categoryKey?.replace(/_/g, ' '),
+                  })
+                }
+              >
+                Details
+              </button>
+              {provider.mapsUrl ? (
+                <a href={provider.mapsUrl} target="_blank" rel="noreferrer" className="button-primary inline-button">
+                  Open in Maps
+                </a>
+              ) : null}
+              {provider.websiteUrl ? (
+                <a href={provider.websiteUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button">
+                  Visit website
+                </a>
+              ) : null}
+            </div>
+          </article>
+        ))}
+      </div>
+    );
+  }
 
   const renderActiveTab = () => {
     if (activeTab === 'pricing') return renderPricingTab();

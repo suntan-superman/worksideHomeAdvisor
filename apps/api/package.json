@@ -7,7 +7,7 @@
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "lint": "node -e \"console.log('api lint placeholder')\"",
-    "test": "node --test src/modules/public/public.service.test.js src/modules/providers/providers.service.test.js src/modules/marketplace-sms/provider-reply-parser.service.test.js",
+    "test": "node --test src/modules/public/public.service.test.js src/modules/providers/providers.service.test.js src/modules/billing/billing.service.test.js src/modules/marketplace-sms/provider-reply-parser.service.test.js",
     "seed": "node scripts/seed-demo.js",
     "admin:user": "node scripts/set-admin-user.js",
     "clone:demo": "node scripts/clone-demo-account.js",

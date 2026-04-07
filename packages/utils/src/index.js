@@ -226,6 +226,7 @@ export function normalizeCampaignName(value, fallback = 'general') {
 }
 
 export function normalizeLandingAttribution(input = {}) {
+  const anonymousId = normalizeFreeText(input.anonymousId || '');
   const source = normalizeTextToken(input.source || input.src || input.utm_source);
   const medium = normalizeTextToken(input.medium || input.utm_medium);
   const campaign = normalizeCampaignName(input.campaign || input.utm_campaign || '');
@@ -236,6 +237,7 @@ export function normalizeLandingAttribution(input = {}) {
   const route = normalizeFreeText(input.route || '');
 
   return {
+    anonymousId,
     platform,
     source: source || platform || 'direct',
     medium: medium || (platform === 'direct' ? 'organic' : 'paid_social'),

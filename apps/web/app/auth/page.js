@@ -12,6 +12,10 @@ import { OnboardingGuide } from '../../components/OnboardingGuide';
 import { PasswordInput } from '../../components/PasswordInput';
 import { Toast } from '../../components/Toast';
 import {
+  getStoredAttributionDraft,
+  setStoredAttributionDraft,
+} from '../../lib/attribution-draft';
+import {
   clearStoredAuthOnboardingState,
   getStoredAuthOnboardingState,
   setStoredAuthOnboardingState,
@@ -32,7 +36,6 @@ const ROLE_OPTIONS = [
   { value: 'agent', label: 'Realtor', description: 'Use agent-facing pricing and presentation workflows.' },
   { value: 'provider', label: 'Provider', description: 'Manage provider onboarding, leads, and marketplace profile.' },
 ];
-const AUTH_ATTRIBUTION_DRAFT_KEY = 'worksideAuthAttributionDraft';
 
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
@@ -123,25 +126,6 @@ function buildAuthGuideSteps({ role, mode, email }) {
       status: 'upcoming',
     },
   ];
-}
-
-function persistAuthAttributionDraft(attribution) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  if (!attribution) {
-    window.sessionStorage.removeItem(AUTH_ATTRIBUTION_DRAFT_KEY);
-    return;
-  }
-
-  window.sessionStorage.setItem(
-    AUTH_ATTRIBUTION_DRAFT_KEY,
-    JSON.stringify({
-      attribution,
-      capturedAt: new Date().toISOString(),
-    }),
-  );
 }
 
 export default function AuthPage() {
@@ -251,6 +235,11 @@ export default function AuthPage() {
         setAuthStateHydrated(true);
         return;
       }
+
+      const storedAttributionDraft = getStoredAttributionDraft();
+      if (storedAttributionDraft?.attribution) {
+        setAttribution(storedAttributionDraft.attribution);
+      }
     }
 
     setAttribution(
@@ -330,17 +319,7 @@ export default function AuthPage() {
       return;
     }
 
-    if (
-      !attribution.source &&
-      !attribution.campaign &&
-      !attribution.medium &&
-      !attribution.adset &&
-      !attribution.ad
-    ) {
-      return;
-    }
-
-    persistAuthAttributionDraft(attribution);
+    setStoredAttributionDraft(attribution);
   }, [attribution]);
 
   function updateField(field, value) {
@@ -388,7 +367,7 @@ export default function AuthPage() {
               }
             : undefined,
         });
-        persistAuthAttributionDraft(
+        setStoredAttributionDraft(
           attribution
             ? {
                 ...attribution,
@@ -427,7 +406,7 @@ export default function AuthPage() {
           user: result.user,
         });
         clearStoredAuthOnboardingState();
-        persistAuthAttributionDraft(
+        setStoredAttributionDraft(
           attribution
             ? {
                 ...attribution,
@@ -447,7 +426,7 @@ export default function AuthPage() {
           user: result.user,
         });
         clearStoredAuthOnboardingState();
-        persistAuthAttributionDraft(
+        setStoredAttributionDraft(
           attribution
             ? {
                 ...attribution,

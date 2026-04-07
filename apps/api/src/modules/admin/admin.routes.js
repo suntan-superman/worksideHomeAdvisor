@@ -14,10 +14,12 @@ import {
   getAdminProviderSnapshot,
   getAdminUsageSnapshot,
   getAdminWorkerSnapshot,
+  linkAdminProviderAccountAction,
   listAdminProperties,
   listAdminUsers,
   resendAdminProviderLeadAction,
   runAdminMediaVariantCleanup,
+  syncAdminProviderBillingAction,
   updateAdminProviderCategoryAction,
   updateAdminProviderReviewAction,
 } from './admin.service.js';
@@ -84,6 +86,12 @@ const updateProviderReviewSchema = z.object({
   turnaroundLabel: z.string().trim().max(80).optional(),
   pricingSummary: z.string().trim().max(140).optional(),
   serviceHighlights: z.array(z.string().trim().min(1).max(60)).max(6).optional(),
+});
+
+const linkProviderAccountSchema = z.object({
+  userEmail: z.string().trim().email().max(120).optional(),
+  unlink: z.boolean().optional(),
+  forceRelink: z.boolean().optional(),
 });
 
 export async function adminRoutes(fastify) {
@@ -225,6 +233,25 @@ export async function adminRoutes(fastify) {
       return reply.send(await updateAdminProviderReviewAction(request.params.providerId, payload));
     } catch (error) {
       request.log.error({ err: error, providerId: request.params?.providerId }, 'admin provider review update failed');
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/providers/:providerId/link-account', async (request, reply) => {
+    try {
+      const payload = linkProviderAccountSchema.parse(request.body || {});
+      return reply.send(await linkAdminProviderAccountAction(request.params.providerId, payload));
+    } catch (error) {
+      request.log.error({ err: error, providerId: request.params?.providerId }, 'admin provider link action failed');
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/providers/:providerId/sync-billing', async (request, reply) => {
+    try {
+      return reply.send(await syncAdminProviderBillingAction(request.params.providerId));
+    } catch (error) {
+      request.log.error({ err: error, providerId: request.params?.providerId }, 'admin provider billing sync failed');
       return reply.code(400).send({ message: error.message });
     }
   });

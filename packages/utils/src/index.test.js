@@ -18,6 +18,7 @@ test('resolveTrafficPlatform detects Instagram and Facebook traffic', () => {
 
 test('normalizeLandingAttribution standardizes campaign inputs', () => {
   const attribution = normalizeLandingAttribution({
+    anonymousId: 'anon-123',
     src: 'IG',
     medium: 'Paid Social',
     campaign: '  Pricing Preview  ',
@@ -28,6 +29,7 @@ test('normalizeLandingAttribution standardizes campaign inputs', () => {
   });
 
   assert.deepEqual(attribution, {
+    anonymousId: 'anon-123',
     platform: 'instagram',
     source: 'ig',
     medium: 'paid_social',

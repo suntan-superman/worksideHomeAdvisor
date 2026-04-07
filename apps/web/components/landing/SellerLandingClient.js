@@ -12,6 +12,7 @@ import {
   getPublicSellerPreview,
   trackLandingEvent,
 } from '../../lib/api';
+import { setStoredAttributionDraft } from '../../lib/attribution-draft';
 import { EmailGateModal } from './EmailGateModal';
 import { FinalCTASection } from './FinalCTASection';
 import { HeroSection } from './HeroSection';
@@ -107,6 +108,36 @@ export function SellerLandingClient({
   useEffect(() => {
     setAnonymousId(getOrCreateAnonymousId());
   }, []);
+
+  useEffect(() => {
+    if (!anonymousId) {
+      return;
+    }
+
+    setStoredAttributionDraft({
+      ...attribution,
+      anonymousId,
+      roleIntent: 'seller',
+    });
+  }, [anonymousId, attribution]);
+
+  useEffect(() => {
+    if (!anonymousId || !preview) {
+      return;
+    }
+
+    setStoredAttributionDraft(
+      {
+        ...attribution,
+        anonymousId,
+        roleIntent: 'seller',
+      },
+      {
+        previewReadyScore: preview.marketReadyScore,
+        previewMidPrice: preview.estimatedRange?.mid,
+      },
+    );
+  }, [anonymousId, attribution, preview]);
 
   useEffect(() => {
     trackLandingEvent({

@@ -22,10 +22,13 @@ import {
   listProperties,
   updateUserProfile,
 } from '../../lib/api';
+import {
+  clearStoredAttributionDraft,
+  getStoredAttributionDraft,
+} from '../../lib/attribution-draft';
 import { getStoredSession, setStoredSession } from '../../lib/session';
 
 const SELLER_LANDING_DRAFT_KEY = 'worksideSellerLandingDraft';
-const AUTH_ATTRIBUTION_DRAFT_KEY = 'worksideAuthAttributionDraft';
 
 function formatAudienceLabel(value) {
   return String(value || '')
@@ -51,24 +54,32 @@ function loadSellerLandingDraft() {
   }
 }
 
-function loadAuthAttributionDraft() {
-  if (typeof window === 'undefined') {
-    return null;
-  }
+function mergeAttributionSources(...sources) {
+  const merged = {};
 
-  try {
-    const rawDraft = window.sessionStorage.getItem(AUTH_ATTRIBUTION_DRAFT_KEY);
-    if (!rawDraft) {
-      return null;
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') {
+      continue;
     }
 
-    const parsedDraft = JSON.parse(rawDraft);
-    return parsedDraft?.attribution && typeof parsedDraft.attribution === 'object'
-      ? parsedDraft.attribution
-      : null;
-  } catch {
-    return null;
+    for (const [key, value] of Object.entries(source)) {
+      if (value === undefined || value === null) {
+        continue;
+      }
+
+      if (typeof value === 'string' && !value.trim()) {
+        continue;
+      }
+
+      if (typeof value === 'number' && !Number.isFinite(value)) {
+        continue;
+      }
+
+      merged[key] = value;
+    }
   }
+
+  return Object.keys(merged).length ? merged : null;
 }
 
 function getAllowedBillingAudiences(user) {
@@ -625,18 +636,29 @@ export default function DashboardPage() {
 
     try {
       const landingDraft = loadSellerLandingDraft();
-      const authAttributionDraft = loadAuthAttributionDraft();
+      const storedAttributionDraft = getStoredAttributionDraft();
+      const propertyAttribution = mergeAttributionSources(
+        session?.user?.signupAttribution,
+        storedAttributionDraft?.attribution,
+        storedAttributionDraft?.previewReadyScore !== null
+          ? { previewReadyScore: storedAttributionDraft.previewReadyScore }
+          : null,
+        storedAttributionDraft?.previewMidPrice !== null
+          ? { previewMidPrice: storedAttributionDraft.previewMidPrice }
+          : null,
+        landingDraft?.attribution,
+      );
       const response = await createProperty(
         {
           ...createForm,
-          attribution: landingDraft?.attribution || authAttributionDraft || undefined,
+          attribution: propertyAttribution || undefined,
         },
         session.user.id,
       );
       if (typeof window !== 'undefined') {
         window.sessionStorage.removeItem(SELLER_LANDING_DRAFT_KEY);
-        window.sessionStorage.removeItem(AUTH_ATTRIBUTION_DRAFT_KEY);
       }
+      clearStoredAttributionDraft();
       const nextProperties = [response.property, ...properties];
       setProperties(nextProperties);
       setSelectedPropertyId(response.property.id);
