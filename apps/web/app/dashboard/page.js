@@ -12,6 +12,7 @@ import {
   archiveProperty as archivePropertyRequest,
   createBillingCheckoutSession,
   createProperty,
+  deleteProperty as deletePropertyRequest,
   getBillingPlans,
   getBillingSummary,
   getDashboard,
@@ -29,6 +30,7 @@ import {
 import { getStoredSession, setStoredSession } from '../../lib/session';
 
 const SELLER_LANDING_DRAFT_KEY = 'worksideSellerLandingDraft';
+const DASHBOARD_FLASH_TOAST_KEY = 'worksideDashboardFlashToast';
 
 function formatAudienceLabel(value) {
   return String(value || '')
@@ -80,6 +82,31 @@ function mergeAttributionSources(...sources) {
   }
 
   return Object.keys(merged).length ? merged : null;
+}
+
+function buildPropertyLocationLabel(property) {
+  return [property?.addressLine1, property?.city, property?.state, property?.zip]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function readDashboardFlashToast() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const rawToast = window.sessionStorage.getItem(DASHBOARD_FLASH_TOAST_KEY);
+    if (!rawToast) {
+      return null;
+    }
+
+    window.sessionStorage.removeItem(DASHBOARD_FLASH_TOAST_KEY);
+    const parsedToast = JSON.parse(rawToast);
+    return parsedToast && typeof parsedToast === 'object' ? parsedToast : null;
+  } catch {
+    return null;
+  }
 }
 
 function getAllowedBillingAudiences(user) {
@@ -231,6 +258,7 @@ export default function DashboardPage() {
   const [billingSessionId, setBillingSessionId] = useState('');
   const [showCompletedWorkflowSteps, setShowCompletedWorkflowSteps] = useState(false);
   const [focusedWorkflowStepKey, setFocusedWorkflowStepKey] = useState('');
+  const [pendingDeleteProperty, setPendingDeleteProperty] = useState(null);
   const [accountForm, setAccountForm] = useState({
     firstName: '',
     lastName: '',
@@ -436,9 +464,9 @@ export default function DashboardPage() {
         setProperties(response.properties || []);
 
         const preferredPropertyId =
-          session.lastPropertyId ||
-          response.properties?.[0]?.id ||
-          '';
+          response.properties?.some((property) => property.id === session.lastPropertyId)
+            ? session.lastPropertyId
+            : response.properties?.[0]?.id || '';
 
         setSelectedPropertyId(preferredPropertyId);
       } catch (requestError) {
@@ -454,6 +482,32 @@ export default function DashboardPage() {
 
     loadProperties();
   }, [session]);
+
+  useEffect(() => {
+    if (loading || !session?.user?.id) {
+      return;
+    }
+
+    const flashToast = readDashboardFlashToast();
+    if (flashToast?.message) {
+      setToast((current) => current || flashToast);
+    }
+  }, [loading, session?.user?.id]);
+
+  useEffect(() => {
+    if (!selectedPropertyId) {
+      if (!properties.length) {
+        setDashboard(null);
+      }
+      return;
+    }
+
+    if (properties.some((property) => property.id === selectedPropertyId)) {
+      return;
+    }
+
+    setSelectedPropertyId(properties[0]?.id || '');
+  }, [properties, selectedPropertyId]);
 
   const billingPlansQuery = useQuery({
     queryKey: ['billing-plans'],
@@ -798,6 +852,56 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleDeleteSelectedProperty() {
+    if (!pendingDeleteProperty?.id || !session?.user?.id) {
+      return;
+    }
+
+    setActionState('Deleting property...');
+    setToast(null);
+
+    try {
+      const response = await deletePropertyRequest(pendingDeleteProperty.id, session.user.id);
+      const remainingProperties = properties.filter(
+        (property) => property.id !== pendingDeleteProperty.id,
+      );
+      const nextSelectedPropertyId =
+        selectedPropertyId === pendingDeleteProperty.id
+          ? remainingProperties[0]?.id || ''
+          : selectedPropertyId;
+      const nextSession = {
+        ...(session || {}),
+        lastPropertyId: nextSelectedPropertyId,
+      };
+
+      setProperties(remainingProperties);
+      setSelectedPropertyId(nextSelectedPropertyId);
+      setDashboard((current) =>
+        current?.property?.id === pendingDeleteProperty.id ? null : current,
+      );
+      setPendingDeleteProperty(null);
+      setSession(nextSession);
+      setStoredSession(nextSession);
+      await queryClient.invalidateQueries({ queryKey: ['billing-summary', session.user.id] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard-workflow'] });
+      setToast({
+        tone: 'success',
+        title: 'Property deleted',
+        message: response.deletedPropertyTitle
+          ? `${response.deletedPropertyTitle} and its linked outputs were removed permanently.`
+          : 'The property and its linked outputs were removed permanently.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not delete property',
+        message: requestError.message,
+      });
+    } finally {
+      setActionState('');
+    }
+  }
+
   async function handleAnalyzePricing() {
     if (!selectedPropertyId) {
       return;
@@ -928,22 +1032,39 @@ export default function DashboardPage() {
                 </p>
               ) : null}
               {selectedProperty ? (
-                <div className="button-stack">
-                  <span className="billing-pill">
-                    {selectedPropertyArchived ? 'Archived · read-only' : 'Active · editable'}
-                  </span>
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={
-                      selectedPropertyArchived
-                        ? handleRestoreSelectedProperty
-                        : handleArchiveSelectedProperty
-                    }
-                    disabled={Boolean(actionState)}
-                  >
-                    {selectedPropertyArchived ? 'Restore property' : 'Archive property'}
-                  </button>
+                <div className="dashboard-property-lifecycle">
+                  <div className="button-stack">
+                    <span className="billing-pill">
+                      {selectedPropertyArchived ? 'Archived · read-only' : 'Active · editable'}
+                    </span>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={
+                        selectedPropertyArchived
+                          ? handleRestoreSelectedProperty
+                          : handleArchiveSelectedProperty
+                      }
+                      disabled={Boolean(actionState)}
+                    >
+                      {selectedPropertyArchived ? 'Restore property' : 'Archive property'}
+                    </button>
+                    {selectedPropertyArchived ? (
+                      <button
+                        type="button"
+                        className="button-danger"
+                        onClick={() => setPendingDeleteProperty(selectedProperty)}
+                        disabled={Boolean(actionState)}
+                      >
+                        Delete permanently
+                      </button>
+                    ) : null}
+                  </div>
+                  <p className="dashboard-property-capacity-note">
+                    {selectedPropertyArchived
+                      ? 'Archived workspaces stay viewable and do not count toward your active-property limit. Restoring will use a slot again, and permanent delete will remove all linked outputs and activity tied to this property.'
+                      : 'Archive this workspace to free an active-property slot without losing its current record or outputs.'}
+                  </p>
                 </div>
               ) : null}
             </article>
@@ -1501,6 +1622,49 @@ export default function DashboardPage() {
           </section>
         </>
       )}
+      {pendingDeleteProperty ? (
+        <div
+          className="workspace-modal-backdrop"
+          role="presentation"
+          onClick={() => setPendingDeleteProperty(null)}
+        >
+          <div
+            className="workspace-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-property-title"
+            aria-describedby="delete-property-description"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="delete-property-title">Delete {pendingDeleteProperty.title || 'this property'} permanently?</h2>
+            <p id="delete-property-description">
+              This action is irreversible. The property, photos, pricing history, reports, brochures, social pack, saved providers, provider outreach, and linked SMS/activity records will be deleted permanently.
+            </p>
+            <div className="workspace-modal-preview-copy dashboard-property-delete-summary">
+              <strong>{pendingDeleteProperty.title || 'Archived property'}</strong>
+              <span>{buildPropertyLocationLabel(pendingDeleteProperty) || 'Address not listed'}</span>
+              <span>Only archived properties can be deleted permanently.</span>
+            </div>
+            <div className="workspace-modal-actions">
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => setPendingDeleteProperty(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button-danger"
+                onClick={handleDeleteSelectedProperty}
+                disabled={Boolean(actionState)}
+              >
+                {actionState === 'Deleting property...' ? 'Deleting...' : 'Delete permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </AppFrame>
   );
 }

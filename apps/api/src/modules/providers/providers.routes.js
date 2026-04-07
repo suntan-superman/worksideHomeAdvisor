@@ -259,6 +259,7 @@ export async function providersRoutes(fastify) {
       const image = await getProviderMapImageForProperty(propertyId, {
         categoryKey: query.category,
         taskKey: query.taskKey,
+        limit: query.limit,
         includeExternal: query.includeExternal,
         zoomOffset: Number.isFinite(query.zoomOffset)
           ? query.zoomOffset

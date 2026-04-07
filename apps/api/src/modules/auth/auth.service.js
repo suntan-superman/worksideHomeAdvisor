@@ -15,14 +15,8 @@ import {
 } from '../marketplace-sms/marketplace-sms.service.js';
 import { SmsLogModel } from '../marketplace-sms/sms-log.model.js';
 import { BillingSubscriptionModel } from '../billing/billing.model.js';
-import { FlyerModel } from '../documents/flyer.model.js';
-import { ReportModel } from '../documents/report.model.js';
-import { ImageJobModel } from '../media/image-job.model.js';
-import { MediaAssetModel } from '../media/media.model.js';
-import { MediaVariantModel } from '../media/media-variant.model.js';
-import { deleteStoredAssetIfUnreferenced } from '../media/storage-reference.service.js';
-import { PricingAnalysisModel } from '../pricing/pricing.model.js';
 import { PropertyModel } from '../properties/property.model.js';
+import { deletePropertiesByIds } from '../properties/property-lifecycle.service.js';
 import {
   LeadDispatchModel,
   LeadRequestModel,
@@ -32,7 +26,6 @@ import {
   SavedProviderModel,
 } from '../providers/provider-leads.model.js';
 import { PublicFunnelEventModel } from '../public/public.model.js';
-import { ChecklistModel } from '../tasks/checklist.model.js';
 import { AnalysisLockModel } from '../usage/analysis-lock.model.js';
 import { RateLimitEventModel } from '../usage/rate-limit.model.js';
 import { UsageTrackingModel } from '../usage/usage-tracking.model.js';
@@ -170,81 +163,6 @@ async function getLatestActivePasswordResetToken(email) {
   }).sort({ createdAt: -1 });
 }
 
-async function deleteUserOwnedProperties(propertyIds = []) {
-  if (!propertyIds.length) {
-    return { deletedPropertyCount: 0 };
-  }
-
-  const [mediaAssets, mediaVariants, leadRequests] = await Promise.all([
-    MediaAssetModel.find({ propertyId: { $in: propertyIds } })
-      .select({ _id: 1, storageProvider: 1, storageKey: 1 })
-      .lean(),
-    MediaVariantModel.find({ propertyId: { $in: propertyIds } })
-      .select({ _id: 1, storageProvider: 1, storageKey: 1 })
-      .lean(),
-    LeadRequestModel.find({ propertyId: { $in: propertyIds } })
-      .select({ _id: 1 })
-      .lean(),
-  ]);
-
-  const leadRequestIds = leadRequests.map((request) => request._id);
-  const leadDispatches = leadRequestIds.length
-    ? await LeadDispatchModel.find({ leadRequestId: { $in: leadRequestIds } })
-        .select({ _id: 1 })
-        .lean()
-    : [];
-  const leadDispatchIds = leadDispatches.map((dispatch) => dispatch._id);
-
-  await Promise.all(
-    [
-      ...mediaAssets.map((asset) => ({ kind: 'asset', ...asset })),
-      ...mediaVariants.map((variant) => ({ kind: 'variant', ...variant })),
-    ].map(async (asset) => {
-      try {
-        await deleteStoredAssetIfUnreferenced({
-          storageProvider: asset.storageProvider,
-          storageKey: asset.storageKey,
-          excludeAssetId: asset.kind === 'asset' ? asset._id : null,
-          excludeVariantId: asset.kind === 'variant' ? asset._id : null,
-        });
-      } catch {
-        // Continue deleting account data even if a file/object is already gone.
-      }
-    }),
-  );
-
-  await Promise.all([
-    MediaVariantModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    ImageJobModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    MediaAssetModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    PricingAnalysisModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    FlyerModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    ReportModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    ChecklistModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    SavedProviderModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    ProviderReferenceModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    PublicFunnelEventModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    SmsLogModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    PropertyModel.deleteMany({ _id: { $in: propertyIds } }),
-  ]);
-
-  if (leadRequestIds.length) {
-    await Promise.all([
-      ProviderResponseModel.deleteMany({ leadRequestId: { $in: leadRequestIds } }),
-      ProviderSmsLogModel.deleteMany({
-        $or: [
-          { leadRequestId: { $in: leadRequestIds } },
-          leadDispatchIds.length ? { leadDispatchId: { $in: leadDispatchIds } } : null,
-        ].filter(Boolean),
-      }),
-      LeadDispatchModel.deleteMany({ leadRequestId: { $in: leadRequestIds } }),
-      LeadRequestModel.deleteMany({ _id: { $in: leadRequestIds } }),
-    ]);
-  }
-
-  return { deletedPropertyCount: propertyIds.length };
-}
-
 export async function purgeUserAccount(
   userId,
   { allowDemoAccount = false, allowAdminAccount = false } = {},
@@ -270,7 +188,7 @@ export async function purgeUserAccount(
     .select({ _id: 1 })
     .lean();
   const propertyIds = ownedProperties.map((property) => property._id);
-  const { deletedPropertyCount } = await deleteUserOwnedProperties(propertyIds);
+  const { deletedPropertyCount } = await deletePropertiesByIds(propertyIds);
   const remainingLeadRequests = await LeadRequestModel.find({ userId: user._id })
     .select({ _id: 1 })
     .lean();

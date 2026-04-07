@@ -45,9 +45,9 @@ The intent is to keep the roadmap actionable while web/mobile deployment testing
 ### Pass 4: Marketplace quality
 
 - [x] improve Google fallback diagnostics
-- [ ] improve in-app provider map presentation and dense-market handling
+- [x] improve in-app provider map presentation and dense-market handling
 - [x] make Workside provider precedence clearer in mixed result sets
-- [ ] improve no-coverage messaging when internal providers are unavailable
+- [x] improve no-coverage messaging when internal providers are unavailable
 
 ### Pass 5: Premium output quality
 
@@ -73,6 +73,12 @@ The intent is to keep the roadmap actionable while web/mobile deployment testing
 - [ ] add coverage for freeform enhancement requests
 - [ ] add coverage for social-pack generation
 - [x] add focused coverage for provider billing state transitions
+
+### Pass 8: Property lifecycle controls
+
+- [x] add clearer archive / restore management across dashboard and workspace
+- [x] add permanent property delete flow with explicit confirmation and ownership safeguards
+- [x] define how property deletion affects generated outputs, saved providers, and downstream audit history
 
 ---
 

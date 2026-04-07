@@ -2406,7 +2406,7 @@ export async function saveProviderForProperty(propertyId, providerId) {
 
 export async function getProviderMapImageForProperty(
   propertyId,
-  { categoryKey = '', taskKey = '', includeExternal = false, zoomOffset = 0 } = {},
+  { categoryKey = '', taskKey = '', includeExternal = false, zoomOffset = 0, limit = 10 } = {},
 ) {
   const property = await getPropertyById(propertyId);
   if (!property) {
@@ -2417,7 +2417,7 @@ export async function getProviderMapImageForProperty(
     categoryKey,
     taskKey,
     includeExternal,
-    limit: 10,
+    limit: Math.max(1, Math.min(Number(limit || 10), 10)),
   });
 
   const mapProviders = [

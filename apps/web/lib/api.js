@@ -202,6 +202,15 @@ export function restoreProperty(propertyId, ownerUserId) {
   });
 }
 
+export function deleteProperty(propertyId, ownerUserId) {
+  return request(`/api/v1/properties/${propertyId}`, {
+    method: 'DELETE',
+    headers: {
+      'x-user-id': ownerUserId,
+    },
+  });
+}
+
 export function getDashboard(propertyId) {
   return request(`/api/v1/properties/${propertyId}/dashboard`);
 }
@@ -233,7 +242,7 @@ export function listProviders(propertyId, { categoryKey, taskKey, limit, include
   return request(`/api/v1/properties/${propertyId}/providers${query ? `?${query}` : ''}`);
 }
 
-export function getProviderMapImageUrl(propertyId, { categoryKey, taskKey, includeExternal, zoomOffset } = {}) {
+export function getProviderMapImageUrl(propertyId, { categoryKey, taskKey, includeExternal, zoomOffset, limit } = {}) {
   const search = new URLSearchParams();
   if (categoryKey) {
     search.set('category', categoryKey);
@@ -243,6 +252,9 @@ export function getProviderMapImageUrl(propertyId, { categoryKey, taskKey, inclu
   }
   if (includeExternal) {
     search.set('includeExternal', 'true');
+  }
+  if (limit) {
+    search.set('limit', String(limit));
   }
   if (Number.isFinite(zoomOffset) && zoomOffset !== 0) {
     search.set('zoomOffset', String(zoomOffset));

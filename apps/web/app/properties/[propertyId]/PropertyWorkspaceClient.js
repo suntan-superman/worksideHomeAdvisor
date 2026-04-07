@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 import { formatCurrency } from '@workside/utils';
@@ -16,6 +17,7 @@ import {
   createImageEnhancementJob,
   createProviderLead,
   createProviderReference,
+  deleteProperty as deletePropertyRequest,
   deleteMediaAsset as deleteMediaAssetRequest,
   deleteProviderReference,
   downloadFile,
@@ -69,6 +71,7 @@ const PROPERTY_WORKSPACE_HIDDEN_WORKFLOW_STEPS = new Set([
   'profile_complete',
   'property_added',
 ]);
+const DASHBOARD_FLASH_TOAST_KEY = 'worksideDashboardFlashToast';
 
 const REPORT_SECTION_OPTIONS = [
   { id: 'executive_summary', label: 'Executive Summary' },
@@ -264,9 +267,9 @@ function formatProviderReferenceAccessLabel(reference) {
   return 'Contact details not listed';
 }
 
-function buildProviderAvailabilityMessage(providerSuggestionTask, providerSource) {
+function buildProviderCoverageGuidance(providerSuggestionTask, providerSource) {
   if (!providerSuggestionTask) {
-    return '';
+    return null;
   }
 
   const categoryLabel =
@@ -274,21 +277,115 @@ function buildProviderAvailabilityMessage(providerSuggestionTask, providerSource
     providerSuggestionTask.providerCategoryLabel ||
     providerSuggestionTask.title ||
     'providers';
+  const categoryLabelLower = categoryLabel.toLowerCase();
   const liveCount = Number(providerSource?.internalProviders || 0);
   const unavailableCount = Number(providerSource?.unavailableProviders || 0);
+  const externalCount = Number(providerSource?.externalProviders || 0);
+  const totalMatches = Number(providerSource?.totalCategoryProviders || 0);
+  const fallback = providerSource?.googleFallback || null;
+  const fallbackEnabled = Boolean(providerSource?.googleFallbackEnabled || fallback?.enabled);
 
   if (liveCount > 0) {
-    return '';
+    return null;
   }
 
   if (unavailableCount > 0) {
     const statusCounts = Object.entries(providerSource?.unavailableStatusCounts || {})
       .map(([status, count]) => `${count} ${formatProviderStatusLabel(status).toLowerCase()}`)
       .join(', ');
-    return `No live ${categoryLabel.toLowerCase()} are available yet. ${unavailableCount} matching provider${unavailableCount === 1 ? ' is' : 's are'} still in setup${statusCounts ? ` (${statusCounts})` : ''} and will appear here once they go live.`;
+
+    return {
+      tone: 'setup',
+      eyebrow: 'Coverage status',
+      title: `No live ${categoryLabelLower} yet`,
+      message: `Workside found matching providers for this property, but they are still completing onboarding and marketplace setup.`,
+      highlights: [
+        `${unavailableCount} matching provider${unavailableCount === 1 ? '' : 's'} still in setup`,
+        statusCounts || null,
+        fallbackEnabled ? 'Google fallback is ready for backup search' : 'Google fallback is not available in this session',
+      ].filter(Boolean),
+      nextStep: fallbackEnabled
+        ? 'Use Google fallback or the live map search below if you need an outside option before these providers go live.'
+        : 'These providers should appear here automatically once they are approved and fully live.',
+    };
   }
 
-  return `No ${categoryLabel.toLowerCase()} are available for this property yet.`;
+  if (fallback?.triggered && fallback.status === 'results' && externalCount > 0) {
+    return {
+      tone: 'fallback',
+      eyebrow: 'Marketplace gap',
+      title: `No live Workside ${categoryLabelLower} for this property`,
+      message: `There is not yet active marketplace coverage for this category at this address, so the workspace loaded outside local options from Google fallback below.`,
+      highlights: [
+        `${externalCount} Google fallback result${externalCount === 1 ? '' : 's'} loaded`,
+        fallback.locationLabel ? `Search area: ${fallback.locationLabel}` : null,
+        fallback.queryUsed ? `Query: ${fallback.queryUsed}` : null,
+      ].filter(Boolean),
+      nextStep: 'Review the fallback contacts below, save the best ones to the provider sheet, and keep the task moving while marketplace coverage grows.',
+    };
+  }
+
+  if (fallback?.triggered && fallback.status === 'no_results') {
+    return {
+      tone: 'empty',
+      eyebrow: 'Search result',
+      title: `No nearby ${categoryLabelLower} were found in fallback search`,
+      message: `Workside does not have live coverage here yet, and Google fallback did not return structured nearby results for this request.`,
+      highlights: [
+        fallback.locationLabel ? `Search area: ${fallback.locationLabel}` : null,
+        fallback.queryUsed ? `Query: ${fallback.queryUsed}` : null,
+        'Open the live map search below for a broader manual search',
+      ].filter(Boolean),
+      nextStep: 'If you still need coverage, open the map search below and save any promising outside contacts to the provider reference sheet.',
+    };
+  }
+
+  if (fallback?.triggered && fallback.status === 'error') {
+    return {
+      tone: 'warning',
+      eyebrow: 'Search issue',
+      title: `Google fallback could not finish for ${categoryLabelLower}`,
+      message:
+        fallback.diagnostic ||
+        'The workspace could not complete the outside-provider search right now, so only marketplace coverage is shown.',
+      highlights: [
+        totalMatches > 0
+          ? `${totalMatches} Workside provider record${totalMatches === 1 ? '' : 's'} matched overall`
+          : 'No matching Workside provider records in coverage yet',
+        'You can still open the live map search below',
+      ],
+      nextStep: 'Try the fallback search again or continue with the live map search while we improve marketplace coverage.',
+    };
+  }
+
+  if (fallbackEnabled) {
+    return {
+      tone: 'coverage',
+      eyebrow: 'Marketplace gap',
+      title: `No live Workside ${categoryLabelLower} for this property`,
+      message: `This task does not yet have active marketplace coverage at the property location, but you can broaden the search with Google fallback or the live map search below.`,
+      highlights: [
+        totalMatches > 0
+          ? `${totalMatches} Workside provider record${totalMatches === 1 ? '' : 's'} matched, but none are live here`
+          : 'No matching Workside provider records in this coverage area yet',
+        'Google fallback is available on demand',
+      ],
+      nextStep: 'Use the fallback actions below to keep the checklist moving while Workside coverage fills in.',
+    };
+  }
+
+  return {
+    tone: 'coverage',
+    eyebrow: 'Marketplace gap',
+    title: `No live ${categoryLabelLower} are available here yet`,
+    message: `This property does not currently have marketplace coverage for this task, and Google fallback is not configured for this session.`,
+    highlights: [
+      totalMatches > 0
+        ? `${totalMatches} Workside provider record${totalMatches === 1 ? '' : 's'} matched, but none are live here`
+        : 'No matching Workside provider records in this coverage area yet',
+    ],
+    nextStep: 'You can keep moving with the rest of the checklist now, then revisit this step when provider coverage expands.',
+  };
 }
 
 function buildProviderSourceSummary(providerSource) {
@@ -356,6 +453,7 @@ function readFileAsDataUrl(file) {
 }
 
 export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const flyerPreviewRef = useRef(null);
   const reportPreviewRef = useRef(null);
@@ -409,12 +507,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [activeProviderDetails, setActiveProviderDetails] = useState(null);
   const [showProviderMap, setShowProviderMap] = useState(false);
   const [providerMapScope, setProviderMapScope] = useState('internal');
+  const [providerMapDensity, setProviderMapDensity] = useState('compact');
   const [activeProviderTaskKey, setActiveProviderTaskKey] = useState('');
   const [providerSearchStatus, setProviderSearchStatus] = useState('');
   const [showMoreVisionVariants, setShowMoreVisionVariants] = useState(false);
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState(null);
   const [showExpandedMap, setShowExpandedMap] = useState(false);
   const [generationPrompt, setGenerationPrompt] = useState(null);
+  const [pendingDeleteProperty, setPendingDeleteProperty] = useState(null);
   const [guidedWorkflow, setGuidedWorkflow] = useState(null);
   const [workflowPreviewStepKey, setWorkflowPreviewStepKey] = useState('');
   const [checklistSummaryMode, setChecklistSummaryMode] = useState('open');
@@ -672,15 +772,23 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     return providerMapProviders;
   }, [providerMapProviders, providerMapScope]);
+  const providerMapResultLimit = providerMapDensity === 'expanded' ? 10 : 6;
+  const providerMapDisplayedProviders = useMemo(
+    () => providerMapViewportProviders.slice(0, providerMapResultLimit),
+    [providerMapResultLimit, providerMapViewportProviders],
+  );
   const hasInternalProviderResults =
     providerRecommendations.length > 0 || unavailableProviderRecommendations.length > 0;
+  const providerMapInternalCount = providerMapViewportProviders.filter((provider) => !provider.isExternalFallback).length;
+  const providerMapExternalCount = providerMapViewportProviders.filter((provider) => provider.isExternalFallback).length;
+  const hiddenProviderMapCount = Math.max(0, providerMapViewportProviders.length - providerMapDisplayedProviders.length);
   const shouldShowExternalProviderSection =
     Boolean(externalProviderRecommendations.length) &&
     (showExternalProviderFallback || !hasInternalProviderResults);
-  const shouldShowExternalProviderEmptyState =
-    externalProviderRecommendations.length === 0 &&
-    (showExternalProviderFallback || !hasInternalProviderResults) &&
-    Boolean(providerSource?.googleFallback?.triggered || providerSource?.googleFallbackDiagnostic);
+  const providerCoverageGuidance = useMemo(
+    () => buildProviderCoverageGuidance(providerSuggestionTask, providerSource),
+    [providerSuggestionTask, providerSource],
+  );
 
   useEffect(() => {
     if (hasInternalProviderResults) {
@@ -692,6 +800,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setProviderMapScope('all');
     }
   }, [hasInternalProviderResults, providerMapProviders.length]);
+
+  useEffect(() => {
+    if (providerMapViewportProviders.length <= 6 && providerMapDensity !== 'compact') {
+      setProviderMapDensity('compact');
+    }
+  }, [providerMapDensity, providerMapViewportProviders.length]);
 
   const recentOutputs = useMemo(
     () =>
@@ -1558,6 +1672,47 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Could not delete photo', message: requestError.message });
     } finally {
+      setStatus('');
+    }
+  }
+
+  async function handleDeleteArchivedProperty() {
+    const storedSession = getStoredSession();
+    const actorUserId = storedSession?.user?.id || '';
+    if (!pendingDeleteProperty?.id || !actorUserId) {
+      return;
+    }
+
+    setStatus('Deleting property...');
+    setToast(null);
+
+    try {
+      await deletePropertyRequest(pendingDeleteProperty.id, actorUserId);
+      const nextSession = {
+        ...(storedSession || {}),
+        lastPropertyId: '',
+      };
+
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.setItem(
+          DASHBOARD_FLASH_TOAST_KEY,
+          JSON.stringify({
+            tone: 'success',
+            title: 'Property deleted',
+            message: `${pendingDeleteProperty.title || 'The property'} and its linked outputs were removed permanently.`,
+          }),
+        );
+      }
+
+      setStoredSession(nextSession);
+      router.push('/dashboard');
+      router.refresh();
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not delete property',
+        message: requestError.message,
+      });
       setStatus('');
     }
   }
@@ -3449,25 +3604,33 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               ) : null}
             </div>
           ) : null}
+          {providerCoverageGuidance ? (
+            <div className={`workspace-inner-card provider-coverage-card provider-coverage-card-${providerCoverageGuidance.tone}`}>
+              <div className="provider-coverage-card-header">
+                <span className="label">{providerCoverageGuidance.eyebrow}</span>
+                <strong>{providerCoverageGuidance.title}</strong>
+              </div>
+              <p>{providerCoverageGuidance.message}</p>
+              {providerCoverageGuidance.highlights?.length ? (
+                <div className="provider-quality-row provider-coverage-highlights">
+                  {providerCoverageGuidance.highlights.map((highlight) => (
+                    <span key={highlight}>{highlight}</span>
+                  ))}
+                </div>
+              ) : null}
+              {providerCoverageGuidance.nextStep ? (
+                <p className="workspace-control-note provider-coverage-next-step">{providerCoverageGuidance.nextStep}</p>
+              ) : null}
+            </div>
+          ) : null}
           {providerSearchStatus ? <p className="workspace-control-note">{providerSearchStatus}</p> : null}
           {renderExternalProviderList()}
-          {shouldShowExternalProviderEmptyState ? (
-            <p className="workspace-control-note">
-              {buildGoogleFallbackSummary(providerSource)}
-            </p>
-          ) : null}
-          {!hasInternalProviderResults && !showExternalProviderFallback && !externalProviderRecommendations.length && providerSuggestionTask ? (
-            <p className="workspace-control-note">
-              {buildProviderAvailabilityMessage(providerSuggestionTask, providerSource) ||
-                'No active marketplace providers are available for this category yet.'}
-            </p>
-          ) : null}
           {providerSource ? (
             <p className="workspace-control-note">
               {buildProviderSourceSummary(providerSource)}
             </p>
           ) : null}
-          {providerSource?.googleFallback && !shouldShowExternalProviderEmptyState ? (
+          {providerSource?.googleFallback && !providerCoverageGuidance ? (
             <p className="workspace-control-note">
               {buildGoogleFallbackSummary(providerSource)}
             </p>
@@ -3729,6 +3892,37 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           </div>
         </div>
       ) : null}
+      {pendingDeleteProperty ? (
+        <div className="workspace-modal-backdrop" role="presentation" onClick={() => setPendingDeleteProperty(null)}>
+          <div
+            className="workspace-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-property-title"
+            aria-describedby="delete-property-description"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="label">Delete property</span>
+            <h2 id="delete-property-title">Delete {pendingDeleteProperty.title || 'this property'} permanently?</h2>
+            <p id="delete-property-description">
+              This action is irreversible. The property, pricing history, photos, brochures, reports, social pack, saved providers, provider outreach, and linked activity records will be removed permanently.
+            </p>
+            <div className="workspace-modal-preview-copy">
+              <strong>{pendingDeleteProperty.title || 'Archived property'}</strong>
+              <span>{buildPropertyAddressLabel(pendingDeleteProperty) || 'Address not listed'}</span>
+              <span>Only archived properties can be deleted permanently.</span>
+            </div>
+            <div className="workspace-modal-actions">
+              <button type="button" className="button-secondary" onClick={() => setPendingDeleteProperty(null)} disabled={Boolean(status)}>
+                Cancel
+              </button>
+              <button type="button" className="button-danger" onClick={handleDeleteArchivedProperty} disabled={Boolean(status)}>
+                {status === 'Deleting property...' ? 'Deleting...' : 'Delete permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {generationPrompt ? (
         <div className="workspace-modal-backdrop" role="presentation" onClick={() => setGenerationPrompt(null)}>
           <div
@@ -3792,6 +3986,40 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     </button>
                   </div>
                 ) : null}
+                {providerMapViewportProviders.length > 6 ? (
+                  <div className="workspace-map-scope-toggle" role="group" aria-label="Provider map density">
+                    <button
+                      type="button"
+                      className={providerMapDensity === 'compact' ? 'mode-chip active' : 'mode-chip'}
+                      onClick={() => setProviderMapDensity('compact')}
+                    >
+                      Top matches
+                    </button>
+                    <button
+                      type="button"
+                      className={providerMapDensity === 'expanded' ? 'mode-chip active' : 'mode-chip'}
+                      onClick={() => setProviderMapDensity('expanded')}
+                    >
+                      Expanded view
+                    </button>
+                  </div>
+                ) : null}
+                <div className="mini-stats provider-map-metrics">
+                  <div className="stat-card">
+                    <strong>Shown on map</strong>
+                    <span>{providerMapDisplayedProviders.length}</span>
+                  </div>
+                  <div className="stat-card">
+                    <strong>Workside</strong>
+                    <span>{providerMapInternalCount}</span>
+                  </div>
+                  {providerMapExternalCount ? (
+                    <div className="stat-card">
+                      <strong>Google</strong>
+                      <span>{providerMapExternalCount}</span>
+                    </div>
+                  ) : null}
+                </div>
               </div>
               <div className="workspace-modal-actions">
                 {providerGoogleSearchUrl ? (
@@ -3814,17 +4042,23 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               categoryKey={providerSuggestionTask?.providerCategoryKey || providerSource?.categoryKey || ''}
               taskKey={providerSuggestionTask?.systemKey || providerSuggestionTask?.id || ''}
               includeExternal={providerMapScope === 'all'}
+              limit={providerMapResultLimit}
               googleMapsUrl={providerGoogleSearchUrl}
               frameClassName="property-map-frame-expanded"
             />
-            {providerMapProviders.length ? (
+            {providerMapDisplayedProviders.length ? (
               <div className="provider-map-summary-list">
                 {providerMapScope === 'internal' && providerMapViewportProviders.length !== providerMapProviders.length ? (
                   <p className="workspace-control-note provider-map-summary-note">
                     The map is focused on matched Workside providers so the view stays local. Google fallback results remain available in the checklist list and through Google Maps.
                   </p>
                 ) : null}
-                {providerMapProviders.map((provider) => (
+                {hiddenProviderMapCount ? (
+                  <p className="workspace-control-note provider-map-summary-note">
+                    Showing the top {providerMapDisplayedProviders.length} provider markers to keep the map readable. Switch to Expanded view to include {hiddenProviderMapCount} more.
+                  </p>
+                ) : null}
+                {providerMapDisplayedProviders.map((provider) => (
                   <article key={`provider-map-summary-${provider.id}`} className="provider-map-summary-item">
                     <div>
                       <strong>{provider.businessName}</strong>
@@ -4145,6 +4379,22 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   This workspace remains viewable, but new pricing runs, media updates, checklist edits, provider actions,
                   and fresh brochure/report generation are disabled until the property is restored from the dashboard.
                 </p>
+                <p className="workspace-archive-detail">
+                  Archiving frees an active-property slot. Restoring this workspace will use a slot again, and permanent delete will remove all linked outputs, providers, and activity records tied to this property.
+                </p>
+                <div className="workspace-archive-actions">
+                  <Link href="/dashboard" className="button-secondary inline-button">
+                    Manage on dashboard
+                  </Link>
+                  <button
+                    type="button"
+                    className="button-danger"
+                    onClick={() => setPendingDeleteProperty(property)}
+                    disabled={Boolean(status)}
+                  >
+                    Delete permanently
+                  </button>
+                </div>
               </section>
             ) : null}
 
