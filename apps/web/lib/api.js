@@ -35,6 +35,31 @@ async function request(path, options = {}) {
   return data;
 }
 
+export async function downloadFile(downloadUrl, fallbackFileName = 'download.bin') {
+  const response = await fetch(downloadUrl, {
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(
+      formatApiErrorMessage(data.message || data.error || 'Download failed.'),
+    );
+  }
+
+  const disposition = response.headers.get('content-disposition') || '';
+  const encodedMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  const plainMatch = disposition.match(/filename="?([^"]+)"?/i);
+  const fileName = encodedMatch?.[1]
+    ? decodeURIComponent(encodedMatch[1])
+    : plainMatch?.[1] || fallbackFileName;
+
+  return {
+    blob: await response.blob(),
+    fileName,
+  };
+}
+
 export function signup(payload) {
   return request('/api/v1/auth/signup', {
     method: 'POST',

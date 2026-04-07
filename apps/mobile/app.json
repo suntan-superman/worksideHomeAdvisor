@@ -11,7 +11,10 @@
     "ios": {
       "supportsTablet": true,
       "icon": "./assets/icon_1024.png",
-      "bundleIdentifier": "software.workside.homeseller"
+      "bundleIdentifier": "software.workside.homeseller",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,6 +25,11 @@
     },
     "web": {
       "favicon": "./assets/icon_192.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "389dbabb-a1cb-4e01-80b4-9227c21bad08"
+      }
     }
   }
 }

@@ -18,6 +18,7 @@ import {
   createProviderReference,
   deleteMediaAsset as deleteMediaAssetRequest,
   deleteProviderReference,
+  downloadFile,
   generateFlyer,
   generateReport,
   getChecklist,
@@ -1757,13 +1758,19 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   function handleDownloadFlyerPdf() {
-    const exportUrl = getFlyerExportUrl(propertyId, flyerType);
-    window.open(exportUrl, '_blank', 'noopener,noreferrer');
+    return handleFileDownload(
+      getFlyerExportUrl(propertyId, flyerType),
+      `${property?.slug || property?.title || 'property'}-flyer.pdf`,
+      'Flyer PDF downloaded',
+    );
   }
 
   function handleDownloadReportPdf() {
-    const exportUrl = getReportExportUrl(propertyId);
-    window.open(exportUrl, '_blank', 'noopener,noreferrer');
+    return handleFileDownload(
+      getReportExportUrl(propertyId),
+      `${property?.slug || property?.title || 'property'}-seller-report.pdf`,
+      'Seller report PDF downloaded',
+    );
   }
 
   function openGenerationPrompt(kind) {
@@ -1771,8 +1778,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setGenerationPrompt({
         kind,
         title: 'Flyer ready',
-        message: 'Your flyer finished generating. Would you like to review it here or download the PDF now?',
-        viewLabel: 'Jump to preview',
+        message: 'Your flyer finished generating. You can stay here or download the PDF now.',
         downloadLabel: 'Download PDF',
       });
       return;
@@ -1781,43 +1787,60 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setGenerationPrompt({
       kind,
       title: 'Seller report ready',
-      message: 'Your seller intelligence report finished generating. Would you like to review it here or download the PDF now?',
-      viewLabel: 'Jump to preview',
+      message: 'Your seller intelligence report finished generating. You can stay here or download the PDF now.',
       downloadLabel: 'Download report PDF',
     });
   }
 
-  function handleReviewGeneratedDocument() {
-    if (!generationPrompt) {
-      return;
-    }
-
-    const targetTab = generationPrompt.kind === 'flyer' ? 'brochure' : 'report';
-    const targetScroll =
-      generationPrompt.kind === 'flyer' ? 'flyer-preview' : 'report-preview';
-
-    setPendingWorkspaceScrollTarget(targetScroll);
-    setActiveTab(targetTab);
-    setGenerationPrompt(null);
-  }
-
-  function handleDownloadGeneratedDocument() {
+  async function handleDownloadGeneratedDocument() {
     if (!generationPrompt) {
       return;
     }
 
     if (generationPrompt.kind === 'flyer') {
-      handleDownloadFlyerPdf();
+      await handleDownloadFlyerPdf();
     } else {
-      handleDownloadReportPdf();
+      await handleDownloadReportPdf();
     }
 
     setGenerationPrompt(null);
   }
 
   function handleDownloadProviderReferenceSheet() {
-    const exportUrl = getProviderReferenceSheetExportUrl(propertyId);
-    window.open(exportUrl, '_blank', 'noopener,noreferrer');
+    return handleFileDownload(
+      getProviderReferenceSheetExportUrl(propertyId),
+      `${property?.slug || property?.title || 'property'}-provider-reference-sheet.pdf`,
+      'Reference sheet PDF downloaded',
+    );
+  }
+
+  async function handleFileDownload(downloadUrl, fallbackFileName, successTitle) {
+    setStatus('Preparing PDF download...');
+    setToast(null);
+    try {
+      const { blob, fileName } = await downloadFile(downloadUrl, fallbackFileName);
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = fileName || fallbackFileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      setToast({
+        tone: 'success',
+        title: successTitle,
+        message: 'Your file download has started.',
+      });
+    } catch (downloadError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not download PDF',
+        message: downloadError.message,
+      });
+    } finally {
+      setStatus('');
+    }
   }
 
   const addressQuery = buildAddressQuery(property);
@@ -3418,9 +3441,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             <div className="workspace-modal-actions">
               <button type="button" className="button-secondary" onClick={() => setGenerationPrompt(null)}>
                 Stay here
-              </button>
-              <button type="button" className="button-secondary" onClick={handleReviewGeneratedDocument}>
-                {generationPrompt.viewLabel}
               </button>
               <button type="button" className="button-primary" onClick={handleDownloadGeneratedDocument}>
                 {generationPrompt.downloadLabel}
