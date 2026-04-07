@@ -89,6 +89,47 @@ function buildNeighborhoodMapImageUrl(property) {
   return url.toString();
 }
 
+function bytesContainStaticMapError(buffer) {
+  if (!buffer) {
+    return false;
+  }
+
+  try {
+    const decoded = Buffer.from(buffer).toString('latin1');
+    return decoded.includes('g.co/staticmaperror');
+  } catch {
+    return false;
+  }
+}
+
+async function resolveStaticMapImageUrl(url) {
+  if (!url) {
+    return '';
+  }
+
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) {
+      return '';
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.toLowerCase().startsWith('image/')) {
+      return '';
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    if (!buffer.length || bytesContainStaticMapError(buffer)) {
+      return '';
+    }
+
+    return `data:${contentType};base64,${buffer.toString('base64')}`;
+  } catch {
+    return '';
+  }
+}
+
 function hasMeaningfulValue(value) {
   if (value === null || value === undefined) {
     return false;
@@ -268,6 +309,49 @@ function renderHighlightGrid(items = [], emptyText = '') {
           `,
         )
         .join('')}
+    </div>
+  `;
+}
+
+function renderStatusSentenceList(items = [], emptyText = '') {
+  const safeItems = items.filter(Boolean);
+  if (!safeItems.length) {
+    return emptyText ? `<div class="empty-card">${escapeHtml(emptyText)}</div>` : '';
+  }
+
+  return `
+    <div class="status-list">
+      ${safeItems
+        .map(
+          (item) => `
+            <div class="status-row">
+              <span class="status-icon">•</span>
+              <span class="status-copy">${escapeHtml(item)}</span>
+            </div>
+          `,
+        )
+        .join('')}
+    </div>
+  `;
+}
+
+function renderConfidenceScale(confidence) {
+  const numeric = Number(confidence || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return '';
+  }
+
+  const percent = Math.max(0, Math.min(100, Math.round(numeric * 100)));
+  return `
+    <div class="confidence-scale">
+      <div class="confidence-scale-head">
+        <span class="metric-label">Pricing confidence</span>
+        <strong>${escapeHtml(`${percent}%`)}</strong>
+      </div>
+      <div class="confidence-track">
+        <div class="confidence-fill" style="width:${percent}%;"></div>
+      </div>
+      <p class="compact-copy">Confidence reflects how tightly the selected comparable sales support the current pricing stance.</p>
     </div>
   `;
 }
@@ -690,7 +774,7 @@ function renderHtmlDocument({ title, body }) {
       }
       .hero-photo { min-height: 280px; }
       .map-frame { min-height: 280px; }
-      .summary-grid, .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+      .summary-grid, .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
       .metric-card, .content-card, .sidebar-card, .provider-card, .feature-pill, .empty-card {
         border: 1px solid var(--line);
         background: rgba(255,255,255,0.88);
@@ -709,20 +793,20 @@ function renderHtmlDocument({ title, body }) {
       .metric-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--moss); margin-bottom: 8px; white-space: nowrap; }
       .metric-value { font-size: 22px; font-weight: 700; white-space: nowrap; }
       .metric-support { margin-top: 8px; font-size: 12px; color: var(--muted); line-height: 1.4; }
-      .section-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 14px; }
+      .section-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 14px; }
       .content-card, .sidebar-card { padding: 18px 20px; }
       .section-stack { display: flex; flex-direction: column; gap: 18px; }
       .bullet-list { margin: 10px 0 0; padding-left: 18px; }
       .bullet-list li { margin: 0 0 8px; color: var(--muted); line-height: 1.5; }
       .feature-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
       .feature-pill { padding: 10px 12px; font-size: 12px; color: var(--ink); background: rgba(255,255,255,0.78); }
-      .photo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+      .photo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
       .photo-tile { margin: 0; border: 1px solid var(--line); background: rgba(255,255,255,0.88); border-radius: 18px; overflow: hidden; }
       .photo-tile img { width: 100%; height: 190px; display: block; object-fit: cover; }
       .photo-tile figcaption { padding: 12px 14px 14px; display: grid; gap: 4px; }
       .photo-tile figcaption strong { font-size: 14px; }
       .photo-tile figcaption span { font-size: 12px; color: var(--muted); }
-      .provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+      .provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
       .provider-card { padding: 16px; }
       .provider-card-head { display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: start; }
       .provider-icon { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(47,95,143,0.12); color: var(--brand-blue); font-size: 12px; font-weight: 800; border: 1px solid rgba(47,95,143,0.18); }
@@ -769,8 +853,8 @@ function renderHtmlDocument({ title, body }) {
         margin-bottom: 10px;
       }
       .single-column { display: grid; gap: 18px; }
-      .marketing-cover-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin-top: 24px; align-items: start; }
-      .marketing-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+      .marketing-cover-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; margin-top: 24px; align-items: start; }
+      .marketing-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
       .action-card {
         margin-top: 14px;
         padding: 18px 20px;
@@ -778,7 +862,7 @@ function renderHtmlDocument({ title, body }) {
         border: 1px solid rgba(79,123,98,0.2);
         background: rgba(255,255,255,0.9);
       }
-      .gallery-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+      .gallery-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
       .gallery-strip img {
         width: 100%;
         height: 210px;
@@ -787,28 +871,28 @@ function renderHtmlDocument({ title, body }) {
         border-radius: 16px;
         border: 1px solid var(--line);
       }
-      .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+      .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
       .map-frame.compact { min-height: 220px; }
       .badge-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
       .badge { padding: 8px 12px; border-radius: 999px; background: var(--moss-soft); color: var(--moss); font-size: 12px; font-weight: 600; white-space: nowrap; }
       .badge-address, .badge-contact { white-space: normal; line-height: 1.4; }
-      .kpi-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 22px; }
+      .kpi-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 22px; }
       .executive-summary-shell { display: grid; gap: 18px; margin-top: 18px; }
-      .executive-callouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+      .executive-callouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
       .callout-chip { border: 1px solid var(--line); background: rgba(255,255,255,0.9); border-radius: 18px; padding: 14px 16px; }
       .callout-chip-opportunity { border-color: rgba(79,123,98,0.24); background: rgba(244,251,246,0.96); }
       .callout-chip-risk { border-color: rgba(176,98,84,0.26); background: rgba(255,246,245,0.96); }
       .callout-chip-value { border-color: rgba(47,95,143,0.2); background: rgba(244,248,252,0.96); }
       .callout-chip strong { display: block; margin-top: 6px; font-size: 14px; }
-      .fact-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
+      .fact-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 12px; }
       .fact-row { border: 1px solid var(--line); background: rgba(255,255,255,0.9); border-radius: 16px; padding: 12px 14px; }
       .fact-row-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--moss); margin-bottom: 6px; white-space: nowrap; }
       .section-intro { margin-top: 6px; max-width: 6.2in; }
       .cover-price-badge { display: inline-flex; align-items: center; gap: 10px; margin-top: 16px; padding: 10px 14px; border-radius: 999px; background: rgba(79,123,98,0.14); color: var(--moss); font-weight: 700; }
       .marketing-hero-copy { display: grid; gap: 14px; }
-      .brochure-bottom-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 16px; }
+      .brochure-bottom-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 16px; }
       .highlight-list li { margin-bottom: 10px; }
-      .gallery-strip.two-up { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+      .gallery-strip.two-up { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
       .compact-copy { font-size: 12px; line-height: 1.52; color: var(--muted); }
       .page-spacer { height: 10px; }
       .insight-list { display: grid; gap: 10px; margin-top: 10px; }
@@ -818,11 +902,11 @@ function renderHtmlDocument({ title, body }) {
       .checklist-item { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; padding: 12px 14px; border-radius: 16px; border: 1px solid var(--line); background: rgba(255,255,255,0.88); }
       .checklist-index { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(79,123,98,0.14); color: var(--moss); font-weight: 700; }
       .checklist-copy { font-size: 14px; line-height: 1.5; }
-      .highlight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
+      .highlight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 12px; }
       .highlight-card { display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: start; padding: 14px 16px; border-radius: 18px; border: 1px solid rgba(79,123,98,0.16); background: rgba(255,255,255,0.92); }
       .highlight-index { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(200,116,71,0.14); color: var(--accent); font-weight: 800; }
       .highlight-copy { font-size: 14px; line-height: 1.5; color: var(--ink); }
-      .feature-icon-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
+      .feature-icon-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 12px; }
       .feature-icon-card { display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: start; padding: 14px 16px; border-radius: 18px; border: 1px solid rgba(47,95,143,0.16); background: rgba(244,248,252,0.96); box-shadow: 0 8px 18px rgba(19,32,43,0.05); }
       .feature-icon-badge { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 14px; background: linear-gradient(135deg, rgba(47,95,143,0.14), rgba(200,116,71,0.14)); color: var(--brand-blue); font-size: 15px; font-weight: 800; }
       .feature-icon-copy { font-size: 14px; line-height: 1.5; color: var(--ink); font-weight: 600; }
@@ -831,11 +915,11 @@ function renderHtmlDocument({ title, body }) {
       .hero-signal-chip-blue { background: var(--brand-blue-soft); color: var(--brand-blue); border-color: rgba(47,95,143,0.18); }
       .hero-signal-chip-green { background: var(--moss-soft); color: var(--moss); border-color: rgba(79,123,98,0.18); }
       .hero-signal-chip-orange { background: var(--accent-soft); color: #9a5a33; border-color: rgba(200,116,71,0.18); }
-      .suggested-category-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
+      .suggested-category-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 12px; }
       .suggested-category-card { padding: 14px 16px; border-radius: 18px; border: 1px solid rgba(47,95,143,0.16); background: rgba(244,248,252,0.96); }
       .suggested-category-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--brand-blue); margin-bottom: 8px; }
-      .seller-cover-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; align-items: stretch; }
-      .seller-cover-row-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
+      .seller-cover-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; align-items: stretch; }
+      .seller-cover-row-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 12px; }
       .cover-right-stack { display: grid; gap: 10px; align-content: start; }
       .cover-photo-card { padding: 12px; }
       .score-hero { border-radius: 28px; padding: 24px 24px 20px; border: 1px solid rgba(200,116,71,0.24); background: linear-gradient(145deg, rgba(47,95,143,0.08), rgba(200,116,71,0.16) 62%, rgba(255,250,244,0.98) 100%); text-align: left; min-height: 3.3in; display: flex; flex-direction: column; justify-content: center; }
@@ -852,12 +936,12 @@ function renderHtmlDocument({ title, body }) {
       .compact-metric-support { margin-top: 6px; font-size: 12px; line-height: 1.45; color: var(--muted); }
       .seller-final-band { margin-top: 14px; padding: 16px 18px; border-radius: 18px; border: 1px solid rgba(200,116,71,0.2); background: linear-gradient(135deg, rgba(47,95,143,0.08), rgba(200,116,71,0.12)); }
       .full-page-grid { display: grid; gap: 18px; align-content: start; min-height: 9.2in; }
-      .summary-shell { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; align-items: start; }
-      .dense-two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+      .summary-shell { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
+      .dense-two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
       .recommendation-grid { display: grid; gap: 14px; }
       .comp-map-stack { display: grid; gap: 14px; }
-      .comp-meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
-      .action-plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; align-items: start; }
+      .comp-meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+      .action-plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
       .brochure-cover { position: relative; min-height: 5.2in; border-radius: 28px; overflow: hidden; border: 1px solid var(--line); background: linear-gradient(135deg, #304f72 0%, #203245 100%); }
       .brochure-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
       .brochure-cover::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(16,24,32,0.08) 0%, rgba(30,57,84,0.40) 30%, rgba(16,24,32,0.72) 68%, rgba(16,24,32,0.9) 100%); }
@@ -868,9 +952,17 @@ function renderHtmlDocument({ title, body }) {
       .brochure-price { display: inline-flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 12px 18px; border-radius: 999px; background: rgba(255,255,255,0.18); color: #ffffff; border: 1px solid rgba(255,255,255,0.26); font-weight: 800; font-size: 15px; backdrop-filter: blur(3px); box-shadow: 0 12px 26px rgba(0,0,0,0.12); white-space: nowrap; }
       .brochure-cover-facts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
       .brochure-cover-fact { padding: 8px 12px; border-radius: 999px; background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.22); font-size: 12px; color: #fff; white-space: nowrap; }
-      .brochure-cover-lower { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 16px; }
+      .brochure-cover-lower { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 16px; }
       .brochure-cta-card { padding: 18px 20px; border-radius: 18px; border: 1px solid rgba(200,116,71,0.24); background: rgba(255,255,255,0.92); }
       .address-line { max-width: 100%; line-height: 1.45; overflow-wrap: normal; word-break: keep-all; }
+      .status-list { display: grid; gap: 10px; margin-top: 12px; }
+      .status-row { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,0.76); border: 1px solid rgba(47,95,143,0.12); }
+      .status-icon { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(79,123,98,0.16); color: var(--moss); font-size: 14px; font-weight: 800; line-height: 1; }
+      .status-copy { color: var(--ink); font-size: 13px; line-height: 1.5; }
+      .confidence-scale { display: grid; gap: 10px; margin-top: 14px; padding: 16px 18px; border-radius: 18px; border: 1px solid rgba(47,95,143,0.14); background: rgba(244,248,252,0.94); }
+      .confidence-scale-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+      .confidence-track { width: 100%; height: 12px; border-radius: 999px; background: rgba(47,95,143,0.10); overflow: hidden; }
+      .confidence-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, rgba(79,123,98,0.55), rgba(47,95,143,0.88)); }
       .brochure-cta-button { display: inline-block; margin-top: 12px; padding: 12px 18px; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 700; }
       .legend-note { margin-top: 10px; font-size: 11px; line-height: 1.45; color: var(--muted); }
       .marketing-gallery-card { padding: 14px 16px; }
@@ -891,7 +983,7 @@ function buildPropertySummaryHtml({ property, report }) {
   const improvementEconomics = report.payload?.improvementEconomics || {};
   const buyerPersonaSummary = report.payload?.buyerPersonaSummary || {};
   const checklistSummary = report.payload?.checklistSummary || {};
-  const compMapImageUrl = buildComparableMapImageUrl(property, report.selectedComps || []);
+  const compMapImageUrl = report._resolvedCompMapImageUrl || buildComparableMapImageUrl(property, report.selectedComps || []);
   const heroPhoto = report.selectedPhotos?.[0];
   const remainingPhotos = (report.selectedPhotos || []).slice(1);
   const featureTags = pickMeaningfulLines(propertyDetails.featureTags || [], 6);
@@ -1067,20 +1159,40 @@ function buildPropertySummaryHtml({ property, report }) {
             'The clearest launch insight is drawn from the current pricing, checklist, and photo signals.',
           )}
         </div>
-        <div class="content-card">
+      </div>
+      ${renderFooter('Property Summary Report · Cover')}
+    </section>
+
+    <section class="page">
+      <div class="brand-bar">
+        <div>
           <div class="section-kicker">Launch focus</div>
-          <h3>Near-term operating plan</h3>
-          ${renderInsightList(
+          <h2>Near-term operating plan</h2>
+          <p class="muted">The most important actions to keep this listing launch moving with clarity and momentum.</p>
+        </div>
+      </div>
+      <div class="single-column">
+        <div class="content-card">
+          ${renderChecklistItems(
             pickMeaningfulLines([
               orderedNextSteps[0] || '',
               orderedNextSteps[1] || '',
-              launchStatusHighlights[0] || '',
-            ], 3),
+              orderedNextSteps[2] || '',
+              orderedNextSteps[3] || '',
+            ], 4),
             'Use the guided workflow to keep the launch plan moving.',
           )}
         </div>
+        <div class="content-card">
+          <div class="section-kicker">Launch status</div>
+          <h3>Current signals</h3>
+          ${renderStatusSentenceList(
+            launchStatusHighlights,
+            'Launch status details are reflected here from pricing, photos, and checklist progress.',
+          )}
+        </div>
       </div>
-      ${renderFooter('Property Summary Report · Cover')}
+      ${renderFooter('Property Summary Report · Launch Focus')}
     </section>
 
     <section class="page">
@@ -1117,7 +1229,7 @@ function buildPropertySummaryHtml({ property, report }) {
         <div class="content-card">
           <div class="section-kicker">Status summary</div>
           <h3>Current launch picture</h3>
-          ${renderHighlightGrid(
+          ${renderStatusSentenceList(
             pickMeaningfulLines([
               coverKeyInsight,
               hasMeaningfulValue(readinessSummary.label) ? `Launch status: ${readinessSummary.label}` : '',
@@ -1189,6 +1301,12 @@ function buildPropertySummaryHtml({ property, report }) {
       <div class="metric-grid">
         ${pricingMetricCards}
       </div>
+      <div class="content-card" style="margin-top:18px;">
+        <div class="section-kicker">Pricing narrative</div>
+        <h3>What supports this recommendation</h3>
+        <p class="muted">${escapeHtml(pricingNarrative)}</p>
+        ${renderConfidenceScale(report.pricingSummary?.confidence)}
+      </div>
       <div class="dense-two-col" style="margin-top:18px;">
         <div class="sidebar-card">
           <div class="section-kicker">Pricing rationale</div>
@@ -1226,7 +1344,7 @@ function buildPropertySummaryHtml({ property, report }) {
           <div class="content-card">
             <div class="section-kicker">Comp map</div>
             <div class="map-frame" style="margin-top:12px;">
-              <img src="${escapeHtml(compMapImageUrl)}" alt="Comparable properties map" />
+              <img src="${escapeHtml(compMapImageUrl)}" alt="Comparable properties map" onerror="this.closest('.content-card').style.display='none';" />
             </div>
             <div class="legend-note">Markers use S for the subject property and A-${String.fromCharCode(64 + Math.min((report.selectedComps || []).length, 6))} for the comparable sales listed below.</div>
             <div class="comp-summary-row" style="margin-top:12px;">
@@ -1403,7 +1521,7 @@ function buildPropertySummaryHtml({ property, report }) {
 
 function buildMarketingReportHtml({ property, flyer }) {
   const propertyAddress = buildPropertyAddress(property);
-  const neighborhoodMapImageUrl = buildNeighborhoodMapImageUrl(property);
+  const neighborhoodMapImageUrl = flyer._resolvedNeighborhoodMapImageUrl || buildNeighborhoodMapImageUrl(property);
   const selectedPhotos = flyer.selectedPhotos || [];
   const heroPhoto = selectedPhotos[0];
   const galleryPhotos = selectedPhotos.slice(1, 5);
@@ -1485,7 +1603,7 @@ function buildMarketingReportHtml({ property, flyer }) {
           ${
             galleryPhotos.length
               ? `
-                <div class="gallery-strip ${galleryPhotos.length <= 2 ? 'two-up' : ''}">
+                <div class="gallery-strip">
                   ${galleryPhotos
                     .map(
                       (photo) =>
@@ -1522,7 +1640,7 @@ function buildMarketingReportHtml({ property, flyer }) {
               neighborhoodMapImageUrl
                 ? `
                   <div class="map-frame compact" style="margin-top:14px;">
-                    <img src="${escapeHtml(neighborhoodMapImageUrl)}" alt="Neighborhood map" />
+                    <img src="${escapeHtml(neighborhoodMapImageUrl)}" alt="Neighborhood map" onerror="this.closest('.map-frame').style.display='none';" />
                   </div>
                 `
                 : ''
@@ -1557,7 +1675,7 @@ function buildMarketingReportHtml({ property, flyer }) {
                 <div class="section-kicker">Neighborhood</div>
                 <h3>Local context</h3>
                 <div class="map-frame compact" style="margin-top:12px;">
-                  <img src="${escapeHtml(neighborhoodMapImageUrl)}" alt="Neighborhood map" />
+                  <img src="${escapeHtml(neighborhoodMapImageUrl)}" alt="Neighborhood map" onerror="this.closest('.map-frame').style.display='none';" />
                 </div>
                 <p class="muted" style="margin-top:10px;">${escapeHtml(propertyAddress)}</p>
                 <div class="badge-row">
@@ -1605,12 +1723,28 @@ function buildMarketingReportHtml({ property, flyer }) {
 }
 
 export async function renderPropertySummaryPdf({ property, report, filename }) {
-  const html = buildPropertySummaryHtml({ property, report });
+  const html = buildPropertySummaryHtml({
+    property,
+    report: {
+      ...report,
+      _resolvedCompMapImageUrl: await resolveStaticMapImageUrl(
+        buildComparableMapImageUrl(property, report.selectedComps || []),
+      ),
+    },
+  });
   return renderHtmlPdf({ html, filename });
 }
 
 export async function renderMarketingReportPdf({ property, flyer, filename }) {
-  const html = buildMarketingReportHtml({ property, flyer });
+  const html = buildMarketingReportHtml({
+    property,
+    flyer: {
+      ...flyer,
+      _resolvedNeighborhoodMapImageUrl: await resolveStaticMapImageUrl(
+        buildNeighborhoodMapImageUrl(property),
+      ),
+    },
+  });
   return renderHtmlPdf({ html, filename });
 }
 

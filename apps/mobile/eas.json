@@ -12,8 +12,15 @@
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
-    }
+      "autoIncrement": true,
+      "ios": {
+        "image": "latest"
+      },
+    "node": "20.18.0",
+      "env": {
+        "EXPO_USE_PNPM": "1"
+      }
+    }  
   },
   "submit": {
     "production": {}
