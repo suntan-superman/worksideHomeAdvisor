@@ -330,7 +330,15 @@ export default function AuthPage() {
   }
 
   function switchToLogin() {
+    setForm((current) => ({
+      ...current,
+      password: '',
+      confirmPassword: '',
+      otpCode: '',
+      resetToken: '',
+    }));
     setMode('login');
+    setShowVerificationOption(false);
     setStatus(getRoleStatus(form.role, 'login'));
   }
 

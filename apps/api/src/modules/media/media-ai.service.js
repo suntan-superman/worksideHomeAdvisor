@@ -387,6 +387,22 @@ function buildFreeformRenderPlan() {
   };
 }
 
+function resolveFreeformPresetKey({ presetKey, jobType, normalizedPlan }) {
+  if (presetKey || jobType) {
+    return presetKey || jobType;
+  }
+
+  if (normalizedPlan?.removeObjects?.includes('furniture')) {
+    return 'remove_furniture';
+  }
+
+  if (normalizedPlan?.removeObjects?.includes('clutter')) {
+    return 'declutter_medium';
+  }
+
+  return 'combined_listing_refresh';
+}
+
 export function buildVariantStoryBlock({ asset, variant }) {
   const presetKey = variant?.metadata?.presetKey || variant?.variantType;
   const roomLabel = asset?.roomLabel || variant?.metadata?.roomLabel || 'Room';
@@ -745,16 +761,16 @@ export async function createImageEnhancementJob({
   const requestedMode =
     mode === 'freeform' || String(instructions || '').trim() ? 'freeform' : 'preset';
   const normalizedInstructions = String(instructions || '').trim().slice(0, 600);
-  const resolvedPresetKey =
-    requestedMode === 'freeform'
-      ? presetKey || jobType || 'combined_listing_refresh'
-      : presetKey || jobType;
-  const preset = resolveVisionPreset(resolvedPresetKey);
   const resolvedRoomType = normalizeRoomType(roomType || asset.roomLabel);
   const normalizedPlan =
     requestedMode === 'freeform'
       ? buildFreeformEnhancementPlan(normalizedInstructions, resolvedRoomType)
       : null;
+  const resolvedPresetKey =
+    requestedMode === 'freeform'
+      ? resolveFreeformPresetKey({ presetKey, jobType, normalizedPlan })
+      : presetKey || jobType;
+  const preset = resolveVisionPreset(resolvedPresetKey);
   const inputHash = buildVisionJobHash({
     assetId: asset._id.toString(),
     presetKey: preset.key,

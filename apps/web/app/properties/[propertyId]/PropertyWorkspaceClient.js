@@ -1792,11 +1792,22 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         refreshMediaVariants(selectedMediaAsset.id),
         refreshWorkflow(),
       ]);
+      setActiveVisionPresetKey(
+        response.job?.presetKey ||
+          response.variant?.metadata?.presetKey ||
+          response.variant?.variantType ||
+          'combined_listing_refresh',
+      );
       setSelectedVariantId(response.variant?.id || '');
       setToast({
         tone: 'success',
         title: 'Custom enhancement ready',
-        message: response.job?.warning || 'Your freeform enhancement request was saved and processed.',
+        message:
+          response.job?.warning ||
+          'Your freeform enhancement request was processed and the generated result is now selected in the Vision compare area.',
+      });
+      requestAnimationFrame(() => {
+        visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Custom enhancement failed', message: requestError.message });
@@ -1805,20 +1816,32 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
   }
 
-  async function handleGenerateSocialPack() {
+  async function handleExportSocialPack() {
     if (blockArchivedMutation()) {
       return;
     }
 
-    setStatus('Generating social ad pack...');
+    setStatus('Preparing social ad pack export...');
     setToast(null);
     try {
       const response = await generateSocialPack(propertyId);
-      setLatestSocialPack(response.socialPack);
+      const socialPack = response.socialPack;
+      setLatestSocialPack(socialPack);
+      const blob = new Blob([socialPack?.markdown || ''], {
+        type: 'text/markdown;charset=utf-8',
+      });
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = `${property?.title || 'property'}-social-ad-pack.md`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
       setToast({
         tone: 'success',
-        title: 'Social ad pack ready',
-        message: 'The latest social export is ready below with headline, caption, CTA, and format guidance.',
+        title: 'Social ad pack exported',
+        message: 'The latest social ad pack was refreshed and the markdown export download has started.',
       });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Social pack failed', message: requestError.message });
@@ -3034,7 +3057,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             <button
               type="button"
               className="button-secondary"
-              onClick={handleGenerateSocialPack}
+              onClick={handleExportSocialPack}
               disabled={Boolean(status) || isArchivedProperty}
             >
               Export social ad pack
