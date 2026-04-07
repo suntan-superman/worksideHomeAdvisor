@@ -1734,116 +1734,122 @@ export function RootScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
     >
-      <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          keyboardVisible ? styles.scrollContentKeyboard : null,
-        ]}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.card}>
-          <Text style={styles.title}>Home Advisor</Text>
-          <Text style={styles.authPoweredBy}>powered by</Text>
-          <Text style={styles.authBrand}>Workside Software</Text>
-          <Text style={styles.authTagline}>Stay Connected.</Text>
+      <View style={styles.authLayout}>
+        <ScrollView
+          style={styles.authScroll}
+          contentContainerStyle={[
+            styles.scrollContent,
+            styles.authScrollContent,
+            keyboardVisible ? styles.scrollContentKeyboard : null,
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.card}>
+            <Text style={styles.title}>Home Advisor</Text>
+            <Text style={styles.authPoweredBy}>powered by</Text>
+            <Text style={styles.authBrand}>Workside Software</Text>
+            <Text style={styles.authTagline}>Stay Connected.</Text>
 
-          <View style={styles.authModeCard}>
-            <Text style={styles.authModeTitle}>
-              {authMode === 'login' ? 'Sign in to continue' : 'Verify your email code'}
-            </Text>
-            <Text style={styles.authModeCopy}>
-              {authMode === 'login'
-                ? 'Use your Workside password to sign in.'
-                : 'Enter the code from your email to finish secure access on mobile.'}
-            </Text>
-          </View>
-
-          <TextInput
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="email-address"
-            placeholder="Email address"
-            placeholderTextColor="#7d8a8f"
-            style={styles.input}
-            value={form.email}
-            onChangeText={(value) => updateField('email', value)}
-          />
-
-          {authMode === 'login' ? (
-            <View style={styles.passwordWrap}>
-              <TextInput
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="Password"
-                placeholderTextColor="#7d8a8f"
-                secureTextEntry={!showPassword}
-                style={[styles.input, styles.passwordInput]}
-                value={form.password}
-                onChangeText={(value) => updateField('password', value)}
-              />
-              <Pressable onPress={() => setShowPassword((current) => !current)} style={styles.eyeButton}>
-                <Text style={styles.eyeButtonText}>{showPassword ? 'Hide' : 'Show'}</Text>
-              </Pressable>
+            <View style={styles.authModeCard}>
+              <Text style={styles.authModeTitle}>
+                {authMode === 'login' ? 'Sign in to continue' : 'Verify your email code'}
+              </Text>
+              <Text style={styles.authModeCopy}>
+                {authMode === 'login'
+                  ? 'Use your Workside password to sign in.'
+                  : 'Enter the code from your email to finish secure access on mobile.'}
+              </Text>
             </View>
-          ) : (
+
             <TextInput
-              autoCapitalize="characters"
+              autoCapitalize="none"
               autoCorrect={false}
-              placeholder="OTP code"
+              keyboardType="email-address"
+              placeholder="Email address"
               placeholderTextColor="#7d8a8f"
               style={styles.input}
-              value={form.otpCode}
-              onChangeText={(value) => updateField('otpCode', value)}
+              value={form.email}
+              onChangeText={(value) => updateField('email', value)}
             />
-          )}
 
-          <Pressable
-            onPress={authMode === 'login' ? handleLogin : handleVerifyOtp}
-            style={[styles.button, busy ? styles.buttonDisabled : styles.buttonPrimary]}
-            disabled={busy}
-          >
-            <Text style={styles.buttonText}>
-              {busy ? 'Working...' : authMode === 'login' ? 'Log in to workspace' : 'Verify email code'}
-            </Text>
-          </Pressable>
-
-          <View style={styles.authSecondaryActions}>
             {authMode === 'login' ? (
-              <Pressable onPress={handleForgotPasswordSendCode} disabled={busy}>
-                <Text style={styles.inlineLink}>Forget password? Send code.</Text>
-              </Pressable>
+              <View style={styles.passwordWrap}>
+                <TextInput
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder="Password"
+                  placeholderTextColor="#7d8a8f"
+                  secureTextEntry={!showPassword}
+                  style={[styles.input, styles.passwordInput]}
+                  value={form.password}
+                  onChangeText={(value) => updateField('password', value)}
+                />
+                <Pressable onPress={() => setShowPassword((current) => !current)} style={styles.eyeButton}>
+                  <Text style={styles.eyeButtonText}>{showPassword ? 'Hide' : 'Show'}</Text>
+                </Pressable>
+              </View>
             ) : (
-              <>
-                <Pressable onPress={handleResendOtp} disabled={busy}>
-                  <Text style={styles.inlineLink}>Resend code</Text>
-                </Pressable>
-                <Pressable onPress={() => handleSwitchAuthMode('login')} disabled={busy}>
-                  <Text style={styles.inlineLink}>Back to password login</Text>
-                </Pressable>
-              </>
+              <TextInput
+                autoCapitalize="characters"
+                autoCorrect={false}
+                placeholder="OTP code"
+                placeholderTextColor="#7d8a8f"
+                style={styles.input}
+                value={form.otpCode}
+                onChangeText={(value) => updateField('otpCode', value)}
+              />
             )}
-          </View>
 
-          {status ? <Text style={styles.status}>{status}</Text> : null}
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          {busy || refreshing ? <ActivityIndicator color="#d28859" style={styles.spinner} /> : null}
-        </View>
+            <Pressable
+              onPress={authMode === 'login' ? handleLogin : handleVerifyOtp}
+              style={[styles.button, busy ? styles.buttonDisabled : styles.buttonPrimary]}
+              disabled={busy}
+            >
+              <Text style={styles.buttonText}>
+                {busy ? 'Working...' : authMode === 'login' ? 'Log in to workspace' : 'Verify email code'}
+              </Text>
+            </Pressable>
 
-        <View style={styles.authFooter}>
-          <Text style={styles.authFooterCopy}>Copyright 2026 Workside Software LLC.</Text>
-          <View style={styles.authFooterLinks}>
-            <Pressable onPress={() => openExternalLink(TERMS_URL)}>
-              <Text style={styles.authFooterLink}>Terms of Service</Text>
-            </Pressable>
-            <Pressable onPress={() => openExternalLink(PRIVACY_URL)}>
-              <Text style={styles.authFooterLink}>Privacy Notice</Text>
-            </Pressable>
-            <Pressable onPress={() => openExternalLink(SUPPORT_URL)}>
-              <Text style={styles.authFooterLink}>Support</Text>
-            </Pressable>
+            <View style={styles.authSecondaryActions}>
+              {authMode === 'login' ? (
+                <Pressable onPress={handleForgotPasswordSendCode} disabled={busy}>
+                  <Text style={styles.inlineLink}>Forget password? Send code.</Text>
+                </Pressable>
+              ) : (
+                <>
+                  <Pressable onPress={handleResendOtp} disabled={busy}>
+                    <Text style={styles.inlineLink}>Resend code</Text>
+                  </Pressable>
+                  <Pressable onPress={() => handleSwitchAuthMode('login')} disabled={busy}>
+                    <Text style={styles.inlineLink}>Back to password login</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+
+            {status ? <Text style={styles.status}>{status}</Text> : null}
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+            {busy || refreshing ? <ActivityIndicator color="#d28859" style={styles.spinner} /> : null}
+          </View>
+        </ScrollView>
+
+        <View style={styles.authFooterDock}>
+          <View style={styles.authFooter}>
+            <Text style={styles.authFooterCopy}>Copyright 2026 Workside Software LLC.</Text>
+            <View style={styles.authFooterLinks}>
+              <Pressable onPress={() => openExternalLink(TERMS_URL)}>
+                <Text style={styles.authFooterLink}>Terms of Service</Text>
+              </Pressable>
+              <Pressable onPress={() => openExternalLink(PRIVACY_URL)}>
+                <Text style={styles.authFooterLink}>Privacy Notice</Text>
+              </Pressable>
+              <Pressable onPress={() => openExternalLink(SUPPORT_URL)}>
+                <Text style={styles.authFooterLink}>Support</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
-      </ScrollView>
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -1859,6 +1865,15 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     justifyContent: 'center',
     gap: 12,
+  },
+  authLayout: {
+    flex: 1,
+  },
+  authScroll: {
+    flex: 1,
+  },
+  authScrollContent: {
+    paddingBottom: 24,
   },
   scrollContentKeyboard: {
     justifyContent: 'flex-start',
@@ -3033,7 +3048,15 @@ const styles = StyleSheet.create({
   authFooter: {
     gap: 8,
     alignItems: 'center',
-    paddingBottom: 6,
+    paddingBottom: 2,
+  },
+  authFooterDock: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(126, 145, 160, 0.18)',
+    backgroundColor: 'rgba(22, 32, 39, 0.98)',
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === 'android' ? 14 : 8,
   },
   authFooterCopy: {
     color: '#b9af9f',
