@@ -427,6 +427,89 @@ export async function sendProviderLeadEmail({
   });
 }
 
+function buildSellerProviderMatchHtml({
+  propertyAddress = '',
+  categoryLabel = '',
+  providerName = '',
+  providerPhone = '',
+  providerEmail = '',
+  workspaceUrl = '',
+}) {
+  const safePropertyAddress = escapeHtml(propertyAddress || 'your property');
+  const safeCategoryLabel = escapeHtml(categoryLabel || 'service');
+  const safeProviderName = escapeHtml(providerName || 'A local provider');
+  const safeProviderPhone = escapeHtml(providerPhone || 'Not provided');
+  const safeProviderEmail = escapeHtml(providerEmail || 'Not provided');
+
+  return renderEmailShell({
+    eyebrow: 'Provider update',
+    title: 'A provider has accepted your request.',
+    intro: `Good news. ${safeProviderName} accepted your ${safeCategoryLabel.toLowerCase()} request for ${safePropertyAddress}.`,
+    bodyHtml: `
+      <div style="margin: 0 0 22px; padding: 22px; border-radius: 22px; background: #f6efe8; border: 1px solid #ead9cb;">
+        <div style="font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.ink}; font-size: 16px; font-weight: 700; margin-bottom: 8px;">
+          Accepted provider
+        </div>
+        <div style="font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.slate}; font-size: 15px; line-height: 1.8;">
+          <strong>${safeProviderName}</strong><br />
+          ${safeCategoryLabel}<br />
+          Phone: ${safeProviderPhone}<br />
+          Email: ${safeProviderEmail}
+        </div>
+      </div>
+      <div style="margin: 0 0 18px;">
+        ${
+          workspaceUrl
+            ? renderButton('Open property workspace', workspaceUrl)
+            : renderButton('Open Workside', env.PUBLIC_WEB_URL)
+        }
+      </div>
+      <p style="margin: 0; font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.slate}; font-size: 15px; line-height: 1.7;">
+        You can review this provider request inside your workspace and continue the checklist from there.
+      </p>
+    `.trim(),
+    footerNote: `${BRANDING.footerCopy} ${BRANDING.supportEmail}`,
+  });
+}
+
+export async function sendSellerProviderMatchEmail({
+  to,
+  propertyAddress,
+  categoryLabel,
+  providerName,
+  providerPhone = '',
+  providerEmail = '',
+  workspaceUrl = '',
+}) {
+  await deliverEmail({
+    to,
+    subject: `Provider accepted: ${providerName || 'Service request'}`,
+    text: [
+      'A provider has accepted your Workside request.',
+      '',
+      `Property: ${propertyAddress || 'Your property'}`,
+      `Category: ${categoryLabel || 'Service'}`,
+      `Provider: ${providerName || 'Local provider'}`,
+      `Phone: ${providerPhone || 'Not provided'}`,
+      `Email: ${providerEmail || 'Not provided'}`,
+      '',
+      workspaceUrl ? `Open your workspace: ${workspaceUrl}` : `Open Workside: ${env.PUBLIC_WEB_URL}`,
+      '',
+      `${BRANDING.footerCopy} ${BRANDING.supportEmail}`,
+    ].join('\n'),
+    html: buildSellerProviderMatchHtml({
+      propertyAddress,
+      categoryLabel,
+      providerName,
+      providerPhone,
+      providerEmail,
+      workspaceUrl,
+    }),
+    logLabel: 'Seller provider match email',
+    logMeta: { propertyAddress, categoryLabel, providerName },
+  });
+}
+
 function buildProviderProfileChangeAlertHtml({
   businessName = '',
   providerEmail = '',

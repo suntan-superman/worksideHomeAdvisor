@@ -17,7 +17,8 @@
     "@tanstack/react-query": "^5.95.2",
     "expo-image-picker": "~16.1.4",
     "react": "19.0.0",
-    "react-native": "0.79.6"
+    "react-native": "0.79.6",
+    "expo": "~53.0.27"
   },
   "devDependencies": {
     "@types/react": "~19.0.10",
@@ -26,7 +27,9 @@
   },
   "expo": {
     "install": {
-      "exclude": ["@react-native-async-storage/async-storage"]
+      "exclude": [
+        "@react-native-async-storage/async-storage"
+      ]
     }
   }
 }

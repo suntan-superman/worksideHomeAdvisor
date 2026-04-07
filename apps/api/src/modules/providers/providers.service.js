@@ -1,7 +1,11 @@
 import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 
-import { normalizePhoneNumber, notifyQueuedLeadDispatches } from '../marketplace-sms/marketplace-sms.service.js';
+import {
+  normalizePhoneNumber,
+  notifyQueuedLeadDispatches,
+  recordProviderLeadResponse,
+} from '../marketplace-sms/marketplace-sms.service.js';
 import { env } from '../../config/env.js';
 import { sendAdminProviderProfileChangeAlert } from '../../services/emailService.js';
 import { readStoredAsset, saveProviderDocumentBuffer } from '../../services/storageService.js';
@@ -1493,7 +1497,8 @@ function summarizeProviderPortalDispatches(dispatches = []) {
     if (
       dispatch.status === 'declined' ||
       dispatch.responseStatus === 'declined' ||
-      dispatch.responseStatus === 'opted_out'
+      dispatch.responseStatus === 'opted_out' ||
+      dispatch.responseStatus === 'already_matched'
     ) {
       summary.declined += 1;
     }
@@ -1503,36 +1508,6 @@ function summarizeProviderPortalDispatches(dispatches = []) {
   }
 
   return summary;
-}
-
-async function refreshLeadRequestStatus(leadRequestId) {
-  const dispatches = await LeadDispatchModel.find({ leadRequestId }).lean();
-
-  let nextStatus = 'open';
-  if (dispatches.some((dispatch) => dispatch.status === 'accepted')) {
-    nextStatus = 'matched';
-  } else if (dispatches.some((dispatch) => ['queued', 'sent', 'delivered'].includes(dispatch.status))) {
-    nextStatus = 'routing';
-  } else if (dispatches.some((dispatch) => ['declined', 'failed', 'expired'].includes(dispatch.status))) {
-    nextStatus = 'open';
-  }
-
-  await LeadRequestModel.findByIdAndUpdate(leadRequestId, {
-    $set: {
-      status: nextStatus,
-      updatedAt: new Date(),
-    },
-  });
-}
-
-async function upsertProviderAnalytics(providerId, mutator) {
-  const monthKey = new Date().toISOString().slice(0, 7);
-  const record =
-    (await ProviderAnalyticsModel.findOne({ providerId, monthKey })) ||
-    (await ProviderAnalyticsModel.create({ providerId, monthKey }));
-
-  mutator(record);
-  await record.save();
 }
 
 async function authenticateProviderPortal(providerId, token) {
@@ -1717,7 +1692,13 @@ function summarizeLeadDispatches(dispatches = []) {
     if (dispatch.status === 'sent') summary.sent += 1;
     if (dispatch.status === 'delivered') summary.delivered += 1;
     if (dispatch.status === 'accepted' || dispatch.responseStatus === 'accepted') summary.accepted += 1;
-    if (dispatch.status === 'declined' || dispatch.responseStatus === 'declined') summary.declined += 1;
+    if (
+      dispatch.status === 'declined' ||
+      dispatch.responseStatus === 'declined' ||
+      dispatch.responseStatus === 'already_matched'
+    ) {
+      summary.declined += 1;
+    }
     if (dispatch.status === 'failed') summary.failed += 1;
     if (dispatch.responseStatus === 'help') summary.help += 1;
     if (dispatch.responseStatus === 'custom_reply') summary.customReplies += 1;
@@ -1737,6 +1718,11 @@ function serializeLeadRequest(document, dispatches = []) {
     source: document.source || 'checklist_task',
     sourceRefId: document.sourceRefId || '',
     status: document.status,
+    selectedProviderId: document.selectedProviderId?.toString?.() || String(document.selectedProviderId || ''),
+    selectedDispatchId: document.selectedDispatchId?.toString?.() || String(document.selectedDispatchId || ''),
+    matchedAt: document.matchedAt || null,
+    sellerNotifiedAt: document.sellerNotifiedAt || null,
+    sellerNotificationChannels: document.sellerNotificationChannels || [],
     maxProviders: Number(document.maxProviders || 3),
     message: document.message || '',
     propertySnapshot: {
@@ -2392,7 +2378,7 @@ export async function createProviderLeadRequest(propertyId, payload = {}) {
     );
 
     await notifyQueuedLeadDispatches(leadRequest._id, console, {
-      deliveryMode: payload.deliveryMode || 'email',
+      deliveryMode: payload.deliveryMode || 'sms_and_email',
     });
   }
 
@@ -2971,37 +2957,16 @@ export async function respondToProviderPortalLead(dispatchId, { providerId, toke
     throw new Error('This provider lead can no longer be responded to.');
   }
 
-  const now = new Date();
-  dispatch.status = responseStatus === 'accepted' ? 'accepted' : 'declined';
-  dispatch.responseStatus = responseStatus;
-  dispatch.respondedAt = now;
-  await dispatch.save();
-
-  await ProviderResponseModel.create({
-    leadRequestId: dispatch.leadRequestId,
-    providerId: provider._id,
+  await recordProviderLeadResponse({
+    dispatch,
+    provider,
     responseStatus,
     note: normalizeString(note).slice(0, 280) || `Responded from provider portal: ${responseStatus}`,
     rawBody: '',
+    logger: console,
+    source: 'portal',
+    sendConfirmation: false,
   });
-
-  await upsertProviderAnalytics(provider._id, (record) => {
-    if (responseStatus === 'accepted') {
-      record.acceptedCount += 1;
-      if (dispatch.sentAt || dispatch.smsSentAt) {
-        const startAt = dispatch.smsSentAt || dispatch.sentAt;
-        const responseMinutes = Math.max(1, Math.round((now.getTime() - new Date(startAt).getTime()) / 60000));
-        const priorAccepted = Math.max(0, record.acceptedCount - 1);
-        record.avgResponseMinutes = priorAccepted
-          ? Math.round(((record.avgResponseMinutes * priorAccepted) + responseMinutes) / record.acceptedCount)
-          : responseMinutes;
-      }
-    } else {
-      record.declinedCount += 1;
-    }
-  });
-
-  await refreshLeadRequestStatus(dispatch.leadRequestId);
   const dashboard = await buildProviderPortalDashboard(provider);
   return { dashboard };
 }

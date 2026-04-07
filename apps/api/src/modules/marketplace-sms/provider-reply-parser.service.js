@@ -13,26 +13,28 @@ export function normalizeReplyBody(value) {
 
 export function parseProviderReply(body) {
   const normalized = normalizeReplyBody(body);
+  const [command = '', requestReference = ''] = normalized.split(' ');
 
-  if (ACCEPT_WORDS.has(normalized)) {
-    return { status: 'accepted', normalized };
+  if (ACCEPT_WORDS.has(command)) {
+    return { status: 'accepted', normalized, requestReference };
   }
 
-  if (DECLINE_WORDS.has(normalized)) {
-    return { status: 'declined', normalized };
+  if (DECLINE_WORDS.has(command)) {
+    return { status: 'declined', normalized, requestReference };
   }
 
-  if (HELP_WORDS.has(normalized)) {
-    return { status: 'help', normalized };
+  if (HELP_WORDS.has(command)) {
+    return { status: 'help', normalized, requestReference };
   }
 
-  if (STOP_WORDS.has(normalized)) {
-    return { status: 'opted_out', normalized };
+  if (STOP_WORDS.has(command)) {
+    return { status: 'opted_out', normalized, requestReference };
   }
 
   return {
     status: 'custom_reply',
     normalized,
+    requestReference,
     rawBody: String(body || '').trim(),
   };
 }
