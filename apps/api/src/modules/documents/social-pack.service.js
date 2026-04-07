@@ -45,7 +45,7 @@ function rankAssets(assets = []) {
   });
 }
 
-function buildMarkdown(pack) {
+export function buildMarkdown(pack) {
   return [
     `# Social Ad Pack`,
     '',
@@ -73,7 +73,7 @@ function buildMarkdown(pack) {
   ].join('\n');
 }
 
-function buildFallbackPack({ property, pricing, selectedPhotos, marketing }) {
+export function buildFallbackPack({ property, pricing, selectedPhotos, marketing }) {
   const priceText = pricing?.recommendedListMid
     ? `around ${formatCurrency(pricing.recommendedListMid)}`
     : 'with market-aligned pricing';

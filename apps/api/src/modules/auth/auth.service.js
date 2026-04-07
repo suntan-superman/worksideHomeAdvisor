@@ -33,6 +33,11 @@ import { recordPublicFunnelEvent } from '../public/public.service.js';
 import { UserModel } from './auth.model.js';
 import { PasswordResetTokenModel } from './password-reset-token.model.js';
 
+export const authServiceDependencies = {
+  bcryptCompare: bcrypt.compare,
+  bcryptHash: bcrypt.hash,
+};
+
 function serializeUser(user) {
   return {
     id: user._id.toString(),
@@ -350,7 +355,7 @@ export async function verifyForgotPasswordOtp(payload) {
     throw createHttpError(429, 'Too many password reset attempts. Request a new code.');
   }
 
-  const valid = await bcrypt.compare(payload.otpCode, resetToken.otpHash);
+  const valid = await authServiceDependencies.bcryptCompare(payload.otpCode, resetToken.otpHash);
   if (!valid) {
     resetToken.attemptCount += 1;
     if (resetToken.attemptCount >= 5) {
@@ -397,7 +402,7 @@ export async function resetForgottenPassword({
     throw createHttpError(404, 'User account not found.');
   }
 
-  user.passwordHash = await bcrypt.hash(newPassword, env.BCRYPT_SALT_ROUNDS);
+  user.passwordHash = await authServiceDependencies.bcryptHash(newPassword, env.BCRYPT_SALT_ROUNDS);
   user.lastLoginAt = new Date();
   await user.save();
 
@@ -421,7 +426,7 @@ export async function verifyEmailOtp(payload) {
     throw new Error('Verification code expired.');
   }
 
-  const valid = await bcrypt.compare(payload.otpCode, user.verificationOtp.codeHash);
+  const valid = await authServiceDependencies.bcryptCompare(payload.otpCode, user.verificationOtp.codeHash);
   if (!valid) {
     user.verificationOtp.attempts += 1;
     await user.save();

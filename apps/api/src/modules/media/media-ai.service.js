@@ -100,7 +100,7 @@ export function serializeMediaVariant(document) {
   };
 }
 
-function normalizeRoomType(value) {
+export function normalizeRoomType(value) {
   const normalized = String(value || 'unknown').toLowerCase().replace(/\s+/g, '_');
 
   if (normalized.includes('kitchen')) {
@@ -122,7 +122,7 @@ function normalizeRoomType(value) {
   return normalized || 'unknown';
 }
 
-function buildFreeformEnhancementPlan(instructions, roomType) {
+export function buildFreeformEnhancementPlan(instructions, roomType) {
   const normalizedInstructions = String(instructions || '').toLowerCase();
   const removeObjects = [];
   const styleChanges = [];
@@ -327,7 +327,7 @@ function buildPresetRenderPlan(presetKey) {
   };
 }
 
-function calculateVisionReviewOverallScore(review = {}) {
+export function calculateVisionReviewOverallScore(review = {}) {
   const structuralScore = Number(review.structuralIntegrityScore || 0);
   const artifactScore = Number(review.artifactScore || 0);
   const listingAppealScore = Number(review.listingAppealScore || 0);
