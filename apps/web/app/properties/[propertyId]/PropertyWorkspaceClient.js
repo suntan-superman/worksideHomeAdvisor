@@ -231,6 +231,27 @@ function formatPercentValue(value) {
   return `${Math.round(numericValue * 100)}%`;
 }
 
+function formatVisionRejectReason(reason) {
+  switch (reason) {
+    case 'object_silhouette_persisted':
+      return 'the furniture silhouette still looked present';
+    case 'crop_structure_change_too_high':
+      return 'the local crop changed too much outside the target object';
+    case 'upper_architecture_change_too_high':
+      return 'too much change reached the upper room architecture';
+    case 'upper_structure_drift_too_high':
+      return 'upper-structure drift was too high';
+    case 'masked_change_too_low':
+      return 'the masked object area changed too little';
+    case 'room_region_change_too_low':
+      return 'the broader room target area changed too little';
+    case 'practical_partial':
+      return 'the best candidate only qualified as a low-confidence practical partial';
+    default:
+      return '';
+  }
+}
+
 function buildVisionFailureMessage(job) {
   const attemptLog = Array.isArray(job?.input?.attemptLog) ? job.input.attemptLog : [];
   const maskAnalysis = attemptLog.find((entry) => entry?.stage === 'mask_analysis') || null;
@@ -270,15 +291,20 @@ function buildVisionFailureMessage(job) {
     const maskedChange = formatPercentValue(bestRejectedAttempt.maskedChangeRatio);
     const roomChange = formatPercentValue(bestRejectedAttempt.targetRegionChangeRatio);
     const drift = formatPercentValue(bestRejectedAttempt.structureHistogramDrift);
+    const topHalf = formatPercentValue(bestRejectedAttempt.topHalfChangeRatio);
+    const cropStructure = formatPercentValue(bestRejectedAttempt.cropStructureChangeRatio);
+    const rejectReason = formatVisionRejectReason(bestRejectedAttempt.primaryRejectReason);
     const metrics = [
       maskedChange ? `best masked change ${maskedChange}` : null,
       roomChange ? `room-region change ${roomChange}` : null,
       drift ? `structure drift ${drift}` : null,
+      topHalf ? `upper-architecture change ${topHalf}` : null,
+      cropStructure ? `local crop change ${cropStructure}` : null,
     ]
       .filter(Boolean)
       .join(', ');
 
-    return `${baseMessage} We reviewed ${attemptSummary}${targetSummary}, but the strongest candidate still stayed too close to the original${metrics ? ` (${metrics})` : ''}.`;
+    return `${baseMessage} We reviewed ${attemptSummary}${targetSummary}, but the strongest candidate was still rejected because ${rejectReason || 'it did not meet the current removal thresholds'}${metrics ? ` (${metrics})` : ''}.`;
   }
 
   return `${baseMessage} We reviewed ${attemptSummary}${targetSummary}, but none of the candidates met the current removal thresholds.`;

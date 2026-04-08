@@ -1994,6 +1994,36 @@ async function compositeImageRegionBuffer(baseBuffer, overlayBuffer, region) {
     .toBuffer();
 }
 
+function getFurnitureRemovalRejectReasons({
+  maskedChangeRatio,
+  targetRegionChangeRatio,
+  maskedEdgeDensityDelta,
+  cropStructureChangeRatio,
+  topHalfChangeRatio,
+  structureHistogramDrift,
+}) {
+  const reasons = [];
+  if (maskedChangeRatio < 0.1) {
+    reasons.push('masked_change_too_low');
+  }
+  if (targetRegionChangeRatio < 0.07) {
+    reasons.push('room_region_change_too_low');
+  }
+  if (maskedEdgeDensityDelta > -0.008) {
+    reasons.push('object_silhouette_persisted');
+  }
+  if (cropStructureChangeRatio > 0.2) {
+    reasons.push('crop_structure_change_too_high');
+  }
+  if (topHalfChangeRatio > 0.15) {
+    reasons.push('upper_architecture_change_too_high');
+  }
+  if (structureHistogramDrift > 0.48) {
+    reasons.push('upper_structure_drift_too_high');
+  }
+  return reasons;
+}
+
 async function calculateMaskedVisualChangeRatio(sourceBuffer, variantBuffer, maskBuffer) {
   const metadata = await sharp(maskBuffer).metadata();
   const width = Number(metadata.width || 0);
@@ -2644,6 +2674,22 @@ async function executeFurnitureRemovalObjectStrategy({
         cropStructureChangeRatio <= 0.2 &&
         topHalfChangeRatio <= 0.15 &&
         structureHistogramDrift <= 0.48;
+      const practicalPartialAccepted =
+        maskedChangeRatio >= 0.35 &&
+        targetRegionChangeRatio >= 0.25 &&
+        maskedEdgeDensityDelta <= 0 &&
+        cropStructureChangeRatio <= 0.28 &&
+        topHalfChangeRatio <= 0.16 &&
+        structureHistogramDrift <= 0.18;
+      const rejectReasons = getFurnitureRemovalRejectReasons({
+        maskedChangeRatio,
+        targetRegionChangeRatio,
+        maskedEdgeDensityDelta,
+        cropStructureChangeRatio,
+        topHalfChangeRatio,
+        structureHistogramDrift,
+      });
+      const primaryRejectReason = rejectReasons[0] || 'thresholds_not_met';
 
       attemptLog.push({
         attempt: attemptCount,
@@ -2658,10 +2704,20 @@ async function executeFurnitureRemovalObjectStrategy({
         cropStructureChangeRatio,
         topHalfChangeRatio,
         structureHistogramDrift,
-        result: strictAccepted ? 'accepted' : softAccepted ? 'soft_accepted' : 'rejected',
+        primaryRejectReason:
+          strictAccepted || softAccepted || practicalPartialAccepted ? null : primaryRejectReason,
+        rejectReasons:
+          strictAccepted || softAccepted || practicalPartialAccepted ? [] : rejectReasons,
+        result: strictAccepted
+          ? 'accepted'
+          : softAccepted
+          ? 'soft_accepted'
+          : practicalPartialAccepted
+          ? 'practical_partial'
+          : 'rejected',
       });
 
-      if (softAccepted && !strictAccepted) {
+      if ((softAccepted || practicalPartialAccepted) && !strictAccepted) {
         const softCandidate = {
           buffer: candidateFullBuffer,
           maskedChangeRatio,
@@ -2670,6 +2726,7 @@ async function executeFurnitureRemovalObjectStrategy({
           cropStructureChangeRatio,
           topHalfChangeRatio,
           structureHistogramDrift,
+          primaryRejectReason: practicalPartialAccepted ? 'practical_partial' : primaryRejectReason,
           lowConfidence: true,
         };
         if (
@@ -2692,6 +2749,7 @@ async function executeFurnitureRemovalObjectStrategy({
         cropStructureChangeRatio,
         topHalfChangeRatio,
         structureHistogramDrift,
+        primaryRejectReason: null,
         lowConfidence: false,
       };
       break;
