@@ -1933,6 +1933,15 @@ function getFurnitureRemovalAttemptConfigs(region, imageWidth, imageHeight) {
       promptSuffix:
         'Try a stronger surgical removal of the same object. Keep walls, floors, windows, trim, and perspective unchanged. Do not restage the room.',
     },
+    {
+      stage: 'conservative_retry',
+      strength: 0.68,
+      guidanceScale: 7.8,
+      numInferenceSteps: 52,
+      region,
+      promptSuffix:
+        'Make one final attempt to remove only the masked furniture object while preserving the original room. Do not replace the furniture with different furniture.',
+    },
   ];
 }
 
@@ -2199,6 +2208,120 @@ async function extractMaskRegions(maskBuffer, options = {}) {
   };
 }
 
+async function extractMaskComponents(maskBuffer, options = {}) {
+  const metadata = await sharp(maskBuffer).metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const raw = await sharp(maskBuffer)
+    .resize(width, height, { fit: 'fill' })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+  const binary = new Uint8Array(width * height);
+  let whitePixels = 0;
+  for (let i = 0; i < binary.length; i += 1) {
+    const value = raw[i * 3];
+    if (value > 32) {
+      binary[i] = 1;
+      whitePixels += 1;
+    }
+  }
+
+  const visited = new Uint8Array(binary.length);
+  const minComponentArea = Math.max(
+    6,
+    Math.round(width * height * (options.minAreaRatio || 0.003)),
+  );
+  const directions = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  const components = [];
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const start = y * width + x;
+      if (!binary[start] || visited[start]) {
+        continue;
+      }
+      const queue = [start];
+      const pixels = [];
+      visited[start] = 1;
+      let area = 0;
+      let minX = x;
+      let maxX = x;
+      let minY = y;
+      let maxY = y;
+      while (queue.length) {
+        const index = queue.pop();
+        const cx = index % width;
+        const cy = Math.floor(index / width);
+        pixels.push(index);
+        area += 1;
+        if (cx < minX) {
+          minX = cx;
+        }
+        if (cx > maxX) {
+          maxX = cx;
+        }
+        if (cy < minY) {
+          minY = cy;
+        }
+        if (cy > maxY) {
+          maxY = cy;
+        }
+        for (const [dx, dy] of directions) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+            continue;
+          }
+          const next = ny * width + nx;
+          if (!binary[next] || visited[next]) {
+            continue;
+          }
+          visited[next] = 1;
+          queue.push(next);
+        }
+      }
+      if (area < minComponentArea) {
+        continue;
+      }
+
+      const rgba = Buffer.alloc(width * height * 4);
+      for (const pixelIndex of pixels) {
+        const offset = pixelIndex * 4;
+        rgba[offset] = 255;
+        rgba[offset + 1] = 255;
+        rgba[offset + 2] = 255;
+        rgba[offset + 3] = 255;
+      }
+
+      components.push({
+        x: minX,
+        y: minY,
+        width: maxX - minX + 1,
+        height: maxY - minY + 1,
+        area,
+        maskBuffer: await sharp(rgba, {
+          raw: { width, height, channels: 4 },
+        })
+          .png()
+          .toBuffer(),
+      });
+    }
+  }
+
+  return {
+    width,
+    height,
+    coverageRatio: Number((whitePixels / Math.max(1, width * height)).toFixed(4)),
+    components: components.sort((left, right) => right.area - left.area),
+  };
+}
+
 async function buildMaskBufferFromRegion(maskWidth, maskHeight, region) {
   const svg = `
     <svg width="${maskWidth}" height="${maskHeight}" viewBox="0 0 ${maskWidth} ${maskHeight}" xmlns="http://www.w3.org/2000/svg">
@@ -2242,44 +2365,96 @@ async function executeFurnitureRemovalObjectStrategy({
   sourceBuffer,
 }) {
   const normalizedSourceBuffer = await sharp(sourceBuffer).rotate().jpeg({ quality: 96 }).toBuffer();
+  const sourceMetadata = await sharp(normalizedSourceBuffer).metadata();
+  const sourceWidth = Number(sourceMetadata.width || 0);
+  const sourceHeight = Number(sourceMetadata.height || 0);
   const sourceImageBase64 = normalizedSourceBuffer.toString('base64');
   const fallbackMaskBuffer = await buildInpaintingMaskBuffer(
     normalizedSourceBuffer,
     preset.key,
     resolvedRoomType,
   );
-  const adaptiveFurnitureMask = await buildAdaptiveFurnitureMaskAtSourceSize(normalizedSourceBuffer, {
+  const adaptiveFurnitureMaskProbe = await buildAdaptiveFurnitureMaskBuffer(normalizedSourceBuffer, {
     bridgeNearbyComponents: false,
   });
-  let maskRegionAnalysis = await extractMaskRegions(adaptiveFurnitureMask.adaptiveMaskBuffer, {
-    minAreaRatio: 0.0015,
+  let componentAnalysis = await extractMaskComponents(adaptiveFurnitureMaskProbe, {
+    minAreaRatio: 0.0035,
   });
-  if (!maskRegionAnalysis.regions.length) {
-    maskRegionAnalysis = await extractMaskRegions(fallbackMaskBuffer, { minAreaRatio: 0.0025 });
+  if (!componentAnalysis.components.length) {
+    const fallbackRegionAnalysis = await extractMaskRegions(fallbackMaskBuffer, { minAreaRatio: 0.0025 });
+    componentAnalysis = {
+      width: sourceWidth,
+      height: sourceHeight,
+      coverageRatio: fallbackRegionAnalysis.coverageRatio,
+      components: fallbackRegionAnalysis.regions.map((region) => ({
+        ...region,
+        maskBuffer: null,
+      })),
+    };
   }
 
-  const objectTargets = maskRegionAnalysis.regions
-    .map((region, index) => {
+  const objectTargets = await Promise.all(
+    componentAnalysis.components.map(async (component, index) => {
+      const componentRegion =
+        componentAnalysis.width === sourceWidth && componentAnalysis.height === sourceHeight
+          ? {
+              x: component.x,
+              y: component.y,
+              width: component.width,
+              height: component.height,
+              area: component.area,
+            }
+          : {
+              x: Math.max(0, Math.round((component.x / Math.max(1, componentAnalysis.width)) * sourceWidth)),
+              y: Math.max(0, Math.round((component.y / Math.max(1, componentAnalysis.height)) * sourceHeight)),
+              width: Math.max(
+                1,
+                Math.round((component.width / Math.max(1, componentAnalysis.width)) * sourceWidth),
+              ),
+              height: Math.max(
+                1,
+                Math.round((component.height / Math.max(1, componentAnalysis.height)) * sourceHeight),
+              ),
+              area: Math.max(
+                1,
+                Math.round(
+                  (component.area / Math.max(1, componentAnalysis.width * componentAnalysis.height)) *
+                    sourceWidth *
+                    sourceHeight,
+                ),
+              ),
+            };
       const padding = Math.max(
         8,
-        Math.min(18, Math.round(Math.max(region.width, region.height) * 0.12)),
+        Math.min(18, Math.round(Math.max(componentRegion.width, componentRegion.height) * 0.12)),
       );
       const expandedRegion = expandMaskRegion(
-        region,
-        maskRegionAnalysis.width,
-        maskRegionAnalysis.height,
+        componentRegion,
+        sourceWidth,
+        sourceHeight,
         padding,
       );
+      const componentMaskBuffer = component.maskBuffer
+        ? await sharp(component.maskBuffer)
+            .resize(sourceWidth, sourceHeight, { fit: 'fill' })
+            .blur(0.9)
+            .png()
+            .toBuffer()
+        : await buildMaskBufferFromRegion(sourceWidth, sourceHeight, componentRegion);
       return {
         index,
+        focusRegion: componentRegion,
         region: expandedRegion,
+        maskBuffer: componentMaskBuffer,
         priority: scoreFurnitureRemovalRegion(
-          expandedRegion,
-          maskRegionAnalysis.width,
-          maskRegionAnalysis.height,
+          componentRegion,
+          sourceWidth,
+          sourceHeight,
         ),
       };
-    })
+    }),
+  );
+  const rankedObjectTargets = objectTargets
     .sort((left, right) => {
       if (left.priority !== right.priority) {
         return right.priority - left.priority;
@@ -2287,22 +2462,32 @@ async function executeFurnitureRemovalObjectStrategy({
       return left.region.area - right.region.area;
     })
     .slice(0, 4);
+  const maskRegionAnalysis = {
+    width: sourceWidth,
+    height: sourceHeight,
+    coverageRatio: componentAnalysis.coverageRatio,
+    regions: rankedObjectTargets.map((target) => ({
+      ...target.focusRegion,
+      area: target.focusRegion.area || target.focusRegion.width * target.focusRegion.height,
+    })),
+  };
 
   const attemptLog = [
     {
       stage: 'mask_analysis',
-      maskCoverageRatio: maskRegionAnalysis.coverageRatio,
-      targetCount: objectTargets.length,
+      maskCoverageRatio: componentAnalysis.coverageRatio,
+      targetCount: rankedObjectTargets.length,
       providerStrategy: preset.providerStrategy || 'object_removal',
-      targetOrder: objectTargets.map((target) => ({
+      targetOrder: rankedObjectTargets.map((target) => ({
         index: target.index,
         priority: target.priority,
-        region: target.region,
+        focusRegion: target.focusRegion,
+        cropRegion: target.region,
       })),
     },
   ];
 
-  if (!objectTargets.length) {
+  if (!rankedObjectTargets.length) {
     return {
       status: 'needs_user_action',
       attemptCount: 0,
@@ -2321,13 +2506,7 @@ async function executeFurnitureRemovalObjectStrategy({
   }
 
   const objectMaskBuffers = await Promise.all(
-    objectTargets.map((target) =>
-      buildMaskBufferFromRegion(
-        maskRegionAnalysis.width,
-        maskRegionAnalysis.height,
-        target.region,
-      ),
-    ),
+    rankedObjectTargets.map((target) => Promise.resolve(target.maskBuffer)),
   );
 
   const evaluationRegions = getPresetEvaluationRegions(preset.key);
@@ -2336,8 +2515,8 @@ async function executeFurnitureRemovalObjectStrategy({
   const successfulTargets = [];
   const failedTargets = [];
 
-  for (let targetIndex = 0; targetIndex < objectTargets.length; targetIndex += 1) {
-    const target = objectTargets[targetIndex];
+  for (let targetIndex = 0; targetIndex < rankedObjectTargets.length; targetIndex += 1) {
+    const target = rankedObjectTargets[targetIndex];
     const maskBuffer = objectMaskBuffers[targetIndex];
     const cropRegion = buildFurnitureRemovalCropRegion(
       target.region,
@@ -2345,10 +2524,10 @@ async function executeFurnitureRemovalObjectStrategy({
       maskRegionAnalysis.height,
     );
     const targetRegionWithinCrop = {
-      x: Math.max(0, target.region.x - cropRegion.x),
-      y: Math.max(0, target.region.y - cropRegion.y),
-      width: Math.min(cropRegion.width, target.region.width),
-      height: Math.min(cropRegion.height, target.region.height),
+      x: Math.max(0, target.focusRegion.x - cropRegion.x),
+      y: Math.max(0, target.focusRegion.y - cropRegion.y),
+      width: Math.min(cropRegion.width, target.focusRegion.width),
+      height: Math.min(cropRegion.height, target.focusRegion.height),
     };
     const normalizedTargetRegionWithinCrop = normalizePixelRegion(
       targetRegionWithinCrop,
@@ -2356,18 +2535,19 @@ async function executeFurnitureRemovalObjectStrategy({
       cropRegion.height,
     );
     const normalizedTargetRegionOnImage = normalizePixelRegion(
-      target.region,
-      maskRegionAnalysis.width,
-      maskRegionAnalysis.height,
+      target.focusRegion,
+      sourceWidth,
+      sourceHeight,
     );
     const cropMaskBuffer = await extractImageRegionBuffer(maskBuffer, cropRegion);
     const attemptConfigs = getFurnitureRemovalAttemptConfigs(
-      target.region,
-      maskRegionAnalysis.width,
-      maskRegionAnalysis.height,
+      target.focusRegion,
+      sourceWidth,
+      sourceHeight,
     );
 
     let acceptedTarget = null;
+    let bestSoftCandidate = null;
     for (const attemptConfig of attemptConfigs) {
       const currentCropBuffer = await extractImageRegionBuffer(workingBuffer, cropRegion);
       const sourceMaskedEdgeDensity = await calculateMaskedEdgeDensity(currentCropBuffer, cropMaskBuffer);
@@ -2450,13 +2630,20 @@ async function executeFurnitureRemovalObjectStrategy({
           region: evaluationRegions.structureRegion,
         },
       );
-      const accepted =
-        maskedChangeRatio >= 0.18 &&
-        targetRegionChangeRatio >= 0.14 &&
-        (maskedEdgeDensityDelta <= -0.01 || maskedChangeRatio >= 0.3) &&
-        cropStructureChangeRatio <= 0.16 &&
-        topHalfChangeRatio <= 0.12 &&
-        structureHistogramDrift <= 0.38;
+      const strictAccepted =
+        maskedChangeRatio >= 0.14 &&
+        targetRegionChangeRatio >= 0.1 &&
+        (maskedEdgeDensityDelta <= -0.006 || maskedChangeRatio >= 0.24) &&
+        cropStructureChangeRatio <= 0.18 &&
+        topHalfChangeRatio <= 0.14 &&
+        structureHistogramDrift <= 0.44;
+      const softAccepted =
+        maskedChangeRatio >= 0.1 &&
+        targetRegionChangeRatio >= 0.07 &&
+        maskedEdgeDensityDelta <= -0.008 &&
+        cropStructureChangeRatio <= 0.2 &&
+        topHalfChangeRatio <= 0.15 &&
+        structureHistogramDrift <= 0.48;
 
       attemptLog.push({
         attempt: attemptCount,
@@ -2471,10 +2658,29 @@ async function executeFurnitureRemovalObjectStrategy({
         cropStructureChangeRatio,
         topHalfChangeRatio,
         structureHistogramDrift,
-        result: accepted ? 'accepted' : 'rejected',
+        result: strictAccepted ? 'accepted' : softAccepted ? 'soft_accepted' : 'rejected',
       });
 
-      if (!accepted) {
+      if (softAccepted && !strictAccepted) {
+        const softCandidate = {
+          buffer: candidateFullBuffer,
+          maskedChangeRatio,
+          targetRegionChangeRatio,
+          maskedEdgeDensityDelta,
+          cropStructureChangeRatio,
+          topHalfChangeRatio,
+          structureHistogramDrift,
+          lowConfidence: true,
+        };
+        if (
+          !bestSoftCandidate ||
+          softCandidate.maskedChangeRatio > bestSoftCandidate.maskedChangeRatio
+        ) {
+          bestSoftCandidate = softCandidate;
+        }
+      }
+
+      if (!strictAccepted) {
         continue;
       }
 
@@ -2486,8 +2692,13 @@ async function executeFurnitureRemovalObjectStrategy({
         cropStructureChangeRatio,
         topHalfChangeRatio,
         structureHistogramDrift,
+        lowConfidence: false,
       };
       break;
+    }
+
+    if (!acceptedTarget && bestSoftCandidate) {
+      acceptedTarget = bestSoftCandidate;
     }
 
     if (acceptedTarget) {
@@ -2496,7 +2707,7 @@ async function executeFurnitureRemovalObjectStrategy({
         targetIndex,
         sourceRegionIndex: target.index,
         priority: target.priority,
-        region: target.region,
+        region: target.focusRegion,
         ...acceptedTarget,
       });
     } else {
@@ -2504,7 +2715,7 @@ async function executeFurnitureRemovalObjectStrategy({
         targetIndex,
         sourceRegionIndex: target.index,
         priority: target.priority,
-        region: target.region,
+        region: target.focusRegion,
       });
     }
   }
@@ -2522,11 +2733,12 @@ async function executeFurnitureRemovalObjectStrategy({
         'Object-level removal attempts preserved room safety, but no target produced real subtraction.',
       attemptLog,
       maskRegionAnalysis,
-      objectTargets,
+      objectTargets: rankedObjectTargets,
       createdVariants: [],
     };
   }
 
+  const hasLowConfidenceTarget = successfulTargets.some((target) => target.lowConfidence);
   const review = await reviewVisionVariant({
     property: null,
     roomLabel: asset.roomLabel,
@@ -2561,15 +2773,17 @@ async function executeFurnitureRemovalObjectStrategy({
     useInBrochure: false,
     useInReport: false,
     metadata: {
-      warning: failedTargets.length
-        ? 'We removed some isolated furniture objects, but overlapping or larger pieces may still need separate passes.'
+      warning: failedTargets.length || hasLowConfidenceTarget
+        ? 'We removed some isolated furniture objects, but overlapping pieces or lower-confidence removals may still need separate passes.'
         : renderPlan.warning,
       summary: renderPlan.summary,
       differenceHint: renderPlan.differenceHint,
       effects: [
         ...(renderPlan.effects || []),
         'Object-level removal strategy',
-        failedTargets.length ? 'Partial success' : 'Isolated target subtraction',
+        failedTargets.length || hasLowConfidenceTarget
+          ? 'Partial success'
+          : 'Isolated target subtraction',
       ],
       sourceAssetId: asset._id.toString(),
       roomLabel: asset.roomLabel,
@@ -2590,14 +2804,15 @@ async function executeFurnitureRemovalObjectStrategy({
       normalizedPlan,
       maskStrategy: 'object_level_crop_masks',
       fallbackMode: failedTargets.length ? 'partial_success' : null,
-      review: {
-        ...review,
-        overallScore,
-        successfulObjectCount: successfulTargets.length,
-        failedObjectCount: failedTargets.length,
-        successfulTargets,
+        review: {
+          ...review,
+          overallScore,
+          successfulObjectCount: successfulTargets.length,
+          failedObjectCount: failedTargets.length,
+          lowConfidenceObjectCount: successfulTargets.filter((target) => target.lowConfidence).length,
+          successfulTargets,
+        },
       },
-    },
   });
 
   return {
@@ -2607,7 +2822,7 @@ async function executeFurnitureRemovalObjectStrategy({
     fallbackMode: failedTargets.length ? 'partial_success' : null,
     attemptLog,
     maskRegionAnalysis,
-    objectTargets,
+    objectTargets: rankedObjectTargets,
     createdVariants: [serializeMediaVariant(variant.toObject())],
   };
 }
