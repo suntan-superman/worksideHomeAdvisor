@@ -85,7 +85,7 @@ export const VISION_PRESETS = [
     guidanceScale: 9,
     numInferenceSteps: 45,
     negativePrompt:
-      'extra furniture, sofa, couch, chair, coffee table, side table, ottoman, rug, clutter, low quality, unrealistic geometry, warped lines, distorted walls',
+      'extra furniture, sofa, couch, chair, coffee table, side table, ottoman, rug, clutter, fireplace, mantel, built-in, low quality, unrealistic geometry, warped lines, distorted walls',
     replicateModel: REPLICATE_INPAINT_MODEL,
   },
   {

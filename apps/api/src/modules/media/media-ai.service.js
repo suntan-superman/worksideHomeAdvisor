@@ -330,9 +330,10 @@ function getPresetPromptAddon(presetKey, roomType) {
   return '';
 }
 
-async function calculateVisualChangeRatio(sourceBuffer, variantBuffer) {
+async function calculateVisualChangeRatio(sourceBuffer, variantBuffer, options = {}) {
   const width = 256;
   const height = 256;
+  const region = options.region || null;
   const src = await sharp(sourceBuffer)
     .rotate()
     .resize(width, height, { fit: 'cover' })
@@ -346,16 +347,29 @@ async function calculateVisualChangeRatio(sourceBuffer, variantBuffer) {
     .raw()
     .toBuffer();
 
-  const pixelCount = width * height;
+  const left = Math.max(0, Math.min(width - 1, Math.round((region?.left || 0) * width)));
+  const top = Math.max(0, Math.min(height - 1, Math.round((region?.top || 0) * height)));
+  const right = Math.max(
+    left + 1,
+    Math.min(width, Math.round(((region?.left || 0) + (region?.width || 1)) * width)),
+  );
+  const bottom = Math.max(
+    top + 1,
+    Math.min(height, Math.round(((region?.top || 0) + (region?.height || 1)) * height)),
+  );
+  const pixelCount = (right - left) * (bottom - top);
   let changedPixels = 0;
-  for (let offset = 0; offset < src.length; offset += 3) {
-    const delta =
-      (Math.abs(src[offset] - next[offset]) +
-        Math.abs(src[offset + 1] - next[offset + 1]) +
-        Math.abs(src[offset + 2] - next[offset + 2])) /
-      3;
-    if (delta >= 18) {
-      changedPixels += 1;
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = left; x < right; x += 1) {
+      const offset = (y * width + x) * 3;
+      const delta =
+        (Math.abs(src[offset] - next[offset]) +
+          Math.abs(src[offset + 1] - next[offset + 1]) +
+          Math.abs(src[offset + 2] - next[offset + 2])) /
+        3;
+      if (delta >= 18) {
+        changedPixels += 1;
+      }
     }
   }
 
@@ -1192,13 +1206,39 @@ function buildMaskShapes(metadata, presetKey, roomType) {
   ]);
 
   if (presetKey === 'remove_furniture') {
+    if (normalizedRoomType === 'living_room') {
+      return [
+        {
+          type: 'rect',
+          left: Math.round(width * 0.04),
+          top: Math.round(height * 0.34),
+          width: Math.round(width * 0.92),
+          height: Math.round(height * 0.6),
+        },
+        {
+          type: 'ellipse',
+          cx: Math.round(width * 0.27),
+          cy: Math.round(height * 0.66),
+          rx: Math.round(width * 0.22),
+          ry: Math.round(height * 0.18),
+        },
+        {
+          type: 'ellipse',
+          cx: Math.round(width * 0.74),
+          cy: Math.round(height * 0.64),
+          rx: Math.round(width * 0.24),
+          ry: Math.round(height * 0.19),
+        },
+      ];
+    }
+
     return [
       {
         type: 'rect',
         left: Math.round(width * 0.08),
-        top: Math.round(height * 0.14),
+        top: Math.round(height * 0.3),
         width: Math.round(width * 0.84),
-        height: Math.round(height * 0.76),
+        height: Math.round(height * 0.64),
       },
       {
         type: 'ellipse',
@@ -1644,81 +1684,117 @@ export async function createImageEnhancementJob({
         scheduler: preset.scheduler,
         negativePrompt: preset.negativePrompt,
       });
+      createdVariants = [];
+      for (let index = 0; index < providerOutputs.length; index += 1) {
+        const output = providerOutputs[index];
+        const buffer = await convertReplicateOutputToBuffer(output);
+        const review = await reviewVisionVariant({
+          property: null,
+          roomLabel: asset.roomLabel,
+          presetKey: preset.key,
+          variantCategory: preset.category,
+          mimeType: 'image/jpeg',
+          sourceImageBase64,
+          variantImageBase64: buffer.toString('base64'),
+        });
+        const visualChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer);
+        const topHalfChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer, {
+          region: { left: 0, top: 0, width: 1, height: 0.52 },
+        });
+        let overallScore = calculateVisionReviewOverallScore(review);
+        let rejectForArchitecturalDrift = false;
+        let qualityWarning = '';
 
-      createdVariants = await Promise.all(
-        providerOutputs.map(async (output, index) => {
-          const buffer = await convertReplicateOutputToBuffer(output);
-          const review = await reviewVisionVariant({
-            property: null,
-            roomLabel: asset.roomLabel,
-            presetKey: preset.key,
-            variantCategory: preset.category,
-            mimeType: 'image/jpeg',
-            sourceImageBase64,
-            variantImageBase64: buffer.toString('base64'),
-          });
-          const visualChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer);
-          let overallScore = calculateVisionReviewOverallScore(review);
-          if (
-            (preset.key === 'remove_furniture' && visualChangeRatio < 0.2) ||
-            (preset.key.startsWith('floor_') && visualChangeRatio < 0.12)
-          ) {
-            overallScore = Math.max(0, overallScore - 18);
+        if (preset.key === 'remove_furniture') {
+          if (visualChangeRatio < 0.22) {
+            overallScore = Math.max(0, overallScore - 22);
           }
-          const saved = await saveBinaryBuffer({
-            propertyId: asset.propertyId.toString(),
-            mimeType: 'image/jpeg',
-            buffer,
-          });
+          if (topHalfChangeRatio > 0.1) {
+            overallScore = Math.max(0, overallScore - 26);
+          }
+          if (topHalfChangeRatio > 0.16) {
+            rejectForArchitecturalDrift = true;
+            qualityWarning = 'Rejected variant due to likely structural drift in upper architecture.';
+          }
+        }
 
-          const variant = await MediaVariantModel.create({
-            visionJobId: job._id,
-            mediaId: asset._id,
-            propertyId: asset.propertyId,
-            variantType: preset.key,
-            variantCategory: preset.category,
-            label: `${renderPlan.label} ${String.fromCharCode(65 + index)}`,
-            mimeType: 'image/jpeg',
-            storageProvider: saved.storageProvider,
-            storageKey: saved.storageKey,
-            byteSize: saved.byteSize,
-            isSelected: false,
-            ...buildVariantLifecycleFields({ isSelected: false }),
-            useInBrochure: false,
-            useInReport: false,
-            metadata: {
-              warning: renderPlan.warning,
-              summary: renderPlan.summary,
-              differenceHint: renderPlan.differenceHint,
-              effects: renderPlan.effects,
-              sourceAssetId: asset._id.toString(),
-              roomLabel: asset.roomLabel,
-              roomType: resolvedRoomType,
-              provider: 'replicate',
-              presetKey: preset.key,
-              promptVersion: preset.promptVersion,
-              helperText: preset.helperText,
-              recommendedUse: preset.recommendedUse,
-              upgradeTier: preset.upgradeTier,
-              category: preset.category,
-              disclaimerType: preset.disclaimerType,
-              roomPromptAddon,
-              presetPromptAddon,
-              mode: requestedMode,
-              instructions: normalizedInstructions,
-              normalizedPlan,
-              providerSourceUrl: getProviderSourceUrl(output),
-              review: {
-                ...review,
-                overallScore,
-                visualChangeRatio,
-              },
+        if (preset.key.startsWith('floor_')) {
+          if (visualChangeRatio < 0.14) {
+            overallScore = Math.max(0, overallScore - 20);
+          }
+          if (topHalfChangeRatio > 0.09) {
+            overallScore = Math.max(0, overallScore - 20);
+          }
+          if (topHalfChangeRatio > 0.14) {
+            rejectForArchitecturalDrift = true;
+            qualityWarning = 'Rejected variant due to likely structural drift outside floor regions.';
+          }
+        }
+
+        if (rejectForArchitecturalDrift) {
+          continue;
+        }
+
+        const saved = await saveBinaryBuffer({
+          propertyId: asset.propertyId.toString(),
+          mimeType: 'image/jpeg',
+          buffer,
+        });
+
+        const variant = await MediaVariantModel.create({
+          visionJobId: job._id,
+          mediaId: asset._id,
+          propertyId: asset.propertyId,
+          variantType: preset.key,
+          variantCategory: preset.category,
+          label: `${renderPlan.label} ${String.fromCharCode(65 + index)}`,
+          mimeType: 'image/jpeg',
+          storageProvider: saved.storageProvider,
+          storageKey: saved.storageKey,
+          byteSize: saved.byteSize,
+          isSelected: false,
+          ...buildVariantLifecycleFields({ isSelected: false }),
+          useInBrochure: false,
+          useInReport: false,
+          metadata: {
+            warning: qualityWarning || renderPlan.warning,
+            summary: renderPlan.summary,
+            differenceHint: renderPlan.differenceHint,
+            effects: renderPlan.effects,
+            sourceAssetId: asset._id.toString(),
+            roomLabel: asset.roomLabel,
+            roomType: resolvedRoomType,
+            provider: 'replicate',
+            presetKey: preset.key,
+            promptVersion: preset.promptVersion,
+            helperText: preset.helperText,
+            recommendedUse: preset.recommendedUse,
+            upgradeTier: preset.upgradeTier,
+            category: preset.category,
+            disclaimerType: preset.disclaimerType,
+            roomPromptAddon,
+            presetPromptAddon,
+            mode: requestedMode,
+            instructions: normalizedInstructions,
+            normalizedPlan,
+            providerSourceUrl: getProviderSourceUrl(output),
+            review: {
+              ...review,
+              overallScore,
+              visualChangeRatio,
+              topHalfChangeRatio,
             },
-          });
+          },
+        });
 
-          return serializeMediaVariant(variant.toObject());
-        }),
-      );
+        createdVariants.push(serializeMediaVariant(variant.toObject()));
+      }
+
+      if (!createdVariants.length) {
+        throw new Error(
+          'Generated variants failed quality safeguards due to heavy structural drift. Please retry with a different source photo angle or a narrower transformation request.',
+        );
+      }
     } else {
       const rendered = await renderVariantBuffer(stored.buffer, preset.key, resolvedRoomType);
       const review = await reviewVisionVariant({
