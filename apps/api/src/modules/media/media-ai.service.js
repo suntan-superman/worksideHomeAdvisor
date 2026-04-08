@@ -456,6 +456,51 @@ async function calculateHistogramDrift(sourceBuffer, variantBuffer, options = {}
   return Number((l1Distance / 2).toFixed(4));
 }
 
+async function calculateEdgeDensity(imageBuffer, options = {}) {
+  const width = 192;
+  const height = 192;
+  const region = options.region || null;
+  const image = await sharp(imageBuffer)
+    .rotate()
+    .resize(width, height, { fit: 'cover' })
+    .removeAlpha()
+    .greyscale()
+    .raw()
+    .toBuffer();
+
+  const left = Math.max(1, Math.min(width - 2, Math.round((region?.left || 0) * width)));
+  const top = Math.max(1, Math.min(height - 2, Math.round((region?.top || 0) * height)));
+  const right = Math.max(
+    left + 1,
+    Math.min(width - 1, Math.round(((region?.left || 0) + (region?.width || 1)) * width)),
+  );
+  const bottom = Math.max(
+    top + 1,
+    Math.min(height - 1, Math.round(((region?.top || 0) + (region?.height || 1)) * height)),
+  );
+  const pixelCount = (right - left) * (bottom - top);
+  let edgePixels = 0;
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = left; x < right; x += 1) {
+      const idx = y * width + x;
+      const gx =
+        Math.abs(image[idx + 1] - image[idx - 1]) +
+        Math.abs(image[idx + 1 + width] - image[idx - 1 + width]) +
+        Math.abs(image[idx + 1 - width] - image[idx - 1 - width]);
+      const gy =
+        Math.abs(image[idx + width] - image[idx - width]) +
+        Math.abs(image[idx + width + 1] - image[idx - width + 1]) +
+        Math.abs(image[idx + width - 1] - image[idx - width - 1]);
+      const magnitude = (gx + gy) / 6;
+      if (magnitude > 26) {
+        edgePixels += 1;
+      }
+    }
+  }
+
+  return Number((edgePixels / Math.max(1, pixelCount)).toFixed(4));
+}
+
 function getPresetEvaluationRegions(presetKey) {
   if (presetKey === 'remove_furniture') {
     return {
@@ -2269,6 +2314,12 @@ export async function createImageEnhancementJob({
       createdVariants = [];
       const rejectedCandidates = [];
       const evaluationRegions = getPresetEvaluationRegions(preset.key);
+      const sourceFocusEdgeDensity =
+        preset.key === 'remove_furniture'
+          ? await calculateEdgeDensity(stored.buffer, {
+              region: evaluationRegions.focusRegion,
+            })
+          : null;
       for (let index = 0; index < providerOutputs.length; index += 1) {
         let output = providerOutputs[index];
         let buffer = await convertReplicateOutputToBuffer(output);
@@ -2337,6 +2388,16 @@ export async function createImageEnhancementJob({
         const structureHistogramDrift = await calculateHistogramDrift(stored.buffer, buffer, {
           region: evaluationRegions.structureRegion,
         });
+        const variantFocusEdgeDensity =
+          preset.key === 'remove_furniture'
+            ? await calculateEdgeDensity(buffer, {
+                region: evaluationRegions.focusRegion,
+              })
+            : null;
+        const focusEdgeDensityDelta =
+          preset.key === 'remove_furniture'
+            ? Number((variantFocusEdgeDensity - sourceFocusEdgeDensity).toFixed(4))
+            : null;
         let overallScore = calculateVisionReviewOverallScore(review);
         let rejectForArchitecturalDrift = false;
         let qualityWarning = '';
@@ -2347,6 +2408,9 @@ export async function createImageEnhancementJob({
           }
           if (focusRegionChangeRatio < 0.2) {
             overallScore = Math.max(0, overallScore - 28);
+          }
+          if (focusEdgeDensityDelta > -0.012) {
+            overallScore = Math.max(0, overallScore - 24);
           }
           if (topHalfChangeRatio > 0.08) {
             overallScore = Math.max(0, overallScore - 26);
@@ -2360,6 +2424,11 @@ export async function createImageEnhancementJob({
           if (focusRegionChangeRatio < 0.16) {
             rejectForArchitecturalDrift = true;
             qualityWarning = 'Rejected variant due to insufficient furniture removal in the target region.';
+          }
+          if (focusRegionChangeRatio < 0.22 && focusEdgeDensityDelta > -0.01) {
+            rejectForArchitecturalDrift = true;
+            qualityWarning =
+              'Rejected variant due to furniture persistence (style change without meaningful object removal).';
           }
           if (topHalfChangeRatio > 0.13) {
             rejectForArchitecturalDrift = true;
@@ -2397,6 +2466,7 @@ export async function createImageEnhancementJob({
             overallScore,
             visualChangeRatio,
             focusRegionChangeRatio,
+            focusEdgeDensityDelta,
             topHalfChangeRatio,
             structureHistogramDrift,
             rejectReason: qualityWarning,
@@ -2458,6 +2528,9 @@ export async function createImageEnhancementJob({
               overallScore,
               visualChangeRatio,
               focusRegionChangeRatio,
+              focusEdgeDensityDelta,
+              sourceFocusEdgeDensity,
+              variantFocusEdgeDensity,
               topHalfChangeRatio,
               structureHistogramDrift,
             },
@@ -2472,6 +2545,7 @@ export async function createImageEnhancementJob({
           if (splitMaskBuffers.length && maskRegionAnalysis?.regions?.length) {
             let segmentedBuffer = stored.buffer;
             let segmentedSuccessCount = 0;
+            let majorRegionRemoved = false;
             const segmentedRegionLimit = Math.min(2, splitMaskBuffers.length, maskRegionAnalysis.regions.length);
             for (let splitIndex = 0; splitIndex < segmentedRegionLimit; splitIndex += 1) {
               const splitOutputs = await runReplicateInpainting({
@@ -2508,6 +2582,15 @@ export async function createImageEnhancementJob({
                 splitCandidateBuffer,
                 { region: evaluationRegions.structureRegion },
               );
+              const splitSourceEdgeDensity = await calculateEdgeDensity(segmentedBuffer, {
+                region: normalizedRegion,
+              });
+              const splitVariantEdgeDensity = await calculateEdgeDensity(splitCandidateBuffer, {
+                region: normalizedRegion,
+              });
+              const splitEdgeDensityDelta = Number(
+                (splitVariantEdgeDensity - splitSourceEdgeDensity).toFixed(4),
+              );
               const splitStructureHistogramDrift = await calculateHistogramDrift(
                 segmentedBuffer,
                 splitCandidateBuffer,
@@ -2522,6 +2605,7 @@ export async function createImageEnhancementJob({
                 guidanceScale: Math.max(10.8, Number(preset.guidanceScale || 9) + 1.8),
                 outputCount: 1,
                 localRegionChangeRatio,
+                splitEdgeDensityDelta,
                 splitTopHalfChangeRatio,
                 splitStructureHistogramDrift,
               });
@@ -2530,15 +2614,19 @@ export async function createImageEnhancementJob({
 
               if (
                 localRegionChangeRatio >= 0.12 &&
+                splitEdgeDensityDelta <= -0.02 &&
                 splitTopHalfChangeRatio <= 0.12 &&
                 splitStructureHistogramDrift <= 0.46
               ) {
                 segmentedBuffer = splitCandidateBuffer;
                 segmentedSuccessCount += 1;
+                if (splitIndex === 0) {
+                  majorRegionRemoved = true;
+                }
               }
             }
 
-            if (segmentedSuccessCount > 0) {
+            if (segmentedSuccessCount > 0 && majorRegionRemoved) {
               const saved = await saveBinaryBuffer({
                 propertyId: asset.propertyId.toString(),
                 mimeType: 'image/jpeg',
@@ -2603,7 +2691,8 @@ export async function createImageEnhancementJob({
                 candidate.topHalfChangeRatio <= 0.13 &&
                 candidate.structureHistogramDrift <= 0.48 &&
                 candidate.focusRegionChangeRatio >= 0.24 &&
-                candidate.visualChangeRatio >= 0.24,
+                candidate.visualChangeRatio >= 0.24 &&
+                candidate.focusEdgeDensityDelta <= -0.02,
             )
             .sort((left, right) => {
               if (left.structureHistogramDrift !== right.structureHistogramDrift) {
