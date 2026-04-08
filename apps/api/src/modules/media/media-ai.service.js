@@ -1998,7 +1998,7 @@ function getFurnitureRemovalRejectReasons({
   maskedChangeRatio,
   targetRegionChangeRatio,
   maskedEdgeDensityDelta,
-  cropStructureChangeRatio,
+  outsideMaskChangeRatio,
   topHalfChangeRatio,
   structureHistogramDrift,
 }) {
@@ -2012,10 +2012,10 @@ function getFurnitureRemovalRejectReasons({
   if (maskedEdgeDensityDelta > -0.008) {
     reasons.push('object_silhouette_persisted');
   }
-  if (cropStructureChangeRatio > 0.2) {
-    reasons.push('crop_structure_change_too_high');
+  if (outsideMaskChangeRatio > 0.22) {
+    reasons.push('outside_target_change_too_high');
   }
-  if (topHalfChangeRatio > 0.15) {
+  if (topHalfChangeRatio > 0.3 && structureHistogramDrift > 0.18) {
     reasons.push('upper_architecture_change_too_high');
   }
   if (structureHistogramDrift > 0.48) {
@@ -2066,6 +2066,73 @@ async function calculateMaskedVisualChangeRatio(sourceBuffer, variantBuffer, mas
   }
 
   return Number((changedPixels / Math.max(1, maskPixels)).toFixed(4));
+}
+
+async function calculateOutsideMaskVisualChangeRatio(sourceBuffer, variantBuffer, maskBuffer) {
+  const metadata = await sharp(maskBuffer).metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const [src, next, rawMask] = await Promise.all([
+    sharp(sourceBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(variantBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(maskBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+  ]);
+
+  const expandedMask = new Uint8Array(width * height);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let isNearMask = false;
+      for (let oy = -2; oy <= 2 && !isNearMask; oy += 1) {
+        for (let ox = -2; ox <= 2; ox += 1) {
+          const nx = x + ox;
+          const ny = y + oy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+            continue;
+          }
+          if (rawMask[ny * width + nx] > 32) {
+            isNearMask = true;
+            break;
+          }
+        }
+      }
+      if (isNearMask) {
+        expandedMask[y * width + x] = 1;
+      }
+    }
+  }
+
+  let outsidePixels = 0;
+  let changedOutsidePixels = 0;
+  for (let i = 0; i < width * height; i += 1) {
+    if (expandedMask[i]) {
+      continue;
+    }
+    outsidePixels += 1;
+    const offset = i * 3;
+    const delta =
+      (Math.abs(src[offset] - next[offset]) +
+        Math.abs(src[offset + 1] - next[offset + 1]) +
+        Math.abs(src[offset + 2] - next[offset + 2])) /
+      3;
+    if (delta >= 18) {
+      changedOutsidePixels += 1;
+    }
+  }
+
+  return Number((changedOutsidePixels / Math.max(1, outsidePixels)).toFixed(4));
 }
 
 async function calculateMaskedEdgeDensity(imageBuffer, maskBuffer) {
@@ -2634,17 +2701,10 @@ async function executeFurnitureRemovalObjectStrategy({
       const maskedEdgeDensityDelta = Number(
         (variantMaskedEdgeDensity - sourceMaskedEdgeDensity).toFixed(4),
       );
-      const cropStructureChangeRatio = await calculateVisualChangeRatio(
+      const outsideMaskChangeRatio = await calculateOutsideMaskVisualChangeRatio(
         currentCropBuffer,
         candidateCropBuffer,
-        {
-          region: {
-            left: 0,
-            top: 0,
-            width: 1,
-            height: Math.min(0.48, normalizedTargetRegionWithinCrop.top + 0.2),
-          },
-        },
+        cropMaskBuffer,
       );
       const topHalfChangeRatio = await calculateVisualChangeRatio(
         normalizedSourceBuffer,
@@ -2660,32 +2720,47 @@ async function executeFurnitureRemovalObjectStrategy({
           region: evaluationRegions.structureRegion,
         },
       );
+      const architecturePreserved =
+        topHalfChangeRatio <= 0.16 ||
+        (topHalfChangeRatio <= 0.3 &&
+          structureHistogramDrift <= 0.18 &&
+          outsideMaskChangeRatio <= 0.16);
       const strictAccepted =
         maskedChangeRatio >= 0.14 &&
         targetRegionChangeRatio >= 0.1 &&
         (maskedEdgeDensityDelta <= -0.006 || maskedChangeRatio >= 0.24) &&
-        cropStructureChangeRatio <= 0.18 &&
-        topHalfChangeRatio <= 0.14 &&
+        outsideMaskChangeRatio <= 0.16 &&
+        architecturePreserved &&
         structureHistogramDrift <= 0.44;
+      const softArchitecturePreserved =
+        topHalfChangeRatio <= 0.18 ||
+        (topHalfChangeRatio <= 0.34 &&
+          structureHistogramDrift <= 0.18 &&
+          outsideMaskChangeRatio <= 0.2);
       const softAccepted =
         maskedChangeRatio >= 0.1 &&
         targetRegionChangeRatio >= 0.07 &&
         maskedEdgeDensityDelta <= -0.008 &&
-        cropStructureChangeRatio <= 0.2 &&
-        topHalfChangeRatio <= 0.15 &&
+        outsideMaskChangeRatio <= 0.2 &&
+        softArchitecturePreserved &&
         structureHistogramDrift <= 0.48;
+      const practicalArchitecturePreserved =
+        topHalfChangeRatio <= 0.2 ||
+        (topHalfChangeRatio <= 0.36 &&
+          structureHistogramDrift <= 0.16 &&
+          outsideMaskChangeRatio <= 0.22);
       const practicalPartialAccepted =
         maskedChangeRatio >= 0.35 &&
         targetRegionChangeRatio >= 0.25 &&
         maskedEdgeDensityDelta <= 0 &&
-        cropStructureChangeRatio <= 0.28 &&
-        topHalfChangeRatio <= 0.16 &&
+        outsideMaskChangeRatio <= 0.22 &&
+        practicalArchitecturePreserved &&
         structureHistogramDrift <= 0.18;
       const rejectReasons = getFurnitureRemovalRejectReasons({
         maskedChangeRatio,
         targetRegionChangeRatio,
         maskedEdgeDensityDelta,
-        cropStructureChangeRatio,
+        outsideMaskChangeRatio,
         topHalfChangeRatio,
         structureHistogramDrift,
       });
@@ -2701,7 +2776,7 @@ async function executeFurnitureRemovalObjectStrategy({
         maskedChangeRatio,
         targetRegionChangeRatio,
         maskedEdgeDensityDelta,
-        cropStructureChangeRatio,
+        outsideMaskChangeRatio,
         topHalfChangeRatio,
         structureHistogramDrift,
         primaryRejectReason:
@@ -2723,7 +2798,7 @@ async function executeFurnitureRemovalObjectStrategy({
           maskedChangeRatio,
           targetRegionChangeRatio,
           maskedEdgeDensityDelta,
-          cropStructureChangeRatio,
+          outsideMaskChangeRatio,
           topHalfChangeRatio,
           structureHistogramDrift,
           primaryRejectReason: practicalPartialAccepted ? 'practical_partial' : primaryRejectReason,
@@ -2746,7 +2821,7 @@ async function executeFurnitureRemovalObjectStrategy({
         maskedChangeRatio,
         targetRegionChangeRatio,
         maskedEdgeDensityDelta,
-        cropStructureChangeRatio,
+        outsideMaskChangeRatio,
         topHalfChangeRatio,
         structureHistogramDrift,
         primaryRejectReason: null,

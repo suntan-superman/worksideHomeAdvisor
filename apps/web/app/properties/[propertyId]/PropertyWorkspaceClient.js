@@ -235,8 +235,8 @@ function formatVisionRejectReason(reason) {
   switch (reason) {
     case 'object_silhouette_persisted':
       return 'the furniture silhouette still looked present';
-    case 'crop_structure_change_too_high':
-      return 'the local crop changed too much outside the target object';
+    case 'outside_target_change_too_high':
+      return 'too much of the crop changed outside the target object';
     case 'upper_architecture_change_too_high':
       return 'too much change reached the upper room architecture';
     case 'upper_structure_drift_too_high':
@@ -292,14 +292,14 @@ function buildVisionFailureMessage(job) {
     const roomChange = formatPercentValue(bestRejectedAttempt.targetRegionChangeRatio);
     const drift = formatPercentValue(bestRejectedAttempt.structureHistogramDrift);
     const topHalf = formatPercentValue(bestRejectedAttempt.topHalfChangeRatio);
-    const cropStructure = formatPercentValue(bestRejectedAttempt.cropStructureChangeRatio);
+    const outsideTargetChange = formatPercentValue(bestRejectedAttempt.outsideMaskChangeRatio);
     const rejectReason = formatVisionRejectReason(bestRejectedAttempt.primaryRejectReason);
     const metrics = [
       maskedChange ? `best masked change ${maskedChange}` : null,
       roomChange ? `room-region change ${roomChange}` : null,
       drift ? `structure drift ${drift}` : null,
       topHalf ? `upper-architecture change ${topHalf}` : null,
-      cropStructure ? `local crop change ${cropStructure}` : null,
+      outsideTargetChange ? `outside-target change ${outsideTargetChange}` : null,
     ]
       .filter(Boolean)
       .join(', ');
