@@ -18,7 +18,7 @@ function getReplicateClient() {
   return replicateClient;
 }
 
-export async function runReplicateInpainting({
+async function runReplicatePrediction({
   image,
   mask,
   model = 'lucataco/sdxl-inpainting:latest',
@@ -57,4 +57,31 @@ export async function runReplicateInpainting({
   }
 
   return output.filter(Boolean);
+}
+
+export async function runReplicateGenericInpainting(options = {}) {
+  return runReplicatePrediction(options);
+}
+
+export async function runReplicateFurnitureRemoval({
+  outputCount = 1,
+  strength = 0.52,
+  guidanceScale = 8.6,
+  numInferenceSteps = 40,
+  negativePrompt =
+    'new furniture, replacement furniture, staged furniture, recolored furniture, reshaped furniture, sofa, couch, chair, coffee table, side table, ottoman, rug, clutter, fireplace, mantel, built-in, new room, different room, low quality, unrealistic geometry, warped lines, distorted walls',
+  ...options
+} = {}) {
+  return runReplicatePrediction({
+    ...options,
+    outputCount,
+    strength,
+    guidanceScale,
+    numInferenceSteps,
+    negativePrompt,
+  });
+}
+
+export async function runReplicateInpainting(options = {}) {
+  return runReplicateGenericInpainting(options);
 }

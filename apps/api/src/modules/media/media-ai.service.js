@@ -8,7 +8,10 @@ import { reviewVisionVariant } from '../../services/photoAnalysisService.js';
 import { ImageJobModel } from './image-job.model.js';
 import { MediaAssetModel } from './media.model.js';
 import { MediaVariantModel } from './media-variant.model.js';
-import { runReplicateInpainting } from './replicate-provider.service.js';
+import {
+  runReplicateFurnitureRemoval,
+  runReplicateInpainting,
+} from './replicate-provider.service.js';
 import {
   buildActiveVariantQuery,
   buildVariantLifecycleFields,
@@ -1578,7 +1581,8 @@ function buildMaskShapes(metadata, presetKey, roomType) {
   ];
 }
 
-async function buildAdaptiveFurnitureMaskBuffer(sourceBuffer) {
+async function buildAdaptiveFurnitureMaskBuffer(sourceBuffer, options = {}) {
+  const bridgeNearbyComponents = options.bridgeNearbyComponents !== false;
   const probeWidth = 72;
   const probeHeight = 72;
   const probe = await sharp(sourceBuffer)
@@ -1760,37 +1764,40 @@ async function buildAdaptiveFurnitureMaskBuffer(sourceBuffer) {
     }
   }
 
-  // Bridge tiny gaps so long sofas/chair groupings are treated as one target zone.
-  const bridgedMask = new Uint8Array(furnitureMask.length);
-  for (let y = 0; y < probeHeight; y += 1) {
-    for (let x = 0; x < probeWidth; x += 1) {
-      const idx = y * probeWidth + x;
-      if (furnitureMask[idx]) {
-        bridgedMask[idx] = 255;
-        continue;
-      }
-      let nearbyFurniture = 0;
-      for (let oy = -2; oy <= 2; oy += 1) {
-        for (let ox = -2; ox <= 2; ox += 1) {
-          const nx = x + ox;
-          const ny = y + oy;
-          if (nx < 0 || ny < 0 || nx >= probeWidth || ny >= probeHeight) {
-            continue;
-          }
-          if (furnitureMask[ny * probeWidth + nx]) {
-            nearbyFurniture += 1;
+  const finalMask = bridgeNearbyComponents ? new Uint8Array(furnitureMask.length) : furnitureMask;
+  if (bridgeNearbyComponents) {
+    // Keep general furniture masks broad enough for protection, but let object-removal
+    // mode keep components separate so we can target one object at a time.
+    for (let y = 0; y < probeHeight; y += 1) {
+      for (let x = 0; x < probeWidth; x += 1) {
+        const idx = y * probeWidth + x;
+        if (furnitureMask[idx]) {
+          finalMask[idx] = 255;
+          continue;
+        }
+        let nearbyFurniture = 0;
+        for (let oy = -2; oy <= 2; oy += 1) {
+          for (let ox = -2; ox <= 2; ox += 1) {
+            const nx = x + ox;
+            const ny = y + oy;
+            if (nx < 0 || ny < 0 || nx >= probeWidth || ny >= probeHeight) {
+              continue;
+            }
+            if (furnitureMask[ny * probeWidth + nx]) {
+              nearbyFurniture += 1;
+            }
           }
         }
-      }
-      if (nearbyFurniture >= 8) {
-        bridgedMask[idx] = 255;
+        if (nearbyFurniture >= 8) {
+          finalMask[idx] = 255;
+        }
       }
     }
   }
 
   const rgba = Buffer.alloc(probeWidth * probeHeight * 4);
-  for (let i = 0; i < bridgedMask.length; i += 1) {
-    const value = bridgedMask[i];
+  for (let i = 0; i < finalMask.length; i += 1) {
+    const value = finalMask[i];
     const offset = i * 4;
     rgba[offset] = value;
     rgba[offset + 1] = value;
@@ -1858,11 +1865,11 @@ async function buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType) {
   return shapeMaskBuffer;
 }
 
-async function buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer) {
+async function buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer, options = {}) {
   const metadata = await sharp(sourceBuffer).rotate().metadata();
   const width = Number(metadata.width || 0);
   const height = Number(metadata.height || 0);
-  const adaptiveMaskProbe = await buildAdaptiveFurnitureMaskBuffer(sourceBuffer);
+  const adaptiveMaskProbe = await buildAdaptiveFurnitureMaskBuffer(sourceBuffer, options);
   const adaptiveMaskBuffer = await sharp(adaptiveMaskProbe)
     .resize(width, height, { fit: 'fill' })
     .blur(1.1)
@@ -1910,32 +1917,162 @@ function getFurnitureRemovalAttemptConfigs(region, imageWidth, imageHeight) {
   return [
     {
       stage: 'initial',
-      strength: 0.3,
-      guidanceScale: 10,
-      numInferenceSteps: 30,
+      strength: 0.52,
+      guidanceScale: 8.6,
+      numInferenceSteps: 40,
       region,
       promptSuffix:
-        'Remove ONLY the furniture inside the masked area. If the task cannot be completed safely, return the original image unchanged.',
-    },
-    {
-      stage: 'conservative_retry',
-      strength: 0.28,
-      guidanceScale: 10,
-      numInferenceSteps: 32,
-      region,
-      promptSuffix:
-        'Remove only the furniture body inside the mask. Do not restage, recolor, reshape, or replace furniture. If unsafe, return the original image unchanged.',
+        'Remove only the selected furniture object inside the mask and reconstruct the newly visible background. Do not restage or replace anything.',
     },
     {
       stage: 'split_retry',
-      strength: 0.26,
-      guidanceScale: 9.8,
-      numInferenceSteps: 28,
-      region: insetMaskRegion(region, imageWidth, imageHeight, 6),
+      strength: 0.62,
+      guidanceScale: 8.2,
+      numInferenceSteps: 46,
+      region,
       promptSuffix:
-        'Attempt a surgical furniture removal only for the most obvious object inside this mask. Leave everything else unchanged. If unsafe, return the original image unchanged.',
+        'Try a stronger surgical removal of the same object. Keep walls, floors, windows, trim, and perspective unchanged. Do not restage the room.',
     },
   ];
+}
+
+function scoreFurnitureRemovalRegion(region, imageWidth, imageHeight) {
+  const areaRatio = region.area / Math.max(1, imageWidth * imageHeight);
+  const centerX = (region.x + region.width / 2) / Math.max(1, imageWidth);
+  const centerY = (region.y + region.height / 2) / Math.max(1, imageHeight);
+  const centrality = 1 - Math.min(1, Math.abs(centerX - 0.5) * 2);
+  const lowerMidBias = 1 - Math.min(1, Math.abs(centerY - 0.68) * 2.4);
+  const targetAreaBias = 1 - Math.min(1, Math.abs(areaRatio - 0.055) / 0.055);
+  const widthPenalty = region.width / Math.max(1, imageWidth) > 0.58 ? 0.72 : 1;
+
+  return Number(
+    ((centrality * 0.34 + lowerMidBias * 0.36 + targetAreaBias * 0.3) * widthPenalty).toFixed(4),
+  );
+}
+
+function buildFurnitureRemovalCropRegion(region, imageWidth, imageHeight) {
+  const padding = Math.max(22, Math.min(96, Math.round(Math.max(region.width, region.height) * 0.55)));
+  return expandMaskRegion(region, imageWidth, imageHeight, padding);
+}
+
+async function extractImageRegionBuffer(imageBuffer, region) {
+  return sharp(imageBuffer)
+    .extract({
+      left: Math.max(0, Math.round(region.x)),
+      top: Math.max(0, Math.round(region.y)),
+      width: Math.max(1, Math.round(region.width)),
+      height: Math.max(1, Math.round(region.height)),
+    })
+    .png()
+    .toBuffer();
+}
+
+async function compositeImageRegionBuffer(baseBuffer, overlayBuffer, region) {
+  const resizedOverlay = await sharp(overlayBuffer)
+    .resize(region.width, region.height, { fit: 'fill' })
+    .jpeg({ quality: 94 })
+    .toBuffer();
+
+  return sharp(baseBuffer)
+    .composite([
+      {
+        input: resizedOverlay,
+        left: Math.max(0, Math.round(region.x)),
+        top: Math.max(0, Math.round(region.y)),
+      },
+    ])
+    .jpeg({ quality: 94 })
+    .toBuffer();
+}
+
+async function calculateMaskedVisualChangeRatio(sourceBuffer, variantBuffer, maskBuffer) {
+  const metadata = await sharp(maskBuffer).metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const [src, next, mask] = await Promise.all([
+    sharp(sourceBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(variantBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(maskBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+  ]);
+
+  let maskPixels = 0;
+  let changedPixels = 0;
+  for (let i = 0; i < width * height; i += 1) {
+    if (mask[i] <= 32) {
+      continue;
+    }
+    maskPixels += 1;
+    const offset = i * 3;
+    const delta =
+      (Math.abs(src[offset] - next[offset]) +
+        Math.abs(src[offset + 1] - next[offset + 1]) +
+        Math.abs(src[offset + 2] - next[offset + 2])) /
+      3;
+    if (delta >= 18) {
+      changedPixels += 1;
+    }
+  }
+
+  return Number((changedPixels / Math.max(1, maskPixels)).toFixed(4));
+}
+
+async function calculateMaskedEdgeDensity(imageBuffer, maskBuffer) {
+  const metadata = await sharp(maskBuffer).metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const [image, mask] = await Promise.all([
+    sharp(imageBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+    sharp(maskBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+  ]);
+
+  let maskPixels = 0;
+  let edgePixels = 0;
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const idx = y * width + x;
+      if (mask[idx] <= 32) {
+        continue;
+      }
+      maskPixels += 1;
+      const gx =
+        Math.abs(image[idx + 1] - image[idx - 1]) +
+        Math.abs(image[idx + 1 + width] - image[idx - 1 + width]) +
+        Math.abs(image[idx + 1 - width] - image[idx - 1 - width]);
+      const gy =
+        Math.abs(image[idx + width] - image[idx - width]) +
+        Math.abs(image[idx + width + 1] - image[idx - width + 1]) +
+        Math.abs(image[idx + width - 1] - image[idx - width - 1]);
+      const magnitude = (gx + gy) / 6;
+      if (magnitude > 26) {
+        edgePixels += 1;
+      }
+    }
+  }
+
+  return Number((edgePixels / Math.max(1, maskPixels)).toFixed(4));
 }
 
 async function extractMaskRegions(maskBuffer, options = {}) {
@@ -2087,6 +2224,391 @@ function expandMaskRegion(region, imageWidth, imageHeight, padding) {
     width: Math.max(1, right - x),
     height: Math.max(1, bottom - y),
     area: Math.max(1, (right - x) * (bottom - y)),
+  };
+}
+
+async function executeFurnitureRemovalObjectStrategy({
+  asset,
+  job,
+  preset,
+  renderPlan,
+  resolvedRoomType,
+  requestedMode,
+  normalizedInstructions,
+  normalizedPlan,
+  fullPrompt,
+  roomPromptAddon,
+  presetPromptAddon,
+  sourceBuffer,
+}) {
+  const normalizedSourceBuffer = await sharp(sourceBuffer).rotate().jpeg({ quality: 96 }).toBuffer();
+  const sourceImageBase64 = normalizedSourceBuffer.toString('base64');
+  const fallbackMaskBuffer = await buildInpaintingMaskBuffer(
+    normalizedSourceBuffer,
+    preset.key,
+    resolvedRoomType,
+  );
+  const adaptiveFurnitureMask = await buildAdaptiveFurnitureMaskAtSourceSize(normalizedSourceBuffer, {
+    bridgeNearbyComponents: false,
+  });
+  let maskRegionAnalysis = await extractMaskRegions(adaptiveFurnitureMask.adaptiveMaskBuffer, {
+    minAreaRatio: 0.0015,
+  });
+  if (!maskRegionAnalysis.regions.length) {
+    maskRegionAnalysis = await extractMaskRegions(fallbackMaskBuffer, { minAreaRatio: 0.0025 });
+  }
+
+  const objectTargets = maskRegionAnalysis.regions
+    .map((region, index) => {
+      const padding = Math.max(
+        8,
+        Math.min(18, Math.round(Math.max(region.width, region.height) * 0.12)),
+      );
+      const expandedRegion = expandMaskRegion(
+        region,
+        maskRegionAnalysis.width,
+        maskRegionAnalysis.height,
+        padding,
+      );
+      return {
+        index,
+        region: expandedRegion,
+        priority: scoreFurnitureRemovalRegion(
+          expandedRegion,
+          maskRegionAnalysis.width,
+          maskRegionAnalysis.height,
+        ),
+      };
+    })
+    .sort((left, right) => {
+      if (left.priority !== right.priority) {
+        return right.priority - left.priority;
+      }
+      return left.region.area - right.region.area;
+    })
+    .slice(0, 4);
+
+  const attemptLog = [
+    {
+      stage: 'mask_analysis',
+      maskCoverageRatio: maskRegionAnalysis.coverageRatio,
+      targetCount: objectTargets.length,
+      providerStrategy: preset.providerStrategy || 'object_removal',
+      targetOrder: objectTargets.map((target) => ({
+        index: target.index,
+        priority: target.priority,
+        region: target.region,
+      })),
+    },
+  ];
+
+  if (!objectTargets.length) {
+    return {
+      status: 'needs_user_action',
+      attemptCount: 0,
+      currentStage: 'guided_selection',
+      fallbackMode: 'guided_selection',
+      failureReason: 'no_object_targets',
+      message:
+        'We could not isolate individual furniture objects in this photo. Try a straighter angle or a tighter crop on the object you want removed first.',
+      warning:
+        'Object-level furniture targeting could not find reliable removal zones in this image.',
+      attemptLog,
+      maskRegionAnalysis,
+      objectTargets: [],
+      createdVariants: [],
+    };
+  }
+
+  const objectMaskBuffers = await Promise.all(
+    objectTargets.map((target) =>
+      buildMaskBufferFromRegion(
+        maskRegionAnalysis.width,
+        maskRegionAnalysis.height,
+        target.region,
+      ),
+    ),
+  );
+
+  const evaluationRegions = getPresetEvaluationRegions(preset.key);
+  let workingBuffer = normalizedSourceBuffer;
+  let attemptCount = 0;
+  const successfulTargets = [];
+  const failedTargets = [];
+
+  for (let targetIndex = 0; targetIndex < objectTargets.length; targetIndex += 1) {
+    const target = objectTargets[targetIndex];
+    const maskBuffer = objectMaskBuffers[targetIndex];
+    const cropRegion = buildFurnitureRemovalCropRegion(
+      target.region,
+      maskRegionAnalysis.width,
+      maskRegionAnalysis.height,
+    );
+    const targetRegionWithinCrop = {
+      x: Math.max(0, target.region.x - cropRegion.x),
+      y: Math.max(0, target.region.y - cropRegion.y),
+      width: Math.min(cropRegion.width, target.region.width),
+      height: Math.min(cropRegion.height, target.region.height),
+    };
+    const normalizedTargetRegionWithinCrop = normalizePixelRegion(
+      targetRegionWithinCrop,
+      cropRegion.width,
+      cropRegion.height,
+    );
+    const normalizedTargetRegionOnImage = normalizePixelRegion(
+      target.region,
+      maskRegionAnalysis.width,
+      maskRegionAnalysis.height,
+    );
+    const cropMaskBuffer = await extractImageRegionBuffer(maskBuffer, cropRegion);
+    const attemptConfigs = getFurnitureRemovalAttemptConfigs(
+      target.region,
+      maskRegionAnalysis.width,
+      maskRegionAnalysis.height,
+    );
+
+    let acceptedTarget = null;
+    for (const attemptConfig of attemptConfigs) {
+      const currentCropBuffer = await extractImageRegionBuffer(workingBuffer, cropRegion);
+      const sourceMaskedEdgeDensity = await calculateMaskedEdgeDensity(currentCropBuffer, cropMaskBuffer);
+      const providerOutputs = await runReplicateFurnitureRemoval({
+        image: currentCropBuffer,
+        mask: cropMaskBuffer,
+        model: preset.replicateModel,
+        prompt: `${fullPrompt} ${attemptConfig.promptSuffix}`,
+        strength: attemptConfig.strength,
+        outputCount: 1,
+        guidanceScale: attemptConfig.guidanceScale,
+        numInferenceSteps: attemptConfig.numInferenceSteps,
+        scheduler: preset.scheduler,
+        negativePrompt: preset.negativePrompt,
+        seed: Math.floor(Math.random() * 1_000_000_000),
+      });
+      attemptCount += 1;
+
+      if (!providerOutputs.length) {
+        attemptLog.push({
+          attempt: attemptCount,
+          stage: attemptConfig.stage,
+          targetIndex,
+          sourceRegionIndex: target.index,
+          priority: target.priority,
+          outputCount: 0,
+          result: 'no_output',
+        });
+        continue;
+      }
+
+      const candidateCropBuffer = await convertReplicateOutputToBuffer(providerOutputs[0]);
+      const candidateFullBuffer = await compositeImageRegionBuffer(
+        workingBuffer,
+        candidateCropBuffer,
+        cropRegion,
+      );
+      const maskedChangeRatio = await calculateMaskedVisualChangeRatio(
+        currentCropBuffer,
+        candidateCropBuffer,
+        cropMaskBuffer,
+      );
+      const targetRegionChangeRatio = await calculateVisualChangeRatio(
+        workingBuffer,
+        candidateFullBuffer,
+        {
+          region: normalizedTargetRegionOnImage,
+        },
+      );
+      const variantMaskedEdgeDensity = await calculateMaskedEdgeDensity(
+        candidateCropBuffer,
+        cropMaskBuffer,
+      );
+      const maskedEdgeDensityDelta = Number(
+        (variantMaskedEdgeDensity - sourceMaskedEdgeDensity).toFixed(4),
+      );
+      const cropStructureChangeRatio = await calculateVisualChangeRatio(
+        currentCropBuffer,
+        candidateCropBuffer,
+        {
+          region: {
+            left: 0,
+            top: 0,
+            width: 1,
+            height: Math.min(0.48, normalizedTargetRegionWithinCrop.top + 0.2),
+          },
+        },
+      );
+      const topHalfChangeRatio = await calculateVisualChangeRatio(
+        normalizedSourceBuffer,
+        candidateFullBuffer,
+        {
+          region: evaluationRegions.structureRegion,
+        },
+      );
+      const structureHistogramDrift = await calculateHistogramDrift(
+        normalizedSourceBuffer,
+        candidateFullBuffer,
+        {
+          region: evaluationRegions.structureRegion,
+        },
+      );
+      const accepted =
+        maskedChangeRatio >= 0.18 &&
+        targetRegionChangeRatio >= 0.14 &&
+        (maskedEdgeDensityDelta <= -0.01 || maskedChangeRatio >= 0.3) &&
+        cropStructureChangeRatio <= 0.16 &&
+        topHalfChangeRatio <= 0.12 &&
+        structureHistogramDrift <= 0.38;
+
+      attemptLog.push({
+        attempt: attemptCount,
+        stage: attemptConfig.stage,
+        targetIndex,
+        sourceRegionIndex: target.index,
+        priority: target.priority,
+        outputCount: providerOutputs.length,
+        maskedChangeRatio,
+        targetRegionChangeRatio,
+        maskedEdgeDensityDelta,
+        cropStructureChangeRatio,
+        topHalfChangeRatio,
+        structureHistogramDrift,
+        result: accepted ? 'accepted' : 'rejected',
+      });
+
+      if (!accepted) {
+        continue;
+      }
+
+      acceptedTarget = {
+        buffer: candidateFullBuffer,
+        maskedChangeRatio,
+        targetRegionChangeRatio,
+        maskedEdgeDensityDelta,
+        cropStructureChangeRatio,
+        topHalfChangeRatio,
+        structureHistogramDrift,
+      };
+      break;
+    }
+
+    if (acceptedTarget) {
+      workingBuffer = acceptedTarget.buffer;
+      successfulTargets.push({
+        targetIndex,
+        sourceRegionIndex: target.index,
+        priority: target.priority,
+        region: target.region,
+        ...acceptedTarget,
+      });
+    } else {
+      failedTargets.push({
+        targetIndex,
+        sourceRegionIndex: target.index,
+        priority: target.priority,
+        region: target.region,
+      });
+    }
+  }
+
+  if (!successfulTargets.length) {
+    return {
+      status: 'needs_user_action',
+      attemptCount,
+      currentStage: 'guided_selection',
+      fallbackMode: 'guided_selection',
+      failureReason: 'object_removal_failed',
+      message:
+        'We tried isolated object removal first, but none of the object targets could be removed cleanly. Try a straighter angle or a tighter object photo.',
+      warning:
+        'Object-level removal attempts preserved room safety, but no target produced real subtraction.',
+      attemptLog,
+      maskRegionAnalysis,
+      objectTargets,
+      createdVariants: [],
+    };
+  }
+
+  const review = await reviewVisionVariant({
+    property: null,
+    roomLabel: asset.roomLabel,
+    presetKey: preset.key,
+    variantCategory: preset.category,
+    mimeType: 'image/jpeg',
+    sourceImageBase64,
+    variantImageBase64: workingBuffer.toString('base64'),
+  });
+  const overallScore = Math.max(
+    0,
+    calculateVisionReviewOverallScore(review) - (failedTargets.length ? 4 : 0),
+  );
+  const saved = await saveBinaryBuffer({
+    propertyId: asset.propertyId.toString(),
+    mimeType: 'image/jpeg',
+    buffer: workingBuffer,
+  });
+  const variant = await MediaVariantModel.create({
+    visionJobId: job._id,
+    mediaId: asset._id,
+    propertyId: asset.propertyId,
+    variantType: preset.key,
+    variantCategory: preset.category,
+    label: failedTargets.length ? `${renderPlan.label} Partial Success` : `${renderPlan.label} A`,
+    mimeType: 'image/jpeg',
+    storageProvider: saved.storageProvider,
+    storageKey: saved.storageKey,
+    byteSize: saved.byteSize,
+    isSelected: false,
+    ...buildVariantLifecycleFields({ isSelected: false }),
+    useInBrochure: false,
+    useInReport: false,
+    metadata: {
+      warning: failedTargets.length
+        ? 'We removed some isolated furniture objects, but overlapping or larger pieces may still need separate passes.'
+        : renderPlan.warning,
+      summary: renderPlan.summary,
+      differenceHint: renderPlan.differenceHint,
+      effects: [
+        ...(renderPlan.effects || []),
+        'Object-level removal strategy',
+        failedTargets.length ? 'Partial success' : 'Isolated target subtraction',
+      ],
+      sourceAssetId: asset._id.toString(),
+      roomLabel: asset.roomLabel,
+      roomType: resolvedRoomType,
+      provider: 'replicate',
+      providerStrategy: preset.providerStrategy || 'object_removal',
+      presetKey: preset.key,
+      promptVersion: preset.promptVersion,
+      helperText: preset.helperText,
+      recommendedUse: preset.recommendedUse,
+      upgradeTier: preset.upgradeTier,
+      category: preset.category,
+      disclaimerType: preset.disclaimerType,
+      roomPromptAddon,
+      presetPromptAddon,
+      mode: requestedMode,
+      instructions: normalizedInstructions,
+      normalizedPlan,
+      maskStrategy: 'object_level_crop_masks',
+      fallbackMode: failedTargets.length ? 'partial_success' : null,
+      review: {
+        ...review,
+        overallScore,
+        successfulObjectCount: successfulTargets.length,
+        failedObjectCount: failedTargets.length,
+        successfulTargets,
+      },
+    },
+  });
+
+  return {
+    status: 'completed',
+    attemptCount,
+    currentStage: failedTargets.length ? 'fallback' : 'completed',
+    fallbackMode: failedTargets.length ? 'partial_success' : null,
+    attemptLog,
+    maskRegionAnalysis,
+    objectTargets,
+    createdVariants: [serializeMediaVariant(variant.toObject())],
   };
 }
 
@@ -2314,6 +2836,48 @@ export async function createImageEnhancementJob({
     const sourceImageBase64 = stored.buffer.toString('base64');
 
     if (preset.providerPreference === 'replicate') {
+      if ((preset.providerStrategy || '') === 'object_removal') {
+        const objectRemovalResult = await executeFurnitureRemovalObjectStrategy({
+          asset,
+          job,
+          preset,
+          renderPlan,
+          resolvedRoomType,
+          requestedMode,
+          normalizedInstructions,
+          normalizedPlan,
+          fullPrompt,
+          roomPromptAddon,
+          presetPromptAddon,
+          sourceBuffer: stored.buffer,
+        });
+        job.attemptCount = objectRemovalResult.attemptCount;
+        job.currentStage = objectRemovalResult.currentStage;
+        job.fallbackMode = objectRemovalResult.fallbackMode;
+        job.input = {
+          ...(job.input || {}),
+          attemptLog: objectRemovalResult.attemptLog,
+          maskRegionAnalysis: objectRemovalResult.maskRegionAnalysis,
+          objectTargets: objectRemovalResult.objectTargets,
+        };
+
+        if (objectRemovalResult.status === 'needs_user_action') {
+          job.status = 'needs_user_action';
+          job.failureReason = objectRemovalResult.failureReason;
+          job.message = objectRemovalResult.message;
+          job.warning = objectRemovalResult.warning;
+          await job.save();
+          return {
+            cached: false,
+            preset,
+            job: serializeImageJob(job.toObject(), []),
+            variants: [],
+            variant: null,
+          };
+        }
+
+        createdVariants = objectRemovalResult.createdVariants;
+      } else {
       const maskBuffer = await buildInpaintingMaskBuffer(
         stored.buffer,
         preset.key,
@@ -3017,6 +3581,7 @@ export async function createImageEnhancementJob({
         attemptLog,
         maskRegionAnalysis,
       };
+      }
     } else {
       const rendered = await renderVariantBuffer(stored.buffer, preset.key, resolvedRoomType);
       const review = await reviewVisionVariant({
