@@ -1947,25 +1947,50 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     );
     setToast(null);
     try {
+      const startedAt = Date.now();
       const response = await createImageEnhancementJob(selectedMediaAsset.id, {
         presetKey,
         roomType: selectedMediaAsset.roomLabel,
         forceRegenerate: true,
       });
-      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id), refreshWorkflow()]);
-      setSelectedVariantId(response.variant?.id || '');
-      setToast({
-        tone: 'success',
-        title:
-          isFurnitureRemovalPreset
-            ? 'Furniture removal preview ready'
-            : isDeclutterPreset
-            ? 'Declutter variant ready'
-            : 'Enhanced photo ready',
-        message:
-          response.job?.warning ||
-          'The new image is now shown in the Vision compare area and the Generated options panel.',
-      });
+      const [, nextVariants] = await Promise.all([
+        refreshMediaAssets(selectedMediaAsset.id),
+        refreshMediaVariants(selectedMediaAsset.id),
+        refreshWorkflow(),
+      ]);
+      const responseOutputVariantIds = new Set(response.job?.outputVariantIds || []);
+      const freshestResponseVariant =
+        nextVariants.find((variant) => responseOutputVariantIds.has(variant.id)) ||
+        nextVariants.find((variant) => variant.id === response.variant?.id) ||
+        nextVariants.find((variant) => new Date(variant.createdAt || 0).getTime() >= startedAt - 2_000) ||
+        null;
+
+      if (freshestResponseVariant) {
+        setSelectedVariantId(freshestResponseVariant.id);
+        setToast({
+          tone: 'success',
+          title:
+            isFurnitureRemovalPreset
+              ? 'Furniture removal preview ready'
+              : isDeclutterPreset
+              ? 'Declutter variant ready'
+              : 'Enhanced photo ready',
+          message:
+            response.job?.warning ||
+            'The new image is now shown in the Vision compare area and the Generated options panel.',
+        });
+      } else {
+        setSelectedVariantId('');
+        const needsUserAction = response.job?.status === 'needs_user_action';
+        setToast({
+          tone: needsUserAction ? 'warning' : 'error',
+          title: needsUserAction ? 'Need a safer selection' : 'No new variant generated',
+          message:
+            response.job?.message ||
+            response.job?.warning ||
+            'No new variant passed safeguards. Try a narrower object target.',
+        });
+      }
       requestAnimationFrame(() => {
         visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
@@ -1993,13 +2018,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setStatus('Generating custom enhancement preview...');
     setToast(null);
     try {
+      const startedAt = Date.now();
       const response = await createImageEnhancementJob(selectedMediaAsset.id, {
         mode: 'freeform',
         instructions: freeformEnhancementInstructions.trim(),
         roomType: selectedMediaAsset.roomLabel,
         forceRegenerate: true,
       });
-      await Promise.all([
+      const [, nextVariants] = await Promise.all([
         refreshMediaAssets(selectedMediaAsset.id),
         refreshMediaVariants(selectedMediaAsset.id),
         refreshWorkflow(),
@@ -2011,14 +2037,32 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           response.variant?.variantType ||
           'combined_listing_refresh',
       );
-      setSelectedVariantId(response.variant?.id || '');
-      setToast({
-        tone: 'success',
-        title: 'Custom enhancement ready',
-        message:
-          response.job?.warning ||
-          'Your freeform enhancement request was processed and the generated result is now selected in the Vision compare area.',
-      });
+      const responseOutputVariantIds = new Set(response.job?.outputVariantIds || []);
+      const freshestResponseVariant =
+        nextVariants.find((variant) => responseOutputVariantIds.has(variant.id)) ||
+        nextVariants.find((variant) => variant.id === response.variant?.id) ||
+        nextVariants.find((variant) => new Date(variant.createdAt || 0).getTime() >= startedAt - 2_000) ||
+        null;
+      if (freshestResponseVariant) {
+        setSelectedVariantId(freshestResponseVariant.id);
+        setToast({
+          tone: 'success',
+          title: 'Custom enhancement ready',
+          message:
+            response.job?.warning ||
+            'Your freeform enhancement request was processed and the generated result is now selected in the Vision compare area.',
+        });
+      } else {
+        setSelectedVariantId('');
+        setToast({
+          tone: response.job?.status === 'needs_user_action' ? 'warning' : 'error',
+          title: 'Custom enhancement needs review',
+          message:
+            response.job?.message ||
+            response.job?.warning ||
+            'No new custom variant passed safeguards for this request.',
+        });
+      }
       requestAnimationFrame(() => {
         visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
