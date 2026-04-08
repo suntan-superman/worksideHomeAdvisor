@@ -1976,9 +1976,63 @@ async function extractImageRegionBuffer(imageBuffer, region) {
     .toBuffer();
 }
 
-async function compositeImageRegionBuffer(baseBuffer, overlayBuffer, region) {
+async function blendMaskedCropBuffer(baseCropBuffer, overlayBuffer, maskBuffer, options = {}) {
+  const width = Math.max(1, Math.round(options.width || 1));
+  const height = Math.max(1, Math.round(options.height || 1));
+  const [resizedOverlay, resizedMask] = await Promise.all([
+    sharp(overlayBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .png()
+      .toBuffer(),
+    sharp(maskBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .blur(1.4)
+      .png()
+      .toBuffer(),
+  ]);
+
+  const overlayWithAlpha = await sharp(resizedOverlay)
+    .joinChannel(resizedMask)
+    .png()
+    .toBuffer();
+
+  return sharp(baseCropBuffer)
+    .resize(width, height, { fit: 'fill' })
+    .composite([{ input: overlayWithAlpha }])
+    .jpeg({ quality: 94 })
+    .toBuffer();
+}
+
+async function compositeImageRegionBuffer(baseBuffer, overlayBuffer, region, options = {}) {
+  const left = Math.max(0, Math.round(region.x));
+  const top = Math.max(0, Math.round(region.y));
+  const width = Math.max(1, Math.round(region.width));
+  const height = Math.max(1, Math.round(region.height));
+
+  if (options.maskBuffer) {
+    const baseCropBuffer = await extractImageRegionBuffer(baseBuffer, { x: left, y: top, width, height });
+    const blendedCrop = await blendMaskedCropBuffer(baseCropBuffer, overlayBuffer, options.maskBuffer, {
+      width,
+      height,
+    });
+
+    return sharp(baseBuffer)
+      .composite([
+        {
+          input: blendedCrop,
+          left,
+          top,
+        },
+      ])
+      .jpeg({ quality: 94 })
+      .toBuffer();
+  }
+
   const resizedOverlay = await sharp(overlayBuffer)
-    .resize(region.width, region.height, { fit: 'fill' })
+    .resize(width, height, { fit: 'fill' })
     .jpeg({ quality: 94 })
     .toBuffer();
 
@@ -1986,8 +2040,8 @@ async function compositeImageRegionBuffer(baseBuffer, overlayBuffer, region) {
     .composite([
       {
         input: resizedOverlay,
-        left: Math.max(0, Math.round(region.x)),
-        top: Math.max(0, Math.round(region.y)),
+        left,
+        top,
       },
     ])
     .jpeg({ quality: 94 })
@@ -2009,19 +2063,40 @@ function getFurnitureRemovalRejectReasons({
   if (targetRegionChangeRatio < 0.07) {
     reasons.push('room_region_change_too_low');
   }
-  if (maskedEdgeDensityDelta > -0.008) {
+  if (maskedEdgeDensityDelta > -0.002 && maskedChangeRatio < 0.35) {
     reasons.push('object_silhouette_persisted');
   }
-  if (outsideMaskChangeRatio > 0.22) {
+  if (outsideMaskChangeRatio > 0.34) {
     reasons.push('outside_target_change_too_high');
   }
-  if (topHalfChangeRatio > 0.3 && structureHistogramDrift > 0.18) {
+  if (topHalfChangeRatio > 0.42 && structureHistogramDrift > 0.18) {
     reasons.push('upper_architecture_change_too_high');
   }
-  if (structureHistogramDrift > 0.48) {
+  if (structureHistogramDrift > 0.5) {
     reasons.push('upper_structure_drift_too_high');
   }
   return reasons;
+}
+
+function calculateFurnitureRemovalCandidateScore({
+  maskedChangeRatio,
+  targetRegionChangeRatio,
+  maskedEdgeDensityDelta,
+  outsideMaskChangeRatio,
+  topHalfChangeRatio,
+  structureHistogramDrift,
+}) {
+  const removalScore =
+    maskedChangeRatio * 0.62 +
+    targetRegionChangeRatio * 0.28 +
+    Math.max(0, -maskedEdgeDensityDelta) * 10;
+  const driftPenalty =
+    outsideMaskChangeRatio * 0.38 +
+    topHalfChangeRatio * 0.22 +
+    structureHistogramDrift * 0.6 +
+    Math.max(0, maskedEdgeDensityDelta) * 0.2;
+
+  return Number((removalScore - driftPenalty).toFixed(4));
 }
 
 async function calculateMaskedVisualChangeRatio(sourceBuffer, variantBuffer, maskBuffer) {
@@ -2677,14 +2752,23 @@ async function executeFurnitureRemovalObjectStrategy({
       }
 
       const candidateCropBuffer = await convertReplicateOutputToBuffer(providerOutputs[0]);
+      const blendedCandidateCropBuffer = await blendMaskedCropBuffer(
+        currentCropBuffer,
+        candidateCropBuffer,
+        cropMaskBuffer,
+        {
+          width: cropRegion.width,
+          height: cropRegion.height,
+        },
+      );
       const candidateFullBuffer = await compositeImageRegionBuffer(
         workingBuffer,
-        candidateCropBuffer,
+        blendedCandidateCropBuffer,
         cropRegion,
       );
       const maskedChangeRatio = await calculateMaskedVisualChangeRatio(
         currentCropBuffer,
-        candidateCropBuffer,
+        blendedCandidateCropBuffer,
         cropMaskBuffer,
       );
       const targetRegionChangeRatio = await calculateVisualChangeRatio(
@@ -2695,7 +2779,7 @@ async function executeFurnitureRemovalObjectStrategy({
         },
       );
       const variantMaskedEdgeDensity = await calculateMaskedEdgeDensity(
-        candidateCropBuffer,
+        blendedCandidateCropBuffer,
         cropMaskBuffer,
       );
       const maskedEdgeDensityDelta = Number(
@@ -2703,7 +2787,7 @@ async function executeFurnitureRemovalObjectStrategy({
       );
       const outsideMaskChangeRatio = await calculateOutsideMaskVisualChangeRatio(
         currentCropBuffer,
-        candidateCropBuffer,
+        blendedCandidateCropBuffer,
         cropMaskBuffer,
       );
       const topHalfChangeRatio = await calculateVisualChangeRatio(
@@ -2745,17 +2829,36 @@ async function executeFurnitureRemovalObjectStrategy({
         softArchitecturePreserved &&
         structureHistogramDrift <= 0.48;
       const practicalArchitecturePreserved =
-        topHalfChangeRatio <= 0.2 ||
-        (topHalfChangeRatio <= 0.36 &&
+        topHalfChangeRatio <= 0.24 ||
+        (topHalfChangeRatio <= 0.46 &&
           structureHistogramDrift <= 0.16 &&
-          outsideMaskChangeRatio <= 0.22);
+          outsideMaskChangeRatio <= 0.34);
       const practicalPartialAccepted =
         maskedChangeRatio >= 0.35 &&
         targetRegionChangeRatio >= 0.25 &&
-        maskedEdgeDensityDelta <= 0 &&
-        outsideMaskChangeRatio <= 0.22 &&
+        maskedEdgeDensityDelta <= -0.002 &&
+        outsideMaskChangeRatio <= 0.34 &&
         practicalArchitecturePreserved &&
         structureHistogramDrift <= 0.18;
+      const subtractionDominance = Number(
+        (maskedChangeRatio - outsideMaskChangeRatio).toFixed(4),
+      );
+      const removalFirstAccepted =
+        maskedChangeRatio >= 0.38 &&
+        targetRegionChangeRatio >= 0.3 &&
+        subtractionDominance >= 0.12 &&
+        (maskedEdgeDensityDelta <= -0.002 || maskedChangeRatio >= 0.46) &&
+        outsideMaskChangeRatio <= 0.34 &&
+        topHalfChangeRatio <= 0.34 &&
+        structureHistogramDrift <= 0.18;
+      const candidateScore = calculateFurnitureRemovalCandidateScore({
+        maskedChangeRatio,
+        targetRegionChangeRatio,
+        maskedEdgeDensityDelta,
+        outsideMaskChangeRatio,
+        topHalfChangeRatio,
+        structureHistogramDrift,
+      });
       const rejectReasons = getFurnitureRemovalRejectReasons({
         maskedChangeRatio,
         targetRegionChangeRatio,
@@ -2780,19 +2883,25 @@ async function executeFurnitureRemovalObjectStrategy({
         topHalfChangeRatio,
         structureHistogramDrift,
         primaryRejectReason:
-          strictAccepted || softAccepted || practicalPartialAccepted ? null : primaryRejectReason,
+          strictAccepted || softAccepted || practicalPartialAccepted || removalFirstAccepted
+            ? null
+            : primaryRejectReason,
         rejectReasons:
-          strictAccepted || softAccepted || practicalPartialAccepted ? [] : rejectReasons,
+          strictAccepted || softAccepted || practicalPartialAccepted || removalFirstAccepted
+            ? []
+            : rejectReasons,
         result: strictAccepted
           ? 'accepted'
           : softAccepted
           ? 'soft_accepted'
           : practicalPartialAccepted
           ? 'practical_partial'
+          : removalFirstAccepted
+          ? 'removal_first_partial'
           : 'rejected',
       });
 
-      if ((softAccepted || practicalPartialAccepted) && !strictAccepted) {
+      if ((softAccepted || practicalPartialAccepted || removalFirstAccepted) && !strictAccepted) {
         const softCandidate = {
           buffer: candidateFullBuffer,
           maskedChangeRatio,
@@ -2801,12 +2910,19 @@ async function executeFurnitureRemovalObjectStrategy({
           outsideMaskChangeRatio,
           topHalfChangeRatio,
           structureHistogramDrift,
-          primaryRejectReason: practicalPartialAccepted ? 'practical_partial' : primaryRejectReason,
+          candidateScore,
+          primaryRejectReason: removalFirstAccepted
+            ? 'removal_first_partial'
+            : practicalPartialAccepted
+            ? 'practical_partial'
+            : primaryRejectReason,
           lowConfidence: true,
         };
         if (
           !bestSoftCandidate ||
-          softCandidate.maskedChangeRatio > bestSoftCandidate.maskedChangeRatio
+          softCandidate.candidateScore > bestSoftCandidate.candidateScore ||
+          (softCandidate.candidateScore === bestSoftCandidate.candidateScore &&
+            softCandidate.maskedChangeRatio > bestSoftCandidate.maskedChangeRatio)
         ) {
           bestSoftCandidate = softCandidate;
         }

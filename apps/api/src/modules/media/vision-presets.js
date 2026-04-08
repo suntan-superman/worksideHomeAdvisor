@@ -73,7 +73,7 @@ export const VISION_PRESETS = [
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'exterior', 'unknown'],
     providerPreference: 'replicate',
     providerStrategy: 'object_removal',
-    promptVersion: 6,
+    promptVersion: 7,
     outputCount: 1,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
