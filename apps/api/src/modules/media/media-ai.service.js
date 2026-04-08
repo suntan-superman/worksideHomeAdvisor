@@ -393,6 +393,27 @@ async function calculateVisualChangeRatio(sourceBuffer, variantBuffer, options =
   return Number((changedPixels / pixelCount).toFixed(4));
 }
 
+function getPresetEvaluationRegions(presetKey) {
+  if (presetKey === 'remove_furniture') {
+    return {
+      focusRegion: { left: 0.03, top: 0.4, width: 0.94, height: 0.56 },
+      structureRegion: { left: 0, top: 0, width: 1, height: 0.52 },
+    };
+  }
+
+  if (String(presetKey || '').startsWith('floor_')) {
+    return {
+      focusRegion: { left: 0.02, top: 0.5, width: 0.96, height: 0.48 },
+      structureRegion: { left: 0, top: 0, width: 1, height: 0.5 },
+    };
+  }
+
+  return {
+    focusRegion: { left: 0, top: 0, width: 1, height: 1 },
+    structureRegion: { left: 0, top: 0, width: 1, height: 0.52 },
+  };
+}
+
 function buildCenterCropRegion(metadata, insetRatio = 0) {
   const width = Number(metadata?.width || 0);
   const height = Number(metadata?.height || 0);
@@ -1714,9 +1735,37 @@ export async function createImageEnhancementJob({
       });
       createdVariants = [];
       const rejectedCandidates = [];
+      const evaluationRegions = getPresetEvaluationRegions(preset.key);
       for (let index = 0; index < providerOutputs.length; index += 1) {
-        const output = providerOutputs[index];
-        const buffer = await convertReplicateOutputToBuffer(output);
+        let output = providerOutputs[index];
+        let buffer = await convertReplicateOutputToBuffer(output);
+        let visualChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer);
+        let focusRegionChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer, {
+          region: evaluationRegions.focusRegion,
+        });
+        if (preset.key === 'remove_furniture' && focusRegionChangeRatio < 0.24) {
+          const refinementOutputs = await runReplicateInpainting({
+            image: buffer,
+            mask: maskBuffer,
+            model: preset.replicateModel,
+            prompt: `${fullPrompt} Continue removing any remaining movable furniture and clutter from the masked area. Keep architecture unchanged.`,
+            strength: Math.min(0.99, Number((preset.strength || 0.9) + 0.05)),
+            outputCount: 1,
+            guidanceScale: (preset.guidanceScale || 9) + 0.5,
+            numInferenceSteps: (preset.numInferenceSteps || 40) + 6,
+            scheduler: preset.scheduler,
+            negativePrompt: preset.negativePrompt,
+            seed: Math.floor(Math.random() * 1_000_000_000),
+          });
+          if (refinementOutputs.length) {
+            output = refinementOutputs[0];
+            buffer = await convertReplicateOutputToBuffer(output);
+            visualChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer);
+            focusRegionChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer, {
+              region: evaluationRegions.focusRegion,
+            });
+          }
+        }
         const review = await reviewVisionVariant({
           property: null,
           roomLabel: asset.roomLabel,
@@ -1726,9 +1775,8 @@ export async function createImageEnhancementJob({
           sourceImageBase64,
           variantImageBase64: buffer.toString('base64'),
         });
-        const visualChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer);
         const topHalfChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer, {
-          region: { left: 0, top: 0, width: 1, height: 0.52 },
+          region: evaluationRegions.structureRegion,
         });
         let overallScore = calculateVisionReviewOverallScore(review);
         let rejectForArchitecturalDrift = false;
@@ -1738,8 +1786,15 @@ export async function createImageEnhancementJob({
           if (visualChangeRatio < 0.22) {
             overallScore = Math.max(0, overallScore - 22);
           }
+          if (focusRegionChangeRatio < 0.2) {
+            overallScore = Math.max(0, overallScore - 28);
+          }
           if (topHalfChangeRatio > 0.1) {
             overallScore = Math.max(0, overallScore - 26);
+          }
+          if (focusRegionChangeRatio < 0.14) {
+            rejectForArchitecturalDrift = true;
+            qualityWarning = 'Rejected variant due to insufficient furniture removal in the target region.';
           }
           if (topHalfChangeRatio > 0.16) {
             rejectForArchitecturalDrift = true;
@@ -1768,6 +1823,7 @@ export async function createImageEnhancementJob({
             review,
             overallScore,
             visualChangeRatio,
+            focusRegionChangeRatio,
             topHalfChangeRatio,
             roomPromptAddon,
             presetPromptAddon,
@@ -1822,6 +1878,7 @@ export async function createImageEnhancementJob({
               ...review,
               overallScore,
               visualChangeRatio,
+              focusRegionChangeRatio,
               topHalfChangeRatio,
             },
           },
@@ -1834,6 +1891,11 @@ export async function createImageEnhancementJob({
         if (rejectedCandidates.length) {
           const fallbackCandidate = [...rejectedCandidates]
             .sort((left, right) => {
+              if (preset.key === 'remove_furniture') {
+                if (left.focusRegionChangeRatio !== right.focusRegionChangeRatio) {
+                  return right.focusRegionChangeRatio - left.focusRegionChangeRatio;
+                }
+              }
               if (left.topHalfChangeRatio !== right.topHalfChangeRatio) {
                 return left.topHalfChangeRatio - right.topHalfChangeRatio;
               }
@@ -1888,6 +1950,7 @@ export async function createImageEnhancementJob({
                 ...fallbackCandidate.review,
                 overallScore: Math.max(0, fallbackCandidate.overallScore - 12),
                 visualChangeRatio: fallbackCandidate.visualChangeRatio,
+                focusRegionChangeRatio: fallbackCandidate.focusRegionChangeRatio,
                 topHalfChangeRatio: fallbackCandidate.topHalfChangeRatio,
                 fallbackApplied: true,
               },
