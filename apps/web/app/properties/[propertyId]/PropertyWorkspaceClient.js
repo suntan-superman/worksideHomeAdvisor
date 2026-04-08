@@ -1736,7 +1736,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         categoryKey: provider.categoryKey,
         source: 'checklist_task',
         sourceRefId: providerSuggestionTask.systemKey || providerSuggestionTask.id,
-        deliveryMode: 'sms_and_email',
+        deliveryMode: 'email',
         message:
           providerSuggestionTask.providerPrompt ||
           providerSuggestionTask.detail ||
@@ -1748,7 +1748,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setToast({
         tone: 'success',
         title: 'Lead request created',
-        message: `The ${provider.categoryKey.replace(/_/g, ' ')} request is now queued for provider outreach.`,
+        message: `The ${provider.categoryKey.replace(/_/g, ' ')} request is now queued for provider email outreach.`,
       });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Could not request provider', message: requestError.message });
@@ -3030,7 +3030,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       {providerReferenceIds.has(`internal:${provider.id}`) ? 'On sheet' : 'Add to sheet'}
                     </button>
                     <button type="button" className="button-primary" onClick={() => handleRequestProviderLead(provider)} disabled={Boolean(status) || isArchivedProperty}>
-                      Request provider
+                      Request by email
                     </button>
                     <button type="button" className="button-secondary" onClick={() => setActiveProviderDetails({ ...provider, categoryLabel: providerSource?.categoryLabel || provider.categoryKey?.replace(/_/g, ' ') })}>
                       Details

@@ -1,33 +1,50 @@
-# ---------- BASE IMAGE ----------
-FROM node:20-slim
+FROM node:20-bookworm-slim
 
-# ---------- ENV ----------
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-ENV NODE_ENV=production
-
-# ---------- INSTALL PNPM ----------
-RUN corepack enable && corepack prepare pnpm@10.0.0 --activate
-
-# ---------- WORKDIR ----------
 WORKDIR /app
 
-# ---------- COPY FILES ----------
-# Copy entire monorepo (important for workspaces)
-COPY . .
-
-# ---------- INSTALL DEPENDENCIES ----------
-# Install all workspace deps
-RUN pnpm install --frozen-lockfile
-
-# ---------- BUILD ----------
-# If you have a backend build step, keep this
-# Otherwise you can remove this line
-RUN pnpm run build || echo "No build step"
-
-# ---------- PORT ----------
+ENV NODE_ENV=production
 ENV PORT=8080
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-# ---------- START ----------
-# Adjust this if your backend entry point differs
-CMD ["pnpm", "--filter", "@workside/api", "start"]
+RUN apt-get update && apt-get install -y \
+  chromium \
+  chromium-sandbox \
+  fonts-liberation \
+  libasound2 \
+  libatk-bridge2.0-0 \
+  libatk1.0-0 \
+  libcairo2 \
+  libcups2 \
+  libdbus-1-3 \
+  libdrm2 \
+  libgbm1 \
+  libglib2.0-0 \
+  libgtk-3-0 \
+  libnss3 \
+  libpango-1.0-0 \
+  libpangocairo-1.0-0 \
+  libx11-6 \
+  libx11-xcb1 \
+  libxcomposite1 \
+  libxdamage1 \
+  libxkbcommon0 \
+  libxrandr2 \
+  xdg-utils \
+  wget \
+  ca-certificates \
+  --no-install-recommends \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+COPY apps apps
+COPY packages packages
+COPY services services
+
+RUN npm ci --omit=dev --workspace=@workside/api --include-workspace-root=false \
+  && npm cache clean --force
+
+WORKDIR /app/apps/api
+
+EXPOSE 8080
+
+CMD ["npm", "start"]
