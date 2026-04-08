@@ -2239,11 +2239,14 @@ export async function createImageEnhancementJob({
         mask: activeMaskBuffer,
         model: preset.replicateModel,
         prompt: fullPrompt,
-        strength: preset.key === 'remove_furniture' ? 0.42 : preset.strength,
-        outputCount: preset.outputCount || 2,
+        strength: preset.key === 'remove_furniture' ? 0.58 : preset.strength,
+        outputCount:
+          preset.key === 'remove_furniture'
+            ? Math.max(4, preset.outputCount || 2)
+            : preset.outputCount || 2,
         guidanceScale:
           preset.key === 'remove_furniture'
-            ? Math.max(10, Number(preset.guidanceScale || 9))
+            ? Math.max(10.4, Number(preset.guidanceScale || 9))
             : preset.guidanceScale,
         numInferenceSteps: preset.numInferenceSteps,
         scheduler: preset.scheduler,
@@ -2256,10 +2259,10 @@ export async function createImageEnhancementJob({
         attempt: 1,
         stage: 'initial',
         maskType: 'full_mask',
-        strength: preset.key === 'remove_furniture' ? 0.42 : preset.strength,
+        strength: preset.key === 'remove_furniture' ? 0.58 : preset.strength,
         guidanceScale:
           preset.key === 'remove_furniture'
-            ? Math.max(10, Number(preset.guidanceScale || 9))
+            ? Math.max(10.4, Number(preset.guidanceScale || 9))
             : preset.guidanceScale,
         outputCount: providerOutputs.length,
       });
@@ -2287,10 +2290,10 @@ export async function createImageEnhancementJob({
               mask: activeMaskBuffer,
               model: preset.replicateModel,
               prompt: `${fullPrompt} Continue removing remaining movable furniture from the masked area, especially sofas, chairs, tables, and rugs. Keep walls, windows, doors, trim, and structure unchanged. Do not add new decor or fixtures.`,
-              strength: refinementPass === 0 ? 0.32 : 0.28,
+              strength: refinementPass === 0 ? 0.5 : 0.42,
               outputCount: 1,
-              guidanceScale: (preset.guidanceScale || 9) + (refinementPass === 0 ? 1.3 : 1.8),
-              numInferenceSteps: (preset.numInferenceSteps || 40) + (refinementPass === 0 ? 8 : 10),
+              guidanceScale: (preset.guidanceScale || 9) + (refinementPass === 0 ? 1.6 : 2),
+              numInferenceSteps: (preset.numInferenceSteps || 40) + (refinementPass === 0 ? 9 : 11),
               scheduler: preset.scheduler,
               negativePrompt: preset.negativePrompt,
               seed: Math.floor(Math.random() * 1_000_000_000),
@@ -2311,8 +2314,8 @@ export async function createImageEnhancementJob({
               attempt: attemptNumber,
               stage,
               maskType: useSplitMask ? 'split_region_0' : 'full_mask',
-              strength: refinementPass === 0 ? 0.32 : 0.28,
-              guidanceScale: (preset.guidanceScale || 9) + (refinementPass === 0 ? 1.3 : 1.8),
+              strength: refinementPass === 0 ? 0.5 : 0.42,
+              guidanceScale: (preset.guidanceScale || 9) + (refinementPass === 0 ? 1.6 : 2),
               outputCount: 1,
               focusRegionChangeRatio,
             });
@@ -2466,11 +2469,141 @@ export async function createImageEnhancementJob({
 
       if (!createdVariants.length) {
         if (preset.key === 'remove_furniture' && rejectedCandidates.length) {
+          if (splitMaskBuffers.length && maskRegionAnalysis?.regions?.length) {
+            let segmentedBuffer = stored.buffer;
+            let segmentedSuccessCount = 0;
+            const segmentedRegionLimit = Math.min(2, splitMaskBuffers.length, maskRegionAnalysis.regions.length);
+            for (let splitIndex = 0; splitIndex < segmentedRegionLimit; splitIndex += 1) {
+              const splitOutputs = await runReplicateInpainting({
+                image: segmentedBuffer,
+                mask: splitMaskBuffers[splitIndex],
+                model: preset.replicateModel,
+                prompt: `${fullPrompt} Remove only the isolated furniture object(s) inside this mask. Do not restage or replace removed furniture. Keep all architecture, windows, walls, and room identity unchanged.`,
+                strength: 0.52,
+                outputCount: 1,
+                guidanceScale: Math.max(10.8, Number(preset.guidanceScale || 9) + 1.8),
+                numInferenceSteps: (preset.numInferenceSteps || 40) + 10,
+                scheduler: preset.scheduler,
+                negativePrompt: preset.negativePrompt,
+                seed: Math.floor(Math.random() * 1_000_000_000),
+              });
+              if (!splitOutputs.length) {
+                continue;
+              }
+              const splitCandidateBuffer = await convertReplicateOutputToBuffer(splitOutputs[0]);
+              const splitRegion = maskRegionAnalysis.regions[splitIndex];
+              const normalizedRegion = {
+                left: splitRegion.x / maskRegionAnalysis.width,
+                top: splitRegion.y / maskRegionAnalysis.height,
+                width: splitRegion.width / maskRegionAnalysis.width,
+                height: splitRegion.height / maskRegionAnalysis.height,
+              };
+              const localRegionChangeRatio = await calculateVisualChangeRatio(
+                segmentedBuffer,
+                splitCandidateBuffer,
+                { region: normalizedRegion },
+              );
+              const splitTopHalfChangeRatio = await calculateVisualChangeRatio(
+                segmentedBuffer,
+                splitCandidateBuffer,
+                { region: evaluationRegions.structureRegion },
+              );
+              const splitStructureHistogramDrift = await calculateHistogramDrift(
+                segmentedBuffer,
+                splitCandidateBuffer,
+                { region: evaluationRegions.structureRegion },
+              );
+              const splitAttemptNumber = Math.min(4, job.attemptCount + 1);
+              attemptLog.push({
+                attempt: splitAttemptNumber,
+                stage: 'split_retry',
+                maskType: `split_region_${splitIndex}`,
+                strength: 0.52,
+                guidanceScale: Math.max(10.8, Number(preset.guidanceScale || 9) + 1.8),
+                outputCount: 1,
+                localRegionChangeRatio,
+                splitTopHalfChangeRatio,
+                splitStructureHistogramDrift,
+              });
+              job.attemptCount = splitAttemptNumber;
+              job.currentStage = 'split_retry';
+
+              if (
+                localRegionChangeRatio >= 0.12 &&
+                splitTopHalfChangeRatio <= 0.12 &&
+                splitStructureHistogramDrift <= 0.46
+              ) {
+                segmentedBuffer = splitCandidateBuffer;
+                segmentedSuccessCount += 1;
+              }
+            }
+
+            if (segmentedSuccessCount > 0) {
+              const saved = await saveBinaryBuffer({
+                propertyId: asset.propertyId.toString(),
+                mimeType: 'image/jpeg',
+                buffer: segmentedBuffer,
+              });
+              const segmentedVariant = await MediaVariantModel.create({
+                visionJobId: job._id,
+                mediaId: asset._id,
+                propertyId: asset.propertyId,
+                variantType: preset.key,
+                variantCategory: preset.category,
+                label: `${renderPlan.label} Partial Success`,
+                mimeType: 'image/jpeg',
+                storageProvider: saved.storageProvider,
+                storageKey: saved.storageKey,
+                byteSize: saved.byteSize,
+                isSelected: false,
+                ...buildVariantLifecycleFields({ isSelected: false }),
+                useInBrochure: false,
+                useInReport: false,
+                metadata: {
+                  warning:
+                    'We safely removed some isolated furniture, but additional objects may need separate passes.',
+                  summary: renderPlan.summary,
+                  differenceHint:
+                    'This split-pass result prioritizes structural safety while removing isolated furniture clusters.',
+                  effects: [...(renderPlan.effects || []), 'Split-pass partial success'],
+                  sourceAssetId: asset._id.toString(),
+                  roomLabel: asset.roomLabel,
+                  roomType: resolvedRoomType,
+                  provider: 'replicate',
+                  presetKey: preset.key,
+                  promptVersion: preset.promptVersion,
+                  helperText: preset.helperText,
+                  recommendedUse: preset.recommendedUse,
+                  upgradeTier: preset.upgradeTier,
+                  category: preset.category,
+                  disclaimerType: preset.disclaimerType,
+                  mode: requestedMode,
+                  instructions: normalizedInstructions,
+                  normalizedPlan,
+                  maskStrategy: 'split_component_regions',
+                  fallbackMode: 'partial_success',
+                  review: {
+                    segmentedSuccessCount,
+                    segmentedPassApplied: true,
+                  },
+                },
+              });
+              createdVariants.push(serializeMediaVariant(segmentedVariant.toObject()));
+              job.fallbackMode = 'partial_success';
+              job.currentStage = 'fallback';
+            }
+          }
+
+          if (createdVariants.length) {
+            // Split-pass recovery succeeded; skip broader fallback selection.
+          } else {
           const conservativeCandidate = [...rejectedCandidates]
             .filter(
               (candidate) =>
                 candidate.topHalfChangeRatio <= 0.13 &&
-                candidate.structureHistogramDrift <= 0.48,
+                candidate.structureHistogramDrift <= 0.48 &&
+                candidate.focusRegionChangeRatio >= 0.24 &&
+                candidate.visualChangeRatio >= 0.24,
             )
             .sort((left, right) => {
               if (left.structureHistogramDrift !== right.structureHistogramDrift) {
@@ -2626,6 +2759,7 @@ export async function createImageEnhancementJob({
                 variant: null,
               };
             }
+          }
           }
         } else if (rejectedCandidates.length) {
           const fallbackCandidate = [...rejectedCandidates]
