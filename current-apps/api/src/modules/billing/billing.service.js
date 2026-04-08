@@ -1,0 +1,1055 @@
+import mongoose from 'mongoose';
+
+import { env } from '../../config/env.js';
+import {
+  getPlanActivePropertyLimit,
+  getPlanConfig,
+  getStripeClient,
+  isStripeConfigured,
+  listPlanCatalog,
+  listPlanCatalogWithPricing,
+  resolveBillingUrls,
+} from '../../services/stripeClient.js';
+import { UserModel } from '../auth/auth.model.js';
+import { BillingSubscriptionModel, BillingWebhookEventModel } from './billing.model.js';
+import { ProviderModel } from '../providers/provider.model.js';
+import { PropertyModel } from '../properties/property.model.js';
+
+const ACTIVE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing', 'past_due', 'paid']);
+const BASE_FREE_FEATURES = ['pricing.preview', 'photo.capture.basic'];
+const ADMIN_FEATURES = [
+  'admin.full_access',
+  'pricing.full',
+  'flyer.generate',
+  'flyer.export',
+  'marketing.export',
+  'presentation.mode',
+  'branding.custom',
+  'reports.client_ready',
+  'team.multi_user',
+];
+const DEMO_FEATURES = [
+  'pricing.full',
+  'flyer.generate',
+  'flyer.export',
+  'marketing.export',
+  'presentation.mode',
+  'branding.custom',
+  'reports.client_ready',
+  'team.multi_user',
+];
+const DEFAULT_ACTIVE_PROPERTY_LIMIT_BY_AUDIENCE = {
+  seller: 1,
+  agent: 1,
+};
+
+const PAID_READY_STATUSES = new Set(['active', 'trialing', 'past_due', 'paid']);
+const PENDING_BILLING_STATUSES = new Set([
+  'checkout_created',
+  'open',
+  'complete',
+  'incomplete',
+  'unpaid',
+  'expired',
+  'async_payment_pending',
+  'async_payment_failed',
+  'incomplete_expired',
+]);
+
+function toDateFromUnixTimestamp(value) {
+  return value ? new Date(value * 1000) : null;
+}
+
+function isSubscriptionActive(status) {
+  return ACTIVE_SUBSCRIPTION_STATUSES.has(status);
+}
+
+export function resolveCheckoutSessionBillingState(session = {}, { mode = 'subscription' } = {}) {
+  const sessionStatus = String(session.status || '').trim() || 'open';
+  const paymentStatus = String(session.payment_status || '').trim();
+
+  if (mode === 'payment') {
+    if (paymentStatus === 'paid' || paymentStatus === 'no_payment_required') {
+      return { status: 'paid', isActive: true };
+    }
+
+    if (sessionStatus === 'expired') {
+      return { status: 'expired', isActive: false };
+    }
+
+    if (paymentStatus === 'unpaid' && sessionStatus === 'complete') {
+      return { status: 'async_payment_pending', isActive: false };
+    }
+
+    return { status: paymentStatus || sessionStatus, isActive: false };
+  }
+
+  if (sessionStatus === 'expired') {
+    return { status: 'expired', isActive: false };
+  }
+
+  if (paymentStatus === 'unpaid' && sessionStatus === 'complete') {
+    return { status: 'async_payment_pending', isActive: false };
+  }
+
+  return { status: sessionStatus, isActive: false };
+}
+
+export function resolveProviderOperationalStatus({
+  currentStatus = 'pending',
+  subscriptionStatus = 'inactive',
+  isPaidPlan = true,
+} = {}) {
+  if (currentStatus === 'suspended') {
+    return 'suspended';
+  }
+
+  if (!isPaidPlan) {
+    return currentStatus === 'pending_billing' ? 'pending' : currentStatus || 'pending';
+  }
+
+  if (PAID_READY_STATUSES.has(subscriptionStatus)) {
+    return 'active';
+  }
+
+  if (PENDING_BILLING_STATUSES.has(subscriptionStatus)) {
+    return 'pending_billing';
+  }
+
+  if (['canceled', 'cancelled'].includes(subscriptionStatus)) {
+    return 'paused';
+  }
+
+  return 'paused';
+}
+
+function toObjectIdString(value) {
+  return value?.toString?.() || String(value);
+}
+
+function serializeSubscription(document) {
+  if (!document) {
+    return null;
+  }
+
+  return {
+    id: document._id?.toString?.() || String(document._id),
+    userId: document.userId?.toString?.() || String(document.userId),
+    stripeCustomerId: document.stripeCustomerId || null,
+    stripeCheckoutSessionId: document.stripeCheckoutSessionId || null,
+    stripeSubscriptionId: document.stripeSubscriptionId || null,
+    stripeInvoiceId: document.stripeInvoiceId || null,
+    productKey: document.productKey,
+    planKey: document.planKey,
+    audience: document.audience,
+    mode: document.mode,
+    status: document.status,
+    isActive: Boolean(document.isActive),
+    trialEndsAt: document.trialEndsAt,
+    currentPeriodStart: document.currentPeriodStart,
+    currentPeriodEnd: document.currentPeriodEnd,
+    cancelAt: document.cancelAt,
+    cancelAtPeriodEnd: Boolean(document.cancelAtPeriodEnd),
+    features: document.features || [],
+    metadata: document.metadata || {},
+    createdAt: document.createdAt,
+    updatedAt: document.updatedAt,
+  };
+}
+
+function buildFreeSummary(userId) {
+  return {
+    userId,
+    isStripeConfigured: isStripeConfigured(),
+    access: {
+      audience: 'seller',
+      planKey: 'free',
+      status: 'free',
+      features: BASE_FREE_FEATURES,
+    },
+    subscription: null,
+  };
+}
+
+function resolveActivePropertyLimit(access = {}) {
+  if (!access || access.planKey === 'admin_bypass' || access.planKey === 'demo_bypass') {
+    return null;
+  }
+
+  if (access.planKey === 'free') {
+    return DEFAULT_ACTIVE_PROPERTY_LIMIT_BY_AUDIENCE[access.audience] ?? 1;
+  }
+
+  return getPlanActivePropertyLimit(access.planKey);
+}
+
+async function buildPropertyCapacitySummary(userId, access = {}) {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return {
+      activeCount: 0,
+      archivedCount: 0,
+      activeLimit: resolveActivePropertyLimit(access),
+      remainingActiveSlots: resolveActivePropertyLimit(access),
+      canCreateActiveProperty: true,
+    };
+  }
+
+  const [activeCount, archivedCount] = await Promise.all([
+    PropertyModel.countDocuments({ ownerUserId: userId, status: { $ne: 'archived' } }),
+    PropertyModel.countDocuments({ ownerUserId: userId, status: 'archived' }),
+  ]);
+
+  const activeLimit = resolveActivePropertyLimit(access);
+  const remainingActiveSlots =
+    activeLimit === null ? null : Math.max(0, activeLimit - activeCount);
+
+  return {
+    activeCount,
+    archivedCount,
+    activeLimit,
+    remainingActiveSlots,
+    canCreateActiveProperty: activeLimit === null || activeCount < activeLimit,
+  };
+}
+
+async function ensureStripeCustomer(user) {
+  if (user.stripeCustomerId) {
+    return user.stripeCustomerId;
+  }
+
+  const stripe = getStripeClient();
+  if (!stripe) {
+    throw new Error('Stripe is not configured.');
+  }
+
+  const customer = await stripe.customers.create({
+    email: user.email,
+    name: [user.firstName, user.lastName].filter(Boolean).join(' ') || undefined,
+    metadata: {
+      userId: user._id.toString(),
+      role: user.role,
+    },
+  });
+
+  user.stripeCustomerId = customer.id;
+  await user.save();
+
+  return customer.id;
+}
+
+function buildCheckoutUrls(overrides) {
+  const { successUrl, cancelUrl } = resolveBillingUrls(overrides);
+  const separator = successUrl.includes('?') ? '&' : '?';
+
+  return {
+    successUrl: `${successUrl}${separator}session_id={CHECKOUT_SESSION_ID}`,
+    cancelUrl,
+  };
+}
+
+function buildSharedBillingMetadata({
+  app = 'home_advisor',
+  billingKind,
+  planKey,
+  productKey,
+  audience,
+  priceId,
+  userId = '',
+  orgId = '',
+  providerId = '',
+}) {
+  const resolvedOrgId = orgId || providerId || userId || '';
+
+  return {
+    app,
+    billingKind,
+    internalPlanCode: planKey,
+    worksideUserId: userId || '',
+    worksideOrgId: resolvedOrgId,
+    worksideProviderId: providerId || '',
+    userId: userId || '',
+    providerId: providerId || '',
+    planKey,
+    productKey,
+    audience,
+    priceId,
+  };
+}
+
+function buildProviderCheckoutUrls(providerId, overrides = {}) {
+  const successBase =
+    overrides.successUrl ||
+    `${env.PUBLIC_WEB_URL}/providers/join?billing=success&providerId=${encodeURIComponent(providerId)}`;
+  const cancelBase =
+    overrides.cancelUrl ||
+    `${env.PUBLIC_WEB_URL}/providers/join?billing=cancelled&providerId=${encodeURIComponent(providerId)}`;
+  const separator = successBase.includes('?') ? '&' : '?';
+
+  return {
+    successUrl: `${successBase}${separator}session_id={CHECKOUT_SESSION_ID}`,
+    cancelUrl: cancelBase,
+  };
+}
+
+function planFromMetadataOrPrice(planKey, priceId) {
+  if (planKey) {
+    return getPlanConfig(planKey);
+  }
+
+  const plans = listPlanCatalog();
+  const matchedPlan = plans.find((plan) => plan.priceId === priceId);
+  if (!matchedPlan) {
+    throw new Error('Could not resolve Stripe plan for subscription.');
+  }
+
+  return getPlanConfig(matchedPlan.planKey);
+}
+
+function resolvePlanKeyFromMetadata(metadata = {}) {
+  return metadata.planKey || metadata.internalPlanCode || '';
+}
+
+function resolveUserIdFromMetadata(metadata = {}, fallback = '') {
+  return metadata.userId || metadata.worksideUserId || fallback;
+}
+
+function resolveProviderIdFromMetadata(metadata = {}) {
+  return metadata.providerId || metadata.worksideProviderId || '';
+}
+
+function buildWebhookMetadataSnapshot(object = {}) {
+  const metadata =
+    object.metadata ||
+    object.lines?.data?.[0]?.metadata ||
+    object.parent?.subscription_details?.metadata ||
+    {};
+
+  return {
+    metadata,
+    planKey: resolvePlanKeyFromMetadata(metadata),
+    userId: resolveUserIdFromMetadata(metadata),
+    providerId: resolveProviderIdFromMetadata(metadata),
+    billingKind: metadata.billingKind || '',
+  };
+}
+
+function buildWebhookObjectSnapshot(event = null) {
+  const object = event?.data?.object || {};
+  const objectType = object.object || '';
+  const metadataSnapshot = buildWebhookMetadataSnapshot(object);
+
+  return {
+    stripeEventId: event?.id || '',
+    type: event?.type || '',
+    livemode: Boolean(event?.livemode),
+    stripeCreatedAt: event?.created ? new Date(event.created * 1000) : null,
+    stripeCustomerId: object.customer || '',
+    stripeCheckoutSessionId:
+      objectType === 'checkout.session' ? object.id || '' : object.checkout_session || '',
+    stripeSubscriptionId:
+      objectType === 'subscription' ? object.id || '' : object.subscription || '',
+    stripeInvoiceId:
+      objectType === 'invoice'
+        ? object.id || ''
+        : object.invoice || object.latest_invoice || '',
+    userId: metadataSnapshot.userId || '',
+    providerId: metadataSnapshot.providerId || '',
+    planKey: metadataSnapshot.planKey || '',
+    billingKind: metadataSnapshot.billingKind || '',
+    eventObjectType: objectType,
+    rawStripeObject: object,
+  };
+}
+
+async function recordWebhookEventLog({
+  event = null,
+  processingStatus = 'processed',
+  errorMessage = '',
+  resultSummary = null,
+}) {
+  if (mongoose.connection.readyState !== 1) {
+    return null;
+  }
+
+  const snapshot = buildWebhookObjectSnapshot(event);
+  const values = {
+    ...snapshot,
+    processingStatus,
+    errorMessage: String(errorMessage || '').slice(0, 1200),
+    resultSummary,
+  };
+
+  if (snapshot.stripeEventId) {
+    return BillingWebhookEventModel.findOneAndUpdate(
+      { stripeEventId: snapshot.stripeEventId },
+      { $set: values },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+  }
+
+  return BillingWebhookEventModel.create(values);
+}
+
+async function resolveStripeSubscriptionFromSessionValue(sessionSubscription) {
+  if (!sessionSubscription) {
+    return null;
+  }
+
+  if (typeof sessionSubscription === 'string') {
+    const stripe = getStripeClient();
+    return stripe.subscriptions.retrieve(sessionSubscription, {
+      expand: ['items.data.price'],
+    });
+  }
+
+  return sessionSubscription;
+}
+
+async function upsertSubscriptionRecord(query, values) {
+  const document = await BillingSubscriptionModel.findOneAndUpdate(
+    query,
+    {
+      $set: values,
+    },
+    {
+      upsert: true,
+      new: true,
+      setDefaultsOnInsert: true,
+    },
+  );
+
+  return serializeSubscription(document);
+}
+
+async function syncProviderCheckoutSession(session, plan) {
+  const providerId = resolveProviderIdFromMetadata(session.metadata || {});
+  if (!providerId) {
+    throw new Error('Stripe checkout session is missing provider metadata.');
+  }
+
+  const provider = await ProviderModel.findById(providerId);
+  if (!provider) {
+    throw new Error('Provider not found for checkout session.');
+  }
+
+  const checkoutState = resolveCheckoutSessionBillingState(session, { mode: plan.mode });
+  provider.subscription.planCode = plan.planKey;
+  provider.subscription.status = checkoutState.status;
+  provider.subscription.stripeCustomerId = session.customer || provider.subscription.stripeCustomerId || '';
+  provider.subscription.stripeCheckoutSessionId = session.id;
+  provider.subscription.stripePriceId = plan.priceId;
+  provider.status = resolveProviderOperationalStatus({
+    currentStatus: provider.status,
+    subscriptionStatus: checkoutState.status,
+    isPaidPlan: plan.planKey !== 'provider_basic',
+  });
+  if (plan.planKey === 'provider_featured' && !checkoutState.isActive) {
+    provider.isSponsored = false;
+  }
+
+  await provider.save();
+
+  if (session.subscription) {
+    const subscription = await resolveStripeSubscriptionFromSessionValue(session.subscription);
+
+    return syncProviderSubscription(subscription, {
+      stripeCheckoutSessionId: session.id,
+      metadata: session.metadata || {},
+    });
+  }
+
+  return {
+    providerId,
+    planKey: plan.planKey,
+    status: provider.subscription.status,
+  };
+}
+
+async function syncProviderSubscription(subscription, overrides = {}) {
+  const firstItem = subscription.items?.data?.[0];
+  const plan = planFromMetadataOrPrice(
+    resolvePlanKeyFromMetadata(subscription.metadata || {}) ||
+      resolvePlanKeyFromMetadata(overrides.metadata || {}),
+    firstItem?.price?.id,
+  );
+  const providerId =
+    resolveProviderIdFromMetadata(subscription.metadata || {}) ||
+    resolveProviderIdFromMetadata(overrides.metadata || {});
+
+  if (!providerId) {
+    throw new Error('Stripe subscription is missing provider metadata.');
+  }
+
+  const provider = await ProviderModel.findById(providerId);
+  if (!provider) {
+    throw new Error('Provider not found for Stripe subscription.');
+  }
+
+  provider.subscription.planCode = plan.planKey;
+  provider.subscription.status = subscription.status;
+  provider.subscription.stripeCustomerId = subscription.customer || provider.subscription.stripeCustomerId || '';
+  provider.subscription.stripeCheckoutSessionId =
+    overrides.stripeCheckoutSessionId || provider.subscription.stripeCheckoutSessionId || '';
+  provider.subscription.stripeSubscriptionId = subscription.id;
+  provider.subscription.stripePriceId = firstItem?.price?.id || plan.priceId || '';
+  provider.subscription.currentPeriodStart = toDateFromUnixTimestamp(subscription.current_period_start);
+  provider.subscription.currentPeriodEnd = toDateFromUnixTimestamp(subscription.current_period_end);
+  provider.subscription.cancelAtPeriodEnd = Boolean(subscription.cancel_at_period_end);
+
+  const active = isSubscriptionActive(subscription.status);
+  provider.status = resolveProviderOperationalStatus({
+    currentStatus: provider.status,
+    subscriptionStatus: subscription.status,
+    isPaidPlan: plan.planKey !== 'provider_basic',
+  });
+  if (active && !provider.activatedAt) {
+    provider.activatedAt = new Date();
+  }
+  if (plan.planKey === 'provider_featured') {
+    provider.isSponsored = active;
+  }
+
+  await provider.save();
+
+  return {
+    providerId: toObjectIdString(provider._id),
+    planKey: plan.planKey,
+    status: provider.subscription.status,
+    isActive: active,
+  };
+}
+
+async function syncCheckoutSession(session) {
+  const userId = resolveUserIdFromMetadata(session.metadata || {}, session.client_reference_id);
+  const plan = planFromMetadataOrPrice(
+    resolvePlanKeyFromMetadata(session.metadata || {}),
+    session.metadata?.priceId,
+  );
+
+  if (plan.audience === 'provider') {
+    return syncProviderCheckoutSession(session, plan);
+  }
+
+  if (!userId) {
+    throw new Error('Stripe checkout session is missing user metadata.');
+  }
+
+  if (plan.mode === 'payment') {
+    const checkoutState = resolveCheckoutSessionBillingState(session, { mode: plan.mode });
+    return upsertSubscriptionRecord(
+      {
+        stripeCheckoutSessionId: session.id,
+      },
+      {
+        userId,
+        stripeCustomerId: session.customer || null,
+        stripeCheckoutSessionId: session.id,
+        stripeInvoiceId: session.invoice || null,
+        productKey: plan.productKey,
+        planKey: plan.planKey,
+        audience: plan.audience,
+        mode: plan.mode,
+        status: checkoutState.status,
+        isActive: checkoutState.isActive,
+        features: plan.features,
+        metadata: session.metadata || {},
+        rawStripeObject: session,
+      },
+    );
+  }
+
+  if (session.subscription) {
+    const subscription = await resolveStripeSubscriptionFromSessionValue(session.subscription);
+
+    return syncStripeSubscription(subscription, {
+      stripeCheckoutSessionId: session.id,
+      metadata: session.metadata || {},
+    });
+  }
+
+  return null;
+}
+
+export async function syncStripeCheckoutSessionById(sessionId) {
+  if (!isStripeConfigured()) {
+    throw new Error('Stripe is not configured.');
+  }
+
+  const normalizedSessionId = String(sessionId || '').trim();
+  if (!normalizedSessionId) {
+    throw new Error('Stripe checkout session id is required.');
+  }
+
+  const stripe = getStripeClient();
+  const session = await stripe.checkout.sessions.retrieve(normalizedSessionId, {
+    expand: ['subscription'],
+  });
+
+  return syncCheckoutSession(session);
+}
+
+export async function syncStripeSubscriptionById(subscriptionId) {
+  if (!isStripeConfigured()) {
+    throw new Error('Stripe is not configured.');
+  }
+
+  const normalizedSubscriptionId = String(subscriptionId || '').trim();
+  if (!normalizedSubscriptionId) {
+    throw new Error('Stripe subscription id is required.');
+  }
+
+  const stripe = getStripeClient();
+  const subscription = await stripe.subscriptions.retrieve(normalizedSubscriptionId, {
+    expand: ['items.data.price'],
+  });
+
+  return syncStripeSubscription(subscription);
+}
+
+async function syncStripeSubscription(subscription, overrides = {}) {
+  const firstItem = subscription.items?.data?.[0];
+  const plan = planFromMetadataOrPrice(
+    resolvePlanKeyFromMetadata(subscription.metadata || {}) ||
+      resolvePlanKeyFromMetadata(overrides.metadata || {}),
+    firstItem?.price?.id,
+  );
+
+  if (plan.audience === 'provider') {
+    return syncProviderSubscription(subscription, overrides);
+  }
+
+  const userId =
+    resolveUserIdFromMetadata(subscription.metadata || {}) ||
+    resolveUserIdFromMetadata(overrides.metadata || {}) ||
+    subscription.customer_email;
+
+  if (!userId) {
+    throw new Error('Stripe subscription is missing user metadata.');
+  }
+
+  return upsertSubscriptionRecord(
+    {
+      stripeSubscriptionId: subscription.id,
+    },
+    {
+      userId,
+      stripeCustomerId: subscription.customer || null,
+      stripeCheckoutSessionId: overrides.stripeCheckoutSessionId || null,
+      stripeSubscriptionId: subscription.id,
+      stripeInvoiceId: subscription.latest_invoice || null,
+      productKey: plan.productKey,
+      planKey: plan.planKey,
+      audience: plan.audience,
+      mode: plan.mode,
+      status: subscription.status,
+      isActive: isSubscriptionActive(subscription.status),
+      trialEndsAt: toDateFromUnixTimestamp(subscription.trial_end),
+      currentPeriodStart: toDateFromUnixTimestamp(subscription.current_period_start),
+      currentPeriodEnd: toDateFromUnixTimestamp(subscription.current_period_end),
+      cancelAt: toDateFromUnixTimestamp(subscription.cancel_at),
+      cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+      features: plan.features,
+      metadata: {
+        ...overrides.metadata,
+        ...subscription.metadata,
+      },
+      rawStripeObject: subscription,
+    },
+  );
+}
+
+async function syncInvoice(invoice) {
+  if (!invoice.subscription) {
+    return null;
+  }
+
+  const stripe = getStripeClient();
+  const subscription = await stripe.subscriptions.retrieve(invoice.subscription, {
+    expand: ['items.data.price'],
+  });
+
+  return syncStripeSubscription(subscription, {
+    metadata: invoice.lines?.data?.[0]?.metadata || {},
+  });
+}
+
+export async function listBillingPlans() {
+  return listPlanCatalogWithPricing();
+}
+
+export async function createCheckoutSession({
+  userId,
+  planKey,
+  successUrl,
+  cancelUrl,
+}) {
+  if (!isStripeConfigured()) {
+    throw new Error('Stripe is not configured.');
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error('A valid userId is required for billing.');
+  }
+
+  const user = await UserModel.findById(userId);
+  if (!user) {
+    throw new Error('User not found.');
+  }
+
+  if (!user.emailVerifiedAt) {
+    throw new Error('Verify the email address before starting checkout.');
+  }
+
+  const plan = getPlanConfig(planKey);
+  const stripe = getStripeClient();
+  const customerId = await ensureStripeCustomer(user);
+  const urls = buildCheckoutUrls({ successUrl, cancelUrl });
+
+  const session = await stripe.checkout.sessions.create({
+    mode: plan.mode,
+    customer: customerId,
+    client_reference_id: user._id.toString(),
+    allow_promotion_codes: true,
+    success_url: urls.successUrl,
+    cancel_url: urls.cancelUrl,
+    line_items: [
+      {
+        price: plan.priceId,
+        quantity: 1,
+      },
+    ],
+    metadata: buildSharedBillingMetadata({
+      billingKind: plan.mode === 'subscription' ? 'subscription' : 'onboarding',
+      planKey: plan.planKey,
+      productKey: plan.productKey,
+      audience: plan.audience,
+      priceId: plan.priceId,
+      userId: user._id.toString(),
+      orgId: user._id.toString(),
+    }),
+    subscription_data:
+      plan.mode === 'subscription'
+        ? {
+            metadata: buildSharedBillingMetadata({
+              billingKind: 'subscription',
+              planKey: plan.planKey,
+              productKey: plan.productKey,
+              audience: plan.audience,
+              priceId: plan.priceId,
+              userId: user._id.toString(),
+              orgId: user._id.toString(),
+            }),
+          }
+        : undefined,
+    payment_intent_data:
+      plan.mode === 'payment'
+        ? {
+            metadata: buildSharedBillingMetadata({
+              billingKind: 'onboarding',
+              planKey: plan.planKey,
+              productKey: plan.productKey,
+              audience: plan.audience,
+              priceId: plan.priceId,
+              userId: user._id.toString(),
+              orgId: user._id.toString(),
+            }),
+          }
+        : undefined,
+  });
+
+  await upsertSubscriptionRecord(
+    {
+      stripeCheckoutSessionId: session.id,
+    },
+    {
+      userId: user._id,
+      stripeCustomerId: customerId,
+      stripeCheckoutSessionId: session.id,
+      productKey: plan.productKey,
+      planKey: plan.planKey,
+      audience: plan.audience,
+      mode: plan.mode,
+      status: 'checkout_created',
+      isActive: false,
+      features: plan.features,
+      metadata: {
+        checkoutStatus: session.status,
+      },
+      rawStripeObject: session,
+    },
+  );
+
+  return {
+    sessionId: session.id,
+    url: session.url,
+    planKey: plan.planKey,
+    mode: plan.mode,
+  };
+}
+
+export async function createProviderCheckoutSession({
+  providerId,
+  planKey,
+  planCode,
+  successUrl,
+  cancelUrl,
+}) {
+  if (!isStripeConfigured()) {
+    throw new Error('Stripe is not configured.');
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(providerId)) {
+    throw new Error('A valid providerId is required for billing.');
+  }
+
+  const provider = await ProviderModel.findById(providerId);
+  if (!provider) {
+    throw new Error('Provider not found.');
+  }
+
+  if (!provider.email) {
+    throw new Error('Provider email is required before starting checkout.');
+  }
+
+  const resolvedPlanKey = planKey || planCode;
+
+  if (resolvedPlanKey === 'provider_basic') {
+    provider.subscription.planCode = 'provider_basic';
+    provider.subscription.status = 'inactive';
+    await provider.save();
+
+    return {
+      providerId,
+      sessionId: null,
+      url: null,
+      planKey: resolvedPlanKey,
+      mode: 'free',
+    };
+  }
+
+  const plan = getPlanConfig(resolvedPlanKey);
+  if (plan.audience !== 'provider') {
+    throw new Error('Provider checkout requires a provider billing plan.');
+  }
+
+  const stripe = getStripeClient();
+  let customerId = provider.subscription?.stripeCustomerId || '';
+  if (!customerId) {
+    const customer = await stripe.customers.create({
+      email: provider.email,
+      name: provider.businessName,
+      phone: provider.phone || undefined,
+      metadata: {
+        providerId: toObjectIdString(provider._id),
+        categoryKey: provider.categoryKey,
+      },
+    });
+    customerId = customer.id;
+    provider.subscription.stripeCustomerId = customerId;
+    await provider.save();
+  }
+
+  const urls = buildProviderCheckoutUrls(providerId, { successUrl, cancelUrl });
+
+  const session = await stripe.checkout.sessions.create({
+    mode: plan.mode,
+    customer: customerId,
+    allow_promotion_codes: true,
+    success_url: urls.successUrl,
+    cancel_url: urls.cancelUrl,
+    line_items: [
+      {
+        price: plan.priceId,
+        quantity: 1,
+      },
+    ],
+    metadata: buildSharedBillingMetadata({
+      billingKind: 'subscription',
+      planKey: plan.planKey,
+      productKey: plan.productKey,
+      audience: plan.audience,
+      priceId: plan.priceId,
+      orgId: toObjectIdString(provider._id),
+      providerId: toObjectIdString(provider._id),
+    }),
+    subscription_data:
+      plan.mode === 'subscription'
+        ? {
+            metadata: buildSharedBillingMetadata({
+              billingKind: 'subscription',
+              planKey: plan.planKey,
+              productKey: plan.productKey,
+              audience: plan.audience,
+              priceId: plan.priceId,
+              orgId: toObjectIdString(provider._id),
+              providerId: toObjectIdString(provider._id),
+            }),
+          }
+        : undefined,
+  });
+
+  provider.subscription.planCode = plan.planKey;
+  provider.subscription.status = 'checkout_created';
+  provider.subscription.stripeCheckoutSessionId = session.id;
+  provider.subscription.stripePriceId = plan.priceId;
+  await provider.save();
+
+  return {
+    providerId: toObjectIdString(provider._id),
+    sessionId: session.id,
+    url: session.url,
+    planKey: plan.planKey,
+    mode: plan.mode,
+  };
+}
+
+export async function getBillingSummary(userId) {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error('A valid userId is required.');
+  }
+
+  const user = await UserModel.findById(userId).lean();
+  if (!user) {
+    throw new Error('User not found.');
+  }
+
+  if (user.isBillingBypass || user.role === 'admin' || user.role === 'super_admin') {
+    const access = {
+      audience: 'internal',
+      planKey: 'admin_bypass',
+      status: 'active',
+      features: ADMIN_FEATURES,
+    };
+    return {
+      userId,
+      isStripeConfigured: isStripeConfigured(),
+      access,
+      subscription: null,
+      propertyCapacity: await buildPropertyCapacitySummary(userId, access),
+    };
+  }
+
+  if (user.isDemoAccount) {
+    const access = {
+      audience: 'demo',
+      planKey: 'demo_bypass',
+      status: 'active',
+      features: DEMO_FEATURES,
+    };
+    return {
+      userId,
+      isStripeConfigured: isStripeConfigured(),
+      access,
+      subscription: null,
+      propertyCapacity: await buildPropertyCapacitySummary(userId, access),
+    };
+  }
+
+  const activeSubscription = await BillingSubscriptionModel.findOne({
+    userId,
+    isActive: true,
+  })
+    .sort({ updatedAt: -1 })
+    .lean();
+
+  if (!activeSubscription) {
+    const freeSummary = buildFreeSummary(userId);
+    return {
+      ...freeSummary,
+      propertyCapacity: await buildPropertyCapacitySummary(userId, freeSummary.access),
+    };
+  }
+
+  const subscription = serializeSubscription(activeSubscription);
+  const features = [...new Set([...BASE_FREE_FEATURES, ...(subscription.features || [])])];
+
+  const access = {
+    audience: subscription.audience,
+    planKey: subscription.planKey,
+    status: subscription.status,
+    features,
+  };
+
+  return {
+    userId,
+    isStripeConfigured: isStripeConfigured(),
+    access,
+    subscription,
+    propertyCapacity: await buildPropertyCapacitySummary(userId, access),
+  };
+}
+
+export async function getPropertyCapacitySummary(userId) {
+  const summary = await getBillingSummary(userId);
+  return summary.propertyCapacity;
+}
+
+export async function handleStripeWebhook(rawBody, signature) {
+  if (!isStripeConfigured()) {
+    throw new Error('Stripe is not configured.');
+  }
+
+  const stripe = getStripeClient();
+  let event;
+
+  try {
+    if (env.STRIPE_WEBHOOK_SECRET) {
+      if (!signature) {
+        throw new Error('Missing Stripe-Signature header.');
+      }
+
+      event = stripe.webhooks.constructEvent(
+        rawBody,
+        signature,
+        env.STRIPE_WEBHOOK_SECRET,
+      );
+    } else {
+      event = JSON.parse(rawBody.toString('utf8'));
+    }
+
+    let resultSummary = null;
+    switch (event.type) {
+      case 'checkout.session.completed':
+      case 'checkout.session.async_payment_succeeded':
+      case 'checkout.session.async_payment_failed':
+      case 'checkout.session.expired':
+        resultSummary = await syncCheckoutSession(event.data.object);
+        break;
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated':
+      case 'customer.subscription.deleted':
+        resultSummary = await syncStripeSubscription(event.data.object);
+        break;
+      case 'invoice.paid':
+      case 'invoice.payment_succeeded':
+      case 'invoice.payment_failed':
+        resultSummary = await syncInvoice(event.data.object);
+        break;
+      default:
+        resultSummary = { skipped: true, reason: 'unsupported_event_type' };
+        break;
+    }
+
+    await recordWebhookEventLog({
+      event,
+      processingStatus: 'processed',
+      resultSummary,
+    });
+
+    return {
+      received: true,
+      type: event.type,
+      result: resultSummary,
+    };
+  } catch (error) {
+    if (event) {
+      await recordWebhookEventLog({
+        event,
+        processingStatus: 'failed',
+        errorMessage: error.message,
+      });
+    }
+
+    throw error;
+  }
+}

@@ -222,94 +222,6 @@ function getVariantDisclaimer(variant) {
   return 'Enhanced images should stay truthful to the room and be reviewed before use in final marketing materials.';
 }
 
-function formatPercentValue(value) {
-  const numericValue = Number(value);
-  if (!Number.isFinite(numericValue)) {
-    return null;
-  }
-
-  return `${Math.round(numericValue * 100)}%`;
-}
-
-function formatVisionRejectReason(reason) {
-  switch (reason) {
-    case 'object_silhouette_persisted':
-      return 'the furniture silhouette still looked present';
-    case 'outside_target_change_too_high':
-      return 'too much of the crop changed outside the target object';
-    case 'upper_architecture_change_too_high':
-      return 'too much change reached the upper room architecture';
-    case 'upper_structure_drift_too_high':
-      return 'upper-structure drift was too high';
-    case 'masked_change_too_low':
-      return 'the masked object area changed too little';
-    case 'room_region_change_too_low':
-      return 'the broader room target area changed too little';
-    case 'practical_partial':
-      return 'the best candidate only qualified as a low-confidence practical partial';
-    default:
-      return '';
-  }
-}
-
-function buildVisionFailureMessage(job) {
-  const attemptLog = Array.isArray(job?.input?.attemptLog) ? job.input.attemptLog : [];
-  const maskAnalysis = attemptLog.find((entry) => entry?.stage === 'mask_analysis') || null;
-  const attempts = attemptLog.filter((entry) => Number.isFinite(entry?.attempt));
-  const acceptedCount = attempts.filter((entry) => entry?.result === 'accepted').length;
-  const softAcceptedCount = attempts.filter((entry) => entry?.result === 'soft_accepted').length;
-  const rejectedAttempts = attempts.filter((entry) => entry?.result === 'rejected');
-  const bestRejectedAttempt = [...rejectedAttempts].sort((left, right) => {
-    const leftScore =
-      Number(left?.maskedChangeRatio || 0) * 0.55 + Number(left?.targetRegionChangeRatio || 0) * 0.45;
-    const rightScore =
-      Number(right?.maskedChangeRatio || 0) * 0.55 + Number(right?.targetRegionChangeRatio || 0) * 0.45;
-    return rightScore - leftScore;
-  })[0];
-
-  const baseMessage =
-    job?.message ||
-    job?.warning ||
-    'No new variant passed safeguards. Try a narrower object target.';
-
-  if (!attempts.length) {
-    return baseMessage;
-  }
-
-  const targetCount =
-    Number(maskAnalysis?.targetCount || 0) ||
-    (Array.isArray(job?.input?.objectTargets) ? job.input.objectTargets.length : 0);
-  const attemptCount = attempts.length;
-  const attemptSummary = `${attemptCount} isolated attempt${attemptCount === 1 ? '' : 's'}`;
-  const targetSummary = targetCount ? ` across ${targetCount} target${targetCount === 1 ? '' : 's'}` : '';
-
-  if (acceptedCount || softAcceptedCount) {
-    return `${baseMessage} ${attemptSummary}${targetSummary} were reviewed, including ${acceptedCount} strict pass${acceptedCount === 1 ? '' : 'es'} and ${softAcceptedCount} low-confidence partial pass${softAcceptedCount === 1 ? '' : 'es'}.`;
-  }
-
-  if (bestRejectedAttempt) {
-    const maskedChange = formatPercentValue(bestRejectedAttempt.maskedChangeRatio);
-    const roomChange = formatPercentValue(bestRejectedAttempt.targetRegionChangeRatio);
-    const drift = formatPercentValue(bestRejectedAttempt.structureHistogramDrift);
-    const topHalf = formatPercentValue(bestRejectedAttempt.topHalfChangeRatio);
-    const outsideTargetChange = formatPercentValue(bestRejectedAttempt.outsideMaskChangeRatio);
-    const rejectReason = formatVisionRejectReason(bestRejectedAttempt.primaryRejectReason);
-    const metrics = [
-      maskedChange ? `best masked change ${maskedChange}` : null,
-      roomChange ? `room-region change ${roomChange}` : null,
-      drift ? `structure drift ${drift}` : null,
-      topHalf ? `upper-architecture change ${topHalf}` : null,
-      outsideTargetChange ? `outside-target change ${outsideTargetChange}` : null,
-    ]
-      .filter(Boolean)
-      .join(', ');
-
-    return `${baseMessage} We reviewed ${attemptSummary}${targetSummary}, but the strongest candidate was still rejected because ${rejectReason || 'it did not meet the current removal thresholds'}${metrics ? ` (${metrics})` : ''}.`;
-  }
-
-  return `${baseMessage} We reviewed ${attemptSummary}${targetSummary}, but none of the candidates met the current removal thresholds.`;
-}
-
 function getVariantReviewScore(variant) {
   return Number(variant?.metadata?.review?.overallScore || 0);
 }
@@ -2035,47 +1947,25 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     );
     setToast(null);
     try {
-      const startedAt = Date.now();
       const response = await createImageEnhancementJob(selectedMediaAsset.id, {
         presetKey,
         roomType: selectedMediaAsset.roomLabel,
         forceRegenerate: true,
       });
-      const [, nextVariants] = await Promise.all([
-        refreshMediaAssets(selectedMediaAsset.id),
-        refreshMediaVariants(selectedMediaAsset.id),
-        refreshWorkflow(),
-      ]);
-      const responseOutputVariantIds = new Set(response.job?.outputVariantIds || []);
-      const freshestResponseVariant =
-        nextVariants.find((variant) => responseOutputVariantIds.has(variant.id)) ||
-        nextVariants.find((variant) => variant.id === response.variant?.id) ||
-        nextVariants.find((variant) => new Date(variant.createdAt || 0).getTime() >= startedAt - 2_000) ||
-        null;
-
-      if (freshestResponseVariant) {
-        setSelectedVariantId(freshestResponseVariant.id);
-        setToast({
-          tone: 'success',
-          title:
-            isFurnitureRemovalPreset
-              ? 'Furniture removal preview ready'
-              : isDeclutterPreset
-              ? 'Declutter variant ready'
-              : 'Enhanced photo ready',
-          message:
-            response.job?.warning ||
-            'The new image is now shown in the Vision compare area and the Generated options panel.',
-        });
-      } else {
-        setSelectedVariantId('');
-        const needsUserAction = response.job?.status === 'needs_user_action';
-        setToast({
-          tone: needsUserAction ? 'warning' : 'error',
-          title: needsUserAction ? 'Need a safer selection' : 'No new variant generated',
-          message: buildVisionFailureMessage(response.job),
-        });
-      }
+      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id), refreshWorkflow()]);
+      setSelectedVariantId(response.variant?.id || '');
+      setToast({
+        tone: 'success',
+        title:
+          isFurnitureRemovalPreset
+            ? 'Furniture removal preview ready'
+            : isDeclutterPreset
+            ? 'Declutter variant ready'
+            : 'Enhanced photo ready',
+        message:
+          response.job?.warning ||
+          'The new image is now shown in the Vision compare area and the Generated options panel.',
+      });
       requestAnimationFrame(() => {
         visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
@@ -2103,14 +1993,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setStatus('Generating custom enhancement preview...');
     setToast(null);
     try {
-      const startedAt = Date.now();
       const response = await createImageEnhancementJob(selectedMediaAsset.id, {
         mode: 'freeform',
         instructions: freeformEnhancementInstructions.trim(),
         roomType: selectedMediaAsset.roomLabel,
         forceRegenerate: true,
       });
-      const [, nextVariants] = await Promise.all([
+      await Promise.all([
         refreshMediaAssets(selectedMediaAsset.id),
         refreshMediaVariants(selectedMediaAsset.id),
         refreshWorkflow(),
@@ -2122,29 +2011,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           response.variant?.variantType ||
           'combined_listing_refresh',
       );
-      const responseOutputVariantIds = new Set(response.job?.outputVariantIds || []);
-      const freshestResponseVariant =
-        nextVariants.find((variant) => responseOutputVariantIds.has(variant.id)) ||
-        nextVariants.find((variant) => variant.id === response.variant?.id) ||
-        nextVariants.find((variant) => new Date(variant.createdAt || 0).getTime() >= startedAt - 2_000) ||
-        null;
-      if (freshestResponseVariant) {
-        setSelectedVariantId(freshestResponseVariant.id);
-        setToast({
-          tone: 'success',
-          title: 'Custom enhancement ready',
-          message:
-            response.job?.warning ||
-            'Your freeform enhancement request was processed and the generated result is now selected in the Vision compare area.',
-        });
-      } else {
-        setSelectedVariantId('');
-        setToast({
-          tone: response.job?.status === 'needs_user_action' ? 'warning' : 'error',
-          title: 'Custom enhancement needs review',
-          message: buildVisionFailureMessage(response.job),
-        });
-      }
+      setSelectedVariantId(response.variant?.id || '');
+      setToast({
+        tone: 'success',
+        title: 'Custom enhancement ready',
+        message:
+          response.job?.warning ||
+          'Your freeform enhancement request was processed and the generated result is now selected in the Vision compare area.',
+      });
       requestAnimationFrame(() => {
         visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });

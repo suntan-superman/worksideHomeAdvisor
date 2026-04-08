@@ -18,7 +18,7 @@ function getReplicateClient() {
   return replicateClient;
 }
 
-async function runReplicatePrediction({
+export async function runReplicateInpainting({
   image,
   mask,
   model = 'lucataco/sdxl-inpainting:latest',
@@ -31,13 +31,12 @@ async function runReplicatePrediction({
   negativePrompt = 'monochrome, lowres, bad anatomy, worst quality, low quality',
   seed,
 }) {
-  const sanitizedGuidanceScale = Math.max(1, Math.min(10, Number(guidanceScale || 7.5)));
   const input = {
     image,
     mask,
     prompt,
     num_outputs: outputCount,
-    guidance_scale: sanitizedGuidanceScale,
+    guidance_scale: guidanceScale,
     steps: numInferenceSteps,
     strength,
     scheduler,
@@ -57,31 +56,4 @@ async function runReplicatePrediction({
   }
 
   return output.filter(Boolean);
-}
-
-export async function runReplicateGenericInpainting(options = {}) {
-  return runReplicatePrediction(options);
-}
-
-export async function runReplicateFurnitureRemoval({
-  outputCount = 1,
-  strength = 0.52,
-  guidanceScale = 8.6,
-  numInferenceSteps = 40,
-  negativePrompt =
-    'new furniture, replacement furniture, staged furniture, recolored furniture, reshaped furniture, sofa, couch, chair, coffee table, side table, ottoman, rug, clutter, fireplace, mantel, built-in, new room, different room, low quality, unrealistic geometry, warped lines, distorted walls',
-  ...options
-} = {}) {
-  return runReplicatePrediction({
-    ...options,
-    outputCount,
-    strength,
-    guidanceScale,
-    numInferenceSteps,
-    negativePrompt,
-  });
-}
-
-export async function runReplicateInpainting(options = {}) {
-  return runReplicateGenericInpainting(options);
 }
