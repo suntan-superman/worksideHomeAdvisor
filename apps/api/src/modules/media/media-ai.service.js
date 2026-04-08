@@ -259,23 +259,6 @@ function getUniversalRealismGuardrails() {
   return 'Keep the result realistic, natural, and suitable for residential real estate marketing. Do not distort walls, windows, doors, ceilings, floors, trim, or permanent fixtures. Do not invent architecture or major finishes that are not already present.';
 }
 
-function getStrictInpaintingRules() {
-  return 'STRICT RULES: Do NOT add new objects. Do NOT change layout or structure. Do NOT modify walls, windows, or lighting unless explicitly requested. Preserve perspective and proportions. ONLY perform the requested task.';
-}
-
-function shouldUseVisionCache({ forceRegenerate, requestedMode, preset }) {
-  if (forceRegenerate) {
-    return false;
-  }
-
-  // Concept previews and freeform are too quality-sensitive to trust stale cache.
-  if (requestedMode === 'freeform' || preset?.category === 'concept_preview') {
-    return false;
-  }
-
-  return true;
-}
-
 function getPresetPromptAddon(presetKey, roomType) {
   const normalizedRoomType = normalizeRoomType(roomType);
   const wallColorPresetKeys = new Set([
@@ -320,7 +303,7 @@ function getPresetPromptAddon(presetKey, roomType) {
   }
 
   if (flooringPresetKeys.has(presetKey)) {
-    return 'Change only the flooring concept. Preserve baseboards, furniture perspective, transitions, reflections, shadows, and the true room geometry. Remove or neutralize area-rug appearance where possible so the floor material change is clearly visible.';
+    return 'Change only the flooring concept. Preserve baseboards, furniture perspective, transitions, reflections, shadows, and the true room geometry.';
   }
 
   if (
@@ -345,73 +328,6 @@ function getPresetPromptAddon(presetKey, roomType) {
   }
 
   return '';
-}
-
-async function calculateVisualChangeRatio(sourceBuffer, variantBuffer, options = {}) {
-  const width = 256;
-  const height = 256;
-  const region = options.region || null;
-  const src = await sharp(sourceBuffer)
-    .rotate()
-    .resize(width, height, { fit: 'cover' })
-    .removeAlpha()
-    .raw()
-    .toBuffer();
-  const next = await sharp(variantBuffer)
-    .rotate()
-    .resize(width, height, { fit: 'cover' })
-    .removeAlpha()
-    .raw()
-    .toBuffer();
-
-  const left = Math.max(0, Math.min(width - 1, Math.round((region?.left || 0) * width)));
-  const top = Math.max(0, Math.min(height - 1, Math.round((region?.top || 0) * height)));
-  const right = Math.max(
-    left + 1,
-    Math.min(width, Math.round(((region?.left || 0) + (region?.width || 1)) * width)),
-  );
-  const bottom = Math.max(
-    top + 1,
-    Math.min(height, Math.round(((region?.top || 0) + (region?.height || 1)) * height)),
-  );
-  const pixelCount = (right - left) * (bottom - top);
-  let changedPixels = 0;
-  for (let y = top; y < bottom; y += 1) {
-    for (let x = left; x < right; x += 1) {
-      const offset = (y * width + x) * 3;
-      const delta =
-        (Math.abs(src[offset] - next[offset]) +
-          Math.abs(src[offset + 1] - next[offset + 1]) +
-          Math.abs(src[offset + 2] - next[offset + 2])) /
-        3;
-      if (delta >= 18) {
-        changedPixels += 1;
-      }
-    }
-  }
-
-  return Number((changedPixels / pixelCount).toFixed(4));
-}
-
-function getPresetEvaluationRegions(presetKey) {
-  if (presetKey === 'remove_furniture') {
-    return {
-      focusRegion: { left: 0.03, top: 0.4, width: 0.94, height: 0.56 },
-      structureRegion: { left: 0, top: 0, width: 1, height: 0.52 },
-    };
-  }
-
-  if (String(presetKey || '').startsWith('floor_')) {
-    return {
-      focusRegion: { left: 0.02, top: 0.5, width: 0.96, height: 0.48 },
-      structureRegion: { left: 0, top: 0, width: 1, height: 0.5 },
-    };
-  }
-
-  return {
-    focusRegion: { left: 0, top: 0, width: 1, height: 1 },
-    structureRegion: { left: 0, top: 0, width: 1, height: 0.52 },
-  };
 }
 
 function buildCenterCropRegion(metadata, insetRatio = 0) {
@@ -1244,46 +1160,20 @@ function buildMaskShapes(metadata, presetKey, roomType) {
   ]);
 
   if (presetKey === 'remove_furniture') {
-    if (normalizedRoomType === 'living_room') {
-      return [
-        {
-          type: 'rect',
-          left: Math.round(width * 0.04),
-          top: Math.round(height * 0.34),
-          width: Math.round(width * 0.92),
-          height: Math.round(height * 0.6),
-        },
-        {
-          type: 'ellipse',
-          cx: Math.round(width * 0.27),
-          cy: Math.round(height * 0.66),
-          rx: Math.round(width * 0.22),
-          ry: Math.round(height * 0.18),
-        },
-        {
-          type: 'ellipse',
-          cx: Math.round(width * 0.74),
-          cy: Math.round(height * 0.64),
-          rx: Math.round(width * 0.24),
-          ry: Math.round(height * 0.19),
-        },
-      ];
-    }
-
     return [
       {
         type: 'rect',
         left: Math.round(width * 0.08),
-        top: Math.round(height * 0.3),
+        top: Math.round(height * 0.24),
         width: Math.round(width * 0.84),
-        height: Math.round(height * 0.64),
+        height: Math.round(height * 0.68),
       },
       {
         type: 'ellipse',
         cx: Math.round(width * 0.5),
-        cy: Math.round(height * 0.64),
-        rx: Math.round(width * 0.35),
-        ry: Math.round(height * 0.23),
+        cy: Math.round(height * 0.66),
+        rx: Math.round(width * 0.28),
+        ry: Math.round(height * 0.2),
       },
     ];
   }
@@ -1330,17 +1220,17 @@ function buildMaskShapes(metadata, presetKey, roomType) {
     return [
       {
         type: 'rect',
-        left: Math.round(width * 0.04),
-        top: Math.round(height * 0.48),
-        width: Math.round(width * 0.92),
-        height: Math.round(height * 0.46),
+        left: Math.round(width * 0.06),
+        top: Math.round(height * 0.58),
+        width: Math.round(width * 0.88),
+        height: Math.round(height * 0.3),
       },
       {
         type: 'ellipse',
         cx: Math.round(width * 0.5),
-        cy: Math.round(height * 0.76),
-        rx: Math.round(width * 0.42),
-        ry: Math.round(height * 0.18),
+        cy: Math.round(height * 0.78),
+        rx: Math.round(width * 0.34),
+        ry: Math.round(height * 0.14),
       },
     ];
   }
@@ -1586,7 +1476,6 @@ export async function createImageEnhancementJob({
   roomType,
   mode = 'preset',
   instructions = '',
-  forceRegenerate = false,
 }) {
   if (mongoose.connection.readyState !== 1) {
     throw new Error('Database connection is required to generate image variants.');
@@ -1618,36 +1507,29 @@ export async function createImageEnhancementJob({
     mode: requestedMode,
     instructions: normalizedInstructions,
   });
-  const canUseCache = shouldUseVisionCache({
-    forceRegenerate,
-    requestedMode,
-    preset,
-  });
 
-  if (canUseCache) {
-    const cachedJob = await ImageJobModel.findOne({
-      mediaId: asset._id,
-      inputHash,
-      status: 'completed',
-      createdAt: { $gte: new Date(Date.now() - CACHE_WINDOW_MS) },
-    })
-      .sort({ createdAt: -1 })
-      .lean();
+  const cachedJob = await ImageJobModel.findOne({
+    mediaId: asset._id,
+    inputHash,
+    status: 'completed',
+    createdAt: { $gte: new Date(Date.now() - CACHE_WINDOW_MS) },
+  })
+    .sort({ createdAt: -1 })
+    .lean();
 
-    if (cachedJob) {
-      const cachedVariants = await loadJobVariants(cachedJob._id);
-      if (cachedVariants.length) {
-        return {
-          cached: true,
-          preset,
-          job: {
-            ...serializeImageJob(cachedJob, cachedVariants),
-            message: cachedJob.message || 'Returning cached vision output.',
-          },
-          variants: cachedVariants,
-          variant: cachedVariants[0] || null,
-        };
-      }
+  if (cachedJob) {
+    const cachedVariants = await loadJobVariants(cachedJob._id);
+    if (cachedVariants.length) {
+      return {
+        cached: true,
+        preset,
+        job: {
+          ...serializeImageJob(cachedJob, cachedVariants),
+          message: cachedJob.message || 'Returning cached vision output.',
+        },
+        variants: cachedVariants,
+        variant: cachedVariants[0] || null,
+      };
     }
   }
 
@@ -1677,7 +1559,6 @@ export async function createImageEnhancementJob({
       mode: requestedMode,
       instructions: normalizedInstructions,
       normalizedPlan,
-      forceRegenerate,
     },
   });
 
@@ -1691,7 +1572,6 @@ export async function createImageEnhancementJob({
     const freeformPlanPromptAddon =
       requestedMode === 'freeform' ? getFreeformPlanPromptAddon(normalizedPlan) : '';
     const fullPrompt = [
-      getStrictInpaintingRules(),
       preset.basePrompt,
       requestedMode === 'freeform'
         ? `Seller instructions: ${normalizedInstructions}`
@@ -1729,192 +1609,34 @@ export async function createImageEnhancementJob({
         outputCount: preset.outputCount || 2,
         guidanceScale: preset.guidanceScale,
         numInferenceSteps: preset.numInferenceSteps,
-        scheduler: preset.scheduler,
-        negativePrompt: preset.negativePrompt,
-        seed: Math.floor(Math.random() * 1_000_000_000),
       });
-      createdVariants = [];
-      const rejectedCandidates = [];
-      const evaluationRegions = getPresetEvaluationRegions(preset.key);
-      for (let index = 0; index < providerOutputs.length; index += 1) {
-        let output = providerOutputs[index];
-        let buffer = await convertReplicateOutputToBuffer(output);
-        let visualChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer);
-        let focusRegionChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer, {
-          region: evaluationRegions.focusRegion,
-        });
-        if (preset.key === 'remove_furniture' && focusRegionChangeRatio < 0.24) {
-          const refinementOutputs = await runReplicateInpainting({
-            image: buffer,
-            mask: maskBuffer,
-            model: preset.replicateModel,
-            prompt: `${fullPrompt} Continue removing any remaining movable furniture and clutter from the masked area. Keep architecture unchanged.`,
-            strength: Math.min(0.99, Number((preset.strength || 0.9) + 0.05)),
-            outputCount: 1,
-            guidanceScale: (preset.guidanceScale || 9) + 0.5,
-            numInferenceSteps: (preset.numInferenceSteps || 40) + 6,
-            scheduler: preset.scheduler,
-            negativePrompt: preset.negativePrompt,
-            seed: Math.floor(Math.random() * 1_000_000_000),
-          });
-          if (refinementOutputs.length) {
-            output = refinementOutputs[0];
-            buffer = await convertReplicateOutputToBuffer(output);
-            visualChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer);
-            focusRegionChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer, {
-              region: evaluationRegions.focusRegion,
-            });
-          }
-        }
-        const review = await reviewVisionVariant({
-          property: null,
-          roomLabel: asset.roomLabel,
-          presetKey: preset.key,
-          variantCategory: preset.category,
-          mimeType: 'image/jpeg',
-          sourceImageBase64,
-          variantImageBase64: buffer.toString('base64'),
-        });
-        const topHalfChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer, {
-          region: evaluationRegions.structureRegion,
-        });
-        let overallScore = calculateVisionReviewOverallScore(review);
-        let rejectForArchitecturalDrift = false;
-        let qualityWarning = '';
 
-        if (preset.key === 'remove_furniture') {
-          if (visualChangeRatio < 0.22) {
-            overallScore = Math.max(0, overallScore - 22);
-          }
-          if (focusRegionChangeRatio < 0.2) {
-            overallScore = Math.max(0, overallScore - 28);
-          }
-          if (topHalfChangeRatio > 0.1) {
-            overallScore = Math.max(0, overallScore - 26);
-          }
-          if (focusRegionChangeRatio < 0.14) {
-            rejectForArchitecturalDrift = true;
-            qualityWarning = 'Rejected variant due to insufficient furniture removal in the target region.';
-          }
-          if (topHalfChangeRatio > 0.16) {
-            rejectForArchitecturalDrift = true;
-            qualityWarning = 'Rejected variant due to likely structural drift in upper architecture.';
-          }
-        }
-
-        if (preset.key.startsWith('floor_')) {
-          if (visualChangeRatio < 0.14) {
-            overallScore = Math.max(0, overallScore - 20);
-          }
-          if (topHalfChangeRatio > 0.09) {
-            overallScore = Math.max(0, overallScore - 20);
-          }
-          if (topHalfChangeRatio > 0.14) {
-            rejectForArchitecturalDrift = true;
-            qualityWarning = 'Rejected variant due to likely structural drift outside floor regions.';
-          }
-        }
-
-        if (rejectForArchitecturalDrift) {
-          rejectedCandidates.push({
-            index,
-            output,
-            buffer,
-            review,
-            overallScore,
-            visualChangeRatio,
-            focusRegionChangeRatio,
-            topHalfChangeRatio,
-            roomPromptAddon,
-            presetPromptAddon,
-          });
-          continue;
-        }
-
-        const saved = await saveBinaryBuffer({
-          propertyId: asset.propertyId.toString(),
-          mimeType: 'image/jpeg',
-          buffer,
-        });
-
-        const variant = await MediaVariantModel.create({
-          visionJobId: job._id,
-          mediaId: asset._id,
-          propertyId: asset.propertyId,
-          variantType: preset.key,
-          variantCategory: preset.category,
-          label: `${renderPlan.label} ${String.fromCharCode(65 + index)}`,
-          mimeType: 'image/jpeg',
-          storageProvider: saved.storageProvider,
-          storageKey: saved.storageKey,
-          byteSize: saved.byteSize,
-          isSelected: false,
-          ...buildVariantLifecycleFields({ isSelected: false }),
-          useInBrochure: false,
-          useInReport: false,
-          metadata: {
-            warning: qualityWarning || renderPlan.warning,
-            summary: renderPlan.summary,
-            differenceHint: renderPlan.differenceHint,
-            effects: renderPlan.effects,
-            sourceAssetId: asset._id.toString(),
+      createdVariants = await Promise.all(
+        providerOutputs.map(async (output, index) => {
+          const buffer = await convertReplicateOutputToBuffer(output);
+          const review = await reviewVisionVariant({
+            property: null,
             roomLabel: asset.roomLabel,
-            roomType: resolvedRoomType,
-            provider: 'replicate',
             presetKey: preset.key,
-            promptVersion: preset.promptVersion,
-            helperText: preset.helperText,
-            recommendedUse: preset.recommendedUse,
-            upgradeTier: preset.upgradeTier,
-            category: preset.category,
-            disclaimerType: preset.disclaimerType,
-            roomPromptAddon,
-            presetPromptAddon,
-            mode: requestedMode,
-            instructions: normalizedInstructions,
-            normalizedPlan,
-            providerSourceUrl: getProviderSourceUrl(output),
-            review: {
-              ...review,
-              overallScore,
-              visualChangeRatio,
-              focusRegionChangeRatio,
-              topHalfChangeRatio,
-            },
-          },
-        });
-
-        createdVariants.push(serializeMediaVariant(variant.toObject()));
-      }
-
-      if (!createdVariants.length) {
-        if (rejectedCandidates.length) {
-          const fallbackCandidate = [...rejectedCandidates]
-            .sort((left, right) => {
-              if (preset.key === 'remove_furniture') {
-                if (left.focusRegionChangeRatio !== right.focusRegionChangeRatio) {
-                  return right.focusRegionChangeRatio - left.focusRegionChangeRatio;
-                }
-              }
-              if (left.topHalfChangeRatio !== right.topHalfChangeRatio) {
-                return left.topHalfChangeRatio - right.topHalfChangeRatio;
-              }
-              return right.visualChangeRatio - left.visualChangeRatio;
-            })[0];
-
+            variantCategory: preset.category,
+            mimeType: 'image/jpeg',
+            sourceImageBase64,
+            variantImageBase64: buffer.toString('base64'),
+          });
+          const overallScore = calculateVisionReviewOverallScore(review);
           const saved = await saveBinaryBuffer({
             propertyId: asset.propertyId.toString(),
             mimeType: 'image/jpeg',
-            buffer: fallbackCandidate.buffer,
+            buffer,
           });
 
-          const fallbackVariant = await MediaVariantModel.create({
+          const variant = await MediaVariantModel.create({
             visionJobId: job._id,
             mediaId: asset._id,
             propertyId: asset.propertyId,
             variantType: preset.key,
             variantCategory: preset.category,
-            label: `${renderPlan.label} Fallback`,
+            label: `${renderPlan.label} ${String.fromCharCode(65 + index)}`,
             mimeType: 'image/jpeg',
             storageProvider: saved.storageProvider,
             storageKey: saved.storageKey,
@@ -1924,11 +1646,10 @@ export async function createImageEnhancementJob({
             useInBrochure: false,
             useInReport: false,
             metadata: {
-              warning:
-                'Low-confidence fallback: most generated variants were rejected for structural drift. Review before any public use.',
+              warning: renderPlan.warning,
               summary: renderPlan.summary,
               differenceHint: renderPlan.differenceHint,
-              effects: [...(renderPlan.effects || []), 'Low-confidence fallback'],
+              effects: renderPlan.effects,
               sourceAssetId: asset._id.toString(),
               roomLabel: asset.roomLabel,
               roomType: resolvedRoomType,
@@ -1940,30 +1661,22 @@ export async function createImageEnhancementJob({
               upgradeTier: preset.upgradeTier,
               category: preset.category,
               disclaimerType: preset.disclaimerType,
-              roomPromptAddon: fallbackCandidate.roomPromptAddon,
-              presetPromptAddon: fallbackCandidate.presetPromptAddon,
+              roomPromptAddon,
+              presetPromptAddon,
               mode: requestedMode,
               instructions: normalizedInstructions,
               normalizedPlan,
-              providerSourceUrl: getProviderSourceUrl(fallbackCandidate.output),
+              providerSourceUrl: getProviderSourceUrl(output),
               review: {
-                ...fallbackCandidate.review,
-                overallScore: Math.max(0, fallbackCandidate.overallScore - 12),
-                visualChangeRatio: fallbackCandidate.visualChangeRatio,
-                focusRegionChangeRatio: fallbackCandidate.focusRegionChangeRatio,
-                topHalfChangeRatio: fallbackCandidate.topHalfChangeRatio,
-                fallbackApplied: true,
+                ...review,
+                overallScore,
               },
             },
           });
 
-          createdVariants.push(serializeMediaVariant(fallbackVariant.toObject()));
-        } else {
-          throw new Error(
-            'Generated variants failed quality safeguards due to heavy structural drift. Please retry with a different source photo angle or a narrower transformation request.',
-          );
-        }
-      }
+          return serializeMediaVariant(variant.toObject());
+        }),
+      );
     } else {
       const rendered = await renderVariantBuffer(stored.buffer, preset.key, resolvedRoomType);
       const review = await reviewVisionVariant({
@@ -2030,14 +1743,9 @@ export async function createImageEnhancementJob({
 
     createdVariants = sortVisionVariants(createdVariants);
     job.status = 'completed';
-    const usedFallbackVariant = createdVariants.some(
-      (variant) => Boolean(variant?.metadata?.review?.fallbackApplied),
-    );
     job.outputVariantIds = createdVariants.map((variant) => variant.id);
     job.selectedVariantId = createdVariants[0]?.id || null;
-    job.warning = usedFallbackVariant
-      ? 'Low-confidence fallback returned. Most generated variants were rejected for structural drift.'
-      : renderPlan.warning;
+    job.warning = renderPlan.warning;
     job.message =
       requestedMode === 'freeform'
         ? 'Custom enhancement request saved and processed.'
