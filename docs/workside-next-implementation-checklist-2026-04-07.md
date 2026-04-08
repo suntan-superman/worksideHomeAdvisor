@@ -62,6 +62,9 @@ The intent is to keep the roadmap actionable while web/mobile deployment testing
 - [ ] add brochure/report inclusion state on base media assets
 - [ ] improve listing-photo candidate selection and ordering UX
 - [ ] improve preset tuning and low-confidence filtering
+- [x] expand concept-preview presets for walls, flooring, kitchen finish packages, and exterior yard upgrades
+- [x] upgrade freeform parsing/routing for cabinets, countertops, flooring, wall color, and exterior feature requests
+- [ ] decide how premium concept-preview upgrades should be packaged, gated, and reported
 - [ ] define how freeform requests affect preferred-variant selection
 
 ### Pass 7: Automated coverage expansion

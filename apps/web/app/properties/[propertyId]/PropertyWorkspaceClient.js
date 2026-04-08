@@ -88,18 +88,59 @@ const REPORT_SECTION_OPTIONS = [
 
 const VISION_PRESET_GROUPS = [
   {
-    key: 'enhancement',
-    label: 'Enhance',
+    key: 'listing_enhancement',
+    label: 'Listing Enhancement',
     items: [
+      { key: 'enhance_listing_quality', displayName: 'Enhance for Listing' },
       { key: 'declutter_light', displayName: 'Light Declutter' },
       { key: 'declutter_medium', displayName: 'Medium Declutter' },
+      { key: 'combined_listing_refresh', displayName: 'Listing Refresh' },
     ],
   },
   {
-    key: 'concept_preview',
-    label: 'Preview',
+    key: 'space_preview',
+    label: 'Space Planning',
     items: [
       { key: 'remove_furniture', displayName: 'Remove Furniture' },
+    ],
+  },
+  {
+    key: 'wall_color',
+    label: 'Wall Color Concepts',
+    items: [
+      { key: 'paint_warm_neutral', displayName: 'Warm Neutral Walls' },
+      { key: 'paint_bright_white', displayName: 'Bright White Walls' },
+      { key: 'paint_soft_greige', displayName: 'Soft Greige Walls' },
+    ],
+  },
+  {
+    key: 'flooring',
+    label: 'Flooring Concepts',
+    items: [
+      { key: 'floor_light_wood', displayName: 'Light Wood Floors' },
+      { key: 'floor_medium_wood', displayName: 'Medium Wood Floors' },
+      { key: 'floor_dark_hardwood', displayName: 'Dark Hardwood Floors' },
+      { key: 'floor_lvp_neutral', displayName: 'Neutral LVP Floors' },
+      { key: 'floor_tile_stone', displayName: 'Tile / Stone Floors' },
+    ],
+  },
+  {
+    key: 'kitchen_upgrade',
+    label: 'Kitchen Upgrade Concepts',
+    items: [
+      { key: 'kitchen_white_cabinets_granite', displayName: 'White Cabinets + Granite' },
+      { key: 'kitchen_white_cabinets_quartz', displayName: 'White Cabinets + Quartz' },
+      { key: 'kitchen_green_cabinets_granite', displayName: 'Green Cabinets + Granite' },
+      { key: 'kitchen_green_cabinets_quartz', displayName: 'Green Cabinets + Quartz' },
+    ],
+  },
+  {
+    key: 'exterior_upgrade',
+    label: 'Exterior Upgrade Concepts',
+    items: [
+      { key: 'exterior_curb_appeal_refresh', displayName: 'Curb Appeal Refresh' },
+      { key: 'backyard_entertaining_refresh', displayName: 'Backyard Entertaining Refresh' },
+      { key: 'backyard_pool_preview', displayName: 'Pool / Water Feature Preview' },
     ],
   },
 ];
@@ -183,6 +224,137 @@ function getVariantDisclaimer(variant) {
 
 function getVariantReviewScore(variant) {
   return Number(variant?.metadata?.review?.overallScore || 0);
+}
+
+function formatFreeformPlanHighlights(normalizedPlan) {
+  if (!normalizedPlan) {
+    return [];
+  }
+
+  const highlights = [];
+
+  if (normalizedPlan.removeObjects?.includes('furniture')) {
+    highlights.push('Furniture removal requested');
+  }
+  if (normalizedPlan.removeObjects?.includes('clutter')) {
+    highlights.push('Declutter requested');
+  }
+  if (normalizedPlan.flooring) {
+    highlights.push(`Flooring: ${normalizedPlan.flooring}`);
+  }
+  if (normalizedPlan.wallColor) {
+    highlights.push(`Wall color: ${normalizedPlan.wallColor}`);
+  }
+  if (normalizedPlan.cabinetColor) {
+    highlights.push(`Cabinet color: ${normalizedPlan.cabinetColor}`);
+  }
+  if (normalizedPlan.countertopMaterial) {
+    highlights.push(`Countertops: ${normalizedPlan.countertopMaterial}`);
+  }
+  if ((normalizedPlan.exteriorFeatures || []).length) {
+    highlights.push(`Exterior: ${(normalizedPlan.exteriorFeatures || []).join(', ')}`);
+  }
+  if (normalizedPlan.lighting) {
+    highlights.push(`${normalizedPlan.lighting === 'brighter' ? 'Brighter' : normalizedPlan.lighting} lighting`);
+  }
+
+  return highlights;
+}
+
+function getSocialPackVariantKey(variant, index = 0) {
+  return `${variant?.format || 'variant'}-${variant?.width || 0}-${variant?.height || 0}-${index}`;
+}
+
+function getSocialPackVariantLabel(variant) {
+  if (!variant) {
+    return 'Social pack view';
+  }
+
+  return variant.width && variant.height
+    ? `${variant.format} ${variant.width}x${variant.height}`
+    : variant.format;
+}
+
+function buildSocialPackVariantDetails(pack, variant) {
+  if (!pack || !variant) {
+    return null;
+  }
+
+  const normalizedFormat = String(variant.format || '').toLowerCase();
+  const sections = [];
+  const highlights = [];
+
+  if (variant.width && variant.height) {
+    highlights.push(`${variant.width}x${variant.height} canvas`);
+  }
+
+  if (normalizedFormat.includes('square')) {
+    highlights.push('Feed-ready layout');
+    sections.push(
+      { label: 'Headline', value: pack.headline },
+      { label: 'Short caption', value: pack.shortCaption },
+      { label: 'CTA', value: pack.cta },
+    );
+    return {
+      title: getSocialPackVariantLabel(variant),
+      summary: 'Use this for square feed placements, static ads, and simple hero-image posts.',
+      guidance: variant.guidance,
+      highlights,
+      sections,
+    };
+  }
+
+  if (normalizedFormat.includes('story') || normalizedFormat.includes('reel')) {
+    highlights.push('Vertical motion-friendly');
+    sections.push(
+      { label: 'Headline', value: pack.headline },
+      { label: 'Short caption', value: pack.shortCaption },
+      { label: 'CTA', value: pack.cta },
+    );
+    return {
+      title: getSocialPackVariantLabel(variant),
+      summary: 'Use this for story, reel, or vertical placements where the opening frame and CTA need to land quickly.',
+      guidance: variant.guidance,
+      highlights,
+      sections,
+    };
+  }
+
+  if (normalizedFormat.includes('ad copy')) {
+    highlights.push('Long-form copy block');
+    sections.push(
+      { label: 'Headline', value: pack.headline },
+      { label: 'Primary text', value: pack.primaryText },
+      { label: 'Short caption', value: pack.shortCaption },
+      { label: 'Disclaimers', value: (pack.disclaimers || []).join(' ') },
+    );
+    return {
+      title: getSocialPackVariantLabel(variant),
+      summary: 'This is the copy reference view for ad drafting, approvals, and export review.',
+      guidance: variant.guidance,
+      highlights,
+      sections,
+    };
+  }
+
+  highlights.push('Call-to-action guidance');
+  sections.push(
+    { label: 'Primary CTA', value: pack.cta },
+    { label: 'Short caption', value: pack.shortCaption },
+    {
+      label: 'Compliance reminder',
+      value:
+        pack.disclaimers?.[0] ||
+        'Review generated copy and imagery before public advertising use.',
+    },
+  );
+  return {
+    title: getSocialPackVariantLabel(variant),
+    summary: 'Use this to choose the CTA language and the supporting line you want to pair with it.',
+    guidance: variant.guidance,
+    highlights,
+    sections,
+  };
 }
 
 function formatWorkflowStatus(status) {
@@ -469,6 +641,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [latestFlyer, setLatestFlyer] = useState(null);
   const [latestReport, setLatestReport] = useState(null);
   const [latestSocialPack, setLatestSocialPack] = useState(null);
+  const [activeSocialPackVariantKey, setActiveSocialPackVariantKey] = useState('');
   const [mediaAssets, setMediaAssets] = useState([]);
   const [mediaVariants, setMediaVariants] = useState([]);
   const [visionPresets, setVisionPresets] = useState([]);
@@ -608,6 +781,25 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const topRankedVariant = useMemo(
     () => mediaVariants.find((variant) => !variant?.metadata?.review?.shouldHideByDefault) || mediaVariants[0] || null,
     [mediaVariants],
+  );
+  const selectedVariantFreeformHighlights = useMemo(
+    () => formatFreeformPlanHighlights(selectedVariant?.metadata?.normalizedPlan),
+    [selectedVariant?.metadata?.normalizedPlan],
+  );
+  const activeSocialPackVariant = useMemo(() => {
+    const variants = latestSocialPack?.variants || [];
+    if (!variants.length) {
+      return null;
+    }
+
+    return (
+      variants.find((variant, index) => getSocialPackVariantKey(variant, index) === activeSocialPackVariantKey) ||
+      variants[0]
+    );
+  }, [activeSocialPackVariantKey, latestSocialPack]);
+  const activeSocialPackVariantDetails = useMemo(
+    () => buildSocialPackVariantDetails(latestSocialPack, activeSocialPackVariant),
+    [activeSocialPackVariant, latestSocialPack],
   );
   const visibleVisionVariants = useMemo(() => {
     if (showMoreVisionVariants) {
@@ -1054,6 +1246,24 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setActiveVisionPresetKey(selectedVariant.variantType);
     }
   }, [selectedVariant?.variantType]);
+
+  useEffect(() => {
+    const variants = latestSocialPack?.variants || [];
+    if (!variants.length) {
+      setActiveSocialPackVariantKey('');
+      return;
+    }
+
+    setActiveSocialPackVariantKey((current) => {
+      if (
+        current &&
+        variants.some((variant, index) => getSocialPackVariantKey(variant, index) === current)
+      ) {
+        return current;
+      }
+      return getSocialPackVariantKey(variants[0], 0);
+    });
+  }, [latestSocialPack]);
 
   useEffect(() => {
     setActiveTab('overview');
@@ -1792,6 +2002,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         refreshMediaVariants(selectedMediaAsset.id),
         refreshWorkflow(),
       ]);
+      setShowMoreVisionVariants(true);
       setActiveVisionPresetKey(
         response.job?.presetKey ||
           response.variant?.metadata?.presetKey ||
@@ -2719,7 +2930,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       <div className="workspace-two-column">
         <div className="content-card">
           <span className="label">Action presets</span>
-          <h2>Choose a Phase 1 preset</h2>
+          <h2>Choose a vision preset</h2>
           {selectedMediaAsset ? (
             <>
               <p>Current source photo: <strong>{selectedMediaAsset.roomLabel}</strong></p>
@@ -2740,6 +2951,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                           onClick={() => setActiveVisionPresetKey(preset.key)}
                         >
                           {preset.displayName}
+                          {preset.upgradeTier === 'premium' ? ' · Premium' : ''}
                         </button>
                       ))}
                     </div>
@@ -2748,7 +2960,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 <div className="workspace-inner-card brochure-control-card">
                   <span className="label">Preset guidance</span>
                   <strong>{activeVisionPreset?.displayName || 'Light Declutter'}</strong>
-                  <p>{activeVisionPreset?.helperText || 'Reduce clutter or preview furniture removal with the current Phase 1 preset set.'}</p>
+                  <p>{activeVisionPreset?.helperText || 'Reduce clutter, explore concept upgrades, and test stronger before/after directions.'}</p>
+                  <div className="tag-row">
+                    <span>{activeVisionPreset?.category === 'concept_preview' ? 'Concept Preview' : 'Listing Enhancement'}</span>
+                    {activeVisionPreset?.upgradeTier === 'premium' ? <span>Premium upgrade candidate</span> : <span>Included workflow</span>}
+                  </div>
                 </div>
               </div>
               <div className="workspace-action-column">
@@ -2775,8 +2991,54 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   </button>
                 </div>
                 <p className="workspace-control-note">
-                  Freeform requests persist with the job and fall back gracefully when a fully generative edit is not available in the current environment.
+                  Freeform requests can now target walls, flooring, cabinetry, countertops, furniture removal, and exterior upgrades. The current environment still treats the stronger finish changes as concept previews that should be reviewed before public use.
                 </p>
+                {selectedVariant?.metadata?.mode === 'freeform' ? (
+                  <div className="vision-freeform-result-card">
+                    <div className="section-header-tight">
+                      <div>
+                        <span className="label">Latest custom result</span>
+                        <strong>{selectedVariant.label || 'Custom enhancement preview'}</strong>
+                      </div>
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                      >
+                        Show compare view
+                      </button>
+                    </div>
+                    <div className="vision-freeform-result-grid">
+                      <img
+                        src={selectedVariant.imageUrl}
+                        alt={selectedVariant.label || 'Generated custom enhancement'}
+                        className="vision-freeform-result-thumb"
+                      />
+                      <div className="workspace-tab-stack">
+                        <p className="workspace-control-note">
+                          This result is now loaded in the before / after compare above.
+                        </p>
+                        {selectedVariant.metadata?.instructions ? (
+                          <p>
+                            <strong>Request:</strong> {selectedVariant.metadata.instructions}
+                          </p>
+                        ) : null}
+                        {selectedVariantFreeformHighlights.length ? (
+                          <div className="tag-row">
+                            {selectedVariantFreeformHighlights.map((item) => (
+                              <span key={`freeform-highlight-${item}`}>{item}</span>
+                            ))}
+                          </div>
+                        ) : null}
+                        {selectedVariant.metadata?.differenceHint ? (
+                          <p className="workspace-control-note">
+                            <strong>What to look for:</strong> {selectedVariant.metadata.differenceHint}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
               <div className="property-media-rail property-photo-grid compact">
                 {mediaAssets.map((asset) => (
@@ -2810,6 +3072,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       {selectedVariant.id === topRankedVariant?.id ? <span>Best candidate</span> : null}
                       {getVariantReviewScore(selectedVariant) ? <span>{getVariantReviewScore(selectedVariant)}/100 reviewed</span> : null}
                       {selectedVariant.metadata?.review?.shouldHideByDefault ? <span>Lower confidence</span> : null}
+                      {selectedVariant.metadata?.upgradeTier === 'premium' ? <span>Premium concept</span> : null}
                     </div>
                     <span>
                       {selectedVariant.isSelected
@@ -3065,13 +3328,54 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           </div>
           {latestSocialPack ? (
             <div className="workspace-tab-stack" style={{ marginTop: '1rem' }}>
+              <p className="workspace-control-note">
+                Select a format chip to inspect the copy, CTA, and guidance for that specific social placement.
+              </p>
               <div className="tag-row">
-                {(latestSocialPack.variants || []).map((variant) => (
-                  <span key={`${variant.format}-${variant.width}-${variant.height}`}>
-                    {variant.width && variant.height ? `${variant.format} ${variant.width}x${variant.height}` : variant.format}
-                  </span>
-                ))}
+                {(latestSocialPack.variants || []).map((variant, index) => {
+                  const variantKey = getSocialPackVariantKey(variant, index);
+                  const isActive = variantKey === activeSocialPackVariantKey;
+                  return (
+                    <button
+                      key={variantKey}
+                      type="button"
+                      className={isActive ? 'social-pack-chip active' : 'social-pack-chip'}
+                      onClick={() => setActiveSocialPackVariantKey(variantKey)}
+                    >
+                      {getSocialPackVariantLabel(variant)}
+                    </button>
+                  );
+                })}
               </div>
+              {activeSocialPackVariantDetails ? (
+                <div className="social-pack-detail-card">
+                  <div className="workspace-tab-stack">
+                    <div>
+                      <span className="label">Selected format</span>
+                      <h3>{activeSocialPackVariantDetails.title}</h3>
+                    </div>
+                    <p>{activeSocialPackVariantDetails.summary}</p>
+                    {activeSocialPackVariantDetails.highlights.length ? (
+                      <div className="tag-row">
+                        {activeSocialPackVariantDetails.highlights.map((item) => (
+                          <span key={`social-pack-highlight-${item}`}>{item}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <p className="workspace-control-note">
+                      <strong>Guidance:</strong> {activeSocialPackVariantDetails.guidance}
+                    </p>
+                    <div className="social-pack-detail-grid">
+                      {activeSocialPackVariantDetails.sections.map((section) => (
+                        <div key={`${activeSocialPackVariantDetails.title}-${section.label}`} className="social-pack-detail-block">
+                          <strong>{section.label}</strong>
+                          <span>{section.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               <p><strong>Headline:</strong> {latestSocialPack.headline}</p>
               <p><strong>Primary text:</strong> {latestSocialPack.primaryText}</p>
               <p><strong>Short caption:</strong> {latestSocialPack.shortCaption}</p>

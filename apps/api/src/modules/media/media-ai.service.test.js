@@ -5,6 +5,7 @@ import {
   buildFreeformEnhancementPlan,
   calculateVisionReviewOverallScore,
   normalizeRoomType,
+  resolveFreeformPresetKey,
 } from './media-ai.service.js';
 
 test('normalizeRoomType maps common room labels to canonical room types', () => {
@@ -25,6 +26,59 @@ test('buildFreeformEnhancementPlan extracts floor, wall, and lighting intent', (
   assert.equal(plan.flooring, 'dark hardwood');
   assert.equal(plan.wallColor, 'warm white');
   assert.equal(plan.lighting, 'brighter');
+});
+
+test('buildFreeformEnhancementPlan extracts kitchen and exterior concept intent', () => {
+  const kitchenPlan = buildFreeformEnhancementPlan(
+    'Please paint cabinets sage green with quartz countertops and brighten the kitchen.',
+    'Kitchen',
+  );
+  const exteriorPlan = buildFreeformEnhancementPlan(
+    'Refresh the backyard with plants, fixtures, and a pool.',
+    'Backyard',
+  );
+
+  assert.equal(kitchenPlan.cabinetColor, 'sage green');
+  assert.equal(kitchenPlan.countertopMaterial, 'quartz');
+  assert.equal(kitchenPlan.roomType, 'kitchen');
+  assert.deepEqual(exteriorPlan.exteriorFeatures, ['plants', 'fixtures', 'pool']);
+  assert.equal(exteriorPlan.exteriorZone, 'backyard');
+  assert.equal(exteriorPlan.roomType, 'exterior');
+});
+
+test('resolveFreeformPresetKey routes advanced concept requests to the closest preset', () => {
+  assert.equal(
+    resolveFreeformPresetKey({
+      normalizedPlan: {
+        roomType: 'living_room',
+        removeObjects: [],
+        flooring: 'dark hardwood',
+      },
+    }),
+    'floor_dark_hardwood',
+  );
+  assert.equal(
+    resolveFreeformPresetKey({
+      normalizedPlan: {
+        roomType: 'kitchen',
+        removeObjects: [],
+        cabinetColor: 'sage green',
+        countertopMaterial: 'quartz',
+      },
+    }),
+    'kitchen_green_cabinets_quartz',
+  );
+  assert.equal(
+    resolveFreeformPresetKey({
+      normalizedPlan: {
+        roomType: 'exterior',
+        removeObjects: [],
+        exteriorZone: 'backyard',
+        exteriorFeatures: ['plants', 'pool'],
+      },
+    }),
+    'backyard_pool_preview',
+  );
 });
 
 test('calculateVisionReviewOverallScore blends review signals into a rounded overall score', () => {
