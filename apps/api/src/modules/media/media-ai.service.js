@@ -1832,10 +1832,6 @@ async function buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType) {
     .png()
     .toBuffer();
 
-  if (presetKey !== 'remove_furniture') {
-    return shapeMaskBuffer;
-  }
-
   const adaptiveMaskProbe = await buildAdaptiveFurnitureMaskBuffer(sourceBuffer);
   const adaptiveMaskBuffer = await sharp(adaptiveMaskProbe)
     .resize(width, height, { fit: 'fill' })
@@ -1843,10 +1839,23 @@ async function buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType) {
     .png()
     .toBuffer();
 
-  return sharp(shapeMaskBuffer)
-    .composite([{ input: adaptiveMaskBuffer, blend: 'lighten' }])
-    .png()
-    .toBuffer();
+  if (presetKey === 'remove_furniture') {
+    return sharp(shapeMaskBuffer)
+      .composite([{ input: adaptiveMaskBuffer, blend: 'lighten' }])
+      .png()
+      .toBuffer();
+  }
+
+  if (String(presetKey || '').startsWith('floor_')) {
+    // Protect furniture from flooring transforms by carving it out of the floor mask.
+    return sharp(shapeMaskBuffer)
+      .composite([{ input: adaptiveMaskBuffer, blend: 'dest-out' }])
+      .blur(0.6)
+      .png()
+      .toBuffer();
+  }
+
+  return shapeMaskBuffer;
 }
 
 async function extractMaskRegions(maskBuffer, options = {}) {
@@ -2425,6 +2434,11 @@ export async function createImageEnhancementJob({
             rejectForArchitecturalDrift = true;
             qualityWarning = 'Rejected variant due to insufficient furniture removal in the target region.';
           }
+          if (focusEdgeDensityDelta > -0.02) {
+            rejectForArchitecturalDrift = true;
+            qualityWarning =
+              'Rejected variant due to furniture persistence (visual restyle without meaningful subtraction).';
+          }
           if (focusRegionChangeRatio < 0.22 && focusEdgeDensityDelta > -0.01) {
             rejectForArchitecturalDrift = true;
             qualityWarning =
@@ -2613,7 +2627,7 @@ export async function createImageEnhancementJob({
               job.currentStage = 'split_retry';
 
               if (
-                localRegionChangeRatio >= 0.12 &&
+                localRegionChangeRatio >= 0.18 &&
                 splitEdgeDensityDelta <= -0.02 &&
                 splitTopHalfChangeRatio <= 0.12 &&
                 splitStructureHistogramDrift <= 0.46
@@ -2690,9 +2704,9 @@ export async function createImageEnhancementJob({
               (candidate) =>
                 candidate.topHalfChangeRatio <= 0.13 &&
                 candidate.structureHistogramDrift <= 0.48 &&
-                candidate.focusRegionChangeRatio >= 0.24 &&
+                candidate.focusRegionChangeRatio >= 0.3 &&
                 candidate.visualChangeRatio >= 0.24 &&
-                candidate.focusEdgeDensityDelta <= -0.02,
+                candidate.focusEdgeDensityDelta <= -0.03,
             )
             .sort((left, right) => {
               if (left.structureHistogramDrift !== right.structureHistogramDrift) {
@@ -2774,58 +2788,27 @@ export async function createImageEnhancementJob({
               ) || rejectedCandidates.some((candidate) => candidate.structureHistogramDrift > 0.5);
 
             if (sawSceneReplacement) {
-              const cleanupPlan = buildPresetRenderPlan('combined_listing_refresh');
-              const cleanupRendered = await renderVariantBuffer(
-                stored.buffer,
-                'combined_listing_refresh',
-                resolvedRoomType,
-              );
-              const saved = await saveBinaryBuffer({
-                propertyId: asset.propertyId.toString(),
-                mimeType: 'image/jpeg',
-                buffer: cleanupRendered.buffer,
-              });
-              const fallbackVariant = await MediaVariantModel.create({
-                visionJobId: job._id,
-                mediaId: asset._id,
-                propertyId: asset.propertyId,
-                variantType: preset.key,
-                variantCategory: preset.category,
-                label: 'Declutter Lite Fallback',
-                mimeType: 'image/jpeg',
-                storageProvider: saved.storageProvider,
-                storageKey: saved.storageKey,
-                byteSize: saved.byteSize,
-                isSelected: false,
-                ...buildVariantLifecycleFields({ isSelected: false }),
-                useInBrochure: false,
-                useInReport: false,
-                metadata: {
-                  warning:
-                    'Full furniture removal was not reliable for this photo. We applied a lighter declutter enhancement instead.',
-                  summary: cleanupPlan.summary,
-                  differenceHint: cleanupPlan.differenceHint,
-                  effects: [...(cleanupPlan.effects || []), 'Declutter lite fallback'],
-                  sourceAssetId: asset._id.toString(),
-                  roomLabel: asset.roomLabel,
-                  roomType: resolvedRoomType,
-                  provider: 'local_sharp',
-                  presetKey: 'combined_listing_refresh',
-                  promptVersion: resolveVisionPreset('combined_listing_refresh').promptVersion,
-                  helperText: resolveVisionPreset('combined_listing_refresh').helperText,
-                  recommendedUse: resolveVisionPreset('combined_listing_refresh').recommendedUse,
-                  upgradeTier: resolveVisionPreset('combined_listing_refresh').upgradeTier,
-                  category: preset.category,
-                  disclaimerType: preset.disclaimerType,
-                  mode: requestedMode,
-                  instructions: normalizedInstructions,
-                  normalizedPlan,
-                  fallbackMode: 'declutter_lite',
-                },
-              });
-              createdVariants.push(serializeMediaVariant(fallbackVariant.toObject()));
-              job.fallbackMode = 'declutter_lite';
-              job.currentStage = 'fallback';
+              job.status = 'needs_user_action';
+              job.currentStage = 'guided_selection';
+              job.fallbackMode = 'guided_selection';
+              job.failureReason = 'scene_replacement_risk';
+              job.message =
+                'Full furniture removal was unsafe for this photo angle. Try selecting one isolated furniture group first.';
+              job.warning =
+                'Scene replacement risk detected. Guided selection is recommended for safer removal.';
+              job.input = {
+                ...(job.input || {}),
+                attemptLog,
+                maskRegionAnalysis,
+              };
+              await job.save();
+              return {
+                cached: false,
+                preset,
+                job: serializeImageJob(job.toObject(), []),
+                variants: [],
+                variant: null,
+              };
             } else {
               job.status = 'needs_user_action';
               job.currentStage = 'guided_selection';
