@@ -82,7 +82,7 @@ export const VISION_PRESETS = [
     helperText:
       'Create a conceptual empty-room version for planning and persuasion, not direct listing replacement.',
     strength: 0.3,
-    guidanceScale: 11,
+    guidanceScale: 10,
     numInferenceSteps: 30,
     negativePrompt:
       'new furniture, replacement furniture, staged furniture, recolored furniture, reshaped furniture, sofa, couch, chair, coffee table, side table, ottoman, rug, clutter, fireplace, mantel, built-in, new room, different room, low quality, unrealistic geometry, warped lines, distorted walls',

@@ -31,12 +31,13 @@ export async function runReplicateInpainting({
   negativePrompt = 'monochrome, lowres, bad anatomy, worst quality, low quality',
   seed,
 }) {
+  const sanitizedGuidanceScale = Math.max(1, Math.min(10, Number(guidanceScale || 7.5)));
   const input = {
     image,
     mask,
     prompt,
     num_outputs: outputCount,
-    guidance_scale: guidanceScale,
+    guidance_scale: sanitizedGuidanceScale,
     steps: numInferenceSteps,
     strength,
     scheduler,

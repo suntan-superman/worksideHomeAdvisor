@@ -1911,7 +1911,7 @@ function getFurnitureRemovalAttemptConfigs(region, imageWidth, imageHeight) {
     {
       stage: 'initial',
       strength: 0.3,
-      guidanceScale: 11,
+      guidanceScale: 10,
       numInferenceSteps: 30,
       region,
       promptSuffix:
@@ -1920,7 +1920,7 @@ function getFurnitureRemovalAttemptConfigs(region, imageWidth, imageHeight) {
     {
       stage: 'conservative_retry',
       strength: 0.28,
-      guidanceScale: 11.2,
+      guidanceScale: 10,
       numInferenceSteps: 32,
       region,
       promptSuffix:
@@ -1929,7 +1929,7 @@ function getFurnitureRemovalAttemptConfigs(region, imageWidth, imageHeight) {
     {
       stage: 'split_retry',
       strength: 0.26,
-      guidanceScale: 11.4,
+      guidanceScale: 9.8,
       numInferenceSteps: 28,
       region: insetMaskRegion(region, imageWidth, imageHeight, 6),
       promptSuffix:
@@ -2384,7 +2384,7 @@ export async function createImageEnhancementJob({
             : preset.outputCount || 2,
         guidanceScale:
           preset.key === 'remove_furniture'
-            ? 11
+            ? 10
             : preset.guidanceScale,
         numInferenceSteps: preset.key === 'remove_furniture' ? 30 : preset.numInferenceSteps,
         scheduler: preset.scheduler,
@@ -2401,7 +2401,7 @@ export async function createImageEnhancementJob({
         strength: preset.key === 'remove_furniture' ? 0.3 : preset.strength,
         guidanceScale:
           preset.key === 'remove_furniture'
-            ? 11
+            ? 10
             : preset.guidanceScale,
         outputCount: providerOutputs.length,
       });
@@ -2453,7 +2453,7 @@ export async function createImageEnhancementJob({
               prompt: `${fullPrompt} Remove ONLY the furniture inside the masked area. Do not restage, replace, recolor, or reshape furniture. Keep walls, floors, windows, lighting, and room geometry unchanged. If the task cannot be completed safely, return the original image unchanged.`,
               strength: refinementPass === 0 ? 0.28 : 0.26,
               outputCount: 1,
-              guidanceScale: refinementPass === 0 ? 11.2 : 11.4,
+              guidanceScale: refinementPass === 0 ? 10 : 9.8,
               numInferenceSteps: refinementPass === 0 ? 32 : 28,
               scheduler: preset.scheduler,
               negativePrompt: preset.negativePrompt,
@@ -2476,7 +2476,7 @@ export async function createImageEnhancementJob({
               stage,
               maskType: useSplitMask ? `split_region_${splitMaskIndex}` : 'full_mask',
               strength: refinementPass === 0 ? 0.28 : 0.26,
-              guidanceScale: refinementPass === 0 ? 11.2 : 11.4,
+              guidanceScale: refinementPass === 0 ? 10 : 9.8,
               outputCount: 1,
               focusRegionChangeRatio,
             });
@@ -2670,7 +2670,7 @@ export async function createImageEnhancementJob({
                 prompt: `${fullPrompt} Remove only the isolated furniture object(s) inside this mask. Do not restage or replace removed furniture. Keep all architecture, windows, walls, and room identity unchanged.`,
                 strength: 0.52,
                 outputCount: 1,
-                guidanceScale: Math.max(10.8, Number(preset.guidanceScale || 9) + 1.8),
+                guidanceScale: 9.8,
                 numInferenceSteps: (preset.numInferenceSteps || 40) + 10,
                 scheduler: preset.scheduler,
                 negativePrompt: preset.negativePrompt,
@@ -2717,7 +2717,7 @@ export async function createImageEnhancementJob({
                 stage: 'split_retry',
                 maskType: `split_region_${splitIndex}`,
                 strength: 0.52,
-                guidanceScale: Math.max(10.8, Number(preset.guidanceScale || 9) + 1.8),
+                guidanceScale: 9.8,
                 outputCount: 1,
                 localRegionChangeRatio,
                 splitEdgeDensityDelta,
