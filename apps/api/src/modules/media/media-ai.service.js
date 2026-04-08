@@ -393,6 +393,64 @@ async function calculateVisualChangeRatio(sourceBuffer, variantBuffer, options =
   return Number((changedPixels / pixelCount).toFixed(4));
 }
 
+async function calculateHistogramDrift(sourceBuffer, variantBuffer, options = {}) {
+  const width = 192;
+  const height = 192;
+  const binsPerChannel = 8;
+  const totalBins = binsPerChannel ** 3;
+  const region = options.region || null;
+  const src = await sharp(sourceBuffer)
+    .rotate()
+    .resize(width, height, { fit: 'cover' })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+  const next = await sharp(variantBuffer)
+    .rotate()
+    .resize(width, height, { fit: 'cover' })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+
+  const left = Math.max(0, Math.min(width - 1, Math.round((region?.left || 0) * width)));
+  const top = Math.max(0, Math.min(height - 1, Math.round((region?.top || 0) * height)));
+  const right = Math.max(
+    left + 1,
+    Math.min(width, Math.round(((region?.left || 0) + (region?.width || 1)) * width)),
+  );
+  const bottom = Math.max(
+    top + 1,
+    Math.min(height, Math.round(((region?.top || 0) + (region?.height || 1)) * height)),
+  );
+  const pixelCount = (right - left) * (bottom - top);
+
+  const srcHist = new Float32Array(totalBins);
+  const nextHist = new Float32Array(totalBins);
+  const toBin = (r, g, b) => {
+    const rb = Math.min(binsPerChannel - 1, Math.floor((r / 256) * binsPerChannel));
+    const gb = Math.min(binsPerChannel - 1, Math.floor((g / 256) * binsPerChannel));
+    const bb = Math.min(binsPerChannel - 1, Math.floor((b / 256) * binsPerChannel));
+    return rb * binsPerChannel * binsPerChannel + gb * binsPerChannel + bb;
+  };
+
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = left; x < right; x += 1) {
+      const offset = (y * width + x) * 3;
+      srcHist[toBin(src[offset], src[offset + 1], src[offset + 2])] += 1;
+      nextHist[toBin(next[offset], next[offset + 1], next[offset + 2])] += 1;
+    }
+  }
+
+  let l1Distance = 0;
+  for (let i = 0; i < totalBins; i += 1) {
+    const srcNormalized = srcHist[i] / pixelCount;
+    const nextNormalized = nextHist[i] / pixelCount;
+    l1Distance += Math.abs(srcNormalized - nextNormalized);
+  }
+
+  return Number((l1Distance / 2).toFixed(4));
+}
+
 function getPresetEvaluationRegions(presetKey) {
   if (presetKey === 'remove_furniture') {
     return {
@@ -2028,6 +2086,9 @@ export async function createImageEnhancementJob({
         const topHalfChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer, {
           region: evaluationRegions.structureRegion,
         });
+        const structureHistogramDrift = await calculateHistogramDrift(stored.buffer, buffer, {
+          region: evaluationRegions.structureRegion,
+        });
         let overallScore = calculateVisionReviewOverallScore(review);
         let rejectForArchitecturalDrift = false;
         let qualityWarning = '';
@@ -2039,16 +2100,30 @@ export async function createImageEnhancementJob({
           if (focusRegionChangeRatio < 0.2) {
             overallScore = Math.max(0, overallScore - 28);
           }
-          if (topHalfChangeRatio > 0.1) {
+          if (topHalfChangeRatio > 0.08) {
             overallScore = Math.max(0, overallScore - 26);
+          }
+          if (visualChangeRatio > 0.58) {
+            overallScore = Math.max(0, overallScore - 28);
+          }
+          if (structureHistogramDrift > 0.42) {
+            overallScore = Math.max(0, overallScore - 28);
           }
           if (focusRegionChangeRatio < 0.16) {
             rejectForArchitecturalDrift = true;
             qualityWarning = 'Rejected variant due to insufficient furniture removal in the target region.';
           }
-          if (topHalfChangeRatio > 0.16) {
+          if (topHalfChangeRatio > 0.13) {
             rejectForArchitecturalDrift = true;
             qualityWarning = 'Rejected variant due to likely structural drift in upper architecture.';
+          }
+          if (visualChangeRatio > 0.62) {
+            rejectForArchitecturalDrift = true;
+            qualityWarning = 'Rejected variant due to scene-identity drift (room appears replaced).';
+          }
+          if (structureHistogramDrift > 0.48) {
+            rejectForArchitecturalDrift = true;
+            qualityWarning = 'Rejected variant due to scene-identity drift in upper structure region.';
           }
         }
 
@@ -2075,6 +2150,7 @@ export async function createImageEnhancementJob({
             visualChangeRatio,
             focusRegionChangeRatio,
             topHalfChangeRatio,
+            structureHistogramDrift,
             roomPromptAddon,
             presetPromptAddon,
           });
@@ -2134,6 +2210,7 @@ export async function createImageEnhancementJob({
               visualChangeRatio,
               focusRegionChangeRatio,
               topHalfChangeRatio,
+              structureHistogramDrift,
             },
           },
         });
@@ -2142,6 +2219,11 @@ export async function createImageEnhancementJob({
       }
 
       if (!createdVariants.length) {
+        if (preset.key === 'remove_furniture') {
+          throw new Error(
+            'Generated variants failed quality safeguards. The model introduced scene replacement instead of furniture removal. Please retry with a straighter room angle or fewer overlapping furniture pieces.',
+          );
+        }
         if (rejectedCandidates.length) {
           const fallbackCandidate = [...rejectedCandidates]
             .sort((left, right) => {
@@ -2210,6 +2292,7 @@ export async function createImageEnhancementJob({
                 visualChangeRatio: fallbackCandidate.visualChangeRatio,
                 focusRegionChangeRatio: fallbackCandidate.focusRegionChangeRatio,
                 topHalfChangeRatio: fallbackCandidate.topHalfChangeRatio,
+                structureHistogramDrift: fallbackCandidate.structureHistogramDrift,
                 fallbackApplied: true,
               },
             },
