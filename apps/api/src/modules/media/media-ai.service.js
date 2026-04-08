@@ -1470,6 +1470,233 @@ function buildMaskShapes(metadata, presetKey, roomType) {
   ];
 }
 
+async function buildAdaptiveFurnitureMaskBuffer(sourceBuffer) {
+  const probeWidth = 72;
+  const probeHeight = 72;
+  const probe = await sharp(sourceBuffer)
+    .rotate()
+    .resize(probeWidth, probeHeight, { fit: 'cover' })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+
+  function getRgb(x, y) {
+    const offset = (y * probeWidth + x) * 3;
+    return [probe[offset], probe[offset + 1], probe[offset + 2]];
+  }
+
+  const topPixels = [];
+  for (let y = 0; y < Math.floor(probeHeight * 0.3); y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      topPixels.push(getRgb(x, y));
+    }
+  }
+  const channels = [0, 1, 2].map((channelIndex) =>
+    topPixels
+      .map((pixel) => pixel[channelIndex])
+      .sort((left, right) => left - right),
+  );
+  const median = channels.map((channelValues) =>
+    channelValues[Math.floor(channelValues.length / 2)] || 128,
+  );
+  const wallLuminance = 0.2126 * median[0] + 0.7152 * median[1] + 0.0722 * median[2];
+
+  const binary = new Uint8Array(probeWidth * probeHeight);
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      if (y < Math.floor(probeHeight * 0.34)) {
+        continue;
+      }
+      const [r, g, b] = getRgb(x, y);
+      const dr = r - median[0];
+      const dg = g - median[1];
+      const db = b - median[2];
+      const colorDistance = Math.sqrt(dr * dr + dg * dg + db * db);
+      const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+      const darkObjectScore = wallLuminance - luminance;
+
+      const isCandidate =
+        colorDistance > 38 ||
+        (darkObjectScore > 20 && saturation < 68) ||
+        (darkObjectScore > 14 && colorDistance > 28);
+      if (!isCandidate) {
+        continue;
+      }
+
+      const idx = y * probeWidth + x;
+      binary[idx] = 255;
+    }
+  }
+
+  const dilated = new Uint8Array(binary.length);
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      let neighbors = 0;
+      for (let oy = -1; oy <= 1; oy += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          const nx = x + ox;
+          const ny = y + oy;
+          if (nx < 0 || ny < 0 || nx >= probeWidth || ny >= probeHeight) {
+            continue;
+          }
+          if (binary[ny * probeWidth + nx]) {
+            neighbors += 1;
+          }
+        }
+      }
+      if (binary[y * probeWidth + x] || neighbors >= 3) {
+        dilated[y * probeWidth + x] = 255;
+      }
+    }
+  }
+
+  const visited = new Uint8Array(dilated.length);
+  const furnitureMask = new Uint8Array(dilated.length);
+  const directions = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      const startIndex = y * probeWidth + x;
+      if (!dilated[startIndex] || visited[startIndex]) {
+        continue;
+      }
+
+      const queue = [startIndex];
+      visited[startIndex] = 1;
+      const component = [];
+      let minX = x;
+      let maxX = x;
+      let minY = y;
+      let maxY = y;
+      let sumX = 0;
+      let sumY = 0;
+      while (queue.length) {
+        const index = queue.pop();
+        const currentX = index % probeWidth;
+        const currentY = Math.floor(index / probeWidth);
+        component.push(index);
+        sumX += currentX;
+        sumY += currentY;
+        if (currentX < minX) {
+          minX = currentX;
+        }
+        if (currentX > maxX) {
+          maxX = currentX;
+        }
+        if (currentY < minY) {
+          minY = currentY;
+        }
+        if (currentY > maxY) {
+          maxY = currentY;
+        }
+
+        for (const [dx, dy] of directions) {
+          const nx = currentX + dx;
+          const ny = currentY + dy;
+          if (nx < 0 || ny < 0 || nx >= probeWidth || ny >= probeHeight) {
+            continue;
+          }
+          const nextIndex = ny * probeWidth + nx;
+          if (!dilated[nextIndex] || visited[nextIndex]) {
+            continue;
+          }
+          visited[nextIndex] = 1;
+          queue.push(nextIndex);
+        }
+      }
+
+      const area = component.length;
+      const boxWidth = maxX - minX + 1;
+      const boxHeight = maxY - minY + 1;
+      const centroidX = sumX / Math.max(1, area);
+      const centroidY = sumY / Math.max(1, area);
+      const aspectRatio = boxWidth / Math.max(1, boxHeight);
+      const areaRatio = area / Math.max(1, boxWidth * boxHeight);
+
+      const isLargeAnchorFurniture =
+        area >= 42 &&
+        boxWidth >= 6 &&
+        boxHeight >= 5 &&
+        centroidY >= probeHeight * 0.36 &&
+        (areaRatio > 0.18 || aspectRatio > 1.35 || boxHeight > 8);
+      const isMediumFurniture =
+        area >= 24 &&
+        boxWidth >= 4 &&
+        boxHeight >= 4 &&
+        centroidY >= probeHeight * 0.42 &&
+        (areaRatio > 0.2 || (aspectRatio >= 0.7 && aspectRatio <= 2.8));
+      const isWideSurfaceObject =
+        area >= 18 &&
+        boxWidth >= 7 &&
+        boxHeight >= 3 &&
+        centroidY >= probeHeight * 0.45 &&
+        aspectRatio >= 1.9;
+      const isLikelyFurniture =
+        isLargeAnchorFurniture || isMediumFurniture || isWideSurfaceObject;
+      if (!isLikelyFurniture) {
+        continue;
+      }
+
+      const expand = area > 56 ? 2 : 1;
+      for (let yy = Math.max(0, minY - expand); yy <= Math.min(probeHeight - 1, maxY + expand); yy += 1) {
+        for (let xx = Math.max(0, minX - expand); xx <= Math.min(probeWidth - 1, maxX + expand); xx += 1) {
+          const outIndex = yy * probeWidth + xx;
+          furnitureMask[outIndex] = 255;
+        }
+      }
+    }
+  }
+
+  // Bridge tiny gaps so long sofas/chair groupings are treated as one target zone.
+  const bridgedMask = new Uint8Array(furnitureMask.length);
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      const idx = y * probeWidth + x;
+      if (furnitureMask[idx]) {
+        bridgedMask[idx] = 255;
+        continue;
+      }
+      let nearbyFurniture = 0;
+      for (let oy = -2; oy <= 2; oy += 1) {
+        for (let ox = -2; ox <= 2; ox += 1) {
+          const nx = x + ox;
+          const ny = y + oy;
+          if (nx < 0 || ny < 0 || nx >= probeWidth || ny >= probeHeight) {
+            continue;
+          }
+          if (furnitureMask[ny * probeWidth + nx]) {
+            nearbyFurniture += 1;
+          }
+        }
+      }
+      if (nearbyFurniture >= 8) {
+        bridgedMask[idx] = 255;
+      }
+    }
+  }
+
+  const rgba = Buffer.alloc(probeWidth * probeHeight * 4);
+  for (let i = 0; i < bridgedMask.length; i += 1) {
+    const value = bridgedMask[i];
+    const offset = i * 4;
+    rgba[offset] = value;
+    rgba[offset + 1] = value;
+    rgba[offset + 2] = value;
+    rgba[offset + 3] = 255;
+  }
+
+  return sharp(rgba, {
+    raw: { width: probeWidth, height: probeHeight, channels: 4 },
+  })
+    .png()
+    .toBuffer();
+}
+
 async function buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType) {
   const metadata = await sharp(sourceBuffer).rotate().metadata();
   const width = Number(metadata.width || 0);
@@ -1491,9 +1718,25 @@ async function buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType) {
     </svg>
   `;
 
-  return sharp(Buffer.from(svg))
+  const shapeMaskBuffer = await sharp(Buffer.from(svg))
     .resize(width, height, { fit: 'fill' })
     .blur(1.2)
+    .png()
+    .toBuffer();
+
+  if (presetKey !== 'remove_furniture') {
+    return shapeMaskBuffer;
+  }
+
+  const adaptiveMaskProbe = await buildAdaptiveFurnitureMaskBuffer(sourceBuffer);
+  const adaptiveMaskBuffer = await sharp(adaptiveMaskProbe)
+    .resize(width, height, { fit: 'fill' })
+    .blur(1.3)
+    .png()
+    .toBuffer();
+
+  return sharp(shapeMaskBuffer)
+    .composite([{ input: adaptiveMaskBuffer, blend: 'lighten' }])
     .png()
     .toBuffer();
 }
@@ -1743,27 +1986,34 @@ export async function createImageEnhancementJob({
         let focusRegionChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer, {
           region: evaluationRegions.focusRegion,
         });
-        if (preset.key === 'remove_furniture' && focusRegionChangeRatio < 0.24) {
-          const refinementOutputs = await runReplicateInpainting({
-            image: buffer,
-            mask: maskBuffer,
-            model: preset.replicateModel,
-            prompt: `${fullPrompt} Continue removing any remaining movable furniture and clutter from the masked area. Keep architecture unchanged.`,
-            strength: Math.min(0.99, Number((preset.strength || 0.9) + 0.05)),
-            outputCount: 1,
-            guidanceScale: (preset.guidanceScale || 9) + 0.5,
-            numInferenceSteps: (preset.numInferenceSteps || 40) + 6,
-            scheduler: preset.scheduler,
-            negativePrompt: preset.negativePrompt,
-            seed: Math.floor(Math.random() * 1_000_000_000),
-          });
-          if (refinementOutputs.length) {
+        if (preset.key === 'remove_furniture') {
+          const maxRefinementPasses = focusRegionChangeRatio < 0.3 ? 2 : 1;
+          let refinementPass = 0;
+          while (refinementPass < maxRefinementPasses && focusRegionChangeRatio < 0.34) {
+            const refinementOutputs = await runReplicateInpainting({
+              image: buffer,
+              mask: maskBuffer,
+              model: preset.replicateModel,
+              prompt: `${fullPrompt} Continue removing remaining movable furniture from the masked area, especially sofas, chairs, tables, and rugs. Keep walls, windows, doors, trim, and structure unchanged. Do not add new decor or fixtures.`,
+              strength: Math.min(0.995, Number((preset.strength || 0.9) + 0.06)),
+              outputCount: 1,
+              guidanceScale: (preset.guidanceScale || 9) + 0.8,
+              numInferenceSteps: (preset.numInferenceSteps || 40) + 8,
+              scheduler: preset.scheduler,
+              negativePrompt: preset.negativePrompt,
+              seed: Math.floor(Math.random() * 1_000_000_000),
+            });
+            if (!refinementOutputs.length) {
+              break;
+            }
+
             output = refinementOutputs[0];
             buffer = await convertReplicateOutputToBuffer(output);
             visualChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer);
             focusRegionChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer, {
               region: evaluationRegions.focusRegion,
             });
+            refinementPass += 1;
           }
         }
         const review = await reviewVisionVariant({
@@ -1792,7 +2042,7 @@ export async function createImageEnhancementJob({
           if (topHalfChangeRatio > 0.1) {
             overallScore = Math.max(0, overallScore - 26);
           }
-          if (focusRegionChangeRatio < 0.14) {
+          if (focusRegionChangeRatio < 0.16) {
             rejectForArchitecturalDrift = true;
             qualityWarning = 'Rejected variant due to insufficient furniture removal in the target region.';
           }
@@ -1873,6 +2123,10 @@ export async function createImageEnhancementJob({
             mode: requestedMode,
             instructions: normalizedInstructions,
             normalizedPlan,
+            maskStrategy:
+              preset.key === 'remove_furniture'
+                ? 'shape_plus_component_aware_furniture_segmentation'
+                : 'shape_mask',
             providerSourceUrl: getProviderSourceUrl(output),
             review: {
               ...review,
@@ -1945,6 +2199,10 @@ export async function createImageEnhancementJob({
               mode: requestedMode,
               instructions: normalizedInstructions,
               normalizedPlan,
+              maskStrategy:
+                preset.key === 'remove_furniture'
+                  ? 'shape_plus_component_aware_furniture_segmentation'
+                  : 'shape_mask',
               providerSourceUrl: getProviderSourceUrl(fallbackCandidate.output),
               review: {
                 ...fallbackCandidate.review,
