@@ -55,6 +55,7 @@ const imageJobRequestSchema = z.object({
   roomType: z.string().max(80).optional(),
   mode: z.enum(['preset', 'freeform']).optional(),
   instructions: z.string().trim().max(600).optional(),
+  forceRegenerate: z.boolean().optional(),
 }).superRefine((value, context) => {
   const requestedPresetKey = value.presetKey || value.jobType || 'enhance_listing_quality';
   if (value.mode !== 'freeform' && !getVisionPresetKeys().includes(requestedPresetKey)) {
@@ -88,6 +89,7 @@ const photoEnhanceSchema = z.object({
   roomType: z.string().max(80).optional(),
   mode: z.enum(['preset', 'freeform']).optional(),
   instructions: z.string().trim().max(600).optional(),
+  forceRegenerate: z.boolean().optional(),
 });
 
 export async function mediaRoutes(fastify) {
@@ -193,6 +195,7 @@ export async function mediaRoutes(fastify) {
         roomType: payload.roomType,
         mode: payload.mode,
         instructions: payload.instructions,
+        forceRegenerate: payload.forceRegenerate,
       });
       return reply.code(201).send(result);
     } catch (error) {
@@ -217,6 +220,7 @@ export async function mediaRoutes(fastify) {
         roomType: payload.roomType,
         mode: payload.mode,
         instructions: payload.instructions,
+        forceRegenerate: payload.forceRegenerate,
       });
       return reply.code(201).send(result);
     } catch (error) {
@@ -240,6 +244,7 @@ export async function mediaRoutes(fastify) {
         roomType: payload.roomType,
         mode: payload.mode,
         instructions: payload.instructions,
+        forceRegenerate: payload.forceRegenerate,
       });
       return reply.code(201).send(result);
     } catch (error) {

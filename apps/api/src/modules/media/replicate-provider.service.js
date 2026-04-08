@@ -29,20 +29,26 @@ export async function runReplicateInpainting({
   numInferenceSteps = 35,
   scheduler = 'K_EULER',
   negativePrompt = 'monochrome, lowres, bad anatomy, worst quality, low quality',
+  seed,
 }) {
+  const input = {
+    image,
+    mask,
+    prompt,
+    num_outputs: outputCount,
+    guidance_scale: guidanceScale,
+    steps: numInferenceSteps,
+    strength,
+    scheduler,
+    negative_prompt: negativePrompt,
+  };
+  if (Number.isFinite(seed)) {
+    input.seed = seed;
+  }
+
   const replicate = getReplicateClient();
   const output = await replicate.run(model, {
-    input: {
-      image,
-      mask,
-      prompt,
-      num_outputs: outputCount,
-      guidance_scale: guidanceScale,
-      steps: numInferenceSteps,
-      strength,
-      scheduler,
-      negative_prompt: negativePrompt,
-    },
+    input,
   });
 
   if (!Array.isArray(output)) {

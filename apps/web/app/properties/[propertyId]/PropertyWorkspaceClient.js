@@ -1950,6 +1950,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       const response = await createImageEnhancementJob(selectedMediaAsset.id, {
         presetKey,
         roomType: selectedMediaAsset.roomLabel,
+        forceRegenerate: true,
       });
       await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id), refreshWorkflow()]);
       setSelectedVariantId(response.variant?.id || '');
@@ -1996,6 +1997,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         mode: 'freeform',
         instructions: freeformEnhancementInstructions.trim(),
         roomType: selectedMediaAsset.roomLabel,
+        forceRegenerate: true,
       });
       await Promise.all([
         refreshMediaAssets(selectedMediaAsset.id),

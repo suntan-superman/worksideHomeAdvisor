@@ -259,6 +259,23 @@ function getUniversalRealismGuardrails() {
   return 'Keep the result realistic, natural, and suitable for residential real estate marketing. Do not distort walls, windows, doors, ceilings, floors, trim, or permanent fixtures. Do not invent architecture or major finishes that are not already present.';
 }
 
+function getStrictInpaintingRules() {
+  return 'STRICT RULES: Do NOT add new objects. Do NOT change layout or structure. Do NOT modify walls, windows, or lighting unless explicitly requested. Preserve perspective and proportions. ONLY perform the requested task.';
+}
+
+function shouldUseVisionCache({ forceRegenerate, requestedMode, preset }) {
+  if (forceRegenerate) {
+    return false;
+  }
+
+  // Concept previews and freeform are too quality-sensitive to trust stale cache.
+  if (requestedMode === 'freeform' || preset?.category === 'concept_preview') {
+    return false;
+  }
+
+  return true;
+}
+
 function getPresetPromptAddon(presetKey, roomType) {
   const normalizedRoomType = normalizeRoomType(roomType);
   const wallColorPresetKeys = new Set([
@@ -1548,6 +1565,7 @@ export async function createImageEnhancementJob({
   roomType,
   mode = 'preset',
   instructions = '',
+  forceRegenerate = false,
 }) {
   if (mongoose.connection.readyState !== 1) {
     throw new Error('Database connection is required to generate image variants.');
@@ -1579,29 +1597,36 @@ export async function createImageEnhancementJob({
     mode: requestedMode,
     instructions: normalizedInstructions,
   });
+  const canUseCache = shouldUseVisionCache({
+    forceRegenerate,
+    requestedMode,
+    preset,
+  });
 
-  const cachedJob = await ImageJobModel.findOne({
-    mediaId: asset._id,
-    inputHash,
-    status: 'completed',
-    createdAt: { $gte: new Date(Date.now() - CACHE_WINDOW_MS) },
-  })
-    .sort({ createdAt: -1 })
-    .lean();
+  if (canUseCache) {
+    const cachedJob = await ImageJobModel.findOne({
+      mediaId: asset._id,
+      inputHash,
+      status: 'completed',
+      createdAt: { $gte: new Date(Date.now() - CACHE_WINDOW_MS) },
+    })
+      .sort({ createdAt: -1 })
+      .lean();
 
-  if (cachedJob) {
-    const cachedVariants = await loadJobVariants(cachedJob._id);
-    if (cachedVariants.length) {
-      return {
-        cached: true,
-        preset,
-        job: {
-          ...serializeImageJob(cachedJob, cachedVariants),
-          message: cachedJob.message || 'Returning cached vision output.',
-        },
-        variants: cachedVariants,
-        variant: cachedVariants[0] || null,
-      };
+    if (cachedJob) {
+      const cachedVariants = await loadJobVariants(cachedJob._id);
+      if (cachedVariants.length) {
+        return {
+          cached: true,
+          preset,
+          job: {
+            ...serializeImageJob(cachedJob, cachedVariants),
+            message: cachedJob.message || 'Returning cached vision output.',
+          },
+          variants: cachedVariants,
+          variant: cachedVariants[0] || null,
+        };
+      }
     }
   }
 
@@ -1631,6 +1656,7 @@ export async function createImageEnhancementJob({
       mode: requestedMode,
       instructions: normalizedInstructions,
       normalizedPlan,
+      forceRegenerate,
     },
   });
 
@@ -1644,6 +1670,7 @@ export async function createImageEnhancementJob({
     const freeformPlanPromptAddon =
       requestedMode === 'freeform' ? getFreeformPlanPromptAddon(normalizedPlan) : '';
     const fullPrompt = [
+      getStrictInpaintingRules(),
       preset.basePrompt,
       requestedMode === 'freeform'
         ? `Seller instructions: ${normalizedInstructions}`
@@ -1683,6 +1710,7 @@ export async function createImageEnhancementJob({
         numInferenceSteps: preset.numInferenceSteps,
         scheduler: preset.scheduler,
         negativePrompt: preset.negativePrompt,
+        seed: Math.floor(Math.random() * 1_000_000_000),
       });
       createdVariants = [];
       for (let index = 0; index < providerOutputs.length; index += 1) {
