@@ -291,8 +291,7 @@ a {
 }
 
 .lead-meta-grid,
-.lead-detail-columns,
-.lead-debug-grid {
+.lead-detail-columns {
   display: grid;
   gap: 14px;
 }
@@ -302,7 +301,6 @@ a {
 }
 
 .lead-meta-grid div,
-.lead-debug-strip div,
 .lead-message-block,
 .lead-detail-panel,
 .detail-row-card {
@@ -313,27 +311,14 @@ a {
 }
 
 .lead-meta-grid strong,
-.lead-debug-strip strong,
 .lead-meta-grid span {
   display: block;
 }
 
 .lead-meta-grid strong,
-.lead-debug-strip strong,
 .lead-message-block strong,
 .lead-detail-panel h3 {
   margin-bottom: 6px;
-}
-
-.lead-debug-strip {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.lead-debug-strip span {
-  display: block;
-  color: var(--muted);
 }
 
 .lead-message-block p,
@@ -359,10 +344,6 @@ a {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.lead-debug-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
 .detail-row-meta {
   display: flex;
   flex-wrap: wrap;
@@ -374,15 +355,6 @@ a {
 
 .empty-inline {
   color: var(--muted);
-}
-
-@media (max-width: 960px) {
-  .lead-meta-grid,
-  .lead-debug-strip,
-  .lead-debug-grid,
-  .lead-detail-columns {
-    grid-template-columns: 1fr;
-  }
 }
 
 .admin-button-secondary {

@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 import { listBillingPlans } from '../billing/billing.service.js';
-import { BillingSubscriptionModel, BillingWebhookEventModel } from '../billing/billing.model.js';
+import { BillingSubscriptionModel } from '../billing/billing.model.js';
 import { UserModel } from '../auth/auth.model.js';
 import { FlyerModel } from '../documents/flyer.model.js';
 import { MediaAssetModel } from '../media/media.model.js';
@@ -18,14 +18,11 @@ import {
   listAdminProviderCategories,
   listAdminProviderLeads,
   listAdminProviders,
-  linkAdminProviderAccount,
   resendAdminProviderLead,
-  syncAdminProviderBilling,
   deleteAdminProvider,
   updateAdminProviderCategory,
   updateAdminProviderReview,
 } from '../providers/providers.service.js';
-import { ProviderModel } from '../providers/provider.model.js';
 import { PricingAnalysisModel } from '../pricing/pricing.model.js';
 import { PropertyModel } from '../properties/property.model.js';
 import { getAdminFunnelSnapshot } from '../public/public.service.js';
@@ -289,96 +286,15 @@ export async function getAdminBillingSnapshot() {
       plans,
       recentSubscriptions: [],
       activeSubscriptionCount: 0,
-      providerSummary: {
-        totalProviders: 0,
-        paidPlans: 0,
-        activePaid: 0,
-        needsAction: 0,
-        needsSync: 0,
-        pendingBilling: 0,
-      },
-      recentProviderBilling: [],
-      webhookSummary: {
-        totalEvents: 0,
-        last24hEvents: 0,
-        failedEvents: 0,
-        last24hFailedEvents: 0,
-        providerEvents: 0,
-      },
-      recentWebhookEvents: [],
     };
   }
 
-  const now = new Date();
-  const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  const [recentSubscriptions, activeSubscriptionCount, providers, recentWebhookEvents, webhookCounts] =
-    await Promise.all([
-      BillingSubscriptionModel.find({})
-        .sort({ updatedAt: -1 })
-        .limit(25)
-        .lean(),
-      BillingSubscriptionModel.countDocuments({ isActive: true }),
-      ProviderModel.find({})
-        .sort({ updatedAt: -1 })
-        .limit(50)
-        .lean(),
-      BillingWebhookEventModel.find({})
-        .sort({ createdAt: -1 })
-        .limit(20)
-        .lean(),
-      Promise.all([
-        BillingWebhookEventModel.countDocuments({}),
-        BillingWebhookEventModel.countDocuments({ createdAt: { $gte: last24Hours } }),
-        BillingWebhookEventModel.countDocuments({ processingStatus: 'failed' }),
-        BillingWebhookEventModel.countDocuments({
-          processingStatus: 'failed',
-          createdAt: { $gte: last24Hours },
-        }),
-        BillingWebhookEventModel.countDocuments({ providerId: { $ne: '' } }),
-      ]),
-    ]);
+  const recentSubscriptions = await BillingSubscriptionModel.find({})
+    .sort({ updatedAt: -1 })
+    .limit(25)
+    .lean();
 
-  const providerSummary = providers.reduce(
-    (summary, provider) => {
-      const subscription = provider.subscription || {};
-      const planCode = subscription.planCode || 'provider_basic';
-      const status = subscription.status || 'inactive';
-      const isPaidPlan = planCode !== 'provider_basic';
-      const isActive = !isPaidPlan || ['active', 'trialing', 'past_due', 'paid'].includes(status);
-      const needsAction = isPaidPlan && !isActive;
-      const needsSync =
-        isPaidPlan &&
-        Boolean(subscription.stripeCheckoutSessionId) &&
-        ['checkout_created', 'open', 'incomplete', 'unpaid'].includes(status);
-
-      summary.totalProviders += 1;
-      if (isPaidPlan) {
-        summary.paidPlans += 1;
-      }
-      if (isPaidPlan && isActive) {
-        summary.activePaid += 1;
-      }
-      if (needsAction) {
-        summary.needsAction += 1;
-      }
-      if (needsSync) {
-        summary.needsSync += 1;
-      }
-      if (provider.status === 'pending_billing') {
-        summary.pendingBilling += 1;
-      }
-
-      return summary;
-    },
-    {
-      totalProviders: 0,
-      paidPlans: 0,
-      activePaid: 0,
-      needsAction: 0,
-      needsSync: 0,
-      pendingBilling: 0,
-    },
-  );
+  const activeSubscriptionCount = await BillingSubscriptionModel.countDocuments({ isActive: true });
 
   return {
     dataSource: 'mongodb',
@@ -394,50 +310,6 @@ export async function getAdminBillingSnapshot() {
       isActive: Boolean(subscription.isActive),
       currentPeriodEnd: subscription.currentPeriodEnd || null,
       updatedAt: subscription.updatedAt || null,
-    })),
-    providerSummary,
-    recentProviderBilling: providers
-      .filter((provider) => {
-        const planCode = provider.subscription?.planCode || 'provider_basic';
-        const status = provider.subscription?.status || 'inactive';
-        return planCode !== 'provider_basic' || status !== 'inactive' || provider.status === 'pending_billing';
-      })
-      .slice(0, 20)
-      .map((provider) => ({
-        id: provider._id?.toString?.() || String(provider._id),
-        businessName: provider.businessName,
-        email: provider.email || '',
-        status: provider.status || 'pending',
-        planCode: provider.subscription?.planCode || 'provider_basic',
-        billingStatus: provider.subscription?.status || 'inactive',
-        stripeCheckoutSessionId: provider.subscription?.stripeCheckoutSessionId || '',
-        stripeSubscriptionId: provider.subscription?.stripeSubscriptionId || '',
-        currentPeriodEnd: provider.subscription?.currentPeriodEnd || null,
-        updatedAt: provider.updatedAt || null,
-      })),
-    webhookSummary: {
-      totalEvents: webhookCounts[0] || 0,
-      last24hEvents: webhookCounts[1] || 0,
-      failedEvents: webhookCounts[2] || 0,
-      last24hFailedEvents: webhookCounts[3] || 0,
-      providerEvents: webhookCounts[4] || 0,
-    },
-    recentWebhookEvents: recentWebhookEvents.map((event) => ({
-      id: event._id?.toString?.() || String(event._id),
-      stripeEventId: event.stripeEventId || '',
-      type: event.type || '',
-      processingStatus: event.processingStatus || 'processed',
-      livemode: Boolean(event.livemode),
-      eventObjectType: event.eventObjectType || '',
-      providerId: event.providerId || '',
-      userId: event.userId || '',
-      planKey: event.planKey || '',
-      stripeCustomerId: event.stripeCustomerId || '',
-      stripeCheckoutSessionId: event.stripeCheckoutSessionId || '',
-      stripeSubscriptionId: event.stripeSubscriptionId || '',
-      errorMessage: event.errorMessage || '',
-      stripeCreatedAt: event.stripeCreatedAt || null,
-      createdAt: event.createdAt || null,
     })),
   };
 }
@@ -631,14 +503,6 @@ export async function updateAdminProviderReviewAction(providerId, payload) {
   return updateAdminProviderReview(providerId, payload);
 }
 
-export async function linkAdminProviderAccountAction(providerId, payload) {
-  return linkAdminProviderAccount(providerId, payload);
-}
-
 export async function deleteAdminProviderAction(providerId) {
   return deleteAdminProvider(providerId);
-}
-
-export async function syncAdminProviderBillingAction(providerId) {
-  return syncAdminProviderBilling(providerId);
 }

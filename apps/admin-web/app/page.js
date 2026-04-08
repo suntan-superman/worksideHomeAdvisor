@@ -13,24 +13,6 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-function formatDateTime(value) {
-  if (!value) {
-    return 'No timestamp';
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return 'Invalid date';
-  }
-
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(parsed);
-}
-
 export default async function AdminHomePage() {
   const [overview, billing, funnel, workersPayload, mediaPayload] = await Promise.all([
     getAdminOverview(),
@@ -47,11 +29,8 @@ export default async function AdminHomePage() {
   const funnelSummary = funnel.summary || {};
   const roleBreakdown = funnel.roleBreakdown || [];
   const platformBreakdown = funnel.platformBreakdown || [];
-  const routeBreakdown = funnel.routeBreakdown || [];
   const stageBreakdown = funnel.stageBreakdown || [];
   const conversionSummary = funnel.conversionSummary || {};
-  const identitySummary = funnel.identitySummary || {};
-  const continuitySummary = funnel.continuitySummary || {};
   const topCampaigns = funnel.topCampaigns || [];
   const recentFunnelEvents = funnel.recentEvents || [];
 
@@ -73,8 +52,6 @@ export default async function AdminHomePage() {
         <MetricCard label="Funnel Events" value={funnelSummary.totalEvents || 0} note={`${funnelSummary.capturedEmails || 0} captured emails`} />
         <MetricCard label="Signup Starts" value={funnelSummary.signupStarts || 0} note={`${funnelSummary.signupCompleted || 0} completed`} />
         <MetricCard label="Email → Signup" value={`${conversionSummary.emailToSignupRate || 0}%`} note={`${conversionSummary.signupToPropertyRate || 0}% signup → property`} />
-        <MetricCard label="Tracked Sessions" value={identitySummary.trackedAnonymousSessions || 0} note={`${continuitySummary.previewSessions || 0} preview sessions`} />
-        <MetricCard label="Attributed Properties" value={identitySummary.attributedProperties || 0} note={`${identitySummary.propertyAttributionRate || 0}% of property creates`} />
         <MetricCard label="Workers Online" value={`${onlineWorkers}/${workers.length || 0}`} note="Health probes from the admin API" />
         <MetricCard label="Vision Variants" value={mediaSummary.totalVariants || 0} note={`${mediaSummary.selectedPersistent || 0} persistent • ${mediaSummary.cleanupEligible || 0} cleanup eligible`} />
       </div>
@@ -108,42 +85,23 @@ export default async function AdminHomePage() {
 
       <div className="split-layout">
         <div className="subpanel">
-          <h2>Identity Continuity</h2>
-          <div className="mini-admin-stats">
-            <div>
-              <strong>{continuitySummary.previewSessions || 0}</strong>
-              <span className="muted">Preview sessions</span>
-            </div>
-            <div>
-              <strong>{continuitySummary.emailCaptureSessions || 0}</strong>
-              <span className="muted">Email-capture sessions</span>
-            </div>
-            <div>
-              <strong>{continuitySummary.signupSessions || 0}</strong>
-              <span className="muted">Signup-complete sessions</span>
-            </div>
-            <div>
-              <strong>{continuitySummary.propertySessions || 0}</strong>
-              <span className="muted">Property-create sessions</span>
-            </div>
-          </div>
-          <div className="stack-list admin-funnel-rate-list">
-            <div className="stack-row">
-              <strong>Preview → email capture</strong>
-              <div className="muted">{continuitySummary.previewToEmailRate || 0}%</div>
-            </div>
-            <div className="stack-row">
-              <strong>Email capture → signup complete</strong>
-              <div className="muted">{continuitySummary.emailToSignupSessionRate || 0}%</div>
-            </div>
-            <div className="stack-row">
-              <strong>Signup complete → property create</strong>
-              <div className="muted">{continuitySummary.signupToPropertySessionRate || 0}%</div>
-            </div>
-            <div className="stack-row">
-              <strong>Property attribution coverage</strong>
-              <div className="muted">{identitySummary.propertyAttributionRate || 0}%</div>
-            </div>
+          <h2>Role Conversion</h2>
+          <div className="stack-list">
+            {roleBreakdown.length ? (
+              roleBreakdown.map((entry) => (
+                <div key={entry.role} className="stack-row">
+                  <div>
+                    <strong>{entry.role}</strong>
+                    <div className="muted">
+                      {entry.signupStarts} starts · {entry.signupCompleted} completions
+                    </div>
+                  </div>
+                  <div className="muted">{entry.properties} properties</div>
+                </div>
+              ))
+            ) : (
+              <p className="muted">No role attribution captured yet.</p>
+            )}
           </div>
         </div>
 
@@ -171,50 +129,6 @@ export default async function AdminHomePage() {
 
       <div className="split-layout">
         <div className="subpanel">
-          <h2>Role Conversion</h2>
-          <div className="stack-list">
-            {roleBreakdown.length ? (
-              roleBreakdown.map((entry) => (
-                <div key={entry.role} className="stack-row">
-                  <div>
-                    <strong>{entry.role}</strong>
-                    <div className="muted">
-                      {entry.signupStarts} starts · {entry.signupCompleted} completions
-                    </div>
-                  </div>
-                  <div className="muted">{entry.properties} properties</div>
-                </div>
-              ))
-            ) : (
-              <p className="muted">No role attribution captured yet.</p>
-            )}
-          </div>
-        </div>
-
-        <div className="subpanel">
-          <h2>Landing / Route Mix</h2>
-          <div className="stack-list">
-            {routeBreakdown.length ? (
-              routeBreakdown.map((entry) => (
-                <div key={`${entry.landingPath}-${entry.route}`} className="stack-row">
-                  <div>
-                    <strong>{entry.landingPath}</strong>
-                    <div className="muted">
-                      {entry.route} · {entry.emails} emails · {entry.signupCompleted} signups
-                    </div>
-                  </div>
-                  <div className="muted">{entry.properties} properties</div>
-                </div>
-              ))
-            ) : (
-              <p className="muted">No landing-path attribution captured yet.</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="split-layout">
-        <div className="subpanel">
           <h2>Top Campaigns</h2>
           <div className="stack-list">
             {topCampaigns.length ? (
@@ -226,10 +140,8 @@ export default async function AdminHomePage() {
                       {campaign.platform} · {campaign.source} / {campaign.medium}
                     </div>
                   </div>
-                  <div className="muted admin-funnel-campaign-meta">
-                    {campaign.events} evt · {campaign.emails} emails · {campaign.signupCompleted} signup · {campaign.properties} properties
-                    <br />
-                    {campaign.emailToSignupRate || 0}% email → signup · {campaign.signupToPropertyRate || 0}% signup → property
+                  <div className="muted">
+                    {campaign.events} evt · {campaign.signupStarts} starts · {campaign.signupCompleted} signup · {campaign.properties} properties
                   </div>
                 </div>
               ))
@@ -249,10 +161,6 @@ export default async function AdminHomePage() {
                     <strong>{event.eventName}</strong>
                     <div className="muted">
                       {event.attribution?.campaign || 'general'} · {event.attribution?.source || 'direct'}
-                      {event.attribution?.adset ? ` · ${event.attribution.adset}` : ''}
-                    </div>
-                    <div className="muted">
-                      {event.landingPath || event.route || 'no route'} · {formatDateTime(event.createdAt)}
                     </div>
                   </div>
                   <div className="muted">

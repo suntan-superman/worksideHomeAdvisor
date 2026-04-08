@@ -37,8 +37,6 @@ const envSchema = z.object({
   TWILIO_FROM_NUMBER: z.string().optional(),
   OTP_LENGTH: z.coerce.number().default(6),
   OTP_TTL_MINUTES: z.coerce.number().default(15),
-  PASSWORD_RESET_OTP_TTL_MINUTES: z.coerce.number().default(10),
-  PASSWORD_RESET_SESSION_TTL_MINUTES: z.coerce.number().default(15),
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_BILLING_SUCCESS_URL: z.string().url().optional(),

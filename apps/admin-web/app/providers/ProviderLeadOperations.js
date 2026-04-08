@@ -14,10 +14,6 @@ function formatResolutionLabel(status) {
   return status.replace(/_/g, ' ');
 }
 
-function formatChannelLabel(channels = []) {
-  return (channels || []).length ? channels.join(' + ') : '—';
-}
-
 export function ProviderLeadOperations({ leads = [], onUpdated }) {
   const [busyLeadId, setBusyLeadId] = useState('');
   const [notice, setNotice] = useState('');
@@ -139,32 +135,6 @@ export function ProviderLeadOperations({ leads = [], onUpdated }) {
             </div>
           </div>
 
-          <div className="lead-debug-strip">
-            <div>
-              <strong>Matched provider</strong>
-              <span>{lead.selectedProviderName || 'No provider selected yet'}</span>
-            </div>
-            <div>
-              <strong>Matched at</strong>
-              <span>{formatDateTime(lead.matchedAt)}</span>
-            </div>
-            <div>
-              <strong>Seller notified</strong>
-              <span>
-                {lead.sellerNotifiedAt
-                  ? `${formatDateTime(lead.sellerNotifiedAt)} · ${formatChannelLabel(lead.sellerNotificationChannels)}`
-                  : 'Not yet'}
-              </span>
-            </div>
-            <div>
-              <strong>SMS debug</strong>
-              <span>
-                {lead.activity?.outboundSms || 0} out · {lead.activity?.inboundSms || 0} in ·{' '}
-                {lead.activity?.statusCallbacks || 0} callbacks
-              </span>
-            </div>
-          </div>
-
           {lead.message ? (
             <div className="lead-message-block">
               <strong>Lead message</strong>
@@ -250,36 +220,6 @@ export function ProviderLeadOperations({ leads = [], onUpdated }) {
               )}
             </section>
           </div>
-
-          <section className="lead-detail-panel">
-            <h3>Twilio / delivery debug</h3>
-            <div className="lead-debug-grid">
-              <div className="detail-row-card">
-                <strong>Latest SMS event</strong>
-                <div className="detail-row-meta">
-                  <span>{lead.activity?.latestSmsDirection || '—'}</span>
-                  <span>{lead.activity?.latestSmsMessageType || '—'}</span>
-                  <span>{lead.activity?.latestSmsDeliveryStatus || lead.activity?.latestSmsParseStatus || '—'}</span>
-                  <span>{formatDateTime(lead.activity?.latestSmsAt)}</span>
-                </div>
-              </div>
-              <div className="detail-row-card">
-                <strong>Latest provider reply</strong>
-                <div className="detail-row-meta">
-                  <span>{lead.activity?.latestResponseStatus || 'No reply yet'}</span>
-                  <span>{formatDateTime(lead.activity?.latestReplyAt)}</span>
-                </div>
-              </div>
-              <div className="detail-row-card">
-                <strong>Latest dispatch state</strong>
-                <div className="detail-row-meta">
-                  <span>{lead.activity?.latestDispatchStatus || '—'}</span>
-                  <span>{lead.activity?.latestResponseStatus || 'awaiting response'}</span>
-                  <span>{formatDateTime(lead.activity?.latestContactedAt)}</span>
-                </div>
-              </div>
-            </div>
-          </section>
 
           <section className="lead-detail-panel">
             <h3>Recent SMS Activity</h3>

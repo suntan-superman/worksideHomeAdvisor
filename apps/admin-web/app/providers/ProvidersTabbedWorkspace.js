@@ -58,21 +58,6 @@ export function ProvidersTabbedWorkspace({
 
   const rosterPreview = useMemo(() => providers.slice(0, 6), [providers]);
   const leadPreview = useMemo(() => leads.slice(0, 6), [leads]);
-  const smsDebugSummary = useMemo(
-    () =>
-      (leads || []).reduce(
-        (summary, lead) => {
-          summary.inboundReplies += Number(lead.activity?.inboundSms || 0);
-          summary.statusCallbacks += Number(lead.activity?.statusCallbacks || 0);
-          if (lead.activity?.latestSmsDeliveryStatus === 'delivered') {
-            summary.deliveredCallbacks += 1;
-          }
-          return summary;
-        },
-        { inboundReplies: 0, statusCallbacks: 0, deliveredCallbacks: 0 },
-      ),
-    [leads],
-  );
 
   return (
     <div className="providers-workspace">
@@ -92,7 +77,6 @@ export function ProvidersTabbedWorkspace({
         <ClientMetricCard label="Awaiting Response" value={leadOpsSummary.awaitingResponse || 0} note="Sent but not yet accepted" />
         <ClientMetricCard label="Failed Dispatches" value={leadOpsSummary.failedDispatches || 0} note="Need manual resend or review" />
         <ClientMetricCard label="Closed Leads" value={(leadOpsSummary.completed || 0) + (leadOpsSummary.cancelled || 0)} note="Completed or cancelled manually" />
-        <ClientMetricCard label="Inbound Replies" value={smsDebugSummary.inboundReplies} note={`${smsDebugSummary.statusCallbacks} status callbacks logged`} />
       </div>
 
       <div className="provider-tabs-shell">

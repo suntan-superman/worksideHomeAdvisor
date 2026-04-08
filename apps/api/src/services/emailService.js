@@ -185,24 +185,6 @@ function buildOtpHtml(code, role = 'seller') {
   });
 }
 
-function buildPasswordResetOtpHtml(code) {
-  return renderEmailShell({
-    eyebrow: 'Password reset',
-    title: 'Reset your password securely.',
-    intro: `Use this one-time code to reset your ${BRANDING.shortProductName} password.`,
-    bodyHtml: `
-      ${renderCodeCard(code)}
-      <p style="margin: 0 0 14px; font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.slate}; font-size: 15px; line-height: 1.7;">
-        This reset code expires in ${env.PASSWORD_RESET_OTP_TTL_MINUTES} minutes and can only be used once.
-      </p>
-      <p style="margin: 0; font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.slate}; font-size: 15px; line-height: 1.7;">
-        If you did not request a password reset, you can safely ignore this email and your current password will keep working.
-      </p>
-    `.trim(),
-    footerNote: `${BRANDING.tagline} Password reset emails are sent from ${getFromEmail()}.`,
-  });
-}
-
 function buildWelcomeHtml(firstName = 'there', role = 'seller') {
   const safeFirstName = escapeHtml(firstName);
   const workspaceLabel =
@@ -291,27 +273,6 @@ export async function sendOtpEmail({ to, code, role = 'seller' }) {
     html: buildOtpHtml(code, role),
     logLabel: 'OTP email',
     logMeta: { code, role },
-  });
-}
-
-export async function sendPasswordResetOtpEmail({ to, code }) {
-  await deliverEmail({
-    to,
-    subject: 'Your Workside Home Advisor password reset code',
-    text: [
-      'Reset your Workside password',
-      '',
-      `Use this one-time code to reset your password: ${code}`,
-      '',
-      `This code expires in ${env.PASSWORD_RESET_OTP_TTL_MINUTES} minutes.`,
-      'If you did not request this email, you can ignore it.',
-      '',
-      `${BRANDING.tagline}`,
-      `Sent from ${getFromEmail()}`,
-    ].join('\n'),
-    html: buildPasswordResetOtpHtml(code),
-    logLabel: 'Password reset OTP email',
-    logMeta: { code },
   });
 }
 

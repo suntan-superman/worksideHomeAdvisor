@@ -4,14 +4,10 @@ import { normalizeLandingAttribution } from '@workside/utils';
 import { demoDashboard } from '../../data/demoData.js';
 import { getPropertyCapacitySummary } from '../billing/billing.service.js';
 import { PropertyModel } from './property.model.js';
-import * as propertyLifecycleService from './property-lifecycle.service.js';
 
 export const PROPERTY_STATUS = {
   ACTIVE: 'active',
   ARCHIVED: 'archived',
-};
-export const propertyServiceDependencies = {
-  deletePropertiesByIds: propertyLifecycleService.deletePropertiesByIds,
 };
 
 const ARCHIVED_PROPERTY_MESSAGE =
@@ -183,41 +179,6 @@ export async function restoreProperty(propertyId, actorUserId = '') {
   await property.save();
 
   return serializeProperty(property.toObject());
-}
-
-export async function deleteProperty(propertyId, actorUserId = '') {
-  if (mongoose.connection.readyState !== 1) {
-    throw new Error('Database connection is required to delete properties.');
-  }
-
-  const property = await PropertyModel.findById(propertyId);
-  if (!property) {
-    throw new Error('Property not found.');
-  }
-
-  if (actorUserId && String(property.ownerUserId) !== String(actorUserId)) {
-    throw new Error('You do not have permission to delete this property.');
-  }
-
-  if (!isPropertyArchived(property)) {
-    throw new Error('Archive this property before deleting it permanently.');
-  }
-
-  await propertyServiceDependencies.deletePropertiesByIds([property._id]);
-
-  const remainingProperties = await listProperties(String(property.ownerUserId));
-  const activePropertyCount = remainingProperties.filter(
-    (remainingProperty) => remainingProperty.status === PROPERTY_STATUS.ACTIVE,
-  ).length;
-  const archivedPropertyCount = remainingProperties.length - activePropertyCount;
-
-  return {
-    deletedPropertyId: propertyId,
-    deletedPropertyTitle: property.title || '',
-    remainingPropertyCount: remainingProperties.length,
-    activePropertyCount,
-    archivedPropertyCount,
-  };
 }
 
 export async function setPropertyReadinessScore(propertyId, readinessScore) {

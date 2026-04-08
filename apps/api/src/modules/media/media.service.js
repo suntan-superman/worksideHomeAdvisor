@@ -39,8 +39,6 @@ function serializeMediaAsset(document, selectedVariant = null) {
     id: document._id?.toString(),
     propertyId: document.propertyId?.toString?.() || String(document.propertyId),
     roomLabel: document.roomLabel,
-    source: document.source || 'mobile_capture',
-    notes: document.notes || '',
     mimeType: document.mimeType,
     width: document.width,
     height: document.height,
@@ -56,8 +54,6 @@ function serializeMediaAsset(document, selectedVariant = null) {
     imageDataUrl: document.imageDataUrl || null,
     listingCandidate: Boolean(document.listingCandidate),
     listingNote: document.listingNote || '',
-    uploadedByUserId:
-      document.uploadedByUserId?.toString?.() || String(document.uploadedByUserId || ''),
     analysis: document.analysis || null,
         selectedVariant: selectedVariant
       ? {
@@ -116,8 +112,6 @@ export async function listMediaAssets(propertyId) {
 export async function createMediaAssetAndAnalysis({
   propertyId,
   roomLabel,
-  source = 'mobile_capture',
-  notes = '',
   mimeType,
   imageBase64,
   width,
@@ -150,12 +144,9 @@ export async function createMediaAssetAndAnalysis({
   const asset = await MediaAssetModel.create({
     propertyId,
     roomLabel,
-    source,
-    notes: String(notes || '').trim().slice(0, 500),
     mimeType,
     width,
     height,
-    uploadedByUserId: property.ownerUserId || null,
     storageProvider: storedImage.storageProvider,
     storageKey: storedImage.storageKey,
     byteSize: storedImage.byteSize,
@@ -185,10 +176,6 @@ export async function updateMediaAsset(assetId, updates) {
 
   if (typeof updates.roomLabel === 'string') {
     asset.roomLabel = updates.roomLabel.trim() || asset.roomLabel;
-  }
-
-  if (typeof updates.notes === 'string') {
-    asset.notes = updates.notes.trim().slice(0, 500);
   }
 
   if (typeof updates.listingCandidate === 'boolean') {

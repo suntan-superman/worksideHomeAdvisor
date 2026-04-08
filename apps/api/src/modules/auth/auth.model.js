@@ -43,9 +43,6 @@ const userSchema = new mongoose.Schema(
     emailVerifiedAt: { type: Date, default: null },
     verificationOtp: { type: otpSchema, default: null },
     lastLoginAt: { type: Date, default: null },
-    mobilePhone: { type: String, default: '' },
-    smsOptIn: { type: Boolean, default: false },
-    smsOptInAt: { type: Date, default: null },
     signupAttribution: { type: attributionSchema, default: null },
   },
   {

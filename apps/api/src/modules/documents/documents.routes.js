@@ -14,10 +14,6 @@ import {
 } from './flyer.service.js';
 import { exportProviderReferenceSheetPdf } from './provider-reference.service.js';
 import {
-  generatePropertySocialPack,
-  getLatestPropertySocialPack,
-} from './social-pack.service.js';
-import {
   exportPropertyReportPdf,
   generatePropertyReport,
   getPropertyReportInputSignature,
@@ -293,29 +289,6 @@ export async function documentsRoutes(fastify) {
         .header('Content-Disposition', `attachment; filename="${filename}"`);
 
       return reply.send(Buffer.from(bytes));
-    } catch (error) {
-      return reply.code(400).send({ message: error.message });
-    }
-  });
-
-  fastify.post('/:propertyId/marketing/social-pack', async (request, reply) => {
-    try {
-      const property = await assertPropertyEditableById(request.params.propertyId);
-      if (!property) {
-        return reply.code(404).send({ message: 'Property not found.' });
-      }
-
-      const socialPack = await generatePropertySocialPack(request.params.propertyId);
-      return reply.code(201).send({ socialPack });
-    } catch (error) {
-      return reply.code(400).send({ message: error.message });
-    }
-  });
-
-  fastify.get('/:propertyId/marketing/social-pack/latest', async (request, reply) => {
-    try {
-      const socialPack = await getLatestPropertySocialPack(request.params.propertyId);
-      return reply.send({ socialPack });
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }

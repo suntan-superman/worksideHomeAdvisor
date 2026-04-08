@@ -116,45 +116,6 @@ export function requestOtp(payload) {
   });
 }
 
-export function requestForgotPasswordOtp(payload) {
-  return request('/api/v1/auth/forgot-password/request', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function verifyForgotPasswordOtp(payload) {
-  return request('/api/v1/auth/forgot-password/verify', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function resetForgottenPassword(payload) {
-  return request('/api/v1/auth/forgot-password/reset', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function getCurrentUser(token) {
-  return request('/api/v1/auth/me', {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-}
-
-export function updateUserProfile(payload, token) {
-  return request('/api/v1/auth/profile', {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(payload),
-  });
-}
-
 export function listProperties(ownerUserId) {
   const search = ownerUserId ? `?ownerUserId=${encodeURIComponent(ownerUserId)}` : '';
   return request(`/api/v1/properties${search}`);
@@ -202,15 +163,6 @@ export function restoreProperty(propertyId, ownerUserId) {
   });
 }
 
-export function deleteProperty(propertyId, ownerUserId) {
-  return request(`/api/v1/properties/${propertyId}`, {
-    method: 'DELETE',
-    headers: {
-      'x-user-id': ownerUserId,
-    },
-  });
-}
-
 export function getDashboard(propertyId) {
   return request(`/api/v1/properties/${propertyId}/dashboard`);
 }
@@ -242,7 +194,7 @@ export function listProviders(propertyId, { categoryKey, taskKey, limit, include
   return request(`/api/v1/properties/${propertyId}/providers${query ? `?${query}` : ''}`);
 }
 
-export function getProviderMapImageUrl(propertyId, { categoryKey, taskKey, includeExternal, zoomOffset, limit } = {}) {
+export function getProviderMapImageUrl(propertyId, { categoryKey, taskKey, includeExternal, zoomOffset } = {}) {
   const search = new URLSearchParams();
   if (categoryKey) {
     search.set('category', categoryKey);
@@ -252,9 +204,6 @@ export function getProviderMapImageUrl(propertyId, { categoryKey, taskKey, inclu
   }
   if (includeExternal) {
     search.set('includeExternal', 'true');
-  }
-  if (limit) {
-    search.set('limit', String(limit));
   }
   if (Number.isFinite(zoomOffset) && zoomOffset !== 0) {
     search.set('zoomOffset', String(zoomOffset));
@@ -425,13 +374,6 @@ export function listMediaAssets(propertyId) {
   return request(`/api/v1/properties/${propertyId}/media`);
 }
 
-export function savePhoto(propertyId, payload) {
-  return request(`/api/v1/properties/${propertyId}/media`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
 export function listMediaVariants(assetId) {
   return request(`/api/v1/media/assets/${assetId}/vision/variants`);
 }
@@ -558,14 +500,4 @@ export function getMarketingReport(propertyId) {
 
 export function getMarketingReportExportUrl(propertyId) {
   return `${API_BASE_URL}/api/v1/reports/marketing/${propertyId}/export.pdf`;
-}
-
-export function generateSocialPack(propertyId) {
-  return request(`/api/v1/properties/${propertyId}/marketing/social-pack`, {
-    method: 'POST',
-  });
-}
-
-export function getLatestSocialPack(propertyId) {
-  return request(`/api/v1/properties/${propertyId}/marketing/social-pack/latest`);
 }

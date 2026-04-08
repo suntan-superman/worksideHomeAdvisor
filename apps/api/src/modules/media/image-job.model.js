@@ -1,7 +1,13 @@
 import mongoose from 'mongoose';
-import { getVisionPresetKeys } from './vision-presets.js';
 
-const visionJobTypes = getVisionPresetKeys();
+const visionJobTypes = [
+  'enhance_listing_quality',
+  'declutter_preview',
+  'declutter_light',
+  'declutter_medium',
+  'remove_furniture',
+  'combined_listing_refresh',
+];
 
 const imageJobSchema = new mongoose.Schema(
   {
@@ -35,14 +41,6 @@ const imageJobSchema = new mongoose.Schema(
     provider: { type: String, default: 'local_sharp' },
     providerJobId: { type: String, default: null },
     presetKey: { type: String, default: null },
-    mode: {
-      type: String,
-      enum: ['preset', 'freeform'],
-      default: 'preset',
-    },
-    instructions: { type: String, default: '' },
-    normalizedPlan: { type: mongoose.Schema.Types.Mixed, default: null },
-    originalUrl: { type: String, default: '' },
     roomType: { type: String, default: 'unknown' },
     promptVersion: { type: Number, default: 1 },
     inputHash: { type: String, default: null, index: true },

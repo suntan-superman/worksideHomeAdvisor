@@ -83,20 +83,6 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 }
 
-function buildProviderAuthHref({ mode = 'login', email = '' } = {}) {
-  const search = new URLSearchParams({ role: 'provider' });
-
-  if (mode && mode !== 'login') {
-    search.set('mode', mode);
-  }
-
-  if (isValidEmail(email)) {
-    search.set('email', email.trim());
-  }
-
-  return `/auth?${search.toString()}`;
-}
-
 function formatCategoryLabel(value) {
   return String(value || 'provider lead')
     .replace(/_/g, ' ')
@@ -107,19 +93,6 @@ function formatPlanLabel(value) {
   return String(value || 'provider_basic')
     .replace(/^provider_/, '')
     .replace(/_/g, ' ');
-}
-
-function formatStripeId(value) {
-  const normalized = String(value || '').trim();
-  if (!normalized) {
-    return 'Not created';
-  }
-
-  if (normalized.length <= 18) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, 8)}...${normalized.slice(-6)}`;
 }
 
 function formatVerificationLabel(value) {
@@ -672,49 +645,6 @@ export function ProviderPortalClient({
     }
   }
 
-  async function handleSyncBillingStatus() {
-    const checkoutSessionId =
-      dashboard?.provider?.subscription?.stripeCheckoutSessionId || sessionId || '';
-
-    if (!checkoutSessionId) {
-      setToast({
-        tone: 'info',
-        title: 'No checkout session to sync',
-        message: 'Create or resume provider billing first so Stripe has a session to sync from.',
-      });
-      return;
-    }
-
-    setBusy(true);
-    setError('');
-
-    try {
-      await syncProviderBillingSession(checkoutSessionId);
-      const refreshed = await portalSessionQuery.refetch();
-      const refreshedStatus =
-        refreshed.data?.dashboard?.provider?.subscription?.status ||
-        dashboard?.provider?.subscription?.status ||
-        'inactive';
-      const billingReady = ['active', 'trialing', 'past_due', 'paid'].includes(refreshedStatus);
-
-      setToast({
-        tone: billingReady ? 'success' : 'info',
-        title: billingReady ? 'Billing synced' : 'Billing sync checked',
-        message: billingReady
-          ? 'Stripe now shows this provider billing record as active.'
-          : `Stripe sync completed. Current billing status: ${refreshedStatus}.`,
-      });
-    } catch (requestError) {
-      setToast({
-        tone: 'error',
-        title: 'Could not sync billing status',
-        message: requestError.message,
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-
   if (loading) {
     return (
       <>
@@ -731,8 +661,6 @@ export function ProviderPortalClient({
   }
 
   if (!dashboard?.provider) {
-    const providerAccountEmail = isValidEmail(appSession?.user?.email) ? appSession.user.email : '';
-
     return (
       <>
         <Toast tone={toast?.tone} title={toast?.title} message={toast?.message} onClose={() => setToast(null)} />
@@ -745,18 +673,6 @@ export function ProviderPortalClient({
             </p>
             {error ? <div className="error-copy">{error}</div> : null}
             <div className="button-stack">
-              <Link
-                href={buildProviderAuthHref({ mode: 'login', email: providerAccountEmail })}
-                className="button-primary"
-              >
-                Provider login
-              </Link>
-              <Link
-                href={buildProviderAuthHref({ mode: 'forgot_request', email: providerAccountEmail })}
-                className="button-secondary"
-              >
-                Reset password
-              </Link>
               <Link href="/providers/join" className="button-primary">
                 Open provider onboarding
               </Link>
@@ -775,10 +691,10 @@ export function ProviderPortalClient({
   const leads = dashboard.leads || [];
   const verification = provider.verification || {};
   const activation = provider.activation || { items: [], blockers: [], nextStep: null, readyPercent: 0 };
-  const billing = provider.billing || {};
-  const billingNeedsAction = Boolean(billing.needsAction);
-  const billingSyncAvailable = Boolean(provider.subscription?.stripeCheckoutSessionId);
-  const billingChipTone = billing.isActive ? 'low' : billing.needsSync ? 'medium' : 'high';
+  const billingNeedsAction =
+    provider.subscription?.planCode &&
+    provider.subscription?.planCode !== 'provider_basic' &&
+    !['active', 'trialing', 'past_due', 'paid'].includes(provider.subscription?.status || '');
 
   return (
     <>
@@ -816,7 +732,6 @@ export function ProviderPortalClient({
           </div>
 
           <div className="provider-portal-meta">
-            <span>Billing period starts: {formatDate(provider.subscription?.currentPeriodStart)}</span>
             <span>Billing period ends: {formatDate(provider.subscription?.currentPeriodEnd)}</span>
             <span>Last portal use: {formatDate(provider.portalAccess?.lastUsedAt)}</span>
             <span>
@@ -865,69 +780,14 @@ export function ProviderPortalClient({
               </article>
             ))}
           </div>
-          <div className="provider-billing-panel">
-            <div className="provider-billing-panel-header">
-              <div>
-                <span className="label">Billing diagnostics</span>
-                <h2>Stripe status</h2>
-              </div>
-              <span className={`checklist-chip checklist-chip-${billingChipTone}`}>
-                {formatActivationStatusLabel(provider.subscription?.status || 'inactive')}
-              </span>
-            </div>
-            <p className="workspace-control-note">
-              {billing.diagnostic || 'Billing state is available once a provider plan has been selected.'}
-            </p>
-            <div className="provider-billing-grid">
-              <div>
-                <strong>Plan</strong>
-                <span>{formatPlanLabel(provider.subscription?.planCode || 'provider_basic')}</span>
-              </div>
-              <div>
-                <strong>Stripe customer</strong>
-                <span>{formatStripeId(provider.subscription?.stripeCustomerId)}</span>
-              </div>
-              <div>
-                <strong>Checkout session</strong>
-                <span>{formatStripeId(provider.subscription?.stripeCheckoutSessionId)}</span>
-              </div>
-              <div>
-                <strong>Subscription</strong>
-                <span>{formatStripeId(provider.subscription?.stripeSubscriptionId)}</span>
-              </div>
-              <div>
-                <strong>Period start</strong>
-                <span>{formatDate(provider.subscription?.currentPeriodStart)}</span>
-              </div>
-              <div>
-                <strong>Period end</strong>
-                <span>{formatDate(provider.subscription?.currentPeriodEnd)}</span>
-              </div>
-              <div>
-                <strong>Cancel at period end</strong>
-                <span>{provider.subscription?.cancelAtPeriodEnd ? 'Yes' : 'No'}</span>
-              </div>
-              <div>
-                <strong>Needs follow-up</strong>
-                <span>{billingNeedsAction ? 'Yes' : 'No'}</span>
-              </div>
-            </div>
-            <div className="button-stack">
-              {billingNeedsAction ? (
-                <button type="button" className="button-primary" onClick={handleContinueBilling} disabled={busy}>
-                  Continue billing setup
-                </button>
-              ) : null}
-              {billingSyncAvailable ? (
-                <button type="button" className="button-secondary" onClick={handleSyncBillingStatus} disabled={busy}>
-                  Sync Stripe status
-                </button>
-              ) : null}
-            </div>
-          </div>
           <span className="label">Quick actions</span>
           <h2>Marketplace controls</h2>
           <div className="button-stack">
+            {billingNeedsAction ? (
+              <button type="button" className="button-primary" onClick={handleContinueBilling} disabled={busy}>
+                Continue billing setup
+              </button>
+            ) : null}
             {verification.review?.level !== 'verified' ? (
               <button type="button" className="button-secondary" onClick={handleSubmitVerification} disabled={busy}>
                 Submit verification for review
@@ -1311,25 +1171,7 @@ export function ProviderPortalClient({
                     <span>Lead status: {lead.leadStatus}</span>
                     <span>Sent: {formatDate(lead.sentAt || lead.createdAt)}</span>
                     <span>Response: {lead.responseStatus || 'awaiting response'}</span>
-                    {lead.deliveryChannels?.length ? (
-                      <span>Sent via {lead.deliveryChannels.join(' + ')}</span>
-                    ) : null}
-                    {lead.sellerNotifiedAt ? (
-                      <span>Seller notified {formatDate(lead.sellerNotifiedAt)}</span>
-                    ) : null}
                   </div>
-                  {lead.selectedProviderName ? (
-                    <div className="provider-portal-response-note">
-                      {lead.selectedProviderId === portalSession?.providerId
-                        ? `You currently hold this matched lead${lead.matchedAt ? ` · matched ${formatDate(lead.matchedAt)}` : ''}.`
-                        : `${lead.selectedProviderName} already accepted this lead${lead.matchedAt ? ` · matched ${formatDate(lead.matchedAt)}` : ''}.`}
-                    </div>
-                  ) : null}
-                  {lead.smsError || lead.emailError ? (
-                    <div className="provider-portal-response-note provider-portal-response-note-warn">
-                      Delivery issue: {lead.smsError || lead.emailError}
-                    </div>
-                  ) : null}
                   <div className="provider-card-actions">
                     {lead.canRespond ? (
                       <>

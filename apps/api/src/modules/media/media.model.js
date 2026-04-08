@@ -29,12 +29,6 @@ const mediaAssetSchema = new mongoose.Schema(
       index: true,
     },
     roomLabel: { type: String, required: true },
-    source: {
-      type: String,
-      enum: ['mobile_capture', 'mobile_library', 'web_upload', 'third_party_import'],
-      default: 'mobile_capture',
-    },
-    notes: { type: String, default: '' },
     mimeType: { type: String, required: true },
     width: { type: Number },
     height: { type: Number },
@@ -45,11 +39,6 @@ const mediaAssetSchema = new mongoose.Schema(
     imageDataUrl: { type: String },
     listingCandidate: { type: Boolean, default: false },
     listingNote: { type: String, default: '' },
-    uploadedByUserId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      default: null,
-    },
     analysis: { type: photoAnalysisSnapshotSchema, default: null },
   },
   {

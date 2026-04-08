@@ -2,19 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  formatPhoneForDisplay,
-  normalizeLandingAttribution,
-} from '@workside/utils';
+import { normalizeLandingAttribution } from '@workside/utils';
 
 import { AppFrame } from '../../components/AppFrame';
 import { OnboardingGuide } from '../../components/OnboardingGuide';
 import { PasswordInput } from '../../components/PasswordInput';
 import { Toast } from '../../components/Toast';
-import {
-  getStoredAttributionDraft,
-  setStoredAttributionDraft,
-} from '../../lib/attribution-draft';
 import {
   clearStoredAuthOnboardingState,
   getStoredAuthOnboardingState,
@@ -22,12 +15,9 @@ import {
 } from '../../lib/onboarding-state';
 import {
   login,
-  requestForgotPasswordOtp,
   requestOtp,
-  resetForgottenPassword,
   signup,
   verifyEmailOtp,
-  verifyForgotPasswordOtp,
 } from '../../lib/api';
 import { setStoredSession } from '../../lib/session';
 
@@ -36,6 +26,7 @@ const ROLE_OPTIONS = [
   { value: 'agent', label: 'Realtor', description: 'Use agent-facing pricing and presentation workflows.' },
   { value: 'provider', label: 'Provider', description: 'Manage provider onboarding, leads, and marketplace profile.' },
 ];
+const AUTH_ATTRIBUTION_DRAFT_KEY = 'worksideAuthAttributionDraft';
 
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
@@ -50,15 +41,6 @@ function getRoleDestination(role) {
 }
 
 function getRoleStatus(role, mode = 'login') {
-  if (mode === 'forgot_request') {
-    return 'Enter your account email and we will send a short-lived reset code.';
-  }
-  if (mode === 'forgot_verify') {
-    return 'Enter the reset code from your email so Workside can unlock the new-password step.';
-  }
-  if (mode === 'forgot_reset') {
-    return 'Choose a new password, confirm it, and we will sign you back in.';
-  }
   if (mode === 'signup') {
     if (role === 'provider') {
       return 'Create a provider account first, then verify your email before setting up your business profile.';
@@ -128,19 +110,34 @@ function buildAuthGuideSteps({ role, mode, email }) {
   ];
 }
 
+function persistAuthAttributionDraft(attribution) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (!attribution) {
+    window.sessionStorage.removeItem(AUTH_ATTRIBUTION_DRAFT_KEY);
+    return;
+  }
+
+  window.sessionStorage.setItem(
+    AUTH_ATTRIBUTION_DRAFT_KEY,
+    JSON.stringify({
+      attribution,
+      capturedAt: new Date().toISOString(),
+    }),
+  );
+}
+
 export default function AuthPage() {
   const router = useRouter();
   const [mode, setMode] = useState('login');
   const [form, setForm] = useState({
     email: '',
     password: '',
-    confirmPassword: '',
     firstName: '',
     lastName: '',
-    mobilePhone: '',
-    smsOptIn: false,
     otpCode: '',
-    resetToken: '',
     role: 'seller',
   });
   const [status, setStatus] = useState(getRoleStatus('seller', 'login'));
@@ -151,11 +148,7 @@ export default function AuthPage() {
   const [authStateHydrated, setAuthStateHydrated] = useState(false);
   const [restoredAuthProgress, setRestoredAuthProgress] = useState(false);
 
-  const isEmailVerificationMode = mode === 'verify';
-  const isForgotRequestMode = mode === 'forgot_request';
-  const isForgotVerifyMode = mode === 'forgot_verify';
-  const isForgotResetMode = mode === 'forgot_reset';
-  const isVerificationMode = isEmailVerificationMode || isForgotVerifyMode;
+  const isVerificationMode = mode === 'verify';
   const emailIsValid = isValidEmail(form.email);
   const passwordLongEnough = form.password.length >= 8;
   const formIsReady =
@@ -168,13 +161,7 @@ export default function AuthPage() {
         )
       : mode === 'login'
         ? Boolean(emailIsValid && form.password)
-        : isForgotRequestMode
-          ? Boolean(emailIsValid)
-          : isForgotVerifyMode
-            ? Boolean(emailIsValid && form.otpCode.trim().length >= 4)
-            : isForgotResetMode
-              ? Boolean(form.resetToken && passwordLongEnough && form.password === form.confirmPassword)
-              : Boolean(emailIsValid && form.otpCode.trim().length >= 4);
+        : Boolean(emailIsValid && form.otpCode.trim().length >= 4);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -214,7 +201,7 @@ export default function AuthPage() {
     if (!hasExplicitQueryContext) {
       const restoredState = getStoredAuthOnboardingState();
       if (restoredState) {
-        const restoredMode = ['login', 'signup', 'verify', 'forgot_request', 'forgot_verify', 'forgot_reset'].includes(restoredState.mode)
+        const restoredMode = ['login', 'signup', 'verify'].includes(restoredState.mode)
           ? restoredState.mode
           : 'login';
         const restoredForm = restoredState.form && typeof restoredState.form === 'object' ? restoredState.form : {};
@@ -234,11 +221,6 @@ export default function AuthPage() {
         setRestoredAuthProgress(true);
         setAuthStateHydrated(true);
         return;
-      }
-
-      const storedAttributionDraft = getStoredAttributionDraft();
-      if (storedAttributionDraft?.attribution) {
-        setAttribution(storedAttributionDraft.attribution);
       }
     }
 
@@ -319,7 +301,17 @@ export default function AuthPage() {
       return;
     }
 
-    setStoredAttributionDraft(attribution);
+    if (
+      !attribution.source &&
+      !attribution.campaign &&
+      !attribution.medium &&
+      !attribution.adset &&
+      !attribution.ad
+    ) {
+      return;
+    }
+
+    persistAuthAttributionDraft(attribution);
   }, [attribution]);
 
   function updateField(field, value) {
@@ -330,27 +322,13 @@ export default function AuthPage() {
   }
 
   function switchToLogin() {
-    setForm((current) => ({
-      ...current,
-      password: '',
-      confirmPassword: '',
-      otpCode: '',
-      resetToken: '',
-    }));
     setMode('login');
-    setShowVerificationOption(false);
     setStatus(getRoleStatus(form.role, 'login'));
   }
 
   function switchToSignup() {
     setMode('signup');
     setStatus(getRoleStatus(form.role, 'signup'));
-  }
-
-  function switchToForgotPassword() {
-    setMode('forgot_request');
-    setShowVerificationOption(false);
-    setStatus(getRoleStatus(form.role, 'forgot_request'));
   }
 
   async function handlePrimaryAction(event) {
@@ -365,8 +343,6 @@ export default function AuthPage() {
           password: form.password,
           firstName: form.firstName,
           lastName: form.lastName,
-          mobilePhone: form.mobilePhone,
-          smsOptIn: form.smsOptIn,
           role: form.role,
           attribution: attribution
             ? {
@@ -375,7 +351,7 @@ export default function AuthPage() {
               }
             : undefined,
         });
-        setStoredAttributionDraft(
+        persistAuthAttributionDraft(
           attribution
             ? {
                 ...attribution,
@@ -414,7 +390,7 @@ export default function AuthPage() {
           user: result.user,
         });
         clearStoredAuthOnboardingState();
-        setStoredAttributionDraft(
+        persistAuthAttributionDraft(
           attribution
             ? {
                 ...attribution,
@@ -424,7 +400,7 @@ export default function AuthPage() {
         );
         setStatus('Login complete.');
         router.push(getRoleDestination(result.user?.role));
-      } else if (mode === 'verify') {
+      } else {
         const result = await verifyEmailOtp({
           email: form.email,
           otpCode: form.otpCode,
@@ -434,7 +410,7 @@ export default function AuthPage() {
           user: result.user,
         });
         clearStoredAuthOnboardingState();
-        setStoredAttributionDraft(
+        persistAuthAttributionDraft(
           attribution
             ? {
                 ...attribution,
@@ -455,67 +431,11 @@ export default function AuthPage() {
                 : 'Your seller dashboard is ready.',
         });
         router.push(getRoleDestination(result.user?.role));
-      } else if (mode === 'forgot_request') {
-        await requestForgotPasswordOtp({
-          email: form.email,
-        });
-        setMode('forgot_verify');
-        setStatus('Check your inbox and enter the password reset code.');
-        setToast({
-          tone: 'success',
-          title: 'Reset code sent',
-          message: 'If that account exists, a password reset code is on the way.',
-        });
-      } else if (mode === 'forgot_verify') {
-        const result = await verifyForgotPasswordOtp({
-          email: form.email,
-          otpCode: form.otpCode,
-        });
-        updateField('resetToken', result.resetToken);
-        updateField('otpCode', '');
-        updateField('password', '');
-        updateField('confirmPassword', '');
-        setMode('forgot_reset');
-        setStatus('Set a new password for this account.');
-        setToast({
-          tone: 'success',
-          title: 'Code verified',
-          message: 'You can set a new password now.',
-        });
-      } else if (mode === 'forgot_reset') {
-        const result = await resetForgottenPassword({
-          resetToken: form.resetToken,
-          newPassword: form.password,
-          confirmPassword: form.confirmPassword,
-        });
-        setStoredSession({
-          token: result.token,
-          user: result.user,
-        });
-        clearStoredAuthOnboardingState();
-        setStatus('Password updated. Redirecting to your workspace.');
-        setToast({
-          tone: 'success',
-          title: 'Password updated',
-          message: 'You are signed back in with the new password.',
-        });
-        router.push(getRoleDestination(result.user?.role));
       }
     } catch (requestError) {
       setToast({
         tone: 'error',
-        title:
-          mode === 'signup'
-            ? 'Could not create account'
-            : mode === 'login'
-              ? 'Login failed'
-              : mode === 'forgot_request'
-                ? 'Could not send reset code'
-                : mode === 'forgot_verify'
-                  ? 'Reset code failed'
-                  : mode === 'forgot_reset'
-                    ? 'Could not reset password'
-                    : 'Verification failed',
+        title: mode === 'signup' ? 'Could not create account' : mode === 'login' ? 'Login failed' : 'Verification failed',
         message: requestError.message,
       });
     } finally {
@@ -587,19 +507,6 @@ export default function AuthPage() {
             >
               Sign up
             </button>
-            {(isForgotRequestMode || isForgotVerifyMode || isForgotResetMode) ? (
-              <button
-                type="button"
-                className={
-                  isForgotRequestMode || isForgotVerifyMode || isForgotResetMode
-                    ? 'mode-chip active'
-                    : 'mode-chip'
-                }
-                onClick={switchToForgotPassword}
-              >
-                Reset password
-              </button>
-            ) : null}
             {showVerificationOption ? (
               <button
                 type="button"
@@ -670,29 +577,9 @@ export default function AuthPage() {
                   onChange={(event) => updateField('lastName', event.target.value)}
                 />
               </label>
-              <label>
-                Mobile number
-                <input
-                  type="tel"
-                  placeholder="(661) 555-1212"
-                  value={form.mobilePhone}
-                  onChange={(event) => updateField('mobilePhone', formatPhoneForDisplay(event.target.value))}
-                />
-              </label>
-              <label className="workspace-checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={form.smsOptIn}
-                  onChange={(event) => updateField('smsOptIn', event.target.checked)}
-                />
-                <span>
-                  I agree to receive transactional SMS messages from Workside Home Advisor regarding account activity, provider responses, and listing workflow updates. Message frequency varies. Reply STOP to opt out.
-                </span>
-              </label>
             </>
           ) : null}
 
-          {!isForgotResetMode ? (
           <label>
             Email
             <input
@@ -705,11 +592,10 @@ export default function AuthPage() {
               <span className="field-hint field-error">Enter a valid email address.</span>
             ) : null}
           </label>
-          ) : null}
 
-          {!isVerificationMode && !isForgotRequestMode ? (
+          {!isVerificationMode ? (
             <label>
-              {isForgotResetMode ? 'New password' : 'Password'}
+              Password
               <PasswordInput
                 value={form.password}
                 onChange={(event) => updateField('password', event.target.value)}
@@ -721,23 +607,9 @@ export default function AuthPage() {
             </label>
           ) : null}
 
-          {isForgotResetMode ? (
-            <label>
-              Confirm password
-              <PasswordInput
-                value={form.confirmPassword}
-                onChange={(event) => updateField('confirmPassword', event.target.value)}
-                placeholder="Re-enter new password"
-              />
-              {form.confirmPassword && form.password !== form.confirmPassword ? (
-                <span className="field-hint field-error">Passwords must match.</span>
-              ) : null}
-            </label>
-          ) : null}
-
           {isVerificationMode ? (
             <label>
-              {isForgotVerifyMode ? 'Password reset code' : 'Verification code'}
+              Verification code
               <input
                 type="text"
                 placeholder="6-digit OTP"
@@ -748,51 +620,17 @@ export default function AuthPage() {
           ) : null}
 
           <button type="submit" className="button-primary" disabled={loading || !formIsReady}>
-            {loading
-              ? 'Working...'
-              : mode === 'signup'
-                ? 'Create account'
-                : mode === 'login'
-                  ? 'Log in'
-                  : mode === 'forgot_request'
-                    ? 'Send reset code'
-                    : mode === 'forgot_verify'
-                      ? 'Verify reset code'
-                      : mode === 'forgot_reset'
-                        ? 'Set new password'
-                        : 'Verify email'}
+            {loading ? 'Working...' : mode === 'signup' ? 'Create account' : mode === 'login' ? 'Log in' : 'Verify email'}
           </button>
 
           {isVerificationMode ? (
             <button
               type="button"
               className="button-secondary"
-              onClick={isForgotVerifyMode ? () => requestForgotPasswordOtp({ email: form.email }) : handleResendOtp}
+              onClick={handleResendOtp}
               disabled={loading || !emailIsValid}
             >
               Resend code
-            </button>
-          ) : null}
-
-          {mode === 'login' ? (
-            <button
-              type="button"
-              className="button-secondary"
-              onClick={switchToForgotPassword}
-              disabled={loading}
-            >
-              Forgot password?
-            </button>
-          ) : null}
-
-          {(isForgotRequestMode || isForgotVerifyMode || isForgotResetMode) ? (
-            <button
-              type="button"
-              className="button-secondary"
-              onClick={switchToLogin}
-              disabled={loading}
-            >
-              Back to login
             </button>
           ) : null}
         </form>

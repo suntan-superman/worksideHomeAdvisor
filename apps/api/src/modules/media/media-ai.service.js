@@ -38,10 +38,6 @@ function serializeImageJob(document, variants = []) {
     provider: document.provider,
     providerJobId: document.providerJobId || null,
     presetKey: document.presetKey || document.jobType,
-    mode: document.mode || 'preset',
-    instructions: document.instructions || '',
-    normalizedPlan: document.normalizedPlan || null,
-    originalUrl: document.originalUrl || '',
     roomType: document.roomType || 'unknown',
     promptVersion: Number(document.promptVersion || 1),
     inputHash: document.inputHash || null,
@@ -53,7 +49,6 @@ function serializeImageJob(document, variants = []) {
       document.selectedVariantId?.toString?.() || document.selectedVariantId || null,
     message: document.message || '',
     warning: document.warning || '',
-    outputUrls: variants.map((variant) => variant.imageUrl).filter(Boolean),
     variants,
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
@@ -100,7 +95,7 @@ export function serializeMediaVariant(document) {
   };
 }
 
-export function normalizeRoomType(value) {
+function normalizeRoomType(value) {
   const normalized = String(value || 'unknown').toLowerCase().replace(/\s+/g, '_');
 
   if (normalized.includes('kitchen')) {
@@ -115,116 +110,11 @@ export function normalizeRoomType(value) {
   if (normalized.includes('bath')) {
     return 'bathroom';
   }
-  if (
-    normalized.includes('exterior') ||
-    normalized.includes('front') ||
-    normalized.includes('backyard') ||
-    normalized.includes('rear') ||
-    normalized.includes('yard') ||
-    normalized.includes('patio') ||
-    normalized.includes('deck') ||
-    normalized.includes('pool')
-  ) {
+  if (normalized.includes('exterior') || normalized.includes('front') || normalized.includes('backyard')) {
     return 'exterior';
   }
 
   return normalized || 'unknown';
-}
-
-function extractRequestedPhrase(text, expression) {
-  const match = String(text || '').match(expression);
-  if (!match?.[1]) {
-    return '';
-  }
-
-  return match[1]
-    .trim()
-    .replace(/\s+/g, ' ')
-    .replace(/^(a|an|the)\s+/i, '')
-    .replace(/\s+(look|finish|tone|color|colour)$/i, '')
-    .trim();
-}
-
-export function buildFreeformEnhancementPlan(instructions, roomType) {
-  const normalizedInstructions = String(instructions || '').toLowerCase();
-  const removeObjects = [];
-  const styleChanges = [];
-  const exteriorFeatures = [];
-
-  if (/furniture|couch|sofa|chair|table|bed/.test(normalizedInstructions)) {
-    removeObjects.push('furniture');
-  }
-  if (/clutter|boxes|toys|countertop|counter/.test(normalizedInstructions)) {
-    removeObjects.push('clutter');
-  }
-  if (/light|brighten|brighter/.test(normalizedInstructions)) {
-    styleChanges.push('brighter lighting');
-  }
-
-  if (/plant|landscap|garden|shrub|tree|flower/.test(normalizedInstructions)) {
-    exteriorFeatures.push('plants');
-  }
-  if (/fixture|sconce|lantern|path light/.test(normalizedInstructions)) {
-    exteriorFeatures.push('fixtures');
-  }
-  if (/pool/.test(normalizedInstructions)) {
-    exteriorFeatures.push('pool');
-  }
-  if (/pond|water feature|waterfall/.test(normalizedInstructions)) {
-    exteriorFeatures.push('pond');
-  }
-  if (/patio|deck|outdoor seating|entertain/.test(normalizedInstructions)) {
-    exteriorFeatures.push('entertaining');
-  }
-
-  const flooring = extractRequestedPhrase(
-    normalizedInstructions,
-    /floor(?:ing)?(?:\s+(?:to|into|as|in|with))?\s+([a-z\s\/-]{3,40}?)(?=,| and | with | while | but |\.|$)/i,
-  );
-  const wallColor = extractRequestedPhrase(
-    normalizedInstructions,
-    /wall(?:s| color| colours| colors)?(?:\s+(?:to|into|as|in))?\s+([a-z\s\/-]{3,40}?)(?=,| and | with | while | but |\.|$)/i,
-  );
-  const cabinetColor =
-    extractRequestedPhrase(
-      normalizedInstructions,
-      /cabinet(?:s|ry)?(?:\s+color)?(?:\s+(?:to|into|as|in))?\s+([a-z\s\/-]{3,40}?)(?=,| and | with | while | but |\.|$)/i,
-    ) ||
-    extractRequestedPhrase(
-      normalizedInstructions,
-      /paint\s+cabinet(?:s|ry)?\s+([a-z\s\/-]{3,40}?)(?=,| and | with | while | but |\.|$)/i,
-    );
-  const countertopMaterial =
-    extractRequestedPhrase(
-      normalizedInstructions,
-      /with\s+([a-z\s\/-]{3,40}?)\s+countertop(?:s)?(?=,| and | while | but |\.|$)/i,
-    ) ||
-    extractRequestedPhrase(
-      normalizedInstructions,
-      /with\s+([a-z\s\/-]{3,40}?)\s+(?:counters|counter)/i,
-    ) ||
-    extractRequestedPhrase(
-      normalizedInstructions,
-      /countertop(?:s)?(?:\s+(?:to|into|as|with|in))?\s+(?!and\b)([a-z\s\/-]{3,40}?)(?=,| and | while | but |\.|$)/i,
-    );
-  const exteriorZone = /backyard|rear yard|patio|deck/.test(normalizedInstructions)
-    ? 'backyard'
-    : /front yard|front exterior|entry|curb appeal/.test(normalizedInstructions)
-      ? 'frontyard'
-      : '';
-
-  return {
-    removeObjects: [...new Set(removeObjects)],
-    styleChanges: [...new Set(styleChanges)],
-    roomType: normalizeRoomType(roomType),
-    flooring,
-    wallColor,
-    cabinetColor,
-    countertopMaterial,
-    exteriorFeatures: [...new Set(exteriorFeatures)],
-    exteriorZone,
-    lighting: /light|brighten|brighter/.test(normalizedInstructions) ? 'brighter' : '',
-  };
 }
 
 function getRoomPromptAddon(roomType) {
@@ -261,18 +151,6 @@ function getUniversalRealismGuardrails() {
 
 function getPresetPromptAddon(presetKey, roomType) {
   const normalizedRoomType = normalizeRoomType(roomType);
-  const wallColorPresetKeys = new Set([
-    'paint_warm_neutral',
-    'paint_bright_white',
-    'paint_soft_greige',
-  ]);
-  const flooringPresetKeys = new Set([
-    'floor_light_wood',
-    'floor_medium_wood',
-    'floor_dark_hardwood',
-    'floor_lvp_neutral',
-    'floor_tile_stone',
-  ]);
 
   if (presetKey === 'declutter_light') {
     if (normalizedRoomType === 'kitchen') {
@@ -296,35 +174,6 @@ function getPresetPromptAddon(presetKey, roomType) {
 
   if (presetKey === 'remove_furniture') {
     return 'Remove movable furniture if possible, but preserve all structural elements, built-ins, windows, doors, and permanent fixtures.';
-  }
-
-  if (wallColorPresetKeys.has(presetKey)) {
-    return 'Change only the wall color concept. Preserve ceilings, trim, baseboards, doors, windows, outlets, wall texture, shadows, and room geometry.';
-  }
-
-  if (flooringPresetKeys.has(presetKey)) {
-    return 'Change only the flooring concept. Preserve baseboards, furniture perspective, transitions, reflections, shadows, and the true room geometry.';
-  }
-
-  if (
-    presetKey === 'kitchen_white_cabinets_granite' ||
-    presetKey === 'kitchen_white_cabinets_quartz' ||
-    presetKey === 'kitchen_green_cabinets_granite' ||
-    presetKey === 'kitchen_green_cabinets_quartz'
-  ) {
-    return 'Preserve the true cabinet layout, door lines, hardware placement, backsplash alignment, sink location, appliances, and countertop edges. Keep the kitchen realistic and coherent.';
-  }
-
-  if (presetKey === 'exterior_curb_appeal_refresh') {
-    return 'Refresh landscaping, plants, and exterior fixtures while preserving the true home structure, windows, doors, driveway, walkway placement, and lot boundaries.';
-  }
-
-  if (presetKey === 'backyard_entertaining_refresh') {
-    return 'Improve backyard plants, lighting, and entertaining feel while preserving fences, patio geometry, hardscape boundaries, and the true house structure.';
-  }
-
-  if (presetKey === 'backyard_pool_preview') {
-    return 'If adding a pool or water feature concept, keep it proportional to the yard and preserve fences, patio geometry, access paths, drainage logic, and the true home structure.';
   }
 
   return '';
@@ -404,188 +253,6 @@ function buildPresetRenderPlan(presetKey) {
     };
   }
 
-  if (preset.key === 'paint_warm_neutral') {
-    return {
-      preset,
-      label: 'Warm Neutral Wall Preview',
-      warning:
-        'This is a concept preview only. Use it to discuss potential paint direction, not as a representation of completed improvements.',
-      summary:
-        'A concept preview that repaints the room in a warm neutral wall color for broader buyer appeal.',
-      differenceHint:
-        'Focus on the wall-tone shift and the overall calmer feel, not pixel-perfect paint boundaries.',
-      effects: ['Wall color concept', 'Warm neutral palette', 'Planning preview'],
-    };
-  }
-
-  if (preset.key === 'paint_bright_white') {
-    return {
-      preset,
-      label: 'Bright White Wall Preview',
-      warning:
-        'This is a concept preview only. Use it to discuss potential paint direction, not as a representation of completed improvements.',
-      summary:
-        'A concept preview that brightens the room with a crisp white wall palette.',
-      differenceHint:
-        'Look for a cleaner, brighter wall presentation and stronger reflected light in the room.',
-      effects: ['Wall color concept', 'Bright white palette', 'Planning preview'],
-    };
-  }
-
-  if (preset.key === 'paint_soft_greige') {
-    return {
-      preset,
-      label: 'Soft Greige Wall Preview',
-      warning:
-        'This is a concept preview only. Use it to discuss potential paint direction, not as a representation of completed improvements.',
-      summary:
-        'A concept preview that updates the room with a softer greige designer-neutral wall tone.',
-      differenceHint:
-        'Look for a more current-market neutral feel while preserving the original room layout and structure.',
-      effects: ['Wall color concept', 'Greige palette', 'Planning preview'],
-    };
-  }
-
-  if (preset.key === 'floor_light_wood') {
-    return {
-      preset,
-      label: 'Light Wood Floor Preview',
-      warning:
-        'This is a concept preview only. Flooring direction, material, and installation details should be verified separately.',
-      summary:
-        'A concept preview that updates the floor to a lighter wood tone for a more modern listing feel.',
-      differenceHint:
-        'Look at the floor material and room brightness together while checking that the perspective still feels believable.',
-      effects: ['Flooring concept', 'Light wood tone', 'Planning preview'],
-    };
-  }
-
-  if (preset.key === 'floor_medium_wood') {
-    return {
-      preset,
-      label: 'Medium Wood Floor Preview',
-      warning:
-        'This is a concept preview only. Flooring direction, material, and installation details should be verified separately.',
-      summary:
-        'A concept preview that updates the floor to a warmer medium-tone wood finish.',
-      differenceHint:
-        'Look for a warmer and more elevated floor treatment without losing realistic room geometry.',
-      effects: ['Flooring concept', 'Medium wood tone', 'Planning preview'],
-    };
-  }
-
-  if (preset.key === 'floor_dark_hardwood') {
-    return {
-      preset,
-      label: 'Dark Hardwood Floor Preview',
-      warning:
-        'This is a concept preview only. Flooring direction, material, and installation details should be verified separately.',
-      summary:
-        'A concept preview that gives the room a darker, richer hardwood floor treatment.',
-      differenceHint:
-        'Look for a stronger contrast and more upscale floor feel while confirming the perspective remains realistic.',
-      effects: ['Flooring concept', 'Dark hardwood tone', 'Planning preview'],
-    };
-  }
-
-  if (preset.key === 'floor_lvp_neutral') {
-    return {
-      preset,
-      label: 'Neutral LVP Floor Preview',
-      warning:
-        'This is a concept preview only. Flooring direction, material, and installation details should be verified separately.',
-      summary:
-        'A concept preview that updates the floor with a neutral LVP look suited to practical resale improvements.',
-      differenceHint:
-        'Look for a cleaner, more updated floor material while preserving the true room structure.',
-      effects: ['Flooring concept', 'Neutral LVP look', 'Planning preview'],
-    };
-  }
-
-  if (preset.key === 'floor_tile_stone') {
-    return {
-      preset,
-      label: 'Tile / Stone Floor Preview',
-      warning:
-        'This is a concept preview only. Flooring direction, material, and installation details should be verified separately.',
-      summary:
-        'A concept preview that shows how tile or stone flooring could update the room or exterior surface.',
-      differenceHint:
-        'Look for cleaner surface material and believable tile/stone alignment rather than exact install detail.',
-      effects: ['Flooring concept', 'Tile / stone surface', 'Planning preview'],
-    };
-  }
-
-  if (preset.key === 'kitchen_white_cabinets_granite' || preset.key === 'kitchen_white_cabinets_quartz') {
-    return {
-      preset,
-      label: 'White Kitchen Upgrade Preview',
-      warning:
-        'This is a concept preview only. Cabinet painting and countertop replacement details should be reviewed separately before budgeting.',
-      summary:
-        'A concept preview that shows a brighter kitchen direction with white cabinetry and upgraded counters.',
-      differenceHint:
-        'Look at cabinetry tone, counter material, and overall kitchen brightness while checking that cabinet lines stay realistic.',
-      effects: ['Kitchen concept', 'White cabinetry', preset.key.includes('quartz') ? 'Quartz counters' : 'Granite counters'],
-    };
-  }
-
-  if (preset.key === 'kitchen_green_cabinets_granite' || preset.key === 'kitchen_green_cabinets_quartz') {
-    return {
-      preset,
-      label: 'Green Kitchen Upgrade Preview',
-      warning:
-        'This is a concept preview only. Cabinet painting and countertop replacement details should be reviewed separately before budgeting.',
-      summary:
-        'A concept preview that shows a more designer-led kitchen direction with green cabinetry and upgraded counters.',
-      differenceHint:
-        'Look for a more distinctive cabinet palette and upgraded counter feel while preserving the true kitchen layout.',
-      effects: ['Kitchen concept', 'Green cabinetry', preset.key.includes('quartz') ? 'Quartz counters' : 'Granite counters'],
-    };
-  }
-
-  if (preset.key === 'exterior_curb_appeal_refresh') {
-    return {
-      preset,
-      label: 'Curb Appeal Upgrade Preview',
-      warning:
-        'This is a concept preview only. Exterior landscaping and fixture changes are shown for planning discussion, not as completed work.',
-      summary:
-        'A concept preview that upgrades the exterior first impression with stronger landscaping and fixture cues.',
-      differenceHint:
-        'Look for improved entry feel, cleaner plant beds, and stronger front-exterior presentation while preserving the true structure.',
-      effects: ['Exterior concept', 'Landscaping refresh', 'Fixture upgrade cues'],
-    };
-  }
-
-  if (preset.key === 'backyard_entertaining_refresh') {
-    return {
-      preset,
-      label: 'Backyard Refresh Preview',
-      warning:
-        'This is a concept preview only. Backyard improvements are shown for planning discussion, not as completed work.',
-      summary:
-        'A concept preview that reshapes the backyard into a more intentional entertaining space with plants and fixtures.',
-      differenceHint:
-        'Look for a more usable and inviting backyard feel while confirming the lot boundaries and hardscape remain believable.',
-      effects: ['Backyard concept', 'Plants and fixture upgrades', 'Entertaining focus'],
-    };
-  }
-
-  if (preset.key === 'backyard_pool_preview') {
-    return {
-      preset,
-      label: 'Pool / Water Feature Preview',
-      warning:
-        'This is a concept preview only. Pool or water-feature feasibility, engineering, and permitting must be reviewed separately.',
-      summary:
-        'A concept preview that explores how a pool or water feature could change the backyard experience.',
-      differenceHint:
-        'Focus on the overall backyard transformation and scale, not exact construction detail.',
-      effects: ['Backyard concept', 'Pool / water feature', 'Planning preview'],
-    };
-  }
-
   if (preset.key === 'combined_listing_refresh') {
     return {
       preset,
@@ -627,7 +294,7 @@ function buildPresetRenderPlan(presetKey) {
   };
 }
 
-export function calculateVisionReviewOverallScore(review = {}) {
+function calculateVisionReviewOverallScore(review = {}) {
   const structuralScore = Number(review.structuralIntegrityScore || 0);
   const artifactScore = Number(review.artifactScore || 0);
   const listingAppealScore = Number(review.listingAppealScore || 0);
@@ -674,222 +341,6 @@ function getProviderSourceUrl(output) {
   return null;
 }
 
-function resolveWallColorPresetKey(wallColor = '') {
-  const normalized = String(wallColor || '').toLowerCase();
-
-  if (normalized.includes('white')) {
-    return 'paint_bright_white';
-  }
-  if (normalized.includes('greige') || normalized.includes('gray') || normalized.includes('grey') || normalized.includes('taupe')) {
-    return 'paint_soft_greige';
-  }
-
-  return 'paint_warm_neutral';
-}
-
-function resolveFlooringPresetKey(flooring = '') {
-  const normalized = String(flooring || '').toLowerCase();
-
-  if (normalized.includes('dark')) {
-    return 'floor_dark_hardwood';
-  }
-  if (normalized.includes('tile') || normalized.includes('stone') || normalized.includes('travertine')) {
-    return 'floor_tile_stone';
-  }
-  if (normalized.includes('lvp') || normalized.includes('vinyl') || normalized.includes('plank')) {
-    return 'floor_lvp_neutral';
-  }
-  if (normalized.includes('medium') || normalized.includes('warm') || normalized.includes('brown')) {
-    return 'floor_medium_wood';
-  }
-
-  return 'floor_light_wood';
-}
-
-function resolveKitchenUpgradePresetKey({ cabinetColor = '', countertopMaterial = '' } = {}) {
-  const cabinet = String(cabinetColor || '').toLowerCase();
-  const counter = String(countertopMaterial || '').toLowerCase();
-
-  if (
-    cabinet.includes('green') ||
-    cabinet.includes('sage') ||
-    cabinet.includes('olive')
-  ) {
-    return counter.includes('quartz')
-      ? 'kitchen_green_cabinets_quartz'
-      : 'kitchen_green_cabinets_granite';
-  }
-
-  return counter.includes('quartz')
-    ? 'kitchen_white_cabinets_quartz'
-    : 'kitchen_white_cabinets_granite';
-}
-
-function resolveExteriorPresetKey(normalizedPlan = {}) {
-  const features = normalizedPlan?.exteriorFeatures || [];
-
-  if (features.includes('pool') || features.includes('pond')) {
-    return 'backyard_pool_preview';
-  }
-  if (
-    normalizedPlan?.exteriorZone === 'backyard' ||
-    features.includes('entertaining')
-  ) {
-    return 'backyard_entertaining_refresh';
-  }
-
-  return 'exterior_curb_appeal_refresh';
-}
-
-function getFreeformPlanPromptAddon(normalizedPlan = {}) {
-  const instructions = [];
-
-  if (normalizedPlan.removeObjects?.includes('furniture')) {
-    instructions.push(
-      'Remove movable furniture such as sofas, chairs, tables, portable shelving, and decor where realistically possible.',
-    );
-  }
-  if (normalizedPlan.removeObjects?.includes('clutter')) {
-    instructions.push(
-      'Reduce loose clutter on counters, shelves, side tables, and floor edges while keeping the room believable.',
-    );
-  }
-  if (normalizedPlan.wallColor) {
-    instructions.push(
-      `If a wall-color concept can be shown believably, preview the walls in ${normalizedPlan.wallColor} while preserving trim lines, shadows, and texture.`,
-    );
-  }
-  if (normalizedPlan.flooring) {
-    instructions.push(
-      `If a flooring concept can be shown believably, preview the floor as ${normalizedPlan.flooring} while preserving room geometry, transitions, and perspective.`,
-    );
-  }
-  if (normalizedPlan.cabinetColor) {
-    instructions.push(
-      `If cabinetry can be edited believably, preview cabinets in ${normalizedPlan.cabinetColor} while preserving the real cabinet layout, door lines, hardware, and appliance spacing.`,
-    );
-  }
-  if (normalizedPlan.countertopMaterial) {
-    instructions.push(
-      `If countertop changes can be shown believably, preview countertops as ${normalizedPlan.countertopMaterial} while preserving edge geometry, backsplash alignment, sink placement, and realism.`,
-    );
-  }
-  if (normalizedPlan.lighting === 'brighter') {
-    instructions.push(
-      'Increase brightness and perceived natural light without blowing out windows, ceilings, or permanent finishes.',
-    );
-  }
-  if ((normalizedPlan.exteriorFeatures || []).length) {
-    instructions.push(
-      `If exterior upgrades can be shown believably, emphasize ${normalizedPlan.exteriorFeatures.join(', ')} while preserving the true structure, lot boundaries, and exterior layout.`,
-    );
-  }
-
-  return instructions.join(' ');
-}
-
-function buildFreeformRenderPlan(normalizedPlan = {}) {
-  const requestedChanges = [];
-  const effects = ['Custom request saved', 'Manual review recommended'];
-
-  if (normalizedPlan.removeObjects?.includes('furniture')) {
-    requestedChanges.push('furniture removal');
-    effects.push('Furniture-removal route');
-  }
-  if (normalizedPlan.removeObjects?.includes('clutter')) {
-    requestedChanges.push('declutter');
-    effects.push('Declutter route');
-  }
-  if (normalizedPlan.wallColor) {
-    requestedChanges.push(`wall color toward ${normalizedPlan.wallColor}`);
-    effects.push(`Wall color concept: ${normalizedPlan.wallColor}`);
-  }
-  if (normalizedPlan.flooring) {
-    requestedChanges.push(`flooring toward ${normalizedPlan.flooring}`);
-    effects.push(`Flooring concept: ${normalizedPlan.flooring}`);
-  }
-  if (normalizedPlan.cabinetColor) {
-    requestedChanges.push(`cabinet color toward ${normalizedPlan.cabinetColor}`);
-    effects.push(`Cabinet concept: ${normalizedPlan.cabinetColor}`);
-  }
-  if (normalizedPlan.countertopMaterial) {
-    requestedChanges.push(`countertops toward ${normalizedPlan.countertopMaterial}`);
-    effects.push(`Countertop concept: ${normalizedPlan.countertopMaterial}`);
-  }
-  if (normalizedPlan.lighting === 'brighter') {
-    requestedChanges.push('brighter lighting');
-    effects.push('Brightness lift requested');
-  }
-  if ((normalizedPlan.exteriorFeatures || []).length) {
-    requestedChanges.push(`exterior upgrades for ${normalizedPlan.exteriorFeatures.join(', ')}`);
-    effects.push(`Exterior concept: ${normalizedPlan.exteriorFeatures.join(', ')}`);
-  }
-  if (effects.length === 2) {
-    effects.splice(1, 0, 'Listing refresh fallback');
-  }
-
-  const requestSummary = requestedChanges.length
-    ? requestedChanges.join(', ')
-    : 'the closest available enhancement flow';
-
-  return {
-    label: 'Custom Enhancement Preview',
-    warning:
-      normalizedPlan.wallColor ||
-      normalizedPlan.flooring ||
-      normalizedPlan.cabinetColor ||
-      normalizedPlan.countertopMaterial ||
-      (normalizedPlan.exteriorFeatures || []).length
-        ? 'Custom instructions were saved with this enhancement request. Finish and color changes may render as concept-level guidance in the current environment, so review the output carefully before public marketing use.'
-        : 'Custom instructions were saved with this enhancement request. Review the output before public marketing use.',
-    summary:
-      `A freeform enhancement request was captured for this photo and processed for ${requestSummary}.`,
-    differenceHint:
-      requestedChanges.length
-        ? `Compare the result against the original and look specifically for ${requestSummary} while confirming the room still feels truthful and listing-safe.`
-        : 'Compare the result against the original and confirm the requested changes still feel truthful and listing-safe.',
-    effects,
-  };
-}
-
-export function resolveFreeformPresetKey({ presetKey, jobType, normalizedPlan }) {
-  if (presetKey || jobType) {
-    return presetKey || jobType;
-  }
-
-  if (normalizedPlan?.removeObjects?.includes('furniture')) {
-    return 'remove_furniture';
-  }
-
-  if (
-    normalizedPlan?.roomType === 'kitchen' &&
-    (normalizedPlan?.cabinetColor || normalizedPlan?.countertopMaterial)
-  ) {
-    return resolveKitchenUpgradePresetKey(normalizedPlan);
-  }
-
-  if (
-    (normalizedPlan?.exteriorFeatures || []).length ||
-    normalizedPlan?.exteriorZone
-  ) {
-    return resolveExteriorPresetKey(normalizedPlan);
-  }
-
-  if (normalizedPlan?.flooring) {
-    return resolveFlooringPresetKey(normalizedPlan.flooring);
-  }
-
-  if (normalizedPlan?.wallColor) {
-    return resolveWallColorPresetKey(normalizedPlan.wallColor);
-  }
-
-  if (normalizedPlan?.removeObjects?.includes('clutter')) {
-    return 'declutter_medium';
-  }
-
-  return 'combined_listing_refresh';
-}
-
 export function buildVariantStoryBlock({ asset, variant }) {
   const presetKey = variant?.metadata?.presetKey || variant?.variantType;
   const roomLabel = asset?.roomLabel || variant?.metadata?.roomLabel || 'Room';
@@ -913,115 +364,6 @@ export function buildVariantStoryBlock({ asset, variant }) {
       suggestedAction:
         suggestedAction ||
         'Consider removing oversized furniture, reducing accent pieces, and simplifying the room before photography or showings.',
-      disclaimer:
-        'This image is an AI-generated concept preview for planning purposes only.',
-    };
-  }
-
-  if (
-    presetKey === 'paint_warm_neutral' ||
-    presetKey === 'paint_bright_white' ||
-    presetKey === 'paint_soft_greige'
-  ) {
-    return {
-      title: `${roomLabel} Paint Concept Preview`,
-      originalMediaId: asset?.id || variant?.mediaId || null,
-      originalImageUrl: asset?.imageUrl || null,
-      variantId: variant?.id || null,
-      variantImageUrl: variant?.imageUrl || null,
-      variantCategory: variant?.variantCategory || 'concept_preview',
-      whatChanged:
-        'This preview changes the wall color direction to show how a fresh paint palette could modernize the room without changing its structure.',
-      whyItMatters:
-        reviewSummary ||
-        'Paint is often one of the fastest ways to make a room feel cleaner, brighter, and more buyer-friendly.',
-      suggestedAction:
-        suggestedAction ||
-        'Compare the preview to the original and decide whether a lighter or more neutral palette would improve listing appeal before photography.',
-      disclaimer:
-        'This image is an AI-generated concept preview for planning purposes only.',
-    };
-  }
-
-  if (
-    presetKey === 'floor_light_wood' ||
-    presetKey === 'floor_medium_wood' ||
-    presetKey === 'floor_dark_hardwood' ||
-    presetKey === 'floor_lvp_neutral' ||
-    presetKey === 'floor_tile_stone'
-  ) {
-    return {
-      title: `${roomLabel} Flooring Concept Preview`,
-      originalMediaId: asset?.id || variant?.mediaId || null,
-      originalImageUrl: asset?.imageUrl || null,
-      variantId: variant?.id || null,
-      variantImageUrl: variant?.imageUrl || null,
-      variantCategory: variant?.variantCategory || 'concept_preview',
-      whatChanged:
-        'This preview changes the flooring direction to show how a more updated surface could reshape the room’s feel.',
-      whyItMatters:
-        reviewSummary ||
-        'Flooring changes can strongly affect perceived quality, brightness, warmth, and how updated the room feels to buyers.',
-      suggestedAction:
-        suggestedAction ||
-        'Use this preview to compare finish direction and decide whether the room benefits more from wood, LVP, or tile-based upgrades.',
-      disclaimer:
-        'This image is an AI-generated concept preview for planning purposes only.',
-    };
-  }
-
-  if (
-    presetKey === 'kitchen_white_cabinets_granite' ||
-    presetKey === 'kitchen_white_cabinets_quartz' ||
-    presetKey === 'kitchen_green_cabinets_granite' ||
-    presetKey === 'kitchen_green_cabinets_quartz'
-  ) {
-    return {
-      title: `${roomLabel} Kitchen Upgrade Preview`,
-      originalMediaId: asset?.id || variant?.mediaId || null,
-      originalImageUrl: asset?.imageUrl || null,
-      variantId: variant?.id || null,
-      variantImageUrl: variant?.imageUrl || null,
-      variantCategory: variant?.variantCategory || 'concept_preview',
-      whatChanged:
-        'This preview updates the cabinetry and countertop direction to show how a stronger kitchen finish package could affect buyer perception.',
-      whyItMatters:
-        reviewSummary ||
-        'Kitchen finish changes often have an outsized effect on perceived home value, listing photos, and overall first impression.',
-      suggestedAction:
-        suggestedAction ||
-        'Use this as a budget-discussion tool to compare whether repainting cabinets and updating counters would materially improve the listing story.',
-      disclaimer:
-        'This image is an AI-generated concept preview for planning purposes only.',
-    };
-  }
-
-  if (
-    presetKey === 'exterior_curb_appeal_refresh' ||
-    presetKey === 'backyard_entertaining_refresh' ||
-    presetKey === 'backyard_pool_preview'
-  ) {
-    return {
-      title: `${roomLabel} Exterior Upgrade Preview`,
-      originalMediaId: asset?.id || variant?.mediaId || null,
-      originalImageUrl: asset?.imageUrl || null,
-      variantId: variant?.id || null,
-      variantImageUrl: variant?.imageUrl || null,
-      variantCategory: variant?.variantCategory || 'concept_preview',
-      whatChanged:
-        presetKey === 'backyard_pool_preview'
-          ? 'This preview adds a pool or water-feature concept to show how the backyard could transform with a larger budget and design scope.'
-          : 'This preview upgrades the exterior with stronger plants, fixtures, and presentation cues to show a more intentional outdoor impression.',
-      whyItMatters:
-        reviewSummary ||
-        (presetKey === 'exterior_curb_appeal_refresh'
-          ? 'Exterior first-impression upgrades can change how buyers feel before they ever step inside.'
-          : 'Outdoor upgrades can help buyers imagine entertaining, relaxing, and getting more value from the lot.'),
-      suggestedAction:
-        suggestedAction ||
-        (presetKey === 'backyard_pool_preview'
-          ? 'Use this to discuss whether a larger backyard investment meaningfully changes the property story.'
-          : 'Use this preview to prioritize landscaping, fixture, and outdoor-living improvements that could create a stronger marketing impression.'),
       disclaimer:
         'This image is an AI-generated concept preview for planning purposes only.',
     };
@@ -1140,24 +482,6 @@ function buildMaskShapes(metadata, presetKey, roomType) {
   }
 
   const normalizedRoomType = normalizeRoomType(roomType);
-  const wallColorPresetKeys = new Set([
-    'paint_warm_neutral',
-    'paint_bright_white',
-    'paint_soft_greige',
-  ]);
-  const flooringPresetKeys = new Set([
-    'floor_light_wood',
-    'floor_medium_wood',
-    'floor_dark_hardwood',
-    'floor_lvp_neutral',
-    'floor_tile_stone',
-  ]);
-  const kitchenUpgradePresetKeys = new Set([
-    'kitchen_white_cabinets_granite',
-    'kitchen_white_cabinets_quartz',
-    'kitchen_green_cabinets_granite',
-    'kitchen_green_cabinets_quartz',
-  ]);
 
   if (presetKey === 'remove_furniture') {
     return [
@@ -1193,120 +517,6 @@ function buildMaskShapes(metadata, presetKey, roomType) {
         cy: Math.round(height * 0.66),
         rx: Math.round(width * 0.22),
         ry: Math.round(height * 0.16),
-      },
-    ];
-  }
-
-  if (wallColorPresetKeys.has(presetKey)) {
-    return [
-      {
-        type: 'rect',
-        left: Math.round(width * 0.06),
-        top: Math.round(height * 0.08),
-        width: Math.round(width * 0.88),
-        height: Math.round(height * 0.56),
-      },
-      {
-        type: 'rect',
-        left: Math.round(width * 0.08),
-        top: Math.round(height * 0.18),
-        width: Math.round(width * 0.84),
-        height: Math.round(height * 0.18),
-      },
-    ];
-  }
-
-  if (flooringPresetKeys.has(presetKey)) {
-    return [
-      {
-        type: 'rect',
-        left: Math.round(width * 0.06),
-        top: Math.round(height * 0.58),
-        width: Math.round(width * 0.88),
-        height: Math.round(height * 0.3),
-      },
-      {
-        type: 'ellipse',
-        cx: Math.round(width * 0.5),
-        cy: Math.round(height * 0.78),
-        rx: Math.round(width * 0.34),
-        ry: Math.round(height * 0.14),
-      },
-    ];
-  }
-
-  if (kitchenUpgradePresetKeys.has(presetKey)) {
-    return [
-      {
-        type: 'rect',
-        left: Math.round(width * 0.08),
-        top: Math.round(height * 0.22),
-        width: Math.round(width * 0.84),
-        height: Math.round(height * 0.32),
-      },
-      {
-        type: 'rect',
-        left: Math.round(width * 0.1),
-        top: Math.round(height * 0.5),
-        width: Math.round(width * 0.8),
-        height: Math.round(height * 0.18),
-      },
-    ];
-  }
-
-  if (presetKey === 'exterior_curb_appeal_refresh') {
-    return [
-      {
-        type: 'rect',
-        left: Math.round(width * 0.02),
-        top: Math.round(height * 0.44),
-        width: Math.round(width * 0.96),
-        height: Math.round(height * 0.42),
-      },
-      {
-        type: 'ellipse',
-        cx: Math.round(width * 0.5),
-        cy: Math.round(height * 0.68),
-        rx: Math.round(width * 0.38),
-        ry: Math.round(height * 0.16),
-      },
-    ];
-  }
-
-  if (presetKey === 'backyard_entertaining_refresh') {
-    return [
-      {
-        type: 'rect',
-        left: Math.round(width * 0.04),
-        top: Math.round(height * 0.38),
-        width: Math.round(width * 0.92),
-        height: Math.round(height * 0.48),
-      },
-      {
-        type: 'ellipse',
-        cx: Math.round(width * 0.5),
-        cy: Math.round(height * 0.72),
-        rx: Math.round(width * 0.32),
-        ry: Math.round(height * 0.16),
-      },
-    ];
-  }
-
-  if (presetKey === 'backyard_pool_preview') {
-    return [
-      {
-        type: 'rect',
-        left: Math.round(width * 0.08),
-        top: Math.round(height * 0.42),
-        width: Math.round(width * 0.84),
-        height: Math.round(height * 0.4),
-      },
-      {
-        type: 'ellipse',
-        cx: Math.round(width * 0.5),
-        cy: Math.round(height * 0.68),
-        rx: Math.round(width * 0.28),
-        ry: Math.round(height * 0.12),
       },
     ];
   }
@@ -1396,30 +606,6 @@ function buildVisionInputHash({ assetId, presetKey, roomType, promptVersion }) {
         presetKey,
         roomType,
         promptVersion,
-        mode: 'preset',
-        instructions: '',
-      }),
-    )
-    .digest('hex');
-}
-
-function buildVisionJobHash({
-  assetId,
-  presetKey,
-  roomType,
-  promptVersion,
-  mode = 'preset',
-  instructions = '',
-}) {
-  return createHash('sha256')
-    .update(
-      JSON.stringify({
-        assetId,
-        presetKey,
-        roomType,
-        promptVersion,
-        mode,
-        instructions: String(instructions || '').trim().toLowerCase(),
       }),
     )
     .digest('hex');
@@ -1474,8 +660,6 @@ export async function createImageEnhancementJob({
   jobType = 'enhance_listing_quality',
   presetKey,
   roomType,
-  mode = 'preset',
-  instructions = '',
 }) {
   if (mongoose.connection.readyState !== 1) {
     throw new Error('Database connection is required to generate image variants.');
@@ -1486,26 +670,13 @@ export async function createImageEnhancementJob({
     throw new Error('Media asset not found.');
   }
 
-  const requestedMode =
-    mode === 'freeform' || String(instructions || '').trim() ? 'freeform' : 'preset';
-  const normalizedInstructions = String(instructions || '').trim().slice(0, 600);
+  const preset = resolveVisionPreset(presetKey || jobType);
   const resolvedRoomType = normalizeRoomType(roomType || asset.roomLabel);
-  const normalizedPlan =
-    requestedMode === 'freeform'
-      ? buildFreeformEnhancementPlan(normalizedInstructions, resolvedRoomType)
-      : null;
-  const resolvedPresetKey =
-    requestedMode === 'freeform'
-      ? resolveFreeformPresetKey({ presetKey, jobType, normalizedPlan })
-      : presetKey || jobType;
-  const preset = resolveVisionPreset(resolvedPresetKey);
-  const inputHash = buildVisionJobHash({
+  const inputHash = buildVisionInputHash({
     assetId: asset._id.toString(),
     presetKey: preset.key,
     roomType: resolvedRoomType,
     promptVersion: preset.promptVersion,
-    mode: requestedMode,
-    instructions: normalizedInstructions,
   });
 
   const cachedJob = await ImageJobModel.findOne({
@@ -1541,10 +712,6 @@ export async function createImageEnhancementJob({
     status: 'processing',
     provider: preset.providerPreference || 'local_sharp',
     presetKey: preset.key,
-    mode: requestedMode,
-    instructions: normalizedInstructions,
-    normalizedPlan,
-    originalUrl: asset.imageUrl || '',
     roomType: resolvedRoomType,
     promptVersion: preset.promptVersion,
     inputHash,
@@ -1555,28 +722,15 @@ export async function createImageEnhancementJob({
       prompt: preset.basePrompt,
       helperText: preset.helperText,
       recommendedUse: preset.recommendedUse,
-      upgradeTier: preset.upgradeTier,
-      mode: requestedMode,
-      instructions: normalizedInstructions,
-      normalizedPlan,
     },
   });
 
   try {
-    const renderPlan =
-      requestedMode === 'freeform'
-        ? buildFreeformRenderPlan(normalizedPlan)
-        : buildPresetRenderPlan(preset.key);
+    const renderPlan = buildPresetRenderPlan(preset.key);
     const roomPromptAddon = getRoomPromptAddon(resolvedRoomType);
     const presetPromptAddon = getPresetPromptAddon(preset.key, resolvedRoomType);
-    const freeformPlanPromptAddon =
-      requestedMode === 'freeform' ? getFreeformPlanPromptAddon(normalizedPlan) : '';
     const fullPrompt = [
       preset.basePrompt,
-      requestedMode === 'freeform'
-        ? `Seller instructions: ${normalizedInstructions}`
-        : '',
-      freeformPlanPromptAddon,
       roomPromptAddon,
       presetPromptAddon,
       getUniversalRealismGuardrails(),
@@ -1658,14 +812,10 @@ export async function createImageEnhancementJob({
               promptVersion: preset.promptVersion,
               helperText: preset.helperText,
               recommendedUse: preset.recommendedUse,
-              upgradeTier: preset.upgradeTier,
               category: preset.category,
               disclaimerType: preset.disclaimerType,
               roomPromptAddon,
               presetPromptAddon,
-              mode: requestedMode,
-              instructions: normalizedInstructions,
-              normalizedPlan,
               providerSourceUrl: getProviderSourceUrl(output),
               review: {
                 ...review,
@@ -1724,13 +874,9 @@ export async function createImageEnhancementJob({
           promptVersion: preset.promptVersion,
           helperText: preset.helperText,
           recommendedUse: preset.recommendedUse,
-          upgradeTier: preset.upgradeTier,
           category: preset.category,
           disclaimerType: preset.disclaimerType,
           roomPromptAddon: rendered.roomPromptAddon,
-          mode: requestedMode,
-          instructions: normalizedInstructions,
-          normalizedPlan,
           review: {
             ...review,
             overallScore,
@@ -1746,10 +892,7 @@ export async function createImageEnhancementJob({
     job.outputVariantIds = createdVariants.map((variant) => variant.id);
     job.selectedVariantId = createdVariants[0]?.id || null;
     job.warning = renderPlan.warning;
-    job.message =
-      requestedMode === 'freeform'
-        ? 'Custom enhancement request saved and processed.'
-        : `${createdVariants.length} ${renderPlan.label.toLowerCase()} variant${createdVariants.length === 1 ? '' : 's'} generated.`;
+    job.message = `${createdVariants.length} ${renderPlan.label.toLowerCase()} variant${createdVariants.length === 1 ? '' : 's'} generated.`;
     await job.save();
 
     return {

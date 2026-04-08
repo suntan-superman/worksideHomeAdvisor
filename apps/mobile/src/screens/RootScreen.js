@@ -23,7 +23,6 @@ import {
   createChecklistItem,
   createImageEnhancementJob,
   deleteAccount,
-  getCurrentUser,
   getChecklist,
   getDashboard,
   getWorkflow,
@@ -31,16 +30,12 @@ import {
   listMediaVariants,
   listProperties,
   login,
-  requestForgotPasswordOtp,
   requestOtp,
-  resetForgottenPassword,
   savePhoto,
   selectMediaVariant,
-  updateUserProfile,
   updateChecklistItem,
   updateMediaAsset,
   verifyEmailOtp,
-  verifyForgotPasswordOtp,
 } from '../services/api';
 
 const ROOM_LABEL_OPTIONS = ['Living room', 'Kitchen', 'Primary bedroom', 'Bathroom', 'Exterior'];
@@ -97,24 +92,6 @@ function formatChecklistStatus(status) {
   }
 
   return 'Open';
-}
-
-function formatPhoneInput(value) {
-  const digits = String(value || '').replace(/\D/g, '').slice(0, 10);
-
-  if (!digits) {
-    return '';
-  }
-
-  if (digits.length < 4) {
-    return `(${digits}`;
-  }
-
-  if (digits.length < 7) {
-    return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-  }
-
-  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
 function getVariantSummary(variant) {
@@ -224,19 +201,10 @@ export function RootScreen() {
   const [appScreen, setAppScreen] = useState('home');
   const [showVisionDetails, setShowVisionDetails] = useState(false);
   const [showCompletedTasks, setShowCompletedTasks] = useState(false);
-  const [freeformEnhancementInstructions, setFreeformEnhancementInstructions] = useState('');
-  const [accountForm, setAccountForm] = useState({
-    firstName: '',
-    lastName: '',
-    mobilePhone: '',
-    smsOptIn: false,
-  });
   const [form, setForm] = useState({
     email: '',
     password: '',
-    confirmPassword: '',
     otpCode: '',
-    resetToken: '',
     roomLabel: ROOM_LABEL_OPTIONS[0],
   });
 
@@ -435,15 +403,6 @@ export function RootScreen() {
   }, []);
 
   useEffect(() => {
-    setAccountForm({
-      firstName: session?.user?.firstName || '',
-      lastName: session?.user?.lastName || '',
-      mobilePhone: formatPhoneInput(session?.user?.mobilePhone || ''),
-      smsOptIn: Boolean(session?.user?.smsOptIn),
-    });
-  }, [session?.user?.firstName, session?.user?.lastName, session?.user?.mobilePhone, session?.user?.smsOptIn]);
-
-  useEffect(() => {
     const queryError =
       propertiesQuery.error ||
       dashboardQuery.error ||
@@ -518,7 +477,6 @@ export function RootScreen() {
     try {
       await savePhotoMutation.mutateAsync({
         roomLabel: form.roomLabel,
-        source: asset.importSource || 'mobile_capture',
         mimeType: asset.mimeType || 'image/jpeg',
         imageBase64: asset.base64,
         width: asset.width,
@@ -561,11 +519,9 @@ export function RootScreen() {
   });
 
   const createVariantMutation = useMutation({
-    mutationFn: async ({ assetId, jobType, mode, instructions }) =>
+    mutationFn: async ({ assetId, jobType }) =>
       createImageEnhancementJob(assetId, {
         jobType,
-        mode,
-        instructions,
       }),
   });
 
@@ -599,7 +555,7 @@ export function RootScreen() {
       });
 
       if (result.requiresOtpVerification) {
-        setAuthMode('verify_email');
+        setAuthMode('verify');
         setStatus('Your account needs OTP verification before the mobile workspace can load.');
         return;
       }
@@ -660,11 +616,11 @@ export function RootScreen() {
     setError('');
 
     try {
-      await requestForgotPasswordOtp({ email });
+      await requestOtp({ email });
       await rememberEmail(email);
       updateField('email', email);
-      setAuthMode('forgot_verify');
-      setStatus('Check your email for a password reset code, then enter it below.');
+      setAuthMode('verify');
+      setStatus('Check your email for a sign-in code, then enter it below.');
     } catch (requestError) {
       setError(
         requestError.message ||
@@ -679,65 +635,10 @@ export function RootScreen() {
     setAuthMode(nextMode);
     setError('');
     setStatus(
-      nextMode === 'verify_email'
+      nextMode === 'verify'
         ? 'Enter the email code we sent you to finish sign-in.'
-        : nextMode === 'forgot_request'
-          ? 'Enter your account email and we will send a password reset code.'
-          : nextMode === 'forgot_verify'
-            ? 'Enter the password reset code from your email.'
-            : nextMode === 'forgot_reset'
-              ? 'Choose a new password and confirm it to finish the reset.'
-              : 'Sign in with the same verified seller account you use on the web.',
+        : 'Sign in with the same verified seller account you use on the web.',
     );
-  }
-
-  async function handleVerifyForgotPasswordCode() {
-    setBusyState(true);
-    setError('');
-
-    try {
-      const result = await verifyForgotPasswordOtp({
-        email: form.email,
-        otpCode: form.otpCode,
-      });
-      updateField('resetToken', result.resetToken);
-      updateField('otpCode', '');
-      updateField('password', '');
-      updateField('confirmPassword', '');
-      setAuthMode('forgot_reset');
-      setStatus('Set your new password now.');
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setBusyState(false);
-    }
-  }
-
-  async function handleResetForgottenPassword() {
-    setBusyState(true);
-    setError('');
-
-    try {
-      const result = await resetForgottenPassword({
-        resetToken: form.resetToken,
-        newPassword: form.password,
-        confirmPassword: form.confirmPassword,
-      });
-      setSession(result);
-      await rememberEmail(form.email);
-      const currentUser = await getCurrentUser(result.token).catch(() => ({ user: result.user }));
-      setSession({
-        ...result,
-        user: currentUser.user || result.user,
-      });
-      await queryClient.invalidateQueries({ queryKey: ['mobile-properties', result.user.id] });
-      setStatus('Password updated. Loading your properties...');
-      setAuthMode('login');
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setBusyState(false);
-    }
   }
 
   function performSignOut() {
@@ -872,10 +773,7 @@ export function RootScreen() {
         return;
       }
 
-      const capturedAsset = {
-        ...result.assets[0],
-        importSource: mode === 'camera' ? 'mobile_capture' : 'mobile_library',
-      };
+      const capturedAsset = result.assets[0];
       setPhotoAsset(capturedAsset);
       setStatus('Photo ready. Save it to the property when you are ready.');
 
@@ -1032,36 +930,6 @@ export function RootScreen() {
     }
   }
 
-  async function handleGenerateFreeformVariant() {
-    if (!selectedAsset || !freeformEnhancementInstructions.trim()) {
-      setError('Describe the enhancement you want before generating a custom preview.');
-      return;
-    }
-
-    setError('');
-    setPendingVisionJobType('freeform');
-    setStatus('Creating a custom enhancement preview. This can take a moment.');
-
-    try {
-      const response = await createVariantMutation.mutateAsync({
-        assetId: selectedAsset.id,
-        jobType: 'enhance_listing_quality',
-        mode: 'freeform',
-        instructions: freeformEnhancementInstructions.trim(),
-      });
-      await Promise.all([
-        invalidatePropertyWorkspace(propertyId),
-        invalidateAssetVariants(selectedAsset.id),
-      ]);
-      setSelectedVariantId(response.variant?.id || '');
-      setStatus(response.job?.warning || 'Custom enhancement preview generated.');
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setPendingVisionJobType('');
-    }
-  }
-
   async function handleSelectVariant(variantId) {
     if (!selectedAsset) {
       return;
@@ -1082,38 +950,6 @@ export function RootScreen() {
       setStatus('Preferred variant selected for future flyer and report output.');
     } catch (requestError) {
       setError(requestError.message);
-    }
-  }
-
-  async function handleSaveAccountSettings() {
-    if (!session?.token) {
-      setError('Sign in again before updating your account settings.');
-      return;
-    }
-
-    setBusyState(true);
-    setError('');
-
-    try {
-      const response = await updateUserProfile({
-        firstName: accountForm.firstName,
-        lastName: accountForm.lastName,
-        mobilePhone: accountForm.mobilePhone,
-        smsOptIn: accountForm.smsOptIn,
-      }, session.token);
-      const nextSession = {
-        ...session,
-        user: {
-          ...session.user,
-          ...response.user,
-        },
-      };
-      setSession(nextSession);
-      setStatus('Account settings updated.');
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setBusyState(false);
     }
   }
 
@@ -1531,25 +1367,6 @@ export function RootScreen() {
                     </Text>
                   </Pressable>
                 </View>
-                <TextInput
-                  placeholder="Describe a custom enhancement request"
-                  placeholderTextColor="#7d8a8f"
-                  style={[styles.input, styles.noteInput]}
-                  value={freeformEnhancementInstructions}
-                  onChangeText={setFreeformEnhancementInstructions}
-                  multiline
-                />
-                <Pressable
-                  onPress={handleGenerateFreeformVariant}
-                  style={[styles.button, styles.buttonSecondary]}
-                  disabled={busy || !freeformEnhancementInstructions.trim()}
-                >
-                  <Text style={styles.buttonSecondaryText}>
-                    {pendingVisionJobType === 'freeform' && createVariantMutation.isPending
-                      ? 'Generating custom preview...'
-                      : 'Generate custom preview'}
-                  </Text>
-                </Pressable>
                 {selectedVariant ? (
                   <>
                     <Text style={styles.label}>Vision output</Text>
@@ -1834,72 +1651,24 @@ export function RootScreen() {
             <View style={styles.mobileCard}>
               <View style={styles.settingsSection}>
                 <Text style={styles.settingsSectionLabel}>Account</Text>
-                <TextInput
-                  placeholder="First name"
-                  placeholderTextColor="#7d8a8f"
-                  style={styles.input}
-                  value={accountForm.firstName}
-                  onChangeText={(value) =>
-                    setAccountForm((current) => ({ ...current, firstName: value }))
-                  }
-                />
-                <TextInput
-                  placeholder="Last name"
-                  placeholderTextColor="#7d8a8f"
-                  style={styles.input}
-                  value={accountForm.lastName}
-                  onChangeText={(value) =>
-                    setAccountForm((current) => ({ ...current, lastName: value }))
-                  }
-                />
+                <View style={styles.settingsInfoCard}>
+                  <Text style={styles.settingsInfoLabel}>Name</Text>
+                  <Text style={styles.settingsInfoValue} numberOfLines={1}>
+                    {getDisplayName(session.user)}
+                  </Text>
+                </View>
                 <View style={styles.settingsInfoCard}>
                   <Text style={styles.settingsInfoLabel}>Email</Text>
                   <Text style={styles.settingsInfoValue} numberOfLines={1}>
                     {truncateMiddle(session.user.email)}
                   </Text>
                 </View>
-                <TextInput
-                  placeholder="Mobile number"
-                  placeholderTextColor="#7d8a8f"
-                  style={styles.input}
-                  keyboardType="phone-pad"
-                  value={accountForm.mobilePhone}
-                  onChangeText={(value) =>
-                    setAccountForm((current) => ({
-                      ...current,
-                      mobilePhone: formatPhoneInput(value),
-                    }))
-                  }
-                />
                 <View style={styles.settingsInfoCard}>
                   <Text style={styles.settingsInfoLabel}>Account Type</Text>
                   <Text style={styles.settingsInfoValue} numberOfLines={1}>
                     {viewerRole === 'agent' ? 'Realtor / Agent' : 'Seller'}
                   </Text>
                 </View>
-                <Pressable
-                  onPress={() =>
-                    setAccountForm((current) => ({
-                      ...current,
-                      smsOptIn: !current.smsOptIn,
-                    }))
-                  }
-                  style={styles.settingsRowButton}
-                >
-                  <Text style={styles.settingsRowTitle}>
-                    {accountForm.smsOptIn ? 'SMS updates enabled' : 'SMS updates disabled'}
-                  </Text>
-                  <Text style={styles.settingsRowMeta}>
-                    Receive transactional listing and provider updates by SMS. Reply STOP to opt out.
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={handleSaveAccountSettings}
-                  style={[styles.button, styles.buttonPrimary]}
-                  disabled={busy}
-                >
-                  <Text style={styles.buttonText}>Save account settings</Text>
-                </Pressable>
               </View>
               <View style={styles.settingsSection}>
                 <Text style={styles.settingsSectionLabel}>App Info & Legal</Text>
@@ -1983,48 +1752,32 @@ export function RootScreen() {
 
             <View style={styles.authModeCard}>
               <Text style={styles.authModeTitle}>
-                {authMode === 'login'
-                  ? 'Sign in to continue'
-                  : authMode === 'verify_email'
-                    ? 'Verify your email code'
-                    : authMode === 'forgot_verify'
-                      ? 'Verify your reset code'
-                      : authMode === 'forgot_reset'
-                        ? 'Set a new password'
-                        : 'Reset your password'}
+                {authMode === 'login' ? 'Sign in to continue' : 'Verify your email code'}
               </Text>
               <Text style={styles.authModeCopy}>
                 {authMode === 'login'
                   ? 'Use your Workside password to sign in.'
-                  : authMode === 'verify_email'
-                    ? 'Enter the code from your email to finish secure access on mobile.'
-                    : authMode === 'forgot_verify'
-                      ? 'Enter the password reset code from your email.'
-                      : authMode === 'forgot_reset'
-                        ? 'Choose and confirm a new password for this account.'
-                        : 'Enter your account email and we will send a password reset code.'}
+                  : 'Enter the code from your email to finish secure access on mobile.'}
               </Text>
             </View>
 
-            {authMode !== 'forgot_reset' ? (
-              <TextInput
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="email-address"
-                placeholder="Email address"
-                placeholderTextColor="#7d8a8f"
-                style={styles.input}
-                value={form.email}
-                onChangeText={(value) => updateField('email', value)}
-              />
-            ) : null}
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              placeholder="Email address"
+              placeholderTextColor="#7d8a8f"
+              style={styles.input}
+              value={form.email}
+              onChangeText={(value) => updateField('email', value)}
+            />
 
-            {authMode === 'login' || authMode === 'forgot_reset' ? (
+            {authMode === 'login' ? (
               <View style={styles.passwordWrap}>
                 <TextInput
                   autoCapitalize="none"
                   autoCorrect={false}
-                  placeholder={authMode === 'forgot_reset' ? 'New password' : 'Password'}
+                  placeholder="Password"
                   placeholderTextColor="#7d8a8f"
                   secureTextEntry={!showPassword}
                   style={[styles.input, styles.passwordInput]}
@@ -2035,58 +1788,25 @@ export function RootScreen() {
                   <Text style={styles.eyeButtonText}>{showPassword ? 'Hide' : 'Show'}</Text>
                 </Pressable>
               </View>
-            ) : authMode === 'verify_email' || authMode === 'forgot_verify' ? (
+            ) : (
               <TextInput
                 autoCapitalize="characters"
                 autoCorrect={false}
-                placeholder={authMode === 'forgot_verify' ? 'Reset code' : 'OTP code'}
+                placeholder="OTP code"
                 placeholderTextColor="#7d8a8f"
                 style={styles.input}
                 value={form.otpCode}
                 onChangeText={(value) => updateField('otpCode', value)}
               />
-            ) : null}
-
-            {authMode === 'forgot_reset' ? (
-              <TextInput
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="Confirm new password"
-                placeholderTextColor="#7d8a8f"
-                secureTextEntry={!showPassword}
-                style={styles.input}
-                value={form.confirmPassword}
-                onChangeText={(value) => updateField('confirmPassword', value)}
-              />
-            ) : null}
+            )}
 
             <Pressable
-              onPress={
-                authMode === 'login'
-                  ? handleLogin
-                  : authMode === 'verify_email'
-                    ? handleVerifyOtp
-                    : authMode === 'forgot_request'
-                      ? handleForgotPasswordSendCode
-                      : authMode === 'forgot_verify'
-                        ? handleVerifyForgotPasswordCode
-                        : handleResetForgottenPassword
-              }
+              onPress={authMode === 'login' ? handleLogin : handleVerifyOtp}
               style={[styles.button, busy ? styles.buttonDisabled : styles.buttonPrimary]}
               disabled={busy}
             >
               <Text style={styles.buttonText}>
-                {busy
-                  ? 'Working...'
-                  : authMode === 'login'
-                    ? 'Log in to workspace'
-                    : authMode === 'verify_email'
-                      ? 'Verify email code'
-                      : authMode === 'forgot_request'
-                        ? 'Send reset code'
-                        : authMode === 'forgot_verify'
-                          ? 'Verify reset code'
-                          : 'Set new password'}
+                {busy ? 'Working...' : authMode === 'login' ? 'Log in to workspace' : 'Verify email code'}
               </Text>
             </Pressable>
 
@@ -2094,23 +1814,6 @@ export function RootScreen() {
               {authMode === 'login' ? (
                 <Pressable onPress={handleForgotPasswordSendCode} disabled={busy}>
                   <Text style={styles.inlineLink}>Forget password? Send code.</Text>
-                </Pressable>
-              ) : authMode === 'forgot_request' ? (
-                <Pressable onPress={() => handleSwitchAuthMode('login')} disabled={busy}>
-                  <Text style={styles.inlineLink}>Back to password login</Text>
-                </Pressable>
-              ) : authMode === 'forgot_verify' ? (
-                <>
-                  <Pressable onPress={handleForgotPasswordSendCode} disabled={busy}>
-                    <Text style={styles.inlineLink}>Resend reset code</Text>
-                  </Pressable>
-                  <Pressable onPress={() => handleSwitchAuthMode('login')} disabled={busy}>
-                    <Text style={styles.inlineLink}>Back to password login</Text>
-                  </Pressable>
-                </>
-              ) : authMode === 'forgot_reset' ? (
-                <Pressable onPress={() => handleSwitchAuthMode('login')} disabled={busy}>
-                  <Text style={styles.inlineLink}>Back to password login</Text>
                 </Pressable>
               ) : (
                 <>
