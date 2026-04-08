@@ -29,7 +29,7 @@ const imageJobSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['queued', 'processing', 'completed', 'failed'],
+      enum: ['queued', 'processing', 'completed', 'failed', 'needs_user_action'],
       default: 'processing',
     },
     provider: { type: String, default: 'local_sharp' },
@@ -59,6 +59,19 @@ const imageJobSchema = new mongoose.Schema(
     },
     message: { type: String, default: '' },
     warning: { type: String, default: '' },
+    attemptCount: { type: Number, default: 0 },
+    maxAttempts: { type: Number, default: 1 },
+    currentStage: {
+      type: String,
+      enum: ['initial', 'conservative_retry', 'split_retry', 'fallback', 'guided_selection', 'completed'],
+      default: 'initial',
+    },
+    fallbackMode: {
+      type: String,
+      enum: ['declutter_lite', 'visual_cleanup', 'guided_selection', 'partial_success', null],
+      default: null,
+    },
+    failureReason: { type: String, default: '' },
   },
   {
     timestamps: true,

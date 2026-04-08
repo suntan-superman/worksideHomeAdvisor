@@ -56,6 +56,7 @@ const imageJobRequestSchema = z.object({
   mode: z.enum(['preset', 'freeform']).optional(),
   instructions: z.string().trim().max(600).optional(),
   forceRegenerate: z.boolean().optional(),
+  maskUrl: z.string().url().optional(),
 }).superRefine((value, context) => {
   const requestedPresetKey = value.presetKey || value.jobType || 'enhance_listing_quality';
   if (value.mode !== 'freeform' && !getVisionPresetKeys().includes(requestedPresetKey)) {
@@ -83,13 +84,23 @@ const mediaCreateSchema = photoAnalysisSchema.extend({
 });
 
 const photoEnhanceSchema = z.object({
-  assetId: z.string().min(1),
+  assetId: z.string().min(1).optional(),
+  propertyPhotoId: z.string().min(1).optional(),
   presetKey: z.string().optional(),
   jobType: z.string().optional(),
   roomType: z.string().max(80).optional(),
   mode: z.enum(['preset', 'freeform']).optional(),
   instructions: z.string().trim().max(600).optional(),
   forceRegenerate: z.boolean().optional(),
+  maskUrl: z.string().url().optional(),
+}).superRefine((value, context) => {
+  if (!value.assetId && !value.propertyPhotoId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'assetId or propertyPhotoId is required.',
+      path: ['assetId'],
+    });
+  }
 });
 
 export async function mediaRoutes(fastify) {
@@ -196,6 +207,7 @@ export async function mediaRoutes(fastify) {
         mode: payload.mode,
         instructions: payload.instructions,
         forceRegenerate: payload.forceRegenerate,
+        maskUrl: payload.maskUrl,
       });
       return reply.code(201).send(result);
     } catch (error) {
@@ -221,6 +233,7 @@ export async function mediaRoutes(fastify) {
         mode: payload.mode,
         instructions: payload.instructions,
         forceRegenerate: payload.forceRegenerate,
+        maskUrl: payload.maskUrl,
       });
       return reply.code(201).send(result);
     } catch (error) {
@@ -232,19 +245,21 @@ export async function mediaRoutes(fastify) {
   fastify.post('/photos/enhance', async (request, reply) => {
     try {
       const payload = photoEnhanceSchema.parse(request.body ?? {});
-      const asset = await getMediaAssetById(payload.assetId);
+      const resolvedAssetId = payload.assetId || payload.propertyPhotoId;
+      const asset = await getMediaAssetById(resolvedAssetId);
       if (!asset) {
         return reply.code(404).send({ message: 'Media asset not found.' });
       }
       await assertPropertyEditableById(asset.propertyId);
       const result = await createImageEnhancementJob({
-        assetId: payload.assetId,
+        assetId: resolvedAssetId,
         jobType: payload.jobType,
         presetKey: payload.presetKey,
         roomType: payload.roomType,
         mode: payload.mode,
         instructions: payload.instructions,
         forceRegenerate: payload.forceRegenerate,
+        maskUrl: payload.maskUrl,
       });
       return reply.code(201).send(result);
     } catch (error) {

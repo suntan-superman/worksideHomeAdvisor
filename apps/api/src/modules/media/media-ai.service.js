@@ -53,6 +53,11 @@ function serializeImageJob(document, variants = []) {
       document.selectedVariantId?.toString?.() || document.selectedVariantId || null,
     message: document.message || '',
     warning: document.warning || '',
+    attemptCount: Number(document.attemptCount || 0),
+    maxAttempts: Number(document.maxAttempts || 1),
+    currentStage: document.currentStage || 'initial',
+    fallbackMode: document.fallbackMode || null,
+    failureReason: document.failureReason || '',
     outputUrls: variants.map((variant) => variant.imageUrl).filter(Boolean),
     variants,
     createdAt: document.createdAt,
@@ -1799,6 +1804,158 @@ async function buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType) {
     .toBuffer();
 }
 
+async function extractMaskRegions(maskBuffer, options = {}) {
+  const metadata = await sharp(maskBuffer).metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const raw = await sharp(maskBuffer)
+    .resize(width, height, { fit: 'fill' })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+  const binary = new Uint8Array(width * height);
+  let whitePixels = 0;
+  for (let i = 0; i < binary.length; i += 1) {
+    const value = raw[i * 3];
+    if (value > 32) {
+      binary[i] = 1;
+      whitePixels += 1;
+    }
+  }
+  const visited = new Uint8Array(binary.length);
+  const minRegionArea = Math.max(120, Math.round(width * height * (options.minAreaRatio || 0.003)));
+  const regions = [];
+  const directions = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const start = y * width + x;
+      if (!binary[start] || visited[start]) {
+        continue;
+      }
+      const queue = [start];
+      visited[start] = 1;
+      let area = 0;
+      let minX = x;
+      let maxX = x;
+      let minY = y;
+      let maxY = y;
+      while (queue.length) {
+        const index = queue.pop();
+        const cx = index % width;
+        const cy = Math.floor(index / width);
+        area += 1;
+        if (cx < minX) {
+          minX = cx;
+        }
+        if (cx > maxX) {
+          maxX = cx;
+        }
+        if (cy < minY) {
+          minY = cy;
+        }
+        if (cy > maxY) {
+          maxY = cy;
+        }
+        for (const [dx, dy] of directions) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+            continue;
+          }
+          const next = ny * width + nx;
+          if (!binary[next] || visited[next]) {
+            continue;
+          }
+          visited[next] = 1;
+          queue.push(next);
+        }
+      }
+      if (area < minRegionArea) {
+        continue;
+      }
+      regions.push({
+        x: minX,
+        y: minY,
+        width: maxX - minX + 1,
+        height: maxY - minY + 1,
+        area,
+      });
+    }
+  }
+
+  const overlapThreshold = 0.35;
+  const merged = [];
+  for (const region of regions.sort((left, right) => right.area - left.area)) {
+    let mergedIntoExisting = false;
+    for (const current of merged) {
+      const intersectionX1 = Math.max(region.x, current.x);
+      const intersectionY1 = Math.max(region.y, current.y);
+      const intersectionX2 = Math.min(region.x + region.width, current.x + current.width);
+      const intersectionY2 = Math.min(region.y + region.height, current.y + current.height);
+      const intersectionWidth = Math.max(0, intersectionX2 - intersectionX1);
+      const intersectionHeight = Math.max(0, intersectionY2 - intersectionY1);
+      const intersectionArea = intersectionWidth * intersectionHeight;
+      const minArea = Math.min(region.area, current.area);
+      if (minArea > 0 && intersectionArea / minArea >= overlapThreshold) {
+        const unionLeft = Math.min(region.x, current.x);
+        const unionTop = Math.min(region.y, current.y);
+        const unionRight = Math.max(region.x + region.width, current.x + current.width);
+        const unionBottom = Math.max(region.y + region.height, current.y + current.height);
+        current.x = unionLeft;
+        current.y = unionTop;
+        current.width = unionRight - unionLeft;
+        current.height = unionBottom - unionTop;
+        current.area = Math.max(current.area, region.area) + intersectionArea;
+        mergedIntoExisting = true;
+        break;
+      }
+    }
+    if (!mergedIntoExisting) {
+      merged.push({ ...region });
+    }
+  }
+
+  return {
+    width,
+    height,
+    coverageRatio: Number((whitePixels / Math.max(1, width * height)).toFixed(4)),
+    regions: merged.sort((left, right) => right.area - left.area),
+  };
+}
+
+async function buildMaskBufferFromRegion(maskWidth, maskHeight, region) {
+  const svg = `
+    <svg width="${maskWidth}" height="${maskHeight}" viewBox="0 0 ${maskWidth} ${maskHeight}" xmlns="http://www.w3.org/2000/svg">
+      <rect width="${maskWidth}" height="${maskHeight}" fill="black" />
+      <rect x="${region.x}" y="${region.y}" width="${region.width}" height="${region.height}" rx="${Math.round(Math.min(maskWidth, maskHeight) * 0.02)}" ry="${Math.round(Math.min(maskWidth, maskHeight) * 0.02)}" fill="white" />
+    </svg>
+  `;
+  return sharp(Buffer.from(svg))
+    .resize(maskWidth, maskHeight, { fit: 'fill' })
+    .blur(0.8)
+    .png()
+    .toBuffer();
+}
+
+function expandMaskRegion(region, imageWidth, imageHeight, padding) {
+  const x = Math.max(0, region.x - padding);
+  const y = Math.max(0, region.y - padding);
+  const right = Math.min(imageWidth, region.x + region.width + padding);
+  const bottom = Math.min(imageHeight, region.y + region.height + padding);
+  return {
+    x,
+    y,
+    width: Math.max(1, right - x),
+    height: Math.max(1, bottom - y),
+    area: Math.max(1, (right - x) * (bottom - y)),
+  };
+}
+
 function buildVisionInputHash({ assetId, presetKey, roomType, promptVersion }) {
   return createHash('sha256')
     .update(
@@ -1888,6 +2045,7 @@ export async function createImageEnhancementJob({
   mode = 'preset',
   instructions = '',
   forceRegenerate = false,
+  maskUrl = '',
 }) {
   if (mongoose.connection.readyState !== 1) {
     throw new Error('Database connection is required to generate image variants.');
@@ -1979,7 +2137,13 @@ export async function createImageEnhancementJob({
       instructions: normalizedInstructions,
       normalizedPlan,
       forceRegenerate,
+      maskUrl: String(maskUrl || ''),
     },
+    attemptCount: 0,
+    maxAttempts: preset.key === 'remove_furniture' ? 4 : 1,
+    currentStage: 'initial',
+    fallbackMode: null,
+    failureReason: '',
   });
 
   try {
@@ -2021,18 +2185,83 @@ export async function createImageEnhancementJob({
         preset.key,
         resolvedRoomType,
       );
-      const providerOutputs = await runReplicateInpainting({
+      const attemptLog = [];
+      let maskRegionAnalysis = null;
+      let splitMaskBuffers = [];
+      if (preset.key === 'remove_furniture') {
+        maskRegionAnalysis = await extractMaskRegions(maskBuffer, { minAreaRatio: 0.0028 });
+        const padding = Math.max(
+          8,
+          Math.min(20, Math.round(Math.min(maskRegionAnalysis.width, maskRegionAnalysis.height) * 0.03)),
+        );
+        splitMaskBuffers = await Promise.all(
+          maskRegionAnalysis.regions
+            .slice(0, 3)
+            .map((region) =>
+              buildMaskBufferFromRegion(
+                maskRegionAnalysis.width,
+                maskRegionAnalysis.height,
+                expandMaskRegion(
+                  region,
+                  maskRegionAnalysis.width,
+                  maskRegionAnalysis.height,
+                  padding,
+                ),
+              ),
+            ),
+        );
+        if (maskRegionAnalysis.coverageRatio > 0.45) {
+          job.status = 'needs_user_action';
+          job.currentStage = 'guided_selection';
+          job.fallbackMode = 'guided_selection';
+          job.failureReason = 'mask_too_broad';
+          job.attemptCount = 0;
+          job.input = {
+            ...(job.input || {}),
+            attemptLog,
+            maskRegionAnalysis,
+          };
+          job.message =
+            'This room is complex for full furniture removal. Try selecting individual objects for better results.';
+          await job.save();
+          return {
+            cached: false,
+            preset,
+            job: serializeImageJob(job.toObject(), []),
+            variants: [],
+            variant: null,
+          };
+        }
+      }
+      let activeMaskBuffer = maskBuffer;
+      let providerOutputs = await runReplicateInpainting({
         image: stored.buffer,
-        mask: maskBuffer,
+        mask: activeMaskBuffer,
         model: preset.replicateModel,
         prompt: fullPrompt,
-        strength: preset.strength,
+        strength: preset.key === 'remove_furniture' ? 0.42 : preset.strength,
         outputCount: preset.outputCount || 2,
-        guidanceScale: preset.guidanceScale,
+        guidanceScale:
+          preset.key === 'remove_furniture'
+            ? Math.max(10, Number(preset.guidanceScale || 9))
+            : preset.guidanceScale,
         numInferenceSteps: preset.numInferenceSteps,
         scheduler: preset.scheduler,
         negativePrompt: preset.negativePrompt,
         seed: Math.floor(Math.random() * 1_000_000_000),
+      });
+      job.attemptCount = 1;
+      job.currentStage = 'initial';
+      attemptLog.push({
+        attempt: 1,
+        stage: 'initial',
+        maskType: 'full_mask',
+        strength: preset.key === 'remove_furniture' ? 0.42 : preset.strength,
+        guidanceScale:
+          preset.key === 'remove_furniture'
+            ? Math.max(10, Number(preset.guidanceScale || 9))
+            : preset.guidanceScale,
+        outputCount: providerOutputs.length,
       });
       createdVariants = [];
       const rejectedCandidates = [];
@@ -2048,15 +2277,20 @@ export async function createImageEnhancementJob({
           const maxRefinementPasses = focusRegionChangeRatio < 0.3 ? 2 : 1;
           let refinementPass = 0;
           while (refinementPass < maxRefinementPasses && focusRegionChangeRatio < 0.34) {
+            const attemptNumber = Math.min(4, job.attemptCount + 1);
+            const useSplitMask = refinementPass > 0 && splitMaskBuffers.length > 0;
+            const stage =
+              refinementPass === 0 ? 'conservative_retry' : 'split_retry';
+            activeMaskBuffer = useSplitMask ? splitMaskBuffers[0] : maskBuffer;
             const refinementOutputs = await runReplicateInpainting({
               image: buffer,
-              mask: maskBuffer,
+              mask: activeMaskBuffer,
               model: preset.replicateModel,
               prompt: `${fullPrompt} Continue removing remaining movable furniture from the masked area, especially sofas, chairs, tables, and rugs. Keep walls, windows, doors, trim, and structure unchanged. Do not add new decor or fixtures.`,
-              strength: Math.min(0.995, Number((preset.strength || 0.9) + 0.06)),
+              strength: refinementPass === 0 ? 0.32 : 0.28,
               outputCount: 1,
-              guidanceScale: (preset.guidanceScale || 9) + 0.8,
-              numInferenceSteps: (preset.numInferenceSteps || 40) + 8,
+              guidanceScale: (preset.guidanceScale || 9) + (refinementPass === 0 ? 1.3 : 1.8),
+              numInferenceSteps: (preset.numInferenceSteps || 40) + (refinementPass === 0 ? 8 : 10),
               scheduler: preset.scheduler,
               negativePrompt: preset.negativePrompt,
               seed: Math.floor(Math.random() * 1_000_000_000),
@@ -2070,6 +2304,17 @@ export async function createImageEnhancementJob({
             visualChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer);
             focusRegionChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer, {
               region: evaluationRegions.focusRegion,
+            });
+            job.attemptCount = attemptNumber;
+            job.currentStage = stage;
+            attemptLog.push({
+              attempt: attemptNumber,
+              stage,
+              maskType: useSplitMask ? 'split_region_0' : 'full_mask',
+              strength: refinementPass === 0 ? 0.32 : 0.28,
+              guidanceScale: (preset.guidanceScale || 9) + (refinementPass === 0 ? 1.3 : 1.8),
+              outputCount: 1,
+              focusRegionChangeRatio,
             });
             refinementPass += 1;
           }
@@ -2151,6 +2396,7 @@ export async function createImageEnhancementJob({
             focusRegionChangeRatio,
             topHalfChangeRatio,
             structureHistogramDrift,
+            rejectReason: qualityWarning,
             roomPromptAddon,
             presetPromptAddon,
           });
@@ -2219,12 +2465,169 @@ export async function createImageEnhancementJob({
       }
 
       if (!createdVariants.length) {
-        if (preset.key === 'remove_furniture') {
-          throw new Error(
-            'Generated variants failed quality safeguards. The model introduced scene replacement instead of furniture removal. Please retry with a straighter room angle or fewer overlapping furniture pieces.',
-          );
-        }
-        if (rejectedCandidates.length) {
+        if (preset.key === 'remove_furniture' && rejectedCandidates.length) {
+          const conservativeCandidate = [...rejectedCandidates]
+            .filter(
+              (candidate) =>
+                candidate.topHalfChangeRatio <= 0.13 &&
+                candidate.structureHistogramDrift <= 0.48,
+            )
+            .sort((left, right) => {
+              if (left.structureHistogramDrift !== right.structureHistogramDrift) {
+                return left.structureHistogramDrift - right.structureHistogramDrift;
+              }
+              if (left.topHalfChangeRatio !== right.topHalfChangeRatio) {
+                return left.topHalfChangeRatio - right.topHalfChangeRatio;
+              }
+              return right.focusRegionChangeRatio - left.focusRegionChangeRatio;
+            })[0];
+
+          if (conservativeCandidate) {
+            const saved = await saveBinaryBuffer({
+              propertyId: asset.propertyId.toString(),
+              mimeType: 'image/jpeg',
+              buffer: conservativeCandidate.buffer,
+            });
+
+            const conservativeVariant = await MediaVariantModel.create({
+              visionJobId: job._id,
+              mediaId: asset._id,
+              propertyId: asset.propertyId,
+              variantType: preset.key,
+              variantCategory: preset.category,
+              label: `${renderPlan.label} Partial Success`,
+              mimeType: 'image/jpeg',
+              storageProvider: saved.storageProvider,
+              storageKey: saved.storageKey,
+              byteSize: saved.byteSize,
+              isSelected: false,
+              ...buildVariantLifecycleFields({ isSelected: false }),
+              useInBrochure: false,
+              useInReport: false,
+              metadata: {
+                warning:
+                  'We safely improved part of the room. Additional objects may need separate edits.',
+                summary: renderPlan.summary,
+                differenceHint:
+                  'This fallback preserves room identity but may leave some furniture in place.',
+                effects: [...(renderPlan.effects || []), 'Partial success fallback'],
+                sourceAssetId: asset._id.toString(),
+                roomLabel: asset.roomLabel,
+                roomType: resolvedRoomType,
+                provider: 'replicate',
+                presetKey: preset.key,
+                promptVersion: preset.promptVersion,
+                helperText: preset.helperText,
+                recommendedUse: preset.recommendedUse,
+                upgradeTier: preset.upgradeTier,
+                category: preset.category,
+                disclaimerType: preset.disclaimerType,
+                roomPromptAddon: conservativeCandidate.roomPromptAddon,
+                presetPromptAddon: conservativeCandidate.presetPromptAddon,
+                mode: requestedMode,
+                instructions: normalizedInstructions,
+                normalizedPlan,
+                maskStrategy: 'shape_plus_component_aware_furniture_segmentation',
+                fallbackMode: 'partial_success',
+                providerSourceUrl: getProviderSourceUrl(conservativeCandidate.output),
+                review: {
+                  ...conservativeCandidate.review,
+                  overallScore: Math.max(0, conservativeCandidate.overallScore - 8),
+                  visualChangeRatio: conservativeCandidate.visualChangeRatio,
+                  focusRegionChangeRatio: conservativeCandidate.focusRegionChangeRatio,
+                  topHalfChangeRatio: conservativeCandidate.topHalfChangeRatio,
+                  structureHistogramDrift: conservativeCandidate.structureHistogramDrift,
+                  conservativeFallbackApplied: true,
+                },
+              },
+            });
+
+            createdVariants.push(serializeMediaVariant(conservativeVariant.toObject()));
+            job.fallbackMode = 'partial_success';
+            job.currentStage = 'fallback';
+          } else {
+            const sawSceneReplacement =
+              rejectedCandidates.some((candidate) =>
+                String(candidate?.rejectReason || '').toLowerCase().includes('scene-identity drift'),
+              ) || rejectedCandidates.some((candidate) => candidate.structureHistogramDrift > 0.5);
+
+            if (sawSceneReplacement) {
+              const cleanupPlan = buildPresetRenderPlan('combined_listing_refresh');
+              const cleanupRendered = await renderVariantBuffer(
+                stored.buffer,
+                'combined_listing_refresh',
+                resolvedRoomType,
+              );
+              const saved = await saveBinaryBuffer({
+                propertyId: asset.propertyId.toString(),
+                mimeType: 'image/jpeg',
+                buffer: cleanupRendered.buffer,
+              });
+              const fallbackVariant = await MediaVariantModel.create({
+                visionJobId: job._id,
+                mediaId: asset._id,
+                propertyId: asset.propertyId,
+                variantType: preset.key,
+                variantCategory: preset.category,
+                label: 'Declutter Lite Fallback',
+                mimeType: 'image/jpeg',
+                storageProvider: saved.storageProvider,
+                storageKey: saved.storageKey,
+                byteSize: saved.byteSize,
+                isSelected: false,
+                ...buildVariantLifecycleFields({ isSelected: false }),
+                useInBrochure: false,
+                useInReport: false,
+                metadata: {
+                  warning:
+                    'Full furniture removal was not reliable for this photo. We applied a lighter declutter enhancement instead.',
+                  summary: cleanupPlan.summary,
+                  differenceHint: cleanupPlan.differenceHint,
+                  effects: [...(cleanupPlan.effects || []), 'Declutter lite fallback'],
+                  sourceAssetId: asset._id.toString(),
+                  roomLabel: asset.roomLabel,
+                  roomType: resolvedRoomType,
+                  provider: 'local_sharp',
+                  presetKey: 'combined_listing_refresh',
+                  promptVersion: resolveVisionPreset('combined_listing_refresh').promptVersion,
+                  helperText: resolveVisionPreset('combined_listing_refresh').helperText,
+                  recommendedUse: resolveVisionPreset('combined_listing_refresh').recommendedUse,
+                  upgradeTier: resolveVisionPreset('combined_listing_refresh').upgradeTier,
+                  category: preset.category,
+                  disclaimerType: preset.disclaimerType,
+                  mode: requestedMode,
+                  instructions: normalizedInstructions,
+                  normalizedPlan,
+                  fallbackMode: 'declutter_lite',
+                },
+              });
+              createdVariants.push(serializeMediaVariant(fallbackVariant.toObject()));
+              job.fallbackMode = 'declutter_lite';
+              job.currentStage = 'fallback';
+            } else {
+              job.status = 'needs_user_action';
+              job.currentStage = 'guided_selection';
+              job.fallbackMode = 'guided_selection';
+              job.failureReason = 'structural_drift';
+              job.message =
+                'This room is complex for full furniture removal. Try selecting individual items for better results.';
+              job.warning = 'Broad structural drift detected during furniture-removal attempts.';
+              job.input = {
+                ...(job.input || {}),
+                attemptLog,
+                maskRegionAnalysis,
+              };
+              await job.save();
+              return {
+                cached: false,
+                preset,
+                job: serializeImageJob(job.toObject(), []),
+                variants: [],
+                variant: null,
+              };
+            }
+          }
+        } else if (rejectedCandidates.length) {
           const fallbackCandidate = [...rejectedCandidates]
             .sort((left, right) => {
               if (preset.key === 'remove_furniture') {
@@ -2305,6 +2708,11 @@ export async function createImageEnhancementJob({
           );
         }
       }
+      job.input = {
+        ...(job.input || {}),
+        attemptLog,
+        maskRegionAnalysis,
+      };
     } else {
       const rendered = await renderVariantBuffer(stored.buffer, preset.key, resolvedRoomType);
       const review = await reviewVisionVariant({
@@ -2371,14 +2779,34 @@ export async function createImageEnhancementJob({
 
     createdVariants = sortVisionVariants(createdVariants);
     job.status = 'completed';
+    if (!job.attemptCount) {
+      job.attemptCount = 1;
+    }
+    job.currentStage = job.fallbackMode ? 'fallback' : 'completed';
     const usedFallbackVariant = createdVariants.some(
-      (variant) => Boolean(variant?.metadata?.review?.fallbackApplied),
+      (variant) =>
+        Boolean(
+          variant?.metadata?.review?.fallbackApplied ||
+            variant?.metadata?.review?.conservativeFallbackApplied ||
+            variant?.metadata?.fallbackMode,
+        ),
     );
     job.outputVariantIds = createdVariants.map((variant) => variant.id);
     job.selectedVariantId = createdVariants[0]?.id || null;
-    job.warning = usedFallbackVariant
-      ? 'Low-confidence fallback returned. Most generated variants were rejected for structural drift.'
-      : renderPlan.warning;
+    if (usedFallbackVariant) {
+      if (job.fallbackMode === 'declutter_lite') {
+        job.warning =
+          'Full furniture removal was not reliable for this room. A lighter declutter enhancement was applied.';
+      } else if (job.fallbackMode === 'partial_success') {
+        job.warning =
+          'Partial success fallback returned. Additional objects may need separate edits.';
+      } else {
+        job.warning =
+          'Fallback variant returned. Strict furniture-removal or drift safeguards rejected most candidates.';
+      }
+    } else {
+      job.warning = renderPlan.warning;
+    }
     job.message =
       requestedMode === 'freeform'
         ? 'Custom enhancement request saved and processed.'
@@ -2394,8 +2822,10 @@ export async function createImageEnhancementJob({
     };
   } catch (error) {
     job.status = 'failed';
+    job.currentStage = job.currentStage || 'initial';
     job.message = 'Image variant generation failed.';
     job.warning = error.message;
+    job.failureReason = error.message;
     await job.save();
     throw error;
   }
