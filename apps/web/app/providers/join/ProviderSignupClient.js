@@ -224,6 +224,45 @@ function getExistingEmailConflictMessage(message) {
   return '';
 }
 
+function buildProviderAuthHref({ mode = 'login', email = '' } = {}) {
+  const search = new URLSearchParams({ role: 'provider' });
+
+  if (mode && mode !== 'login') {
+    search.set('mode', mode);
+  }
+
+  if (isValidEmail(email)) {
+    search.set('email', email.trim());
+  }
+
+  return `/auth?${search.toString()}`;
+}
+
+function resolveProviderAccountEmail({
+  formEmail = '',
+  pendingVerificationEmail = '',
+  createdProviderEmail = '',
+  appSessionEmail = '',
+} = {}) {
+  if (isValidEmail(formEmail)) {
+    return formEmail.trim();
+  }
+
+  if (isValidEmail(pendingVerificationEmail)) {
+    return pendingVerificationEmail.trim();
+  }
+
+  if (isValidEmail(createdProviderEmail)) {
+    return createdProviderEmail.trim();
+  }
+
+  if (isValidEmail(appSessionEmail)) {
+    return appSessionEmail.trim();
+  }
+
+  return '';
+}
+
 function buildProviderGuideSteps(stepIndex, signedInProvider = false) {
   const stepDescriptions = [
     {
@@ -494,6 +533,12 @@ export function ProviderSignupClient({
   const providerPlanDetails = Object.fromEntries(
     providerPlans.map((plan) => [plan.planKey, plan]),
   );
+  const providerAccountEmail = resolveProviderAccountEmail({
+    formEmail: form.email,
+    pendingVerificationEmail,
+    createdProviderEmail: createdProvider?.email || '',
+    appSessionEmail: appSession?.user?.email || '',
+  });
 
   function updateField(field, value) {
     if (existingEmailConflict && ['email', 'firstName', 'lastName', 'businessName'].includes(field)) {
@@ -860,17 +905,31 @@ export function ProviderSignupClient({
             </ul>
             <div className="button-stack">
               {pendingVerificationEmail ? (
-                <Link
-                  className="button-primary"
-                  href={`/auth?mode=verify&email=${encodeURIComponent(pendingVerificationEmail)}`}
-                >
-                  Verify and log in
-                </Link>
+                <>
+                  <Link
+                    className="button-primary"
+                    href={buildProviderAuthHref({ mode: 'verify', email: pendingVerificationEmail })}
+                  >
+                    Verify provider account
+                  </Link>
+                  <Link
+                    className="button-secondary"
+                    href={buildProviderAuthHref({ mode: 'forgot_request', email: pendingVerificationEmail })}
+                  >
+                    Reset password
+                  </Link>
+                </>
               ) : (
                 <a className="button-primary" href={`mailto:${BRANDING.supportEmail}`}>
                   Contact support
                 </a>
               )}
+              <Link
+                className="button-secondary"
+                href={buildProviderAuthHref({ mode: 'login', email: providerAccountEmail })}
+              >
+                Provider login
+              </Link>
               <Link className="button-secondary" href="/">
                 Back to homepage
               </Link>
@@ -898,8 +957,17 @@ export function ProviderSignupClient({
               a provider account instead.
             </p>
             <div className="button-stack">
-              <Link className="button-primary" href="/auth">
-                Open account login
+              <Link
+                className="button-primary"
+                href={buildProviderAuthHref({ mode: 'login', email: appSession?.user?.email || '' })}
+              >
+                Open provider login
+              </Link>
+              <Link
+                className="button-secondary"
+                href={buildProviderAuthHref({ mode: 'forgot_request', email: appSession?.user?.email || '' })}
+              >
+                Reset provider password
               </Link>
               <Link className="button-secondary" href="/dashboard">
                 Return to workspace
@@ -944,10 +1012,24 @@ export function ProviderSignupClient({
                 attempt and start over later.
               </p>
               <div className="button-stack">
+                <Link
+                  type="button"
+                  className="button-primary"
+                  href={buildProviderAuthHref({ mode: 'login', email: providerAccountEmail })}
+                >
+                  Log in as provider
+                </Link>
+                <Link
+                  type="button"
+                  className="button-secondary"
+                  href={buildProviderAuthHref({ mode: 'forgot_request', email: providerAccountEmail })}
+                >
+                  Reset password
+                </Link>
                 <button type="button" className="button-secondary" onClick={handleReturnToStepOne}>
                   Back to step 1
                 </button>
-                <button type="button" className="button-primary" onClick={handleCancelSignup}>
+                <button type="button" className="button-secondary" onClick={handleCancelSignup}>
                   Cancel signup
                 </button>
               </div>
@@ -956,6 +1038,35 @@ export function ProviderSignupClient({
 
           {stepIndex === 0 ? (
             <>
+              {!signedInProvider ? (
+                <div className="signup-decision-card">
+                  <strong>Already have a provider account?</strong>
+                  <p>
+                    Use the existing provider login if your business is already in Workside, or reset
+                    the password before continuing billing and activation.
+                  </p>
+                  <div className="button-stack">
+                    <Link
+                      className="button-secondary"
+                      href={buildProviderAuthHref({ mode: 'login', email: providerAccountEmail })}
+                    >
+                      Provider login
+                    </Link>
+                    <Link
+                      className="button-secondary"
+                      href={buildProviderAuthHref({ mode: 'forgot_request', email: providerAccountEmail })}
+                    >
+                      Reset provider password
+                    </Link>
+                    <Link
+                      className="button-secondary"
+                      href={buildProviderAuthHref({ mode: 'verify', email: providerAccountEmail })}
+                    >
+                      Verify existing account
+                    </Link>
+                  </div>
+                </div>
+              ) : null}
               {!signedInProvider ? (
                 <div className="split-fields">
                   <label>

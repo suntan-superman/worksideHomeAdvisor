@@ -1,7 +1,17 @@
 import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 
-import { normalizePhoneNumber, notifyQueuedLeadDispatches } from '../marketplace-sms/marketplace-sms.service.js';
+import {
+  syncStripeCheckoutSessionById,
+  syncStripeSubscriptionById,
+} from '../billing/billing.service.js';
+import { BillingWebhookEventModel } from '../billing/billing.model.js';
+import {
+  normalizePhoneNumber,
+  notifyQueuedLeadDispatches,
+  recordProviderLeadResponse,
+  sendSellerProviderPendingSms,
+} from '../marketplace-sms/marketplace-sms.service.js';
 import { env } from '../../config/env.js';
 import { sendAdminProviderProfileChangeAlert } from '../../services/emailService.js';
 import { readStoredAsset, saveProviderDocumentBuffer } from '../../services/storageService.js';
@@ -633,17 +643,61 @@ function hasValidLeadPhone(value) {
   return normalizePhoneNumber(value).length >= 10;
 }
 
+function buildProviderBillingSnapshot(providerDocument = {}) {
+  const subscription = providerDocument.subscription || {};
+  const planCode = subscription.planCode || 'provider_basic';
+  const status = subscription.status || 'inactive';
+  const isPaidPlan = planCode !== 'provider_basic';
+  const isActive = !isPaidPlan || ['active', 'trialing', 'past_due', 'paid'].includes(status);
+  const needsAction = isPaidPlan && !isActive;
+  const needsSync =
+    isPaidPlan &&
+    Boolean(subscription.stripeCheckoutSessionId) &&
+    ['checkout_created', 'open', 'incomplete', 'unpaid'].includes(status);
+
+  let diagnostic = 'Billing still needs attention before this provider can be fully activated.';
+
+  if (!isPaidPlan) {
+    diagnostic = 'Basic plan does not require Stripe billing before marketplace review.';
+  } else if (isActive) {
+    diagnostic = 'Stripe subscription is active and billing is ready for marketplace use.';
+  } else if (status === 'checkout_created') {
+    diagnostic = 'A Stripe checkout session was created, but the subscription has not been confirmed yet.';
+  } else if (['open', 'incomplete', 'unpaid'].includes(status)) {
+    diagnostic = 'Stripe has a pending checkout or subscription record that still needs payment completion or sync confirmation.';
+  } else if (['canceled', 'cancelled', 'incomplete_expired'].includes(status)) {
+    diagnostic = 'Stripe billing is not currently active for this provider account.';
+  }
+
+  return {
+    planCode,
+    status,
+    stripeCustomerId: subscription.stripeCustomerId || '',
+    stripeCheckoutSessionId: subscription.stripeCheckoutSessionId || '',
+    stripeSubscriptionId: subscription.stripeSubscriptionId || '',
+    stripePriceId: subscription.stripePriceId || '',
+    currentPeriodStart: subscription.currentPeriodStart || null,
+    currentPeriodEnd: subscription.currentPeriodEnd || null,
+    cancelAtPeriodEnd: Boolean(subscription.cancelAtPeriodEnd),
+    isPaidPlan,
+    isActive,
+    needsAction,
+    needsSync,
+    diagnostic,
+  };
+}
+
 export function buildProviderActivationChecklist(providerDocument, verificationProfile, categoryDocument = null) {
   const provider = providerDocument || {};
   const serviceArea = provider.serviceArea || {};
   const leadRouting = provider.leadRouting || {};
-  const subscription = provider.subscription || {};
+  const billing = buildProviderBillingSnapshot(provider);
   const compliance = provider.compliance || {};
   const verification = verificationProfile || buildVerificationProfile(provider, categoryDocument);
   const verificationRequirements = verification.requirements || buildVerificationRequirements(categoryDocument);
-  const planCode = subscription.planCode || 'provider_basic';
-  const isPaidPlan = planCode !== 'provider_basic';
-  const billingReady = !isPaidPlan || ['active', 'trialing', 'past_due', 'paid'].includes(subscription.status || '');
+  const planCode = billing.planCode;
+  const isPaidPlan = billing.isPaidPlan;
+  const billingReady = billing.isActive;
   const wantsSms = ['sms', 'sms_and_email'].includes(leadRouting.deliveryMode || 'sms_and_email');
   const wantsEmail = ['email', 'sms_and_email'].includes(leadRouting.deliveryMode || 'sms_and_email');
   const leadPhoneReady = !wantsSms || hasValidLeadPhone(leadRouting.notifyPhone);
@@ -1279,9 +1333,61 @@ function buildLegacyGoogleProviderFallbackItem(place = {}, categoryKey = '', pro
   };
 }
 
+function buildGoogleFallbackSummary({
+  enabled = false,
+  triggered = false,
+  status = 'idle',
+  triggerReason = '',
+  queryUsed = '',
+  searchMode = '',
+  resultCount = 0,
+  attemptCount = 0,
+  locationLabel = '',
+  diagnostic = '',
+} = {}) {
+  return {
+    enabled: Boolean(enabled),
+    triggered: Boolean(triggered),
+    status,
+    triggerReason,
+    queryUsed,
+    searchMode,
+    resultCount: Number(resultCount || 0),
+    attemptCount: Number(attemptCount || 0),
+    locationLabel,
+    diagnostic,
+  };
+}
+
 async function searchGoogleFallbackProviders(property, { categoryKey = '', limit = 5 } = {}) {
-  if (!env.GOOGLE_MAPS_SERVER_API_KEY || !property || !categoryKey) {
-    return { items: [], diagnostic: '' };
+  const locationLabel = buildPropertyLocationQuery(property) || [property?.city, property?.state, property?.zip].filter(Boolean).join(', ');
+
+  if (!env.GOOGLE_MAPS_SERVER_API_KEY) {
+    return {
+      items: [],
+      diagnostic: '',
+      summary: buildGoogleFallbackSummary({
+        enabled: false,
+        triggered: false,
+        status: 'disabled',
+        triggerReason: 'missing_google_maps_key',
+        locationLabel,
+      }),
+    };
+  }
+
+  if (!property || !categoryKey) {
+    return {
+      items: [],
+      diagnostic: '',
+      summary: buildGoogleFallbackSummary({
+        enabled: true,
+        triggered: false,
+        status: 'missing_context',
+        triggerReason: 'missing_property_or_category',
+        locationLabel,
+      }),
+    };
   }
 
   const queryVariants =
@@ -1302,7 +1408,17 @@ async function searchGoogleFallbackProviders(property, { categoryKey = '', limit
     .filter((query, index, allQueries) => allQueries.indexOf(query) === index);
 
   if (!fallbackQueries.length) {
-    return { items: [], diagnostic: '' };
+    return {
+      items: [],
+      diagnostic: '',
+      summary: buildGoogleFallbackSummary({
+        enabled: true,
+        triggered: false,
+        status: 'missing_query',
+        triggerReason: 'no_fallback_queries',
+        locationLabel,
+      }),
+    };
   }
 
   try {
@@ -1324,6 +1440,17 @@ async function searchGoogleFallbackProviders(property, { categoryKey = '', limit
             .slice(0, Math.max(1, Math.min(Number(limit || 5), 5)))
             .map((place) => buildExternalProviderFallbackItem(place, categoryKey, property)),
           diagnostic: '',
+          summary: buildGoogleFallbackSummary({
+            enabled: true,
+            triggered: true,
+            status: 'results',
+            triggerReason: 'requested',
+            queryUsed: textQuery,
+            searchMode: 'places_search_text',
+            resultCount: places.length,
+            attemptCount: fallbackQueries.indexOf(textQuery) + 1,
+            locationLabel,
+          }),
         };
       }
     }
@@ -1343,11 +1470,37 @@ async function searchGoogleFallbackProviders(property, { categoryKey = '', limit
             .slice(0, Math.max(1, Math.min(Number(limit || 5), 5)))
             .map((place) => buildLegacyGoogleProviderFallbackItem(place, categoryKey, property)),
           diagnostic: '',
+          summary: buildGoogleFallbackSummary({
+            enabled: true,
+            triggered: true,
+            status: 'results',
+            triggerReason: 'requested',
+            queryUsed: textQuery,
+            searchMode: 'places_legacy_textsearch',
+            resultCount: places.length,
+            attemptCount: fallbackQueries.indexOf(textQuery) + 1,
+            locationLabel,
+          }),
         };
       }
     }
 
-    return { items: [], diagnostic: latestDiagnostic };
+    return {
+      items: [],
+      diagnostic: latestDiagnostic,
+      summary: buildGoogleFallbackSummary({
+        enabled: true,
+        triggered: true,
+        status: latestDiagnostic ? 'error' : 'no_results',
+        triggerReason: 'requested',
+        queryUsed: fallbackQueries[0] || '',
+        searchMode: latestDiagnostic ? 'fallback_failed' : 'none',
+        resultCount: 0,
+        attemptCount: fallbackQueries.length * 2,
+        locationLabel,
+        diagnostic: latestDiagnostic,
+      }),
+    };
   } catch (error) {
     logError('provider.google_fallback_search_failed', error, {
       categoryKey,
@@ -1356,6 +1509,18 @@ async function searchGoogleFallbackProviders(property, { categoryKey = '', limit
     return {
       items: [],
       diagnostic: 'Google fallback search could not be completed at this time.',
+      summary: buildGoogleFallbackSummary({
+        enabled: true,
+        triggered: true,
+        status: 'error',
+        triggerReason: 'requested',
+        queryUsed: fallbackQueries[0] || '',
+        searchMode: 'exception',
+        resultCount: 0,
+        attemptCount: fallbackQueries.length,
+        locationLabel,
+        diagnostic: 'Google fallback search could not be completed at this time.',
+      }),
     };
   }
 }
@@ -1365,6 +1530,7 @@ function serializeProvider(document, extras = {}) {
   const category = categoryDocument || null;
   const verification = buildVerificationProfile(document, category);
   const activation = buildProviderActivationChecklist(document, verification, category);
+  const billing = buildProviderBillingSnapshot(document);
 
   return {
     id: document._id?.toString?.() || String(document._id),
@@ -1398,8 +1564,22 @@ function serializeProvider(document, extras = {}) {
       preferredContactMethod: document.leadRouting?.preferredContactMethod || 'sms',
     },
     subscription: {
-      planCode: document.subscription?.planCode || 'provider_basic',
-      status: document.subscription?.status || 'inactive',
+      planCode: billing.planCode,
+      status: billing.status,
+      stripeCustomerId: billing.stripeCustomerId,
+      stripeCheckoutSessionId: billing.stripeCheckoutSessionId,
+      stripeSubscriptionId: billing.stripeSubscriptionId,
+      stripePriceId: billing.stripePriceId,
+      currentPeriodStart: billing.currentPeriodStart,
+      currentPeriodEnd: billing.currentPeriodEnd,
+      cancelAtPeriodEnd: billing.cancelAtPeriodEnd,
+    },
+    billing: {
+      isPaidPlan: billing.isPaidPlan,
+      isActive: billing.isActive,
+      needsAction: billing.needsAction,
+      needsSync: billing.needsSync,
+      diagnostic: billing.diagnostic,
     },
     compliance: {
       approvalStatus: document.compliance?.approvalStatus || 'draft',
@@ -1410,6 +1590,11 @@ function serializeProvider(document, extras = {}) {
     },
     verification,
     activation,
+    portalAccess: {
+      issuedAt: document.portalAccess?.issuedAt || null,
+      lastUsedAt: document.portalAccess?.lastUsedAt || null,
+    },
+    onboardingSource: document.onboardingSource || 'admin',
     createdAt: document.createdAt || null,
     updatedAt: document.updatedAt || null,
     ...restExtras,
@@ -1447,7 +1632,40 @@ function serializeProviderReference(document) {
   };
 }
 
-function serializeProviderPortalLead(dispatch, leadRequest) {
+function summarizeLeadActivity(dispatches = [], responses = [], smsLogs = []) {
+  const outboundSms = smsLogs.filter((log) => log.direction === 'outbound').length;
+  const inboundSms = smsLogs.filter((log) => log.direction === 'inbound').length;
+  const statusCallbacks = smsLogs.filter((log) => String(log.messageType || '').startsWith('status_callback')).length;
+  const latestSmsLog = [...smsLogs].sort(
+    (left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime(),
+  )[0];
+  const latestDispatch = [...dispatches].sort((left, right) => {
+    const rightAt = new Date(right.respondedAt || right.smsSentAt || right.sentAt || right.createdAt || 0).getTime();
+    const leftAt = new Date(left.respondedAt || left.smsSentAt || left.sentAt || left.createdAt || 0).getTime();
+    return rightAt - leftAt;
+  })[0];
+  const latestResponse = [...responses].sort(
+    (left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime(),
+  )[0];
+
+  return {
+    outboundSms,
+    inboundSms,
+    statusCallbacks,
+    latestSmsDirection: latestSmsLog?.direction || '',
+    latestSmsDeliveryStatus: latestSmsLog?.deliveryStatus || '',
+    latestSmsParseStatus: latestSmsLog?.parseStatus || '',
+    latestSmsMessageType: latestSmsLog?.messageType || '',
+    latestSmsAt: latestSmsLog?.createdAt || null,
+    latestDispatchStatus: latestDispatch?.status || '',
+    latestResponseStatus: latestDispatch?.responseStatus || latestResponse?.responseStatus || '',
+    latestContactedAt:
+      latestDispatch?.respondedAt || latestDispatch?.smsSentAt || latestDispatch?.sentAt || latestDispatch?.createdAt || null,
+    latestReplyAt: latestResponse?.createdAt || null,
+  };
+}
+
+function serializeProviderPortalLead(dispatch, leadRequest, options = {}) {
   const propertyAddress =
     leadRequest?.propertySnapshot?.address ||
     [leadRequest?.propertySnapshot?.city, leadRequest?.propertySnapshot?.state, leadRequest?.propertySnapshot?.zip]
@@ -1467,7 +1685,19 @@ function serializeProviderPortalLead(dispatch, leadRequest) {
     propertyCity: leadRequest?.propertySnapshot?.city || '',
     propertyState: leadRequest?.propertySnapshot?.state || '',
     propertyZip: leadRequest?.propertySnapshot?.zip || '',
+    selectedProviderId:
+      leadRequest?.selectedProviderId?.toString?.() || String(leadRequest?.selectedProviderId || ''),
+    selectedProviderName: options.selectedProviderName || '',
+    matchedAt: leadRequest?.matchedAt || null,
+    sellerNotifiedAt: leadRequest?.sellerNotifiedAt || null,
+    sellerNotificationChannels: leadRequest?.sellerNotificationChannels || [],
     sentAt: dispatch.sentAt || null,
+    smsSentAt: dispatch.smsSentAt || null,
+    smsMessageSid: dispatch.smsMessageSid || '',
+    smsError: dispatch.smsError || '',
+    emailSentAt: dispatch.emailSentAt || null,
+    emailError: dispatch.emailError || '',
+    deliveryChannels: dispatch.deliveryChannels || [],
     respondedAt: dispatch.respondedAt || null,
     createdAt: dispatch.createdAt || null,
     canRespond: ['queued', 'sent', 'delivered'].includes(dispatch.status),
@@ -1493,7 +1723,8 @@ function summarizeProviderPortalDispatches(dispatches = []) {
     if (
       dispatch.status === 'declined' ||
       dispatch.responseStatus === 'declined' ||
-      dispatch.responseStatus === 'opted_out'
+      dispatch.responseStatus === 'opted_out' ||
+      dispatch.responseStatus === 'already_matched'
     ) {
       summary.declined += 1;
     }
@@ -1503,36 +1734,6 @@ function summarizeProviderPortalDispatches(dispatches = []) {
   }
 
   return summary;
-}
-
-async function refreshLeadRequestStatus(leadRequestId) {
-  const dispatches = await LeadDispatchModel.find({ leadRequestId }).lean();
-
-  let nextStatus = 'open';
-  if (dispatches.some((dispatch) => dispatch.status === 'accepted')) {
-    nextStatus = 'matched';
-  } else if (dispatches.some((dispatch) => ['queued', 'sent', 'delivered'].includes(dispatch.status))) {
-    nextStatus = 'routing';
-  } else if (dispatches.some((dispatch) => ['declined', 'failed', 'expired'].includes(dispatch.status))) {
-    nextStatus = 'open';
-  }
-
-  await LeadRequestModel.findByIdAndUpdate(leadRequestId, {
-    $set: {
-      status: nextStatus,
-      updatedAt: new Date(),
-    },
-  });
-}
-
-async function upsertProviderAnalytics(providerId, mutator) {
-  const monthKey = new Date().toISOString().slice(0, 7);
-  const record =
-    (await ProviderAnalyticsModel.findOne({ providerId, monthKey })) ||
-    (await ProviderAnalyticsModel.create({ providerId, monthKey }));
-
-  mutator(record);
-  await record.save();
 }
 
 async function authenticateProviderPortal(providerId, token) {
@@ -1607,25 +1808,27 @@ async function buildProviderPortalDashboard(providerDocument) {
   const leadRequests = leadRequestIds.length
     ? await LeadRequestModel.find({ _id: { $in: leadRequestIds } }).lean()
     : [];
+  const selectedProviderIds = [
+    ...new Set(
+      leadRequests
+        .map((leadRequest) => leadRequest.selectedProviderId?.toString?.() || String(leadRequest.selectedProviderId || ''))
+        .filter(Boolean),
+    ),
+  ];
+  const selectedProviders = selectedProviderIds.length
+    ? await ProviderModel.find({ _id: { $in: selectedProviderIds } }).lean()
+    : [];
   const leadRequestById = new Map(
     leadRequests.map((leadRequest) => [leadRequest._id?.toString?.() || String(leadRequest._id), leadRequest]),
+  );
+  const selectedProviderById = new Map(
+    selectedProviders.map((provider) => [provider._id?.toString?.() || String(provider._id), provider]),
   );
 
   return {
     provider: serializeProvider(providerDocument.toObject ? providerDocument.toObject() : providerDocument, {
       categoryLabel: category?.label || providerDocument.categoryKey,
       categoryDocument: category || null,
-      portalAccess: {
-        issuedAt: providerDocument.portalAccess?.issuedAt || null,
-        lastUsedAt: providerDocument.portalAccess?.lastUsedAt || null,
-      },
-      subscription: {
-        planCode: providerDocument.subscription?.planCode || 'provider_basic',
-        status: providerDocument.subscription?.status || 'inactive',
-        currentPeriodStart: providerDocument.subscription?.currentPeriodStart || null,
-        currentPeriodEnd: providerDocument.subscription?.currentPeriodEnd || null,
-        cancelAtPeriodEnd: Boolean(providerDocument.subscription?.cancelAtPeriodEnd),
-      },
       analytics: analytics
         ? {
             monthKey: analytics.monthKey,
@@ -1641,6 +1844,17 @@ async function buildProviderPortalDashboard(providerDocument) {
       serializeProviderPortalLead(
         dispatch,
         leadRequestById.get(dispatch.leadRequestId?.toString?.() || String(dispatch.leadRequestId)),
+        {
+          selectedProviderName:
+            selectedProviderById.get(
+              leadRequestById.get(dispatch.leadRequestId?.toString?.() || String(dispatch.leadRequestId))
+                ?.selectedProviderId?.toString?.() ||
+                String(
+                  leadRequestById.get(dispatch.leadRequestId?.toString?.() || String(dispatch.leadRequestId))
+                    ?.selectedProviderId || '',
+                ),
+            )?.businessName || '',
+        },
       ),
     ),
   };
@@ -1717,7 +1931,13 @@ function summarizeLeadDispatches(dispatches = []) {
     if (dispatch.status === 'sent') summary.sent += 1;
     if (dispatch.status === 'delivered') summary.delivered += 1;
     if (dispatch.status === 'accepted' || dispatch.responseStatus === 'accepted') summary.accepted += 1;
-    if (dispatch.status === 'declined' || dispatch.responseStatus === 'declined') summary.declined += 1;
+    if (
+      dispatch.status === 'declined' ||
+      dispatch.responseStatus === 'declined' ||
+      dispatch.responseStatus === 'already_matched'
+    ) {
+      summary.declined += 1;
+    }
     if (dispatch.status === 'failed') summary.failed += 1;
     if (dispatch.responseStatus === 'help') summary.help += 1;
     if (dispatch.responseStatus === 'custom_reply') summary.customReplies += 1;
@@ -1727,7 +1947,7 @@ function summarizeLeadDispatches(dispatches = []) {
   return summary;
 }
 
-function serializeLeadRequest(document, dispatches = []) {
+function serializeLeadRequest(document, dispatches = [], options = {}) {
   return {
     id: document._id?.toString?.() || String(document._id),
     propertyId: document.propertyId?.toString?.() || String(document.propertyId),
@@ -1737,6 +1957,12 @@ function serializeLeadRequest(document, dispatches = []) {
     source: document.source || 'checklist_task',
     sourceRefId: document.sourceRefId || '',
     status: document.status,
+    selectedProviderId: document.selectedProviderId?.toString?.() || String(document.selectedProviderId || ''),
+    selectedProviderName: options.selectedProviderName || '',
+    selectedDispatchId: document.selectedDispatchId?.toString?.() || String(document.selectedDispatchId || ''),
+    matchedAt: document.matchedAt || null,
+    sellerNotifiedAt: document.sellerNotifiedAt || null,
+    sellerNotificationChannels: document.sellerNotificationChannels || [],
     maxProviders: Number(document.maxProviders || 3),
     message: document.message || '',
     propertySnapshot: {
@@ -1746,6 +1972,8 @@ function serializeLeadRequest(document, dispatches = []) {
       zip: document.propertySnapshot?.zip || '',
     },
     dispatches,
+    dispatchSummary: options.dispatchSummary || summarizeLeadDispatches(dispatches),
+    activity: options.activity || summarizeLeadActivity(dispatches, options.responses || [], options.smsLogs || []),
     createdAt: document.createdAt || null,
     updatedAt: document.updatedAt || null,
   };
@@ -2093,7 +2321,17 @@ export async function listProvidersForProperty(
         categoryKey: resolvedCategoryKey,
         limit: Math.max(1, Math.min(Number(limit || 5), 5)),
       })
-    : { items: [], diagnostic: '' };
+    : {
+        items: [],
+        diagnostic: '',
+        summary: buildGoogleFallbackSummary({
+          enabled: Boolean(env.GOOGLE_MAPS_SERVER_API_KEY),
+          triggered: false,
+          status: Boolean(env.GOOGLE_MAPS_SERVER_API_KEY) ? 'available_on_demand' : 'disabled',
+          triggerReason: rankedProviders.length ? 'internal_results_available' : 'not_requested',
+          locationLabel: buildPropertyLocationQuery(property) || [property?.city, property?.state, property?.zip].filter(Boolean).join(', '),
+        }),
+      };
   const externalItems = googleFallbackResult.items || [];
 
   return {
@@ -2139,6 +2377,10 @@ export async function listProvidersForProperty(
       externalProviders: externalItems.length,
       googleFallbackEnabled: Boolean(env.GOOGLE_MAPS_SERVER_API_KEY),
       googleFallbackDiagnostic: googleFallbackResult.diagnostic || '',
+      googleFallback: {
+        ...(googleFallbackResult.summary || {}),
+        enabled: Boolean(env.GOOGLE_MAPS_SERVER_API_KEY),
+      },
       categoryLabel: categoryByKey.get(resolvedCategoryKey || '')?.label || '',
     },
   };
@@ -2164,7 +2406,7 @@ export async function saveProviderForProperty(propertyId, providerId) {
 
 export async function getProviderMapImageForProperty(
   propertyId,
-  { categoryKey = '', taskKey = '', includeExternal = false, zoomOffset = 0 } = {},
+  { categoryKey = '', taskKey = '', includeExternal = false, zoomOffset = 0, limit = 10 } = {},
 ) {
   const property = await getPropertyById(propertyId);
   if (!property) {
@@ -2175,7 +2417,7 @@ export async function getProviderMapImageForProperty(
     categoryKey,
     taskKey,
     includeExternal,
-    limit: 10,
+    limit: Math.max(1, Math.min(Number(limit || 10), 10)),
   });
 
   const mapProviders = [
@@ -2392,8 +2634,18 @@ export async function createProviderLeadRequest(propertyId, payload = {}) {
     );
 
     await notifyQueuedLeadDispatches(leadRequest._id, console, {
-      deliveryMode: payload.deliveryMode || 'email',
+      deliveryMode: payload.deliveryMode || 'sms_and_email',
     });
+  }
+
+  const seller = await UserModel.findById(property.ownerUserId).lean();
+  if (seller) {
+    await sendSellerProviderPendingSms({
+      user: seller,
+      property,
+      leadRequest,
+      serviceType: resolvedCategoryKey.replace(/_/g, ' '),
+    }).catch(() => null);
   }
 
   return {
@@ -2415,13 +2667,25 @@ export async function listProviderLeadsForProperty(propertyId) {
 
   const leadRequests = await LeadRequestModel.find({ propertyId }).sort({ createdAt: -1 }).limit(20).lean();
   const leadRequestIds = leadRequests.map((entry) => entry._id);
-  const dispatches = leadRequestIds.length
-    ? await LeadDispatchModel.find({ leadRequestId: { $in: leadRequestIds } }).lean()
-    : [];
-  const providerIds = [...new Set(dispatches.map((entry) => entry.providerId?.toString?.() || String(entry.providerId)))];
+  const [dispatches, responses, smsLogs] = leadRequestIds.length
+    ? await Promise.all([
+        LeadDispatchModel.find({ leadRequestId: { $in: leadRequestIds } }).lean(),
+        ProviderResponseModel.find({ leadRequestId: { $in: leadRequestIds } }).sort({ createdAt: -1 }).lean(),
+        ProviderSmsLogModel.find({ leadRequestId: { $in: leadRequestIds } }).sort({ createdAt: -1 }).lean(),
+      ])
+    : [[], [], []];
+  const providerIds = [
+    ...new Set(
+      [...dispatches, ...leadRequests]
+        .map((entry) => entry.providerId?.toString?.() || entry.selectedProviderId?.toString?.() || String(entry.providerId || entry.selectedProviderId || ''))
+        .filter(Boolean),
+    ),
+  ];
   const providers = providerIds.length ? await ProviderModel.find({ _id: { $in: providerIds } }).lean() : [];
   const providerById = new Map(providers.map((provider) => [provider._id?.toString?.() || String(provider._id), provider]));
   const dispatchesByLeadId = new Map();
+  const responsesByLeadId = new Map();
+  const smsLogsByLeadId = new Map();
 
   for (const dispatch of dispatches) {
     const leadId = dispatch.leadRequestId?.toString?.() || String(dispatch.leadRequestId);
@@ -2438,7 +2702,22 @@ export async function listProviderLeadsForProperty(propertyId) {
       emailSentAt: dispatch.emailSentAt || null,
       emailError: dispatch.emailError || '',
       respondedAt: dispatch.respondedAt || null,
+      smsSentAt: dispatch.smsSentAt || null,
+      smsMessageSid: dispatch.smsMessageSid || '',
+      smsError: dispatch.smsError || '',
     });
+  }
+
+  for (const response of responses) {
+    const leadId = response.leadRequestId?.toString?.() || String(response.leadRequestId);
+    if (!responsesByLeadId.has(leadId)) responsesByLeadId.set(leadId, []);
+    responsesByLeadId.get(leadId).push(response);
+  }
+
+  for (const log of smsLogs) {
+    const leadId = log.leadRequestId?.toString?.() || String(log.leadRequestId);
+    if (!smsLogsByLeadId.has(leadId)) smsLogsByLeadId.set(leadId, []);
+    smsLogsByLeadId.get(leadId).push(log);
   }
 
   return {
@@ -2446,6 +2725,14 @@ export async function listProviderLeadsForProperty(propertyId) {
       serializeLeadRequest(
         leadRequest,
         dispatchesByLeadId.get(leadRequest._id?.toString?.() || String(leadRequest._id)) || [],
+        {
+          selectedProviderName:
+            providerById.get(
+              leadRequest.selectedProviderId?.toString?.() || String(leadRequest.selectedProviderId || ''),
+            )?.businessName || '',
+          responses: responsesByLeadId.get(leadRequest._id?.toString?.() || String(leadRequest._id)) || [],
+          smsLogs: smsLogsByLeadId.get(leadRequest._id?.toString?.() || String(leadRequest._id)) || [],
+        },
       ),
     ),
   };
@@ -2971,37 +3258,16 @@ export async function respondToProviderPortalLead(dispatchId, { providerId, toke
     throw new Error('This provider lead can no longer be responded to.');
   }
 
-  const now = new Date();
-  dispatch.status = responseStatus === 'accepted' ? 'accepted' : 'declined';
-  dispatch.responseStatus = responseStatus;
-  dispatch.respondedAt = now;
-  await dispatch.save();
-
-  await ProviderResponseModel.create({
-    leadRequestId: dispatch.leadRequestId,
-    providerId: provider._id,
+  await recordProviderLeadResponse({
+    dispatch,
+    provider,
     responseStatus,
     note: normalizeString(note).slice(0, 280) || `Responded from provider portal: ${responseStatus}`,
     rawBody: '',
+    logger: console,
+    source: 'portal',
+    sendConfirmation: false,
   });
-
-  await upsertProviderAnalytics(provider._id, (record) => {
-    if (responseStatus === 'accepted') {
-      record.acceptedCount += 1;
-      if (dispatch.sentAt || dispatch.smsSentAt) {
-        const startAt = dispatch.smsSentAt || dispatch.sentAt;
-        const responseMinutes = Math.max(1, Math.round((now.getTime() - new Date(startAt).getTime()) / 60000));
-        const priorAccepted = Math.max(0, record.acceptedCount - 1);
-        record.avgResponseMinutes = priorAccepted
-          ? Math.round(((record.avgResponseMinutes * priorAccepted) + responseMinutes) / record.acceptedCount)
-          : responseMinutes;
-      }
-    } else {
-      record.declinedCount += 1;
-    }
-  });
-
-  await refreshLeadRequestStatus(dispatch.leadRequestId);
   const dashboard = await buildProviderPortalDashboard(provider);
   return { dashboard };
 }
@@ -3111,6 +3377,94 @@ export async function updateAdminProviderReview(providerId, payload = {}) {
   };
 }
 
+export async function linkAdminProviderAccount(
+  providerId,
+  { userEmail = '', unlink = false, forceRelink = false } = {},
+) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to link provider accounts.');
+  }
+
+  const provider = await ProviderModel.findById(providerId);
+  if (!provider) {
+    throw new Error('Provider not found.');
+  }
+
+  if (unlink) {
+    provider.userId = null;
+    provider.portalAccess = {
+      tokenHash: '',
+      issuedAt: null,
+      lastUsedAt: null,
+    };
+    await provider.save();
+
+    const category = await ProviderCategoryModel.findOne({ key: provider.categoryKey }).lean();
+    return {
+      provider: serializeProvider(provider.toObject(), {
+        categoryLabel: category?.label || provider.categoryKey,
+        categoryDocument: category || null,
+        linkedUserEmail: '',
+        linkedUserRole: '',
+        linkedUserVerifiedAt: null,
+        linkedUserLastLoginAt: null,
+        accountLinkStatus: 'unlinked',
+      }),
+    };
+  }
+
+  const normalizedEmail = String(userEmail || provider.email || '').trim().toLowerCase();
+  if (!normalizedEmail) {
+    throw new Error('A provider account email is required before linking.');
+  }
+
+  const user = await UserModel.findOne({ email: normalizedEmail }).lean();
+  if (!user) {
+    throw new Error('No user account was found for that email address.');
+  }
+
+  if (user.role !== 'provider') {
+    throw new Error('Only provider-role accounts can be linked to provider profiles.');
+  }
+
+  const existingProviderForUser = await ProviderModel.findOne({
+    userId: user._id,
+    _id: { $ne: provider._id },
+  }).lean();
+  if (existingProviderForUser) {
+    throw new Error(`That provider account is already linked to ${existingProviderForUser.businessName}.`);
+  }
+
+  if (
+    provider.userId &&
+    String(provider.userId) !== String(user._id) &&
+    !forceRelink
+  ) {
+    throw new Error('This provider is already linked to a different account. Use relink to replace it.');
+  }
+
+  provider.userId = user._id;
+  provider.portalAccess = {
+    tokenHash: '',
+    issuedAt: null,
+    lastUsedAt: null,
+  };
+  await provider.save();
+
+  const category = await ProviderCategoryModel.findOne({ key: provider.categoryKey }).lean();
+  return {
+    provider: serializeProvider(provider.toObject(), {
+      categoryLabel: category?.label || provider.categoryKey,
+      categoryDocument: category || null,
+      linkedUserEmail: user.email,
+      linkedUserRole: user.role,
+      linkedUserVerifiedAt: user.emailVerifiedAt || null,
+      linkedUserLastLoginAt: user.lastLoginAt || null,
+      accountLinkStatus: 'linked',
+    }),
+  };
+}
+
 export async function deleteAdminProvider(providerId) {
   if (mongoose.connection.readyState !== 1) {
     throw new Error('Database connection is required to remove providers.');
@@ -3138,6 +3492,54 @@ export async function deleteAdminProvider(providerId) {
   };
 }
 
+export async function syncAdminProviderBilling(providerId) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to sync provider billing.');
+  }
+
+  const provider = await ProviderModel.findById(providerId);
+  if (!provider) {
+    throw new Error('Provider not found.');
+  }
+
+  let result = null;
+  if (provider.subscription?.stripeCheckoutSessionId) {
+    result = await syncStripeCheckoutSessionById(provider.subscription.stripeCheckoutSessionId);
+  } else if (provider.subscription?.stripeSubscriptionId) {
+    result = await syncStripeSubscriptionById(provider.subscription.stripeSubscriptionId);
+  } else {
+    throw new Error('No Stripe checkout session or subscription is recorded for this provider.');
+  }
+
+  const refreshedProvider = await ProviderModel.findById(providerId);
+  if (!refreshedProvider) {
+    throw new Error('Provider not found after billing sync.');
+  }
+
+  const category = await ProviderCategoryModel.findOne({ key: refreshedProvider.categoryKey }).lean();
+  const latestWebhookEvent = await BillingWebhookEventModel.findOne({
+    providerId: refreshedProvider._id?.toString?.() || String(refreshedProvider._id),
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return {
+    result,
+    provider: serializeProvider(refreshedProvider.toObject(), {
+      categoryLabel: category?.label || refreshedProvider.categoryKey,
+      categoryDocument: category || null,
+      latestWebhookEvent: latestWebhookEvent
+        ? {
+            type: latestWebhookEvent.type || '',
+            processingStatus: latestWebhookEvent.processingStatus || 'processed',
+            createdAt: latestWebhookEvent.createdAt || null,
+            errorMessage: latestWebhookEvent.errorMessage || '',
+          }
+        : null,
+    }),
+  };
+}
+
 export async function listAdminProviders({ limit = 50 } = {}) {
   await ensureProviderCategories();
 
@@ -3157,7 +3559,17 @@ export async function listAdminProviders({ limit = 50 } = {}) {
   ]);
 
   const providerIds = providers.map((provider) => provider._id);
-  const [dispatchCounts, categories] = await Promise.all([
+  const linkedUserIds = providers
+    .map((provider) => provider.userId)
+    .filter((value) => Boolean(value));
+  const providerEmails = [
+    ...new Set(
+      providers
+        .map((provider) => String(provider.email || '').trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  ];
+  const [dispatchCounts, categories, linkedUsers, candidateUsers, webhookEvents] = await Promise.all([
     providerIds.length
       ? LeadDispatchModel.aggregate([
           { $match: { providerId: { $in: providerIds } } },
@@ -3165,21 +3577,79 @@ export async function listAdminProviders({ limit = 50 } = {}) {
         ])
       : [],
     ProviderCategoryModel.find({}).lean(),
+    linkedUserIds.length ? UserModel.find({ _id: { $in: linkedUserIds } }).lean() : [],
+    providerEmails.length ? UserModel.find({ email: { $in: providerEmails }, role: 'provider' }).lean() : [],
+    providerIds.length
+      ? BillingWebhookEventModel.find({
+          providerId: { $in: providerIds.map((value) => value?.toString?.() || String(value)) },
+        })
+          .sort({ createdAt: -1 })
+          .lean()
+      : [],
   ]);
 
   const dispatchCountByProviderId = new Map(dispatchCounts.map((entry) => [entry._id?.toString?.() || String(entry._id), Number(entry.leadCount || 0)]));
   const categoryByKey = new Map(categories.map((category) => [category.key, category]));
+  const linkedUserById = new Map(
+    linkedUsers.map((user) => [user._id?.toString?.() || String(user._id), user]),
+  );
+  const latestWebhookEventByProviderId = webhookEvents.reduce((map, event) => {
+    const providerId = String(event.providerId || '').trim();
+    if (!providerId || map.has(providerId)) {
+      return map;
+    }
+
+    map.set(providerId, {
+      type: event.type || '',
+      processingStatus: event.processingStatus || 'processed',
+      createdAt: event.createdAt || null,
+      errorMessage: event.errorMessage || '',
+    });
+    return map;
+  }, new Map());
+  const candidateUsersByEmail = candidateUsers.reduce((map, user) => {
+    const emailKey = String(user.email || '').trim().toLowerCase();
+    if (!emailKey) {
+      return map;
+    }
+
+    const existing = map.get(emailKey) || [];
+    existing.push(user);
+    map.set(emailKey, existing);
+    return map;
+  }, new Map());
 
   return {
     dataSource: 'mongodb',
     leadSummary: { open, routing, matched },
-    providers: providers.map((provider) =>
-      serializeProvider(provider, {
+    providers: providers.map((provider) => {
+      const providerId = provider._id?.toString?.() || String(provider._id);
+      const linkedUser = provider.userId
+        ? linkedUserById.get(provider.userId?.toString?.() || String(provider.userId))
+        : null;
+      const candidateEmail = String(provider.email || '').trim().toLowerCase();
+      const candidateMatches = !linkedUser && candidateEmail
+        ? candidateUsersByEmail.get(candidateEmail) || []
+        : [];
+      const suggestedUser = candidateMatches.length === 1 ? candidateMatches[0] : null;
+
+      return serializeProvider(provider, {
         categoryLabel: categoryByKey.get(provider.categoryKey)?.label || provider.categoryKey,
         categoryDocument: categoryByKey.get(provider.categoryKey) || null,
-        leadCount: dispatchCountByProviderId.get(provider._id?.toString?.() || String(provider._id)) || 0,
-      }),
-    ),
+        leadCount: dispatchCountByProviderId.get(providerId) || 0,
+        linkedUserEmail: linkedUser?.email || '',
+        linkedUserRole: linkedUser?.role || '',
+        linkedUserVerifiedAt: linkedUser?.emailVerifiedAt || null,
+        linkedUserLastLoginAt: linkedUser?.lastLoginAt || null,
+        accountLinkStatus: linkedUser ? 'linked' : 'unlinked',
+        suggestedUserId: suggestedUser?._id?.toString?.() || '',
+        suggestedUserEmail: suggestedUser?.email || '',
+        suggestedUserVerifiedAt: suggestedUser?.emailVerifiedAt || null,
+        suggestedUserLastLoginAt: suggestedUser?.lastLoginAt || null,
+        suggestedUserConflict: candidateMatches.length > 1,
+        latestWebhookEvent: latestWebhookEventByProviderId.get(providerId) || null,
+      });
+    }),
   };
 }
 
@@ -3200,8 +3670,13 @@ export async function listAdminProviderLeads({ limit = 50 } = {}) {
 
   const providerIds = [
     ...new Set(
-      [...dispatches, ...responses, ...smsLogs]
-        .map((record) => record.providerId?.toString?.() || String(record.providerId || ''))
+      [...dispatches, ...responses, ...smsLogs, ...leads]
+        .map(
+          (record) =>
+            record.providerId?.toString?.() ||
+            record.selectedProviderId?.toString?.() ||
+            String(record.providerId || record.selectedProviderId || ''),
+        )
         .filter(Boolean),
     ),
   ];
@@ -3283,6 +3758,14 @@ export async function listAdminProviderLeads({ limit = 50 } = {}) {
         source: lead.source || 'checklist_task',
         sourceRefId: lead.sourceRefId || '',
         requestedByRole: lead.requestedByRole || 'seller',
+        selectedProviderId:
+          lead.selectedProviderId?.toString?.() || String(lead.selectedProviderId || ''),
+        selectedProviderName:
+          providerById.get(lead.selectedProviderId?.toString?.() || String(lead.selectedProviderId || ''))
+            ?.businessName || '',
+        matchedAt: lead.matchedAt || null,
+        sellerNotifiedAt: lead.sellerNotifiedAt || null,
+        sellerNotificationChannels: lead.sellerNotificationChannels || [],
         maxProviders: Number(lead.maxProviders || 0),
         message: lead.message || '',
         propertyAddress,
@@ -3299,6 +3782,7 @@ export async function listAdminProviderLeads({ limit = 50 } = {}) {
         help: counts.help,
         customReplies: counts.customReplies,
         optedOut: counts.optedOut,
+        activity: summarizeLeadActivity(leadDispatches, leadResponses, leadSmsLogs),
         dispatches: leadDispatches.map((dispatch) =>
           serializeLeadDispatch(
             dispatch,

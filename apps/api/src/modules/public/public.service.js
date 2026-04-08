@@ -151,8 +151,24 @@ export async function getAdminFunnelSnapshot() {
         signupCompleted: 0,
         propertiesCreated: 0,
       },
+      identitySummary: {
+        trackedAnonymousSessions: 0,
+        attributedSignups: 0,
+        attributedProperties: 0,
+        propertyAttributionRate: 0,
+      },
+      continuitySummary: {
+        previewSessions: 0,
+        emailCaptureSessions: 0,
+        signupSessions: 0,
+        propertySessions: 0,
+        previewToEmailRate: 0,
+        emailToSignupSessionRate: 0,
+        signupToPropertySessionRate: 0,
+      },
       roleBreakdown: [],
       platformBreakdown: [],
+      routeBreakdown: [],
       stageBreakdown: [],
       conversionSummary: {
         emailToSignupRate: 0,
@@ -170,8 +186,16 @@ export async function getAdminFunnelSnapshot() {
     signupStarts,
     signupCompleted,
     propertiesCreated,
+    trackedAnonymousSessions,
+    attributedSignups,
+    attributedProperties,
+    previewSessionIds,
+    emailCaptureSessionIds,
+    signupSessionIds,
+    propertySessionIds,
     roleBreakdown,
     platformBreakdown,
+    routeBreakdown,
     stageBreakdown,
     topCampaigns,
     recentEvents,
@@ -185,6 +209,33 @@ export async function getAdminFunnelSnapshot() {
       eventName: 'signup_completed',
     }),
     PublicFunnelEventModel.countDocuments({ eventName: 'property_created' }),
+    PublicFunnelEventModel.distinct('anonymousId', {
+      anonymousId: { $nin: ['', null] },
+    }),
+    PublicFunnelEventModel.countDocuments({
+      eventName: 'signup_completed',
+      anonymousId: { $nin: ['', null] },
+    }),
+    PublicFunnelEventModel.countDocuments({
+      eventName: 'property_created',
+      anonymousId: { $nin: ['', null] },
+    }),
+    PublicFunnelEventModel.distinct('anonymousId', {
+      eventName: 'seller_preview_generated',
+      anonymousId: { $nin: ['', null] },
+    }),
+    PublicFunnelEventModel.distinct('anonymousId', {
+      eventName: 'seller_email_submitted',
+      anonymousId: { $nin: ['', null] },
+    }),
+    PublicFunnelEventModel.distinct('anonymousId', {
+      eventName: 'signup_completed',
+      anonymousId: { $nin: ['', null] },
+    }),
+    PublicFunnelEventModel.distinct('anonymousId', {
+      eventName: 'property_created',
+      anonymousId: { $nin: ['', null] },
+    }),
     PublicFunnelEventModel.aggregate([
       {
         $group: {
@@ -241,6 +292,34 @@ export async function getAdminFunnelSnapshot() {
     PublicFunnelEventModel.aggregate([
       {
         $group: {
+          _id: {
+            landingPath: '$attribution.landingPath',
+            route: '$attribution.route',
+          },
+          events: { $sum: 1 },
+          emails: {
+            $sum: {
+              $cond: [{ $eq: ['$eventName', 'seller_email_submitted'] }, 1, 0],
+            },
+          },
+          signupCompleted: {
+            $sum: {
+              $cond: [{ $eq: ['$eventName', 'signup_completed'] }, 1, 0],
+            },
+          },
+          properties: {
+            $sum: {
+              $cond: [{ $eq: ['$eventName', 'property_created'] }, 1, 0],
+            },
+          },
+        },
+      },
+      { $sort: { properties: -1, signupCompleted: -1, emails: -1, events: -1 } },
+      { $limit: 12 },
+    ]),
+    PublicFunnelEventModel.aggregate([
+      {
+        $group: {
           _id: '$eventName',
           count: { $sum: 1 },
         },
@@ -290,6 +369,10 @@ export async function getAdminFunnelSnapshot() {
 
   const safeRate = (numerator, denominator) =>
     denominator > 0 ? Number(((numerator / denominator) * 100).toFixed(1)) : 0;
+  const previewSessions = previewSessionIds.length;
+  const emailCaptureSessions = emailCaptureSessionIds.length;
+  const signupSessions = signupSessionIds.length;
+  const propertySessions = propertySessionIds.length;
 
   return {
     dataSource: 'mongodb',
@@ -299,6 +382,21 @@ export async function getAdminFunnelSnapshot() {
       signupStarts,
       signupCompleted,
       propertiesCreated,
+    },
+    identitySummary: {
+      trackedAnonymousSessions: trackedAnonymousSessions.length,
+      attributedSignups,
+      attributedProperties,
+      propertyAttributionRate: safeRate(attributedProperties, propertiesCreated),
+    },
+    continuitySummary: {
+      previewSessions,
+      emailCaptureSessions,
+      signupSessions,
+      propertySessions,
+      previewToEmailRate: safeRate(emailCaptureSessions, previewSessions),
+      emailToSignupSessionRate: safeRate(signupSessions, emailCaptureSessions),
+      signupToPropertySessionRate: safeRate(propertySessions, signupSessions),
     },
     roleBreakdown: roleBreakdown.map((item) => ({
       role: item._id || 'unknown',
@@ -312,6 +410,14 @@ export async function getAdminFunnelSnapshot() {
       platform: item._id || 'direct',
       events: item.events,
       signupStarts: item.signupStarts,
+      signupCompleted: item.signupCompleted,
+      properties: item.properties,
+    })),
+    routeBreakdown: routeBreakdown.map((item) => ({
+      landingPath: item._id.landingPath || 'unknown',
+      route: item._id.route || 'unknown',
+      events: item.events,
+      emails: item.emails,
       signupCompleted: item.signupCompleted,
       properties: item.properties,
     })),
@@ -334,6 +440,8 @@ export async function getAdminFunnelSnapshot() {
       signupStarts: item.signupStarts,
       signupCompleted: item.signupCompleted,
       properties: item.properties,
+      emailToSignupRate: safeRate(item.signupCompleted, item.emails),
+      signupToPropertyRate: safeRate(item.properties, item.signupCompleted),
     })),
     recentEvents: recentEvents.map((item) => ({
       id: item._id?.toString?.() || String(item._id),
@@ -342,6 +450,8 @@ export async function getAdminFunnelSnapshot() {
       email: item.email || '',
       attribution: item.attribution || {},
       sessionStage: item.sessionStage || '',
+      route: item.attribution?.route || '',
+      landingPath: item.attribution?.landingPath || '',
       createdAt: item.createdAt || null,
     })),
   };

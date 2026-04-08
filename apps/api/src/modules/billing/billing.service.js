@@ -11,7 +11,7 @@ import {
   resolveBillingUrls,
 } from '../../services/stripeClient.js';
 import { UserModel } from '../auth/auth.model.js';
-import { BillingSubscriptionModel } from './billing.model.js';
+import { BillingSubscriptionModel, BillingWebhookEventModel } from './billing.model.js';
 import { ProviderModel } from '../providers/provider.model.js';
 import { PropertyModel } from '../properties/property.model.js';
 
@@ -43,12 +43,84 @@ const DEFAULT_ACTIVE_PROPERTY_LIMIT_BY_AUDIENCE = {
   agent: 1,
 };
 
+const PAID_READY_STATUSES = new Set(['active', 'trialing', 'past_due', 'paid']);
+const PENDING_BILLING_STATUSES = new Set([
+  'checkout_created',
+  'open',
+  'complete',
+  'incomplete',
+  'unpaid',
+  'expired',
+  'async_payment_pending',
+  'async_payment_failed',
+  'incomplete_expired',
+]);
+
 function toDateFromUnixTimestamp(value) {
   return value ? new Date(value * 1000) : null;
 }
 
 function isSubscriptionActive(status) {
   return ACTIVE_SUBSCRIPTION_STATUSES.has(status);
+}
+
+export function resolveCheckoutSessionBillingState(session = {}, { mode = 'subscription' } = {}) {
+  const sessionStatus = String(session.status || '').trim() || 'open';
+  const paymentStatus = String(session.payment_status || '').trim();
+
+  if (mode === 'payment') {
+    if (paymentStatus === 'paid' || paymentStatus === 'no_payment_required') {
+      return { status: 'paid', isActive: true };
+    }
+
+    if (sessionStatus === 'expired') {
+      return { status: 'expired', isActive: false };
+    }
+
+    if (paymentStatus === 'unpaid' && sessionStatus === 'complete') {
+      return { status: 'async_payment_pending', isActive: false };
+    }
+
+    return { status: paymentStatus || sessionStatus, isActive: false };
+  }
+
+  if (sessionStatus === 'expired') {
+    return { status: 'expired', isActive: false };
+  }
+
+  if (paymentStatus === 'unpaid' && sessionStatus === 'complete') {
+    return { status: 'async_payment_pending', isActive: false };
+  }
+
+  return { status: sessionStatus, isActive: false };
+}
+
+export function resolveProviderOperationalStatus({
+  currentStatus = 'pending',
+  subscriptionStatus = 'inactive',
+  isPaidPlan = true,
+} = {}) {
+  if (currentStatus === 'suspended') {
+    return 'suspended';
+  }
+
+  if (!isPaidPlan) {
+    return currentStatus === 'pending_billing' ? 'pending' : currentStatus || 'pending';
+  }
+
+  if (PAID_READY_STATUSES.has(subscriptionStatus)) {
+    return 'active';
+  }
+
+  if (PENDING_BILLING_STATUSES.has(subscriptionStatus)) {
+    return 'pending_billing';
+  }
+
+  if (['canceled', 'cancelled'].includes(subscriptionStatus)) {
+    return 'paused';
+  }
+
+  return 'paused';
 }
 
 function toObjectIdString(value) {
@@ -245,6 +317,79 @@ function resolveProviderIdFromMetadata(metadata = {}) {
   return metadata.providerId || metadata.worksideProviderId || '';
 }
 
+function buildWebhookMetadataSnapshot(object = {}) {
+  const metadata =
+    object.metadata ||
+    object.lines?.data?.[0]?.metadata ||
+    object.parent?.subscription_details?.metadata ||
+    {};
+
+  return {
+    metadata,
+    planKey: resolvePlanKeyFromMetadata(metadata),
+    userId: resolveUserIdFromMetadata(metadata),
+    providerId: resolveProviderIdFromMetadata(metadata),
+    billingKind: metadata.billingKind || '',
+  };
+}
+
+function buildWebhookObjectSnapshot(event = null) {
+  const object = event?.data?.object || {};
+  const objectType = object.object || '';
+  const metadataSnapshot = buildWebhookMetadataSnapshot(object);
+
+  return {
+    stripeEventId: event?.id || '',
+    type: event?.type || '',
+    livemode: Boolean(event?.livemode),
+    stripeCreatedAt: event?.created ? new Date(event.created * 1000) : null,
+    stripeCustomerId: object.customer || '',
+    stripeCheckoutSessionId:
+      objectType === 'checkout.session' ? object.id || '' : object.checkout_session || '',
+    stripeSubscriptionId:
+      objectType === 'subscription' ? object.id || '' : object.subscription || '',
+    stripeInvoiceId:
+      objectType === 'invoice'
+        ? object.id || ''
+        : object.invoice || object.latest_invoice || '',
+    userId: metadataSnapshot.userId || '',
+    providerId: metadataSnapshot.providerId || '',
+    planKey: metadataSnapshot.planKey || '',
+    billingKind: metadataSnapshot.billingKind || '',
+    eventObjectType: objectType,
+    rawStripeObject: object,
+  };
+}
+
+async function recordWebhookEventLog({
+  event = null,
+  processingStatus = 'processed',
+  errorMessage = '',
+  resultSummary = null,
+}) {
+  if (mongoose.connection.readyState !== 1) {
+    return null;
+  }
+
+  const snapshot = buildWebhookObjectSnapshot(event);
+  const values = {
+    ...snapshot,
+    processingStatus,
+    errorMessage: String(errorMessage || '').slice(0, 1200),
+    resultSummary,
+  };
+
+  if (snapshot.stripeEventId) {
+    return BillingWebhookEventModel.findOneAndUpdate(
+      { stripeEventId: snapshot.stripeEventId },
+      { $set: values },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+  }
+
+  return BillingWebhookEventModel.create(values);
+}
+
 async function resolveStripeSubscriptionFromSessionValue(sessionSubscription) {
   if (!sessionSubscription) {
     return null;
@@ -287,11 +432,20 @@ async function syncProviderCheckoutSession(session, plan) {
     throw new Error('Provider not found for checkout session.');
   }
 
+  const checkoutState = resolveCheckoutSessionBillingState(session, { mode: plan.mode });
   provider.subscription.planCode = plan.planKey;
-  provider.subscription.status = session.status || 'open';
+  provider.subscription.status = checkoutState.status;
   provider.subscription.stripeCustomerId = session.customer || provider.subscription.stripeCustomerId || '';
   provider.subscription.stripeCheckoutSessionId = session.id;
   provider.subscription.stripePriceId = plan.priceId;
+  provider.status = resolveProviderOperationalStatus({
+    currentStatus: provider.status,
+    subscriptionStatus: checkoutState.status,
+    isPaidPlan: plan.planKey !== 'provider_basic',
+  });
+  if (plan.planKey === 'provider_featured' && !checkoutState.isActive) {
+    provider.isSponsored = false;
+  }
 
   await provider.save();
 
@@ -343,17 +497,16 @@ async function syncProviderSubscription(subscription, overrides = {}) {
   provider.subscription.cancelAtPeriodEnd = Boolean(subscription.cancel_at_period_end);
 
   const active = isSubscriptionActive(subscription.status);
-  if (active) {
-    provider.status = provider.status === 'suspended' ? 'suspended' : 'active';
-    if (!provider.activatedAt) {
-      provider.activatedAt = new Date();
-    }
-    provider.isSponsored = plan.planKey === 'provider_featured';
-  } else if (provider.status !== 'suspended') {
-    provider.status = 'paused';
-    if (plan.planKey === 'provider_featured') {
-      provider.isSponsored = false;
-    }
+  provider.status = resolveProviderOperationalStatus({
+    currentStatus: provider.status,
+    subscriptionStatus: subscription.status,
+    isPaidPlan: plan.planKey !== 'provider_basic',
+  });
+  if (active && !provider.activatedAt) {
+    provider.activatedAt = new Date();
+  }
+  if (plan.planKey === 'provider_featured') {
+    provider.isSponsored = active;
   }
 
   await provider.save();
@@ -382,6 +535,7 @@ async function syncCheckoutSession(session) {
   }
 
   if (plan.mode === 'payment') {
+    const checkoutState = resolveCheckoutSessionBillingState(session, { mode: plan.mode });
     return upsertSubscriptionRecord(
       {
         stripeCheckoutSessionId: session.id,
@@ -395,8 +549,8 @@ async function syncCheckoutSession(session) {
         planKey: plan.planKey,
         audience: plan.audience,
         mode: plan.mode,
-        status: session.payment_status === 'paid' ? 'paid' : session.status || 'open',
-        isActive: session.payment_status === 'paid',
+        status: checkoutState.status,
+        isActive: checkoutState.isActive,
         features: plan.features,
         metadata: session.metadata || {},
         rawStripeObject: session,
@@ -432,6 +586,24 @@ export async function syncStripeCheckoutSessionById(sessionId) {
   });
 
   return syncCheckoutSession(session);
+}
+
+export async function syncStripeSubscriptionById(subscriptionId) {
+  if (!isStripeConfigured()) {
+    throw new Error('Stripe is not configured.');
+  }
+
+  const normalizedSubscriptionId = String(subscriptionId || '').trim();
+  if (!normalizedSubscriptionId) {
+    throw new Error('Stripe subscription id is required.');
+  }
+
+  const stripe = getStripeClient();
+  const subscription = await stripe.subscriptions.retrieve(normalizedSubscriptionId, {
+    expand: ['items.data.price'],
+  });
+
+  return syncStripeSubscription(subscription);
 }
 
 async function syncStripeSubscription(subscription, overrides = {}) {
@@ -820,38 +992,64 @@ export async function handleStripeWebhook(rawBody, signature) {
   const stripe = getStripeClient();
   let event;
 
-  if (env.STRIPE_WEBHOOK_SECRET) {
-    if (!signature) {
-      throw new Error('Missing Stripe-Signature header.');
+  try {
+    if (env.STRIPE_WEBHOOK_SECRET) {
+      if (!signature) {
+        throw new Error('Missing Stripe-Signature header.');
+      }
+
+      event = stripe.webhooks.constructEvent(
+        rawBody,
+        signature,
+        env.STRIPE_WEBHOOK_SECRET,
+      );
+    } else {
+      event = JSON.parse(rawBody.toString('utf8'));
     }
 
-    event = stripe.webhooks.constructEvent(
-      rawBody,
-      signature,
-      env.STRIPE_WEBHOOK_SECRET,
-    );
-  } else {
-    event = JSON.parse(rawBody.toString('utf8'));
-  }
+    let resultSummary = null;
+    switch (event.type) {
+      case 'checkout.session.completed':
+      case 'checkout.session.async_payment_succeeded':
+      case 'checkout.session.async_payment_failed':
+      case 'checkout.session.expired':
+        resultSummary = await syncCheckoutSession(event.data.object);
+        break;
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated':
+      case 'customer.subscription.deleted':
+        resultSummary = await syncStripeSubscription(event.data.object);
+        break;
+      case 'invoice.paid':
+      case 'invoice.payment_succeeded':
+      case 'invoice.payment_failed':
+        resultSummary = await syncInvoice(event.data.object);
+        break;
+      default:
+        resultSummary = { skipped: true, reason: 'unsupported_event_type' };
+        break;
+    }
 
-  switch (event.type) {
-    case 'checkout.session.completed':
-      await syncCheckoutSession(event.data.object);
-      break;
-    case 'customer.subscription.created':
-    case 'customer.subscription.updated':
-    case 'customer.subscription.deleted':
-      await syncStripeSubscription(event.data.object);
-      break;
-    case 'invoice.paid':
-      await syncInvoice(event.data.object);
-      break;
-    default:
-      break;
-  }
+    await recordWebhookEventLog({
+      event,
+      processingStatus: 'processed',
+      resultSummary,
+    });
 
-  return {
-    received: true,
-    type: event.type,
-  };
+    return {
+      received: true,
+      type: event.type,
+      result: resultSummary,
+    };
+  } catch (error) {
+    if (event) {
+      await recordWebhookEventLog({
+        event,
+        processingStatus: 'failed',
+        errorMessage: error.message,
+      });
+    }
+
+    throw error;
+  }
 }

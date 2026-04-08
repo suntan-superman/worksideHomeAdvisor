@@ -269,21 +269,25 @@ async function countRecentEvents(userId, scope, windowMs) {
   });
 }
 
-export async function enforceAuthAction(identifier) {
-  const eventCount = await countRecentEvents(identifier, 'auth', AUTH_RATE_LIMIT.windowMs);
-  if (eventCount >= AUTH_RATE_LIMIT.max) {
+export async function enforceScopedRateLimit(identifier, scope, { max, windowMs }) {
+  const eventCount = await countRecentEvents(identifier, scope, windowMs);
+  if (eventCount >= max) {
     return {
       allowed: false,
-      retryAfterSeconds: 60 * 60,
+      retryAfterSeconds: Math.ceil(windowMs / 1000),
     };
   }
 
   await RateLimitEventModel.create({
-    userId: identifier,
-    scope: 'auth',
+    userId: String(identifier),
+    scope,
   });
 
   return { allowed: true };
+}
+
+export async function enforceAuthAction(identifier) {
+  return enforceScopedRateLimit(identifier, 'auth', AUTH_RATE_LIMIT);
 }
 
 function buildUpgradeDecision(context, reason, analysisType) {

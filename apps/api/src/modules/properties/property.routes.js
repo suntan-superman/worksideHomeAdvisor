@@ -5,6 +5,7 @@ import { z } from 'zod';
 import {
   archiveProperty,
   createProperty,
+  deleteProperty,
   getPropertyById,
   listProperties,
   restoreProperty,
@@ -124,6 +125,23 @@ export async function propertyRoutes(fastify) {
       const actorUserId = String(request.headers['x-user-id'] || '');
       const property = await restoreProperty(propertyId, actorUserId);
       return reply.send({ property });
+    } catch (error) {
+      const statusCode =
+        error.message === 'Property not found.'
+          ? 404
+          : error.message.includes('permission')
+            ? 403
+            : 400;
+      return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
+  fastify.delete('/:propertyId', async (request, reply) => {
+    try {
+      const { propertyId } = paramsSchema.parse(request.params);
+      const actorUserId = String(request.headers['x-user-id'] || '');
+      const result = await deleteProperty(propertyId, actorUserId);
+      return reply.send(result);
     } catch (error) {
       const statusCode =
         error.message === 'Property not found.'

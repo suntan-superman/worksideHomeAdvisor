@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { BRANDING } from '@workside/branding';
 import { clearStoredSession, getStoredSession } from '../lib/session';
 import { clearStoredProviderSession, getStoredProviderSession } from '../lib/provider-session';
+import { clearStoredAuthOnboardingState } from '../lib/onboarding-state';
 
 const WEB_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -47,6 +48,7 @@ export function AppFrame({ children, busy = false }) {
     function handleIdleTimeout() {
       clearStoredSession();
       clearStoredProviderSession();
+      clearStoredAuthOnboardingState();
       setSession(null);
       setProviderSession(null);
       router.replace('/auth?timedOut=1');
@@ -115,6 +117,7 @@ export function AppFrame({ children, busy = false }) {
               onClick={() => {
                 clearStoredSession();
                 clearStoredProviderSession();
+                clearStoredAuthOnboardingState();
                 setSession(null);
                 setProviderSession(null);
                 router.push('/');

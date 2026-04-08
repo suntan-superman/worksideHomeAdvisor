@@ -426,6 +426,7 @@ export function ProviderResultsMap({
   categoryKey = '',
   taskKey = '',
   includeExternal = false,
+  limit = 10,
   googleMapsUrl = '',
   frameClassName = '',
 }) {
@@ -453,6 +454,7 @@ export function ProviderResultsMap({
           categoryKey,
           taskKey,
           includeExternal,
+          limit,
           zoomOffset,
         });
         const response = await fetch(requestUrl, {
@@ -521,7 +523,7 @@ export function ProviderResultsMap({
     return () => {
       controller.abort();
     };
-  }, [categoryKey, includeExternal, propertyId, taskKey, zoomOffset]);
+  }, [categoryKey, includeExternal, limit, propertyId, taskKey, zoomOffset]);
 
   useEffect(() => {
     return () => {
@@ -575,6 +577,11 @@ export function ProviderResultsMap({
         >
           Reset
         </button>
+      </div>
+      <div className="provider-static-map-legend">
+        <span><strong>H</strong> subject property</span>
+        <span><strong>Green</strong> Workside providers</span>
+        <span><strong>Blue</strong> Google fallback</span>
       </div>
       <div className="property-map-frame-shell">
         <div className={`property-map-frame provider-static-map-frame${frameClassName ? ` ${frameClassName}` : ''}`}>

@@ -74,6 +74,45 @@ export function requestOtp(payload) {
   });
 }
 
+export function requestForgotPasswordOtp(payload) {
+  return request('/api/v1/auth/forgot-password/request', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function verifyForgotPasswordOtp(payload) {
+  return request('/api/v1/auth/forgot-password/verify', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function resetForgottenPassword(payload) {
+  return request('/api/v1/auth/forgot-password/reset', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getCurrentUser(token) {
+  return request('/api/v1/auth/me', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+export function updateUserProfile(payload, token) {
+  return request('/api/v1/auth/profile', {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
 export function deleteAccount(token) {
   return request('/api/v1/auth/account', {
     method: 'DELETE',

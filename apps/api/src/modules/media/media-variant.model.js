@@ -1,13 +1,7 @@
 import mongoose from 'mongoose';
+import { getVisionPresetKeys } from './vision-presets.js';
 
-const visionVariantTypes = [
-  'enhance_listing_quality',
-  'declutter_preview',
-  'declutter_light',
-  'declutter_medium',
-  'remove_furniture',
-  'combined_listing_refresh',
-];
+const visionVariantTypes = getVisionPresetKeys();
 
 const mediaVariantSchema = new mongoose.Schema(
   {

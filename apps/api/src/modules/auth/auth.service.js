@@ -1,19 +1,22 @@
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
-import { normalizeLandingAttribution } from '@workside/utils';
+import { normalizeLandingAttribution, normalizeUsPhoneToE164 } from '@workside/utils';
 
 import { env } from '../../config/env.js';
-import { sendOtpEmail, sendWelcomeEmail } from '../../services/emailService.js';
+import {
+  sendOtpEmail,
+  sendPasswordResetOtpEmail,
+  sendWelcomeEmail,
+} from '../../services/emailService.js';
 import { signSessionToken } from '../../services/sessionService.js';
+import {
+  sendRegistrationConfirmationSms,
+} from '../marketplace-sms/marketplace-sms.service.js';
+import { SmsLogModel } from '../marketplace-sms/sms-log.model.js';
 import { BillingSubscriptionModel } from '../billing/billing.model.js';
-import { FlyerModel } from '../documents/flyer.model.js';
-import { ReportModel } from '../documents/report.model.js';
-import { ImageJobModel } from '../media/image-job.model.js';
-import { MediaAssetModel } from '../media/media.model.js';
-import { MediaVariantModel } from '../media/media-variant.model.js';
-import { deleteStoredAssetIfUnreferenced } from '../media/storage-reference.service.js';
-import { PricingAnalysisModel } from '../pricing/pricing.model.js';
 import { PropertyModel } from '../properties/property.model.js';
+import { deletePropertiesByIds } from '../properties/property-lifecycle.service.js';
 import {
   LeadDispatchModel,
   LeadRequestModel,
@@ -23,12 +26,17 @@ import {
   SavedProviderModel,
 } from '../providers/provider-leads.model.js';
 import { PublicFunnelEventModel } from '../public/public.model.js';
-import { ChecklistModel } from '../tasks/checklist.model.js';
 import { AnalysisLockModel } from '../usage/analysis-lock.model.js';
 import { RateLimitEventModel } from '../usage/rate-limit.model.js';
 import { UsageTrackingModel } from '../usage/usage-tracking.model.js';
 import { recordPublicFunnelEvent } from '../public/public.service.js';
 import { UserModel } from './auth.model.js';
+import { PasswordResetTokenModel } from './password-reset-token.model.js';
+
+export const authServiceDependencies = {
+  bcryptCompare: bcrypt.compare,
+  bcryptHash: bcrypt.hash,
+};
 
 function serializeUser(user) {
   return {
@@ -39,6 +47,10 @@ function serializeUser(user) {
     lastName: user.lastName,
     isDemoAccount: Boolean(user.isDemoAccount),
     isBillingBypass: Boolean(user.isBillingBypass),
+    mobilePhone: user.mobilePhone || '',
+    smsOptIn: Boolean(user.smsOptIn),
+    smsOptInAt: user.smsOptInAt || null,
+    signupAttribution: user.signupAttribution || null,
   };
 }
 
@@ -52,6 +64,40 @@ function buildOtpCode() {
   const min = 10 ** (env.OTP_LENGTH - 1);
   const max = 10 ** env.OTP_LENGTH - 1;
   return String(Math.floor(Math.random() * (max - min + 1)) + min);
+}
+
+function buildPasswordResetSessionToken(tokenDocument) {
+  return jwt.sign(
+    {
+      sub: tokenDocument.userId.toString(),
+      email: tokenDocument.email,
+      resetTokenId: tokenDocument._id.toString(),
+      purpose: 'password_reset',
+    },
+    env.JWT_SECRET,
+    { expiresIn: `${env.PASSWORD_RESET_SESSION_TTL_MINUTES}m` },
+  );
+}
+
+function verifyPasswordResetSessionToken(resetToken) {
+  const payload = jwt.verify(resetToken, env.JWT_SECRET);
+  if (payload?.purpose !== 'password_reset' || !payload?.resetTokenId) {
+    throw createHttpError(401, 'Password reset session is invalid.');
+  }
+  return payload;
+}
+
+function normalizePhonePayload({ mobilePhone = '', smsOptIn = false } = {}) {
+  const normalizedPhone = normalizeUsPhoneToE164(mobilePhone);
+  if (smsOptIn && !normalizedPhone) {
+    throw createHttpError(400, 'A valid US mobile number is required when SMS opt-in is enabled.');
+  }
+
+  return {
+    mobilePhone: normalizedPhone,
+    smsOptIn: Boolean(smsOptIn && normalizedPhone),
+    smsOptInAt: smsOptIn && normalizedPhone ? new Date() : null,
+  };
 }
 
 async function storeVerificationOtp(user) {
@@ -68,78 +114,58 @@ async function storeVerificationOtp(user) {
   await sendOtpEmail({ to: user.email, code, role: user.role });
 }
 
-async function deleteUserOwnedProperties(propertyIds = []) {
-  if (!propertyIds.length) {
-    return { deletedPropertyCount: 0 };
+async function invalidatePasswordResetTokensForUser(userId, excludeId = null) {
+  if (!userId) {
+    return;
   }
 
-  const [mediaAssets, mediaVariants, leadRequests] = await Promise.all([
-    MediaAssetModel.find({ propertyId: { $in: propertyIds } })
-      .select({ _id: 1, storageProvider: 1, storageKey: 1 })
-      .lean(),
-    MediaVariantModel.find({ propertyId: { $in: propertyIds } })
-      .select({ _id: 1, storageProvider: 1, storageKey: 1 })
-      .lean(),
-    LeadRequestModel.find({ propertyId: { $in: propertyIds } })
-      .select({ _id: 1 })
-      .lean(),
-  ]);
+  const updateFilter = {
+    userId,
+    usedAt: null,
+    invalidatedAt: null,
+  };
 
-  const leadRequestIds = leadRequests.map((request) => request._id);
-  const leadDispatches = leadRequestIds.length
-    ? await LeadDispatchModel.find({ leadRequestId: { $in: leadRequestIds } })
-        .select({ _id: 1 })
-        .lean()
-    : [];
-  const leadDispatchIds = leadDispatches.map((dispatch) => dispatch._id);
+  if (excludeId) {
+    updateFilter._id = { $ne: excludeId };
+  }
 
-  await Promise.all(
-    [
-      ...mediaAssets.map((asset) => ({ kind: 'asset', ...asset })),
-      ...mediaVariants.map((variant) => ({ kind: 'variant', ...variant })),
-    ].map(async (asset) => {
-      try {
-        await deleteStoredAssetIfUnreferenced({
-          storageProvider: asset.storageProvider,
-          storageKey: asset.storageKey,
-          excludeAssetId: asset.kind === 'asset' ? asset._id : null,
-          excludeVariantId: asset.kind === 'variant' ? asset._id : null,
-        });
-      } catch {
-        // Continue deleting account data even if a file/object is already gone.
-      }
-    }),
+  await PasswordResetTokenModel.updateMany(
+    updateFilter,
+    {
+      $set: {
+        invalidatedAt: new Date(),
+      },
+    },
   );
+}
 
-  await Promise.all([
-    MediaVariantModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    ImageJobModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    MediaAssetModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    PricingAnalysisModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    FlyerModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    ReportModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    ChecklistModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    SavedProviderModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    ProviderReferenceModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    PublicFunnelEventModel.deleteMany({ propertyId: { $in: propertyIds } }),
-    PropertyModel.deleteMany({ _id: { $in: propertyIds } }),
-  ]);
+async function requestPasswordResetToken(user) {
+  await invalidatePasswordResetTokensForUser(user._id);
 
-  if (leadRequestIds.length) {
-    await Promise.all([
-      ProviderResponseModel.deleteMany({ leadRequestId: { $in: leadRequestIds } }),
-      ProviderSmsLogModel.deleteMany({
-        $or: [
-          { leadRequestId: { $in: leadRequestIds } },
-          leadDispatchIds.length ? { leadDispatchId: { $in: leadDispatchIds } } : null,
-        ].filter(Boolean),
-      }),
-      LeadDispatchModel.deleteMany({ leadRequestId: { $in: leadRequestIds } }),
-      LeadRequestModel.deleteMany({ _id: { $in: leadRequestIds } }),
-    ]);
-  }
+  const code = buildOtpCode();
+  const otpHash = await bcrypt.hash(code, env.BCRYPT_SALT_ROUNDS);
+  const token = await PasswordResetTokenModel.create({
+    userId: user._id,
+    email: user.email,
+    otpHash,
+    expiresAt: new Date(Date.now() + env.PASSWORD_RESET_OTP_TTL_MINUTES * 60 * 1000),
+    attemptCount: 0,
+  });
 
-  return { deletedPropertyCount: propertyIds.length };
+  await sendPasswordResetOtpEmail({
+    to: user.email,
+    code,
+  });
+
+  return token;
+}
+
+async function getLatestActivePasswordResetToken(email) {
+  return PasswordResetTokenModel.findOne({
+    email: String(email || '').toLowerCase(),
+    usedAt: null,
+    invalidatedAt: null,
+  }).sort({ createdAt: -1 });
 }
 
 export async function purgeUserAccount(
@@ -167,7 +193,7 @@ export async function purgeUserAccount(
     .select({ _id: 1 })
     .lean();
   const propertyIds = ownedProperties.map((property) => property._id);
-  const { deletedPropertyCount } = await deleteUserOwnedProperties(propertyIds);
+  const { deletedPropertyCount } = await deletePropertiesByIds(propertyIds);
   const remainingLeadRequests = await LeadRequestModel.find({ userId: user._id })
     .select({ _id: 1 })
     .lean();
@@ -205,6 +231,8 @@ export async function purgeUserAccount(
     PublicFunnelEventModel.deleteMany({
       $or: [{ userId: user._id }, { email: user.email }],
     }),
+    PasswordResetTokenModel.deleteMany({ userId: user._id }),
+    SmsLogModel.deleteMany({ userId: user._id }),
     UserModel.deleteOne({ _id: user._id }),
   ]);
 
@@ -224,12 +252,20 @@ export async function signup(payload) {
 
   const passwordHash = await bcrypt.hash(payload.password, env.BCRYPT_SALT_ROUNDS);
 
+  const normalizedPhone = normalizePhonePayload({
+    mobilePhone: payload.mobilePhone,
+    smsOptIn: payload.smsOptIn,
+  });
+
   const user = await UserModel.create({
     email: payload.email.toLowerCase(),
     passwordHash,
     firstName: payload.firstName,
     lastName: payload.lastName,
     role: payload.role || 'seller',
+    mobilePhone: normalizedPhone.mobilePhone,
+    smsOptIn: normalizedPhone.smsOptIn,
+    smsOptInAt: normalizedPhone.smsOptInAt,
     signupAttribution: payload.attribution
       ? normalizeLandingAttribution({
           ...payload.attribution,
@@ -286,6 +322,100 @@ export async function requestOtp(email) {
   return { sent: true };
 }
 
+export async function requestForgotPasswordOtp(email) {
+  const normalizedEmail = String(email || '').toLowerCase();
+  const user = await UserModel.findOne({ email: normalizedEmail });
+  if (!user) {
+    return { sent: true };
+  }
+
+  await requestPasswordResetToken(user);
+  return { sent: true };
+}
+
+export async function verifyForgotPasswordOtp(payload) {
+  const resetToken = await getLatestActivePasswordResetToken(payload.email);
+  if (!resetToken) {
+    throw createHttpError(404, 'Password reset code not found.');
+  }
+
+  if (resetToken.usedAt || resetToken.invalidatedAt) {
+    throw createHttpError(400, 'Password reset code is no longer valid.');
+  }
+
+  if (resetToken.expiresAt < new Date()) {
+    resetToken.invalidatedAt = new Date();
+    await resetToken.save();
+    throw createHttpError(400, 'Password reset code expired.');
+  }
+
+  if (resetToken.attemptCount >= 5) {
+    resetToken.invalidatedAt = resetToken.invalidatedAt || new Date();
+    await resetToken.save();
+    throw createHttpError(429, 'Too many password reset attempts. Request a new code.');
+  }
+
+  const valid = await authServiceDependencies.bcryptCompare(payload.otpCode, resetToken.otpHash);
+  if (!valid) {
+    resetToken.attemptCount += 1;
+    if (resetToken.attemptCount >= 5) {
+      resetToken.invalidatedAt = new Date();
+    }
+    await resetToken.save();
+    throw createHttpError(400, 'Password reset code is invalid.');
+  }
+
+  resetToken.verifiedAt = new Date();
+  await resetToken.save();
+
+  return {
+    resetToken: buildPasswordResetSessionToken(resetToken),
+    expiresInMinutes: env.PASSWORD_RESET_SESSION_TTL_MINUTES,
+  };
+}
+
+export async function resetForgottenPassword({
+  resetToken,
+  newPassword,
+  confirmPassword = '',
+}) {
+  if (confirmPassword && newPassword !== confirmPassword) {
+    throw createHttpError(400, 'Passwords do not match.');
+  }
+
+  const payload = verifyPasswordResetSessionToken(resetToken);
+  const tokenDocument = await PasswordResetTokenModel.findById(payload.resetTokenId);
+  if (!tokenDocument) {
+    throw createHttpError(404, 'Password reset session not found.');
+  }
+
+  if (tokenDocument.usedAt || tokenDocument.invalidatedAt) {
+    throw createHttpError(400, 'Password reset session is no longer valid.');
+  }
+
+  if (!tokenDocument.verifiedAt) {
+    throw createHttpError(400, 'Password reset code must be verified before setting a new password.');
+  }
+
+  const user = await UserModel.findById(payload.sub);
+  if (!user || user.email.toLowerCase() !== tokenDocument.email.toLowerCase()) {
+    throw createHttpError(404, 'User account not found.');
+  }
+
+  user.passwordHash = await authServiceDependencies.bcryptHash(newPassword, env.BCRYPT_SALT_ROUNDS);
+  user.lastLoginAt = new Date();
+  await user.save();
+
+  tokenDocument.usedAt = new Date();
+  await tokenDocument.save();
+  await invalidatePasswordResetTokensForUser(user._id, tokenDocument._id);
+
+  return {
+    token: signSessionToken(user),
+    user: serializeUser(user),
+  };
+}
+
 export async function verifyEmailOtp(payload) {
   const user = await UserModel.findOne({ email: payload.email.toLowerCase() });
   if (!user || !user.verificationOtp) {
@@ -296,7 +426,7 @@ export async function verifyEmailOtp(payload) {
     throw new Error('Verification code expired.');
   }
 
-  const valid = await bcrypt.compare(payload.otpCode, user.verificationOtp.codeHash);
+  const valid = await authServiceDependencies.bcryptCompare(payload.otpCode, user.verificationOtp.codeHash);
   if (!valid) {
     user.verificationOtp.attempts += 1;
     await user.save();
@@ -311,6 +441,9 @@ export async function verifyEmailOtp(payload) {
     firstName: user.firstName,
     role: user.role,
   });
+  if (user.smsOptIn && user.mobilePhone) {
+    await sendRegistrationConfirmationSms(user).catch(() => null);
+  }
 
   if (user.signupAttribution) {
     await recordPublicFunnelEvent({
@@ -334,4 +467,50 @@ export async function verifyEmailOtp(payload) {
 
 export async function deleteAccount(userId) {
   return purgeUserAccount(userId);
+}
+
+export async function getAuthenticatedUser(userId) {
+  if (mongoose.connection.readyState !== 1) {
+    throw createHttpError(503, 'Database connection is required to load account details.');
+  }
+
+  const user = await UserModel.findById(userId);
+  if (!user) {
+    throw createHttpError(404, 'User account not found.');
+  }
+
+  return serializeUser(user);
+}
+
+export async function updateAuthenticatedUser(userId, payload = {}) {
+  if (mongoose.connection.readyState !== 1) {
+    throw createHttpError(503, 'Database connection is required to update account details.');
+  }
+
+  const user = await UserModel.findById(userId);
+  if (!user) {
+    throw createHttpError(404, 'User account not found.');
+  }
+
+  if (typeof payload.firstName === 'string') {
+    user.firstName = payload.firstName.trim();
+  }
+
+  if (typeof payload.lastName === 'string') {
+    user.lastName = payload.lastName.trim();
+  }
+
+  if (payload.mobilePhone !== undefined || payload.smsOptIn !== undefined) {
+    const normalizedPhone = normalizePhonePayload({
+      mobilePhone: payload.mobilePhone !== undefined ? payload.mobilePhone : user.mobilePhone,
+      smsOptIn: payload.smsOptIn !== undefined ? payload.smsOptIn : user.smsOptIn,
+    });
+
+    user.mobilePhone = normalizedPhone.mobilePhone;
+    user.smsOptIn = normalizedPhone.smsOptIn;
+    user.smsOptInAt = normalizedPhone.smsOptIn ? (user.smsOptInAt || normalizedPhone.smsOptInAt) : null;
+  }
+
+  await user.save();
+  return serializeUser(user);
 }

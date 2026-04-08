@@ -1,13 +1,7 @@
 import mongoose from 'mongoose';
+import { getVisionPresetKeys } from './vision-presets.js';
 
-const visionJobTypes = [
-  'enhance_listing_quality',
-  'declutter_preview',
-  'declutter_light',
-  'declutter_medium',
-  'remove_furniture',
-  'combined_listing_refresh',
-];
+const visionJobTypes = getVisionPresetKeys();
 
 const imageJobSchema = new mongoose.Schema(
   {
@@ -35,12 +29,20 @@ const imageJobSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['queued', 'processing', 'completed', 'failed'],
+      enum: ['queued', 'processing', 'completed', 'failed', 'needs_user_action'],
       default: 'processing',
     },
     provider: { type: String, default: 'local_sharp' },
     providerJobId: { type: String, default: null },
     presetKey: { type: String, default: null },
+    mode: {
+      type: String,
+      enum: ['preset', 'freeform'],
+      default: 'preset',
+    },
+    instructions: { type: String, default: '' },
+    normalizedPlan: { type: mongoose.Schema.Types.Mixed, default: null },
+    originalUrl: { type: String, default: '' },
     roomType: { type: String, default: 'unknown' },
     promptVersion: { type: Number, default: 1 },
     inputHash: { type: String, default: null, index: true },
@@ -57,6 +59,19 @@ const imageJobSchema = new mongoose.Schema(
     },
     message: { type: String, default: '' },
     warning: { type: String, default: '' },
+    attemptCount: { type: Number, default: 0 },
+    maxAttempts: { type: Number, default: 1 },
+    currentStage: {
+      type: String,
+      enum: ['initial', 'conservative_retry', 'split_retry', 'fallback', 'guided_selection', 'completed'],
+      default: 'initial',
+    },
+    fallbackMode: {
+      type: String,
+      enum: ['declutter_lite', 'visual_cleanup', 'guided_selection', 'partial_success', null],
+      default: null,
+    },
+    failureReason: { type: String, default: '' },
   },
   {
     timestamps: true,

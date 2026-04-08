@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { formatCurrency } from '@workside/utils';
+import { formatCurrency, formatPhoneForDisplay } from '@workside/utils';
 
 import { AppFrame } from '../../components/AppFrame';
 import { Toast } from '../../components/Toast';
@@ -12,6 +12,7 @@ import {
   archiveProperty as archivePropertyRequest,
   createBillingCheckoutSession,
   createProperty,
+  deleteProperty as deletePropertyRequest,
   getBillingPlans,
   getBillingSummary,
   getDashboard,
@@ -20,11 +21,16 @@ import {
   restoreProperty as restorePropertyRequest,
   syncBillingSession,
   listProperties,
+  updateUserProfile,
 } from '../../lib/api';
+import {
+  clearStoredAttributionDraft,
+  getStoredAttributionDraft,
+} from '../../lib/attribution-draft';
 import { getStoredSession, setStoredSession } from '../../lib/session';
 
 const SELLER_LANDING_DRAFT_KEY = 'worksideSellerLandingDraft';
-const AUTH_ATTRIBUTION_DRAFT_KEY = 'worksideAuthAttributionDraft';
+const DASHBOARD_FLASH_TOAST_KEY = 'worksideDashboardFlashToast';
 
 function formatAudienceLabel(value) {
   return String(value || '')
@@ -50,21 +56,54 @@ function loadSellerLandingDraft() {
   }
 }
 
-function loadAuthAttributionDraft() {
+function mergeAttributionSources(...sources) {
+  const merged = {};
+
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') {
+      continue;
+    }
+
+    for (const [key, value] of Object.entries(source)) {
+      if (value === undefined || value === null) {
+        continue;
+      }
+
+      if (typeof value === 'string' && !value.trim()) {
+        continue;
+      }
+
+      if (typeof value === 'number' && !Number.isFinite(value)) {
+        continue;
+      }
+
+      merged[key] = value;
+    }
+  }
+
+  return Object.keys(merged).length ? merged : null;
+}
+
+function buildPropertyLocationLabel(property) {
+  return [property?.addressLine1, property?.city, property?.state, property?.zip]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function readDashboardFlashToast() {
   if (typeof window === 'undefined') {
     return null;
   }
 
   try {
-    const rawDraft = window.sessionStorage.getItem(AUTH_ATTRIBUTION_DRAFT_KEY);
-    if (!rawDraft) {
+    const rawToast = window.sessionStorage.getItem(DASHBOARD_FLASH_TOAST_KEY);
+    if (!rawToast) {
       return null;
     }
 
-    const parsedDraft = JSON.parse(rawDraft);
-    return parsedDraft?.attribution && typeof parsedDraft.attribution === 'object'
-      ? parsedDraft.attribution
-      : null;
+    window.sessionStorage.removeItem(DASHBOARD_FLASH_TOAST_KEY);
+    const parsedToast = JSON.parse(rawToast);
+    return parsedToast && typeof parsedToast === 'object' ? parsedToast : null;
   } catch {
     return null;
   }
@@ -219,6 +258,13 @@ export default function DashboardPage() {
   const [billingSessionId, setBillingSessionId] = useState('');
   const [showCompletedWorkflowSteps, setShowCompletedWorkflowSteps] = useState(false);
   const [focusedWorkflowStepKey, setFocusedWorkflowStepKey] = useState('');
+  const [pendingDeleteProperty, setPendingDeleteProperty] = useState(null);
+  const [accountForm, setAccountForm] = useState({
+    firstName: '',
+    lastName: '',
+    mobilePhone: '',
+    smsOptIn: false,
+  });
   const [createForm, setCreateForm] = useState({
     title: '',
     addressLine1: '',
@@ -337,6 +383,15 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
+    setAccountForm({
+      firstName: session?.user?.firstName || '',
+      lastName: session?.user?.lastName || '',
+      mobilePhone: formatPhoneForDisplay(session?.user?.mobilePhone || ''),
+      smsOptIn: Boolean(session?.user?.smsOptIn),
+    });
+  }, [session?.user?.firstName, session?.user?.lastName, session?.user?.mobilePhone, session?.user?.smsOptIn]);
+
+  useEffect(() => {
     const landingDraft = loadSellerLandingDraft();
     if (!landingDraft) {
       return;
@@ -409,9 +464,9 @@ export default function DashboardPage() {
         setProperties(response.properties || []);
 
         const preferredPropertyId =
-          session.lastPropertyId ||
-          response.properties?.[0]?.id ||
-          '';
+          response.properties?.some((property) => property.id === session.lastPropertyId)
+            ? session.lastPropertyId
+            : response.properties?.[0]?.id || '';
 
         setSelectedPropertyId(preferredPropertyId);
       } catch (requestError) {
@@ -427,6 +482,32 @@ export default function DashboardPage() {
 
     loadProperties();
   }, [session]);
+
+  useEffect(() => {
+    if (loading || !session?.user?.id) {
+      return;
+    }
+
+    const flashToast = readDashboardFlashToast();
+    if (flashToast?.message) {
+      setToast((current) => current || flashToast);
+    }
+  }, [loading, session?.user?.id]);
+
+  useEffect(() => {
+    if (!selectedPropertyId) {
+      if (!properties.length) {
+        setDashboard(null);
+      }
+      return;
+    }
+
+    if (properties.some((property) => property.id === selectedPropertyId)) {
+      return;
+    }
+
+    setSelectedPropertyId(properties[0]?.id || '');
+  }, [properties, selectedPropertyId]);
 
   const billingPlansQuery = useQuery({
     queryKey: ['billing-plans'],
@@ -609,18 +690,29 @@ export default function DashboardPage() {
 
     try {
       const landingDraft = loadSellerLandingDraft();
-      const authAttributionDraft = loadAuthAttributionDraft();
+      const storedAttributionDraft = getStoredAttributionDraft();
+      const propertyAttribution = mergeAttributionSources(
+        session?.user?.signupAttribution,
+        storedAttributionDraft?.attribution,
+        storedAttributionDraft?.previewReadyScore !== null
+          ? { previewReadyScore: storedAttributionDraft.previewReadyScore }
+          : null,
+        storedAttributionDraft?.previewMidPrice !== null
+          ? { previewMidPrice: storedAttributionDraft.previewMidPrice }
+          : null,
+        landingDraft?.attribution,
+      );
       const response = await createProperty(
         {
           ...createForm,
-          attribution: landingDraft?.attribution || authAttributionDraft || undefined,
+          attribution: propertyAttribution || undefined,
         },
         session.user.id,
       );
       if (typeof window !== 'undefined') {
         window.sessionStorage.removeItem(SELLER_LANDING_DRAFT_KEY);
-        window.sessionStorage.removeItem(AUTH_ATTRIBUTION_DRAFT_KEY);
       }
+      clearStoredAttributionDraft();
       const nextProperties = [response.property, ...properties];
       setProperties(nextProperties);
       setSelectedPropertyId(response.property.id);
@@ -640,6 +732,47 @@ export default function DashboardPage() {
       setToast({
         tone: 'error',
         title: 'Could not create property',
+        message: requestError.message,
+      });
+    } finally {
+      setActionState('');
+    }
+  }
+
+  async function handleSaveAccountProfile(event) {
+    event.preventDefault();
+    if (!session?.token) {
+      return;
+    }
+
+    setActionState('Saving account profile...');
+    setToast(null);
+
+    try {
+      const response = await updateUserProfile({
+        firstName: accountForm.firstName,
+        lastName: accountForm.lastName,
+        mobilePhone: accountForm.mobilePhone,
+        smsOptIn: accountForm.smsOptIn,
+      }, session.token);
+      const nextSession = {
+        ...session,
+        user: {
+          ...session.user,
+          ...response.user,
+        },
+      };
+      setSession(nextSession);
+      setStoredSession(nextSession);
+      setToast({
+        tone: 'success',
+        title: 'Profile updated',
+        message: 'Your seller contact settings were saved.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not save profile',
         message: requestError.message,
       });
     } finally {
@@ -712,6 +845,56 @@ export default function DashboardPage() {
       setToast({
         tone: 'error',
         title: 'Could not restore property',
+        message: requestError.message,
+      });
+    } finally {
+      setActionState('');
+    }
+  }
+
+  async function handleDeleteSelectedProperty() {
+    if (!pendingDeleteProperty?.id || !session?.user?.id) {
+      return;
+    }
+
+    setActionState('Deleting property...');
+    setToast(null);
+
+    try {
+      const response = await deletePropertyRequest(pendingDeleteProperty.id, session.user.id);
+      const remainingProperties = properties.filter(
+        (property) => property.id !== pendingDeleteProperty.id,
+      );
+      const nextSelectedPropertyId =
+        selectedPropertyId === pendingDeleteProperty.id
+          ? remainingProperties[0]?.id || ''
+          : selectedPropertyId;
+      const nextSession = {
+        ...(session || {}),
+        lastPropertyId: nextSelectedPropertyId,
+      };
+
+      setProperties(remainingProperties);
+      setSelectedPropertyId(nextSelectedPropertyId);
+      setDashboard((current) =>
+        current?.property?.id === pendingDeleteProperty.id ? null : current,
+      );
+      setPendingDeleteProperty(null);
+      setSession(nextSession);
+      setStoredSession(nextSession);
+      await queryClient.invalidateQueries({ queryKey: ['billing-summary', session.user.id] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard-workflow'] });
+      setToast({
+        tone: 'success',
+        title: 'Property deleted',
+        message: response.deletedPropertyTitle
+          ? `${response.deletedPropertyTitle} and its linked outputs were removed permanently.`
+          : 'The property and its linked outputs were removed permanently.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not delete property',
         message: requestError.message,
       });
     } finally {
@@ -849,22 +1032,39 @@ export default function DashboardPage() {
                 </p>
               ) : null}
               {selectedProperty ? (
-                <div className="button-stack">
-                  <span className="billing-pill">
-                    {selectedPropertyArchived ? 'Archived · read-only' : 'Active · editable'}
-                  </span>
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={
-                      selectedPropertyArchived
-                        ? handleRestoreSelectedProperty
-                        : handleArchiveSelectedProperty
-                    }
-                    disabled={Boolean(actionState)}
-                  >
-                    {selectedPropertyArchived ? 'Restore property' : 'Archive property'}
-                  </button>
+                <div className="dashboard-property-lifecycle">
+                  <div className="button-stack">
+                    <span className="billing-pill">
+                      {selectedPropertyArchived ? 'Archived · read-only' : 'Active · editable'}
+                    </span>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={
+                        selectedPropertyArchived
+                          ? handleRestoreSelectedProperty
+                          : handleArchiveSelectedProperty
+                      }
+                      disabled={Boolean(actionState)}
+                    >
+                      {selectedPropertyArchived ? 'Restore property' : 'Archive property'}
+                    </button>
+                    {selectedPropertyArchived ? (
+                      <button
+                        type="button"
+                        className="button-danger"
+                        onClick={() => setPendingDeleteProperty(selectedProperty)}
+                        disabled={Boolean(actionState)}
+                      >
+                        Delete permanently
+                      </button>
+                    ) : null}
+                  </div>
+                  <p className="dashboard-property-capacity-note">
+                    {selectedPropertyArchived
+                      ? 'Archived workspaces stay viewable and do not count toward your active-property limit. Restoring will use a slot again, and permanent delete will remove all linked outputs and activity tied to this property.'
+                      : 'Archive this workspace to free an active-property slot without losing its current record or outputs.'}
+                  </p>
                 </div>
               ) : null}
             </article>
@@ -891,84 +1091,195 @@ export default function DashboardPage() {
             </article>
           </section>
 
-          <section className="dashboard-grid">
-            <article className="feature-card">
-              <span className="label">Billing access</span>
-              <h3>
-                {billingSummary?.access?.planKey === 'free'
-                  ? 'Free access'
-                  : billingSummary?.access?.planKey === 'admin_bypass'
-                    ? 'Admin access'
-                    : billingSummary?.access?.planKey === 'demo_bypass'
-                      ? 'Demo access'
-                    : billingSummary?.subscription?.planKey || 'No active plan'}
-              </h3>
-              <p>
-                {billingSummary?.access?.status
-                  ? `Current status: ${billingSummary.access.status}.`
-                  : 'Load a session to see the current billing state.'}
-              </p>
-              {propertyCapacity ? (
-                <p>
-                  {propertyCapacity.activeLimit === null
-                    ? `Active properties: ${propertyCapacity.activeCount}.`
-                    : `${propertyCapacity.remainingActiveSlots} active slot(s) remaining out of ${propertyCapacity.activeLimit}.`}
-                </p>
-              ) : null}
-              <div className="tag-row">
-                {(billingSummary?.access?.features || []).slice(0, 4).map((feature) => (
-                  <span key={feature}>{feature}</span>
-                ))}
-              </div>
-            </article>
-
-            <article className="feature-card">
-              <span className="label">Stripe checkout</span>
-              <select
-                className="select-input"
-                value={selectedBillingPlan?.planKey || ''}
-                onChange={(event) => setSelectedPlanKey(event.target.value)}
-              >
-                <option value="">Choose a plan</option>
-                {configuredPlans.map((plan) => (
-                  <option key={plan.planKey} value={plan.planKey}>
-                    {plan.displayName}
-                  </option>
-                ))}
-              </select>
-              <p>
-                {selectedBillingPlan?.description ||
-                  'Pick a configured plan to launch Stripe Checkout.'}
-              </p>
-              {selectedBillingPlan ? (
-                <div className="billing-plan-meta">
-                  <span className="billing-pill">
-                    {selectedBillingPlan.mode === 'subscription' ? 'Recurring plan' : 'One-time fee'}
-                  </span>
-                  <span className="billing-pill">{formatAudienceLabel(selectedBillingPlan.audience)}</span>
-                  <span className="billing-pill">{selectedBillingPlan.priceLabel || selectedBillingPlan.planKey}</span>
+          <section className="dashboard-grid dashboard-account-grid">
+            <form className="feature-card dashboard-contact-card" onSubmit={handleSaveAccountProfile}>
+              <div className="dashboard-contact-card-header">
+                <div>
+                  <span className="label">Seller contact</span>
+                  <h3>Mobile updates</h3>
                 </div>
-              ) : null}
+                <span className={`dashboard-contact-status-pill${accountForm.smsOptIn ? ' enabled' : ''}`}>
+                  {accountForm.smsOptIn ? 'SMS enabled' : 'Email only'}
+                </span>
+              </div>
+              <p className="dashboard-contact-card-copy">
+                Keep your contact details current so Workside can send listing, provider, and account updates to the right place.
+              </p>
+
+              <div className="dashboard-contact-grid">
+                <label className="dashboard-contact-field">
+                  <span>First name</span>
+                  <input
+                    type="text"
+                    value={accountForm.firstName}
+                    onChange={(event) => setAccountForm((current) => ({ ...current, firstName: event.target.value }))}
+                  />
+                </label>
+                <label className="dashboard-contact-field">
+                  <span>Last name</span>
+                  <input
+                    type="text"
+                    value={accountForm.lastName}
+                    onChange={(event) => setAccountForm((current) => ({ ...current, lastName: event.target.value }))}
+                  />
+                </label>
+                <label className="dashboard-contact-field dashboard-contact-field-full">
+                  <span>Mobile number</span>
+                  <input
+                    type="tel"
+                    placeholder="(661) 555-1212"
+                    value={accountForm.mobilePhone}
+                    onChange={(event) =>
+                      setAccountForm((current) => ({
+                        ...current,
+                        mobilePhone: formatPhoneForDisplay(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+
+              <label className="dashboard-checkbox-field dashboard-contact-consent">
+                <input
+                  type="checkbox"
+                  checked={accountForm.smsOptIn}
+                  onChange={(event) =>
+                    setAccountForm((current) => ({
+                      ...current,
+                      smsOptIn: event.target.checked,
+                    }))
+                  }
+                />
+                <span>
+                  I agree to receive transactional SMS messages about account activity, provider responses, and listing workflow updates.
+                </span>
+              </label>
+
+              <p className="dashboard-contact-footnote">
+                Transactional alerts are only sent when you opt in. Message frequency varies by activity.
+              </p>
+
               <div className="button-stack">
-                <button
-                  type="button"
-                  className="button-primary"
-                  onClick={handleStartCheckout}
-                  disabled={!session?.user?.id || !selectedBillingPlan || Boolean(actionState)}
-                >
-                  Unlock plan in Stripe
+                <button type="submit" className="button-primary" disabled={!session?.token || Boolean(actionState)}>
+                  Save contact settings
                 </button>
               </div>
-            </article>
+            </form>
 
-            <article className="feature-card">
-              <span className="label">Demo billing notes</span>
-              <h3>Live-flow testing</h3>
-              <p>
-                Use the sample onboarding or sample monthly plans for low-cost live demos. Admin
-                accounts bypass billing, while demo accounts can complete the full Stripe flow.
-              </p>
-            </article>
+            <div className="dashboard-account-side-column">
+              <article className="feature-card dashboard-summary-card dashboard-billing-card">
+                <div className="dashboard-card-header">
+                  <div>
+                    <span className="label">Billing access</span>
+                    <h3>
+                      {billingSummary?.access?.planKey === 'free'
+                        ? 'Free access'
+                        : billingSummary?.access?.planKey === 'admin_bypass'
+                          ? 'Admin access'
+                          : billingSummary?.access?.planKey === 'demo_bypass'
+                            ? 'Demo access'
+                            : formatAudienceLabel(billingSummary?.subscription?.planKey || 'No active plan')}
+                    </h3>
+                  </div>
+                  <span className={`dashboard-card-pill${billingSummary?.access?.status ? ' active' : ''}`}>
+                    {billingSummary?.access?.status
+                      ? formatAudienceLabel(billingSummary.access.status)
+                      : 'Status pending'}
+                  </span>
+                </div>
+                <p>
+                  {billingSummary?.access?.status
+                    ? 'Current account access, active workspace capacity, and feature unlocks.'
+                    : 'Load a session to see the current billing state and feature access.'}
+                </p>
+                {propertyCapacity ? (
+                  <div className="dashboard-account-mini-grid">
+                    <div className="dashboard-account-mini-stat">
+                      <strong>Active properties</strong>
+                      <span>{propertyCapacity.activeCount}</span>
+                    </div>
+                    <div className="dashboard-account-mini-stat">
+                      <strong>Remaining capacity</strong>
+                      <span>
+                        {propertyCapacity.activeLimit === null
+                          ? 'Unlimited'
+                          : `${propertyCapacity.remainingActiveSlots} of ${propertyCapacity.activeLimit}`}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="tag-row dashboard-feature-tags">
+                  {(billingSummary?.access?.features || []).slice(0, 4).map((feature) => (
+                    <span key={feature}>{feature}</span>
+                  ))}
+                </div>
+              </article>
+
+              <article className="feature-card dashboard-summary-card dashboard-checkout-card">
+                <div className="dashboard-card-header">
+                  <div>
+                    <span className="label">Stripe checkout</span>
+                    <h3>Unlock the next plan</h3>
+                  </div>
+                  <span className="dashboard-card-pill subtle">
+                    {selectedBillingPlan ? formatAudienceLabel(selectedBillingPlan.audience) : 'Choose a plan'}
+                  </span>
+                </div>
+                <p>
+                  {selectedBillingPlan?.description ||
+                    'Pick a configured plan to launch Stripe Checkout.'}
+                </p>
+                <select
+                  className="select-input"
+                  value={selectedBillingPlan?.planKey || ''}
+                  onChange={(event) => setSelectedPlanKey(event.target.value)}
+                >
+                  <option value="">Choose a plan</option>
+                  {configuredPlans.map((plan) => (
+                    <option key={plan.planKey} value={plan.planKey}>
+                      {plan.displayName}
+                    </option>
+                  ))}
+                </select>
+                {selectedBillingPlan ? (
+                  <div className="billing-plan-meta dashboard-billing-plan-meta">
+                    <span className="billing-pill">
+                      {selectedBillingPlan.mode === 'subscription' ? 'Recurring plan' : 'One-time fee'}
+                    </span>
+                    <span className="billing-pill">{formatAudienceLabel(selectedBillingPlan.audience)}</span>
+                    <span className="billing-pill">{selectedBillingPlan.priceLabel || selectedBillingPlan.planKey}</span>
+                  </div>
+                ) : null}
+                <div className="button-stack dashboard-card-actions">
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={handleStartCheckout}
+                    disabled={!session?.user?.id || !selectedBillingPlan || Boolean(actionState)}
+                  >
+                    Unlock plan in Stripe
+                  </button>
+                </div>
+              </article>
+
+              <article className="feature-card dashboard-summary-card dashboard-demo-card">
+                <div className="dashboard-card-header">
+                  <div>
+                    <span className="label">Demo billing notes</span>
+                    <h3>Live-flow testing</h3>
+                  </div>
+                  <span className="dashboard-card-pill subtle">Demo safe</span>
+                </div>
+                <p>
+                  Use the sample onboarding or sample monthly plans for low-cost live demos. Admin accounts bypass billing, while demo accounts can complete the full Stripe flow.
+                </p>
+                <div className="tag-row dashboard-feature-tags">
+                  <span>Sample onboarding</span>
+                  <span>Sample monthly</span>
+                  <span>Admin bypass</span>
+                </div>
+              </article>
+            </div>
           </section>
 
           {selectedPropertyId && workflow ? (
@@ -1311,6 +1622,49 @@ export default function DashboardPage() {
           </section>
         </>
       )}
+      {pendingDeleteProperty ? (
+        <div
+          className="workspace-modal-backdrop"
+          role="presentation"
+          onClick={() => setPendingDeleteProperty(null)}
+        >
+          <div
+            className="workspace-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-property-title"
+            aria-describedby="delete-property-description"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="delete-property-title">Delete {pendingDeleteProperty.title || 'this property'} permanently?</h2>
+            <p id="delete-property-description">
+              This action is irreversible. The property, photos, pricing history, reports, brochures, social pack, saved providers, provider outreach, and linked SMS/activity records will be deleted permanently.
+            </p>
+            <div className="workspace-modal-preview-copy dashboard-property-delete-summary">
+              <strong>{pendingDeleteProperty.title || 'Archived property'}</strong>
+              <span>{buildPropertyLocationLabel(pendingDeleteProperty) || 'Address not listed'}</span>
+              <span>Only archived properties can be deleted permanently.</span>
+            </div>
+            <div className="workspace-modal-actions">
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => setPendingDeleteProperty(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button-danger"
+                onClick={handleDeleteSelectedProperty}
+                disabled={Boolean(actionState)}
+              >
+                {actionState === 'Deleting property...' ? 'Deleting...' : 'Delete permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </AppFrame>
   );
 }

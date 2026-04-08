@@ -10,10 +10,45 @@ function normalizeValue(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function formatDateLabel(value) {
+  if (!value) {
+    return 'Not yet';
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Not yet';
+  }
+
+  return parsed.toLocaleDateString();
+}
+
+function formatPlanLabel(value) {
+  return String(value || 'provider_basic')
+    .replace(/^provider_/, '')
+    .replace(/_/g, ' ');
+}
+
+function formatStripeId(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    return 'Not created';
+  }
+
+  if (normalized.length <= 18) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, 8)}...${normalized.slice(-6)}`;
+}
+
 export function ProviderRoster({ providers = [], onUpdated }) {
   const [busyProviderId, setBusyProviderId] = useState('');
   const [error, setError] = useState('');
   const [pendingApprovalProvider, setPendingApprovalProvider] = useState(null);
+  const [pendingLinkProvider, setPendingLinkProvider] = useState(null);
+  const [linkEmail, setLinkEmail] = useState('');
+  const [forceRelink, setForceRelink] = useState(false);
   const [pendingDeleteProvider, setPendingDeleteProvider] = useState(null);
   const [deleteConfirmationName, setDeleteConfirmationName] = useState('');
   const [search, setSearch] = useState('');
@@ -52,6 +87,62 @@ export function ProviderRoster({ providers = [], onUpdated }) {
     }
   }
 
+  async function applyLink(providerId, payload) {
+    setBusyProviderId(providerId);
+    setError('');
+
+    try {
+      const response = await fetch(`/api/admin/providers/${providerId}/link-account`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.message || 'Provider account link failed.');
+      }
+
+      if (onUpdated) {
+        await onUpdated();
+      } else {
+        window.location.reload();
+      }
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusyProviderId('');
+    }
+  }
+
+  async function applyBillingSync(providerId) {
+    setBusyProviderId(providerId);
+    setError('');
+
+    try {
+      const response = await fetch(`/api/admin/providers/${providerId}/sync-billing`, {
+        method: 'POST',
+      });
+
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.message || 'Provider billing sync failed.');
+      }
+
+      if (onUpdated) {
+        await onUpdated();
+      } else {
+        window.location.reload();
+      }
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusyProviderId('');
+    }
+  }
+
   function requestApproval(provider) {
     setPendingApprovalProvider(provider);
     setError('');
@@ -68,6 +159,38 @@ export function ProviderRoster({ providers = [], onUpdated }) {
       approvalStatus: 'approved',
       status: 'active',
       reviewedBy: 'admin_console',
+    });
+  }
+
+  function requestLink(provider) {
+    setPendingLinkProvider(provider);
+    setLinkEmail(provider.suggestedUserEmail || provider.linkedUserEmail || provider.email || '');
+    setForceRelink(false);
+    setError('');
+  }
+
+  async function confirmLink() {
+    if (!pendingLinkProvider) {
+      return;
+    }
+
+    const providerId = pendingLinkProvider.id;
+    setPendingLinkProvider(null);
+    await applyLink(providerId, {
+      userEmail: linkEmail,
+      forceRelink,
+    });
+  }
+
+  async function confirmUnlink() {
+    if (!pendingLinkProvider) {
+      return;
+    }
+
+    const providerId = pendingLinkProvider.id;
+    setPendingLinkProvider(null);
+    await applyLink(providerId, {
+      unlink: true,
     });
   }
 
@@ -350,6 +473,67 @@ export function ProviderRoster({ providers = [], onUpdated }) {
               </div>
 
               <div className="lead-message-block">
+                <strong>Account link</strong>
+                <p>
+                  {provider.linkedUserEmail
+                    ? `Linked to ${provider.linkedUserEmail} (${provider.linkedUserRole || 'provider'}) · verified ${formatDateLabel(provider.linkedUserVerifiedAt)}.`
+                    : provider.suggestedUserEmail
+                      ? `Suggested provider account match: ${provider.suggestedUserEmail}.`
+                      : provider.suggestedUserConflict
+                        ? 'Multiple provider-role accounts share this email. Choose the exact account to link.'
+                        : 'No provider account is linked yet.'}
+                </p>
+                <p>
+                  {provider.onboardingSource
+                    ? `Onboarding source: ${formatLabel(provider.onboardingSource)}.`
+                    : 'Onboarding source not recorded.'}
+                </p>
+              </div>
+
+              <div className="lead-meta-grid">
+                <div>
+                  <strong>Billing plan</strong>
+                  <span>{formatPlanLabel(provider.subscription?.planCode)}</span>
+                </div>
+                <div>
+                  <strong>Billing status</strong>
+                  <span>{formatLabel(provider.subscription?.status || 'inactive')}</span>
+                </div>
+                <div>
+                  <strong>Billing period end</strong>
+                  <span>{formatDateLabel(provider.subscription?.currentPeriodEnd)}</span>
+                </div>
+                <div>
+                  <strong>Portal last used</strong>
+                  <span>{formatDateLabel(provider.portalAccess?.lastUsedAt)}</span>
+                </div>
+              </div>
+
+              <div className="lead-message-block">
+                <strong>Billing diagnostics</strong>
+                <p>
+                  {provider.billing?.diagnostic ||
+                    'Billing diagnostics will appear once a provider plan and Stripe state are available.'}
+                </p>
+                <p>
+                  Customer: {formatStripeId(provider.subscription?.stripeCustomerId)}. Checkout: {formatStripeId(provider.subscription?.stripeCheckoutSessionId)}. Subscription: {formatStripeId(provider.subscription?.stripeSubscriptionId)}.
+                </p>
+                <p>
+                  Latest webhook: {provider.latestWebhookEvent?.type || 'No Stripe webhook recorded yet'}.
+                  {' '}
+                  {provider.latestWebhookEvent?.createdAt
+                    ? `${formatDateLabel(provider.latestWebhookEvent.createdAt)}`
+                    : ''}
+                  {provider.latestWebhookEvent?.processingStatus
+                    ? ` · ${formatLabel(provider.latestWebhookEvent.processingStatus)}`
+                    : ''}
+                  {provider.latestWebhookEvent?.errorMessage
+                    ? ` · ${provider.latestWebhookEvent.errorMessage}`
+                    : ''}
+                </p>
+              </div>
+
+              <div className="lead-message-block">
                 <strong>Marketplace readiness</strong>
                 <p>
                   {activation.live
@@ -448,6 +632,26 @@ export function ProviderRoster({ providers = [], onUpdated }) {
                   type="button"
                   className="admin-button admin-button-secondary"
                   disabled={isBusy}
+                  onClick={() => requestLink(provider)}
+                >
+                  {provider.linkedUserEmail ? 'Manage account link' : 'Link account'}
+                </button>
+                <button
+                  type="button"
+                  className="admin-button admin-button-secondary"
+                  disabled={
+                    isBusy ||
+                    (!provider.subscription?.stripeCheckoutSessionId &&
+                      !provider.subscription?.stripeSubscriptionId)
+                  }
+                  onClick={() => applyBillingSync(provider.id)}
+                >
+                  Sync billing
+                </button>
+                <button
+                  type="button"
+                  className="admin-button admin-button-secondary"
+                  disabled={isBusy}
                   onClick={() =>
                     applyReview(provider.id, {
                       approvalStatus: 'review',
@@ -541,6 +745,96 @@ export function ProviderRoster({ providers = [], onUpdated }) {
               </button>
               <button type="button" className="admin-button" onClick={confirmApproval}>
                 Confirm approval
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingLinkProvider ? (
+        <div
+          className="admin-dialog-backdrop"
+          role="presentation"
+          onClick={() => {
+            setPendingLinkProvider(null);
+            setLinkEmail('');
+            setForceRelink(false);
+          }}
+        >
+          <div
+            className="admin-dialog-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="link-provider-account-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="small-label">Provider account link</span>
+            <h2 id="link-provider-account-title">Manage account link for {pendingLinkProvider.businessName}</h2>
+            <p>
+              Link this provider record to the provider-role user account that should own portal access, billing continuation, and future recovery flows.
+            </p>
+            <label className="admin-dialog-confirmation">
+              <span>Provider account email</span>
+              <input
+                type="email"
+                value={linkEmail}
+                onChange={(event) => setLinkEmail(event.target.value)}
+                placeholder={pendingLinkProvider.email || 'provider@example.com'}
+                autoComplete="off"
+              />
+            </label>
+            {pendingLinkProvider.linkedUserEmail ? (
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={forceRelink}
+                  onChange={(event) => setForceRelink(event.target.checked)}
+                />
+                <span className="muted">Replace the current linked account if this email belongs to a different provider user.</span>
+              </label>
+            ) : null}
+            <div className="admin-dialog-meta">
+              <div>
+                <strong>Current link</strong>
+                <span>{pendingLinkProvider.linkedUserEmail || 'No linked account'}</span>
+              </div>
+              <div>
+                <strong>Suggested match</strong>
+                <span>{pendingLinkProvider.suggestedUserEmail || 'No exact email match found'}</span>
+              </div>
+              <div>
+                <strong>Provider email</strong>
+                <span>{pendingLinkProvider.email || 'No provider email on file'}</span>
+              </div>
+            </div>
+            <div className="admin-dialog-actions">
+              {pendingLinkProvider.linkedUserEmail ? (
+                <button
+                  type="button"
+                  className="admin-button admin-button-danger"
+                  onClick={confirmUnlink}
+                >
+                  Unlink account
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="admin-button admin-button-secondary"
+                onClick={() => {
+                  setPendingLinkProvider(null);
+                  setLinkEmail('');
+                  setForceRelink(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="admin-button"
+                disabled={!normalizeValue(linkEmail)}
+                onClick={confirmLink}
+              >
+                {pendingLinkProvider.linkedUserEmail ? 'Save account link' : 'Link account'}
               </button>
             </div>
           </div>

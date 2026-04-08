@@ -44,6 +44,7 @@ const variantUsageSchema = z.object({
 
 const updateMediaAssetSchema = z.object({
   roomLabel: z.string().min(1).max(120).optional(),
+  notes: z.string().max(500).optional(),
   listingCandidate: z.boolean().optional(),
   listingNote: z.string().max(280).optional(),
 });
@@ -52,13 +53,52 @@ const imageJobRequestSchema = z.object({
   jobType: z.string().optional(),
   presetKey: z.string().optional(),
   roomType: z.string().max(80).optional(),
+  mode: z.enum(['preset', 'freeform']).optional(),
+  instructions: z.string().trim().max(600).optional(),
+  forceRegenerate: z.boolean().optional(),
+  maskUrl: z.string().url().optional(),
 }).superRefine((value, context) => {
   const requestedPresetKey = value.presetKey || value.jobType || 'enhance_listing_quality';
-  if (!getVisionPresetKeys().includes(requestedPresetKey)) {
+  if (value.mode !== 'freeform' && !getVisionPresetKeys().includes(requestedPresetKey)) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       message: `Unsupported vision preset: ${requestedPresetKey}`,
       path: ['presetKey'],
+    });
+  }
+
+  if (value.mode === 'freeform' && !String(value.instructions || '').trim()) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Freeform enhancement instructions are required.',
+      path: ['instructions'],
+    });
+  }
+});
+
+const mediaCreateSchema = photoAnalysisSchema.extend({
+  source: z
+    .enum(['mobile_capture', 'mobile_library', 'web_upload', 'third_party_import'])
+    .optional(),
+  notes: z.string().max(500).optional(),
+});
+
+const photoEnhanceSchema = z.object({
+  assetId: z.string().min(1).optional(),
+  propertyPhotoId: z.string().min(1).optional(),
+  presetKey: z.string().optional(),
+  jobType: z.string().optional(),
+  roomType: z.string().max(80).optional(),
+  mode: z.enum(['preset', 'freeform']).optional(),
+  instructions: z.string().trim().max(600).optional(),
+  forceRegenerate: z.boolean().optional(),
+  maskUrl: z.string().url().optional(),
+}).superRefine((value, context) => {
+  if (!value.assetId && !value.propertyPhotoId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'assetId or propertyPhotoId is required.',
+      path: ['assetId'],
     });
   }
 });
@@ -108,10 +148,12 @@ export async function mediaRoutes(fastify) {
   fastify.post('/properties/:propertyId/media', async (request, reply) => {
     try {
       const { propertyId } = paramsSchema.parse(request.params);
-      const payload = photoAnalysisSchema.parse(request.body);
+      const payload = mediaCreateSchema.parse(request.body);
       const result = await createMediaAssetAndAnalysis({
         propertyId,
         roomLabel: payload.roomLabel,
+        source: payload.source,
+        notes: payload.notes,
         mimeType: payload.mimeType,
         imageBase64: payload.imageBase64,
         width: payload.width,
@@ -162,6 +204,10 @@ export async function mediaRoutes(fastify) {
         jobType: payload.jobType,
         presetKey: payload.presetKey,
         roomType: payload.roomType,
+        mode: payload.mode,
+        instructions: payload.instructions,
+        forceRegenerate: payload.forceRegenerate,
+        maskUrl: payload.maskUrl,
       });
       return reply.code(201).send(result);
     } catch (error) {
@@ -184,11 +230,40 @@ export async function mediaRoutes(fastify) {
         jobType: payload.jobType,
         presetKey: payload.presetKey,
         roomType: payload.roomType,
+        mode: payload.mode,
+        instructions: payload.instructions,
+        forceRegenerate: payload.forceRegenerate,
+        maskUrl: payload.maskUrl,
       });
       return reply.code(201).send(result);
     } catch (error) {
       const statusCode = error.message === 'Media asset not found.' ? 404 : 400;
       return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/photos/enhance', async (request, reply) => {
+    try {
+      const payload = photoEnhanceSchema.parse(request.body ?? {});
+      const resolvedAssetId = payload.assetId || payload.propertyPhotoId;
+      const asset = await getMediaAssetById(resolvedAssetId);
+      if (!asset) {
+        return reply.code(404).send({ message: 'Media asset not found.' });
+      }
+      await assertPropertyEditableById(asset.propertyId);
+      const result = await createImageEnhancementJob({
+        assetId: resolvedAssetId,
+        jobType: payload.jobType,
+        presetKey: payload.presetKey,
+        roomType: payload.roomType,
+        mode: payload.mode,
+        instructions: payload.instructions,
+        forceRegenerate: payload.forceRegenerate,
+        maskUrl: payload.maskUrl,
+      });
+      return reply.code(201).send(result);
+    } catch (error) {
+      return reply.code(error.message === 'Media asset not found.' ? 404 : 400).send({ message: error.message });
     }
   });
 
