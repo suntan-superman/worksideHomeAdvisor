@@ -1713,6 +1713,7 @@ export async function createImageEnhancementJob({
         seed: Math.floor(Math.random() * 1_000_000_000),
       });
       createdVariants = [];
+      const rejectedCandidates = [];
       for (let index = 0; index < providerOutputs.length; index += 1) {
         const output = providerOutputs[index];
         const buffer = await convertReplicateOutputToBuffer(output);
@@ -1760,6 +1761,17 @@ export async function createImageEnhancementJob({
         }
 
         if (rejectForArchitecturalDrift) {
+          rejectedCandidates.push({
+            index,
+            output,
+            buffer,
+            review,
+            overallScore,
+            visualChangeRatio,
+            topHalfChangeRatio,
+            roomPromptAddon,
+            presetPromptAddon,
+          });
           continue;
         }
 
@@ -1819,9 +1831,75 @@ export async function createImageEnhancementJob({
       }
 
       if (!createdVariants.length) {
-        throw new Error(
-          'Generated variants failed quality safeguards due to heavy structural drift. Please retry with a different source photo angle or a narrower transformation request.',
-        );
+        if (rejectedCandidates.length) {
+          const fallbackCandidate = [...rejectedCandidates]
+            .sort((left, right) => {
+              if (left.topHalfChangeRatio !== right.topHalfChangeRatio) {
+                return left.topHalfChangeRatio - right.topHalfChangeRatio;
+              }
+              return right.visualChangeRatio - left.visualChangeRatio;
+            })[0];
+
+          const saved = await saveBinaryBuffer({
+            propertyId: asset.propertyId.toString(),
+            mimeType: 'image/jpeg',
+            buffer: fallbackCandidate.buffer,
+          });
+
+          const fallbackVariant = await MediaVariantModel.create({
+            visionJobId: job._id,
+            mediaId: asset._id,
+            propertyId: asset.propertyId,
+            variantType: preset.key,
+            variantCategory: preset.category,
+            label: `${renderPlan.label} Fallback`,
+            mimeType: 'image/jpeg',
+            storageProvider: saved.storageProvider,
+            storageKey: saved.storageKey,
+            byteSize: saved.byteSize,
+            isSelected: false,
+            ...buildVariantLifecycleFields({ isSelected: false }),
+            useInBrochure: false,
+            useInReport: false,
+            metadata: {
+              warning:
+                'Low-confidence fallback: most generated variants were rejected for structural drift. Review before any public use.',
+              summary: renderPlan.summary,
+              differenceHint: renderPlan.differenceHint,
+              effects: [...(renderPlan.effects || []), 'Low-confidence fallback'],
+              sourceAssetId: asset._id.toString(),
+              roomLabel: asset.roomLabel,
+              roomType: resolvedRoomType,
+              provider: 'replicate',
+              presetKey: preset.key,
+              promptVersion: preset.promptVersion,
+              helperText: preset.helperText,
+              recommendedUse: preset.recommendedUse,
+              upgradeTier: preset.upgradeTier,
+              category: preset.category,
+              disclaimerType: preset.disclaimerType,
+              roomPromptAddon: fallbackCandidate.roomPromptAddon,
+              presetPromptAddon: fallbackCandidate.presetPromptAddon,
+              mode: requestedMode,
+              instructions: normalizedInstructions,
+              normalizedPlan,
+              providerSourceUrl: getProviderSourceUrl(fallbackCandidate.output),
+              review: {
+                ...fallbackCandidate.review,
+                overallScore: Math.max(0, fallbackCandidate.overallScore - 12),
+                visualChangeRatio: fallbackCandidate.visualChangeRatio,
+                topHalfChangeRatio: fallbackCandidate.topHalfChangeRatio,
+                fallbackApplied: true,
+              },
+            },
+          });
+
+          createdVariants.push(serializeMediaVariant(fallbackVariant.toObject()));
+        } else {
+          throw new Error(
+            'Generated variants failed quality safeguards due to heavy structural drift. Please retry with a different source photo angle or a narrower transformation request.',
+          );
+        }
       }
     } else {
       const rendered = await renderVariantBuffer(stored.buffer, preset.key, resolvedRoomType);
@@ -1889,9 +1967,14 @@ export async function createImageEnhancementJob({
 
     createdVariants = sortVisionVariants(createdVariants);
     job.status = 'completed';
+    const usedFallbackVariant = createdVariants.some(
+      (variant) => Boolean(variant?.metadata?.review?.fallbackApplied),
+    );
     job.outputVariantIds = createdVariants.map((variant) => variant.id);
     job.selectedVariantId = createdVariants[0]?.id || null;
-    job.warning = renderPlan.warning;
+    job.warning = usedFallbackVariant
+      ? 'Low-confidence fallback returned. Most generated variants were rejected for structural drift.'
+      : renderPlan.warning;
     job.message =
       requestedMode === 'freeform'
         ? 'Custom enhancement request saved and processed.'
