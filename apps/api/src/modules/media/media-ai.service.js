@@ -1917,30 +1917,33 @@ function getFurnitureRemovalAttemptConfigs(region, imageWidth, imageHeight) {
   return [
     {
       stage: 'initial',
-      strength: 0.52,
-      guidanceScale: 8.6,
+      strength: 0.58,
+      guidanceScale: 8.2,
       numInferenceSteps: 40,
+      outputCount: 2,
       region,
       promptSuffix:
-        'Remove only the selected furniture object inside the mask and reconstruct the newly visible background. Do not restage or replace anything.',
+        'Remove only the selected furniture object inside the mask and leave the area open and believable. Minor localized reconstruction around the removed object is acceptable. Do not restage or replace anything.',
     },
     {
       stage: 'split_retry',
-      strength: 0.62,
-      guidanceScale: 8.2,
+      strength: 0.68,
+      guidanceScale: 7.8,
       numInferenceSteps: 46,
+      outputCount: 2,
       region,
       promptSuffix:
-        'Try a stronger surgical removal of the same object. Keep walls, floors, windows, trim, and perspective unchanged. Do not restage the room.',
+        'Try a stronger surgical removal of the same object. Prioritize empty space over decorative changes. Keep walls, floors, windows, trim, and perspective unchanged. Do not restage the room.',
     },
     {
       stage: 'conservative_retry',
-      strength: 0.68,
-      guidanceScale: 7.8,
+      strength: 0.74,
+      guidanceScale: 7.4,
       numInferenceSteps: 52,
+      outputCount: 2,
       region,
       promptSuffix:
-        'Make one final attempt to remove only the masked furniture object while preserving the original room. Do not replace the furniture with different furniture.',
+        'Make one final attempt to remove only the masked furniture object while preserving the original room. Accept minor local floor, wall, or lighting reconstruction near the removed area, but do not replace the furniture with different furniture.',
     },
   ];
 }
@@ -2508,6 +2511,23 @@ async function buildMaskBufferFromRegion(maskWidth, maskHeight, region) {
     .toBuffer();
 }
 
+async function buildExpandedObjectMaskBuffer(maskBuffer, width, height, region) {
+  const growPixels = Math.max(
+    2,
+    Math.min(10, Math.round(Math.max(region.width, region.height) * 0.012)),
+  );
+
+  return sharp(maskBuffer)
+    .resize(width, height, { fit: 'fill' })
+    .removeAlpha()
+    .greyscale()
+    .threshold(10)
+    .dilate(growPixels)
+    .blur(Math.max(1.2, growPixels * 0.45))
+    .png()
+    .toBuffer();
+}
+
 function expandMaskRegion(region, imageWidth, imageHeight, padding) {
   const x = Math.max(0, region.x - padding);
   const y = Math.max(0, region.y - padding);
@@ -2608,16 +2628,20 @@ async function executeFurnitureRemovalObjectStrategy({
       );
       const componentMaskBuffer = component.maskBuffer
         ? await sharp(component.maskBuffer)
-            .resize(sourceWidth, sourceHeight, { fit: 'fill' })
-            .blur(0.9)
             .png()
             .toBuffer()
         : await buildMaskBufferFromRegion(sourceWidth, sourceHeight, componentRegion);
+      const expandedComponentMaskBuffer = await buildExpandedObjectMaskBuffer(
+        componentMaskBuffer,
+        sourceWidth,
+        sourceHeight,
+        componentRegion,
+      );
       return {
         index,
         focusRegion: componentRegion,
         region: expandedRegion,
-        maskBuffer: componentMaskBuffer,
+        maskBuffer: expandedComponentMaskBuffer,
         priority: scoreFurnitureRemovalRegion(
           componentRegion,
           sourceWidth,
@@ -2729,7 +2753,7 @@ async function executeFurnitureRemovalObjectStrategy({
         model: preset.replicateModel,
         prompt: `${fullPrompt} ${attemptConfig.promptSuffix}`,
         strength: attemptConfig.strength,
-        outputCount: 1,
+        outputCount: attemptConfig.outputCount || 1,
         guidanceScale: attemptConfig.guidanceScale,
         numInferenceSteps: attemptConfig.numInferenceSteps,
         scheduler: preset.scheduler,
@@ -2751,158 +2775,191 @@ async function executeFurnitureRemovalObjectStrategy({
         continue;
       }
 
-      const candidateCropBuffer = await convertReplicateOutputToBuffer(providerOutputs[0]);
-      const blendedCandidateCropBuffer = await blendMaskedCropBuffer(
-        currentCropBuffer,
-        candidateCropBuffer,
-        cropMaskBuffer,
-        {
-          width: cropRegion.width,
-          height: cropRegion.height,
-        },
-      );
-      const candidateFullBuffer = await compositeImageRegionBuffer(
-        workingBuffer,
-        blendedCandidateCropBuffer,
-        cropRegion,
-      );
-      const maskedChangeRatio = await calculateMaskedVisualChangeRatio(
-        currentCropBuffer,
-        blendedCandidateCropBuffer,
-        cropMaskBuffer,
-      );
-      const targetRegionChangeRatio = await calculateVisualChangeRatio(
-        workingBuffer,
-        candidateFullBuffer,
-        {
-          region: normalizedTargetRegionOnImage,
-        },
-      );
-      const variantMaskedEdgeDensity = await calculateMaskedEdgeDensity(
-        blendedCandidateCropBuffer,
-        cropMaskBuffer,
-      );
-      const maskedEdgeDensityDelta = Number(
-        (variantMaskedEdgeDensity - sourceMaskedEdgeDensity).toFixed(4),
-      );
-      const outsideMaskChangeRatio = await calculateOutsideMaskVisualChangeRatio(
-        currentCropBuffer,
-        blendedCandidateCropBuffer,
-        cropMaskBuffer,
-      );
-      const topHalfChangeRatio = await calculateVisualChangeRatio(
-        normalizedSourceBuffer,
-        candidateFullBuffer,
-        {
-          region: evaluationRegions.structureRegion,
-        },
-      );
-      const structureHistogramDrift = await calculateHistogramDrift(
-        normalizedSourceBuffer,
-        candidateFullBuffer,
-        {
-          region: evaluationRegions.structureRegion,
-        },
-      );
-      const architecturePreserved =
-        topHalfChangeRatio <= 0.16 ||
-        (topHalfChangeRatio <= 0.3 &&
-          structureHistogramDrift <= 0.18 &&
-          outsideMaskChangeRatio <= 0.16);
-      const strictAccepted =
-        maskedChangeRatio >= 0.14 &&
-        targetRegionChangeRatio >= 0.1 &&
-        (maskedEdgeDensityDelta <= -0.006 || maskedChangeRatio >= 0.24) &&
-        outsideMaskChangeRatio <= 0.16 &&
-        architecturePreserved &&
-        structureHistogramDrift <= 0.44;
-      const softArchitecturePreserved =
-        topHalfChangeRatio <= 0.18 ||
-        (topHalfChangeRatio <= 0.34 &&
-          structureHistogramDrift <= 0.18 &&
-          outsideMaskChangeRatio <= 0.2);
-      const softAccepted =
-        maskedChangeRatio >= 0.1 &&
-        targetRegionChangeRatio >= 0.07 &&
-        maskedEdgeDensityDelta <= -0.008 &&
-        outsideMaskChangeRatio <= 0.2 &&
-        softArchitecturePreserved &&
-        structureHistogramDrift <= 0.48;
-      const practicalArchitecturePreserved =
-        topHalfChangeRatio <= 0.24 ||
-        (topHalfChangeRatio <= 0.46 &&
-          structureHistogramDrift <= 0.16 &&
-          outsideMaskChangeRatio <= 0.34);
-      const practicalPartialAccepted =
-        maskedChangeRatio >= 0.35 &&
-        targetRegionChangeRatio >= 0.25 &&
-        maskedEdgeDensityDelta <= -0.002 &&
-        outsideMaskChangeRatio <= 0.34 &&
-        practicalArchitecturePreserved &&
-        structureHistogramDrift <= 0.18;
-      const subtractionDominance = Number(
-        (maskedChangeRatio - outsideMaskChangeRatio).toFixed(4),
-      );
-      const removalFirstAccepted =
-        maskedChangeRatio >= 0.38 &&
-        targetRegionChangeRatio >= 0.3 &&
-        subtractionDominance >= 0.12 &&
-        (maskedEdgeDensityDelta <= -0.002 || maskedChangeRatio >= 0.46) &&
-        outsideMaskChangeRatio <= 0.34 &&
-        topHalfChangeRatio <= 0.34 &&
-        structureHistogramDrift <= 0.18;
-      const candidateScore = calculateFurnitureRemovalCandidateScore({
-        maskedChangeRatio,
-        targetRegionChangeRatio,
-        maskedEdgeDensityDelta,
-        outsideMaskChangeRatio,
-        topHalfChangeRatio,
-        structureHistogramDrift,
-      });
-      const rejectReasons = getFurnitureRemovalRejectReasons({
-        maskedChangeRatio,
-        targetRegionChangeRatio,
-        maskedEdgeDensityDelta,
-        outsideMaskChangeRatio,
-        topHalfChangeRatio,
-        structureHistogramDrift,
-      });
-      const primaryRejectReason = rejectReasons[0] || 'thresholds_not_met';
+      for (let candidateIndex = 0; candidateIndex < providerOutputs.length; candidateIndex += 1) {
+        const candidateCropBuffer = await convertReplicateOutputToBuffer(providerOutputs[candidateIndex]);
+        const blendedCandidateCropBuffer = await blendMaskedCropBuffer(
+          currentCropBuffer,
+          candidateCropBuffer,
+          cropMaskBuffer,
+          {
+            width: cropRegion.width,
+            height: cropRegion.height,
+          },
+        );
+        const candidateFullBuffer = await compositeImageRegionBuffer(
+          workingBuffer,
+          blendedCandidateCropBuffer,
+          cropRegion,
+        );
+        const maskedChangeRatio = await calculateMaskedVisualChangeRatio(
+          currentCropBuffer,
+          blendedCandidateCropBuffer,
+          cropMaskBuffer,
+        );
+        const targetRegionChangeRatio = await calculateVisualChangeRatio(
+          workingBuffer,
+          candidateFullBuffer,
+          {
+            region: normalizedTargetRegionOnImage,
+          },
+        );
+        const variantMaskedEdgeDensity = await calculateMaskedEdgeDensity(
+          blendedCandidateCropBuffer,
+          cropMaskBuffer,
+        );
+        const maskedEdgeDensityDelta = Number(
+          (variantMaskedEdgeDensity - sourceMaskedEdgeDensity).toFixed(4),
+        );
+        const outsideMaskChangeRatio = await calculateOutsideMaskVisualChangeRatio(
+          currentCropBuffer,
+          blendedCandidateCropBuffer,
+          cropMaskBuffer,
+        );
+        const topHalfChangeRatio = await calculateVisualChangeRatio(
+          normalizedSourceBuffer,
+          candidateFullBuffer,
+          {
+            region: evaluationRegions.structureRegion,
+          },
+        );
+        const structureHistogramDrift = await calculateHistogramDrift(
+          normalizedSourceBuffer,
+          candidateFullBuffer,
+          {
+            region: evaluationRegions.structureRegion,
+          },
+        );
+        const architecturePreserved =
+          topHalfChangeRatio <= 0.16 ||
+          (topHalfChangeRatio <= 0.3 &&
+            structureHistogramDrift <= 0.18 &&
+            outsideMaskChangeRatio <= 0.16);
+        const strictAccepted =
+          maskedChangeRatio >= 0.14 &&
+          targetRegionChangeRatio >= 0.1 &&
+          (maskedEdgeDensityDelta <= -0.006 || maskedChangeRatio >= 0.24) &&
+          outsideMaskChangeRatio <= 0.16 &&
+          architecturePreserved &&
+          structureHistogramDrift <= 0.44;
+        const softArchitecturePreserved =
+          topHalfChangeRatio <= 0.18 ||
+          (topHalfChangeRatio <= 0.34 &&
+            structureHistogramDrift <= 0.18 &&
+            outsideMaskChangeRatio <= 0.2);
+        const softAccepted =
+          maskedChangeRatio >= 0.1 &&
+          targetRegionChangeRatio >= 0.07 &&
+          maskedEdgeDensityDelta <= -0.008 &&
+          outsideMaskChangeRatio <= 0.2 &&
+          softArchitecturePreserved &&
+          structureHistogramDrift <= 0.48;
+        const practicalArchitecturePreserved =
+          topHalfChangeRatio <= 0.24 ||
+          (topHalfChangeRatio <= 0.46 &&
+            structureHistogramDrift <= 0.16 &&
+            outsideMaskChangeRatio <= 0.34);
+        const practicalPartialAccepted =
+          maskedChangeRatio >= 0.35 &&
+          targetRegionChangeRatio >= 0.25 &&
+          maskedEdgeDensityDelta <= -0.002 &&
+          outsideMaskChangeRatio <= 0.34 &&
+          practicalArchitecturePreserved &&
+          structureHistogramDrift <= 0.18;
+        const subtractionDominance = Number(
+          (maskedChangeRatio - outsideMaskChangeRatio).toFixed(4),
+        );
+        const removalFirstAccepted =
+          maskedChangeRatio >= 0.38 &&
+          targetRegionChangeRatio >= 0.3 &&
+          subtractionDominance >= 0.12 &&
+          (maskedEdgeDensityDelta <= -0.002 || maskedChangeRatio >= 0.46) &&
+          outsideMaskChangeRatio <= 0.34 &&
+          topHalfChangeRatio <= 0.34 &&
+          structureHistogramDrift <= 0.18;
+        const candidateScore = calculateFurnitureRemovalCandidateScore({
+          maskedChangeRatio,
+          targetRegionChangeRatio,
+          maskedEdgeDensityDelta,
+          outsideMaskChangeRatio,
+          topHalfChangeRatio,
+          structureHistogramDrift,
+        });
+        const rejectReasons = getFurnitureRemovalRejectReasons({
+          maskedChangeRatio,
+          targetRegionChangeRatio,
+          maskedEdgeDensityDelta,
+          outsideMaskChangeRatio,
+          topHalfChangeRatio,
+          structureHistogramDrift,
+        });
+        const primaryRejectReason = rejectReasons[0] || 'thresholds_not_met';
 
-      attemptLog.push({
-        attempt: attemptCount,
-        stage: attemptConfig.stage,
-        targetIndex,
-        sourceRegionIndex: target.index,
-        priority: target.priority,
-        outputCount: providerOutputs.length,
-        maskedChangeRatio,
-        targetRegionChangeRatio,
-        maskedEdgeDensityDelta,
-        outsideMaskChangeRatio,
-        topHalfChangeRatio,
-        structureHistogramDrift,
-        primaryRejectReason:
-          strictAccepted || softAccepted || practicalPartialAccepted || removalFirstAccepted
-            ? null
-            : primaryRejectReason,
-        rejectReasons:
-          strictAccepted || softAccepted || practicalPartialAccepted || removalFirstAccepted
-            ? []
-            : rejectReasons,
-        result: strictAccepted
-          ? 'accepted'
-          : softAccepted
-          ? 'soft_accepted'
-          : practicalPartialAccepted
-          ? 'practical_partial'
-          : removalFirstAccepted
-          ? 'removal_first_partial'
-          : 'rejected',
-      });
+        attemptLog.push({
+          attempt: attemptCount,
+          candidateIndex,
+          stage: attemptConfig.stage,
+          targetIndex,
+          sourceRegionIndex: target.index,
+          priority: target.priority,
+          outputCount: providerOutputs.length,
+          maskedChangeRatio,
+          targetRegionChangeRatio,
+          maskedEdgeDensityDelta,
+          outsideMaskChangeRatio,
+          topHalfChangeRatio,
+          structureHistogramDrift,
+          candidateScore,
+          primaryRejectReason:
+            strictAccepted || softAccepted || practicalPartialAccepted || removalFirstAccepted
+              ? null
+              : primaryRejectReason,
+          rejectReasons:
+            strictAccepted || softAccepted || practicalPartialAccepted || removalFirstAccepted
+              ? []
+              : rejectReasons,
+          result: strictAccepted
+            ? 'accepted'
+            : softAccepted
+            ? 'soft_accepted'
+            : practicalPartialAccepted
+            ? 'practical_partial'
+            : removalFirstAccepted
+            ? 'removal_first_partial'
+            : 'rejected',
+        });
 
-      if ((softAccepted || practicalPartialAccepted || removalFirstAccepted) && !strictAccepted) {
-        const softCandidate = {
+        if ((softAccepted || practicalPartialAccepted || removalFirstAccepted) && !strictAccepted) {
+          const softCandidate = {
+            buffer: candidateFullBuffer,
+            maskedChangeRatio,
+            targetRegionChangeRatio,
+            maskedEdgeDensityDelta,
+            outsideMaskChangeRatio,
+            topHalfChangeRatio,
+            structureHistogramDrift,
+            candidateScore,
+            primaryRejectReason: removalFirstAccepted
+              ? 'removal_first_partial'
+              : practicalPartialAccepted
+              ? 'practical_partial'
+              : primaryRejectReason,
+            lowConfidence: true,
+          };
+          if (
+            !bestSoftCandidate ||
+            softCandidate.candidateScore > bestSoftCandidate.candidateScore ||
+            (softCandidate.candidateScore === bestSoftCandidate.candidateScore &&
+              softCandidate.maskedChangeRatio > bestSoftCandidate.maskedChangeRatio)
+          ) {
+            bestSoftCandidate = softCandidate;
+          }
+        }
+
+        if (!strictAccepted) {
+          continue;
+        }
+
+        acceptedTarget = {
           buffer: candidateFullBuffer,
           maskedChangeRatio,
           targetRegionChangeRatio,
@@ -2911,39 +2968,15 @@ async function executeFurnitureRemovalObjectStrategy({
           topHalfChangeRatio,
           structureHistogramDrift,
           candidateScore,
-          primaryRejectReason: removalFirstAccepted
-            ? 'removal_first_partial'
-            : practicalPartialAccepted
-            ? 'practical_partial'
-            : primaryRejectReason,
-          lowConfidence: true,
+          primaryRejectReason: null,
+          lowConfidence: false,
         };
-        if (
-          !bestSoftCandidate ||
-          softCandidate.candidateScore > bestSoftCandidate.candidateScore ||
-          (softCandidate.candidateScore === bestSoftCandidate.candidateScore &&
-            softCandidate.maskedChangeRatio > bestSoftCandidate.maskedChangeRatio)
-        ) {
-          bestSoftCandidate = softCandidate;
-        }
+        break;
       }
 
-      if (!strictAccepted) {
-        continue;
+      if (acceptedTarget) {
+        break;
       }
-
-      acceptedTarget = {
-        buffer: candidateFullBuffer,
-        maskedChangeRatio,
-        targetRegionChangeRatio,
-        maskedEdgeDensityDelta,
-        outsideMaskChangeRatio,
-        topHalfChangeRatio,
-        structureHistogramDrift,
-        primaryRejectReason: null,
-        lowConfidence: false,
-      };
-      break;
     }
 
     if (!acceptedTarget && bestSoftCandidate) {

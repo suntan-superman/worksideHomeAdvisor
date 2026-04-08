@@ -73,13 +73,13 @@ export const VISION_PRESETS = [
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'exterior', 'unknown'],
     providerPreference: 'replicate',
     providerStrategy: 'object_removal',
-    promptVersion: 7,
+    promptVersion: 8,
     outputCount: 1,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     upgradeTier: 'standard',
     basePrompt:
-      'You are editing a real estate listing photo. Remove ONLY the selected furniture object inside the masked area and reconstruct the newly revealed background realistically. Do NOT restage the room. Do NOT replace, recolor, or reshape furniture. Do NOT change layout, walls, floors, windows, lighting, or room geometry. Preserve perspective, trim lines, and shadows. If the object cannot be removed safely, return the original image unchanged.',
+      'You are editing a real estate listing photo. Remove ONLY the selected furniture object inside the masked area and reconstruct the newly revealed background realistically. Prioritize true subtraction and open space over decorative restyling. Small localized wall, floor, or lighting reconstruction around the removed object is acceptable, but do NOT restage the room and do NOT add replacement furniture or decor. Do NOT change overall layout, windows, room geometry, or permanent architecture. Preserve perspective, trim lines, and major shadows. If the object cannot be removed safely, return the original image unchanged.',
     helperText:
       'Attempt object-level furniture removal for planning previews without silently restaging the room.',
     strength: 0.52,
