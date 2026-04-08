@@ -72,20 +72,20 @@ export const VISION_PRESETS = [
     category: 'concept_preview',
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'exterior', 'unknown'],
     providerPreference: 'replicate',
-    promptVersion: 4,
+    promptVersion: 5,
     outputCount: 3,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     upgradeTier: 'standard',
     basePrompt:
-      'Create a realistic empty-room concept by removing movable furniture from this photo, including seating, tables, rugs, and decor. Do not replace removed furniture with new furniture. Leave cleared areas open and floor-visible where realistic. Preserve the same room identity, camera viewpoint, walls, windows, doors, built-ins, flooring lines, and layout exactly.',
+      'You are editing a real estate listing photo. Remove ONLY the furniture inside the masked area. Do NOT change layout. Do NOT modify walls, floors, windows, lighting, or room geometry. Do NOT add objects or regenerate the full scene. Preserve perspective and shadows. If the task cannot be completed safely, return the original image unchanged.',
     helperText:
       'Create a conceptual empty-room version for planning and persuasion, not direct listing replacement.',
-    strength: 0.93,
-    guidanceScale: 9,
-    numInferenceSteps: 45,
+    strength: 0.3,
+    guidanceScale: 11,
+    numInferenceSteps: 30,
     negativePrompt:
-      'new furniture, replacement furniture, staged furniture, sofa, couch, chair, coffee table, side table, ottoman, rug, clutter, fireplace, mantel, built-in, new room, different room, low quality, unrealistic geometry, warped lines, distorted walls',
+      'new furniture, replacement furniture, staged furniture, recolored furniture, reshaped furniture, sofa, couch, chair, coffee table, side table, ottoman, rug, clutter, fireplace, mantel, built-in, new room, different room, low quality, unrealistic geometry, warped lines, distorted walls',
     replicateModel: REPLICATE_INPAINT_MODEL,
   },
   {
