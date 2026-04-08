@@ -303,7 +303,7 @@ function getPresetPromptAddon(presetKey, roomType) {
   }
 
   if (flooringPresetKeys.has(presetKey)) {
-    return 'Change only the flooring concept. Preserve baseboards, furniture perspective, transitions, reflections, shadows, and the true room geometry.';
+    return 'Change only the flooring concept. Preserve baseboards, furniture perspective, transitions, reflections, shadows, and the true room geometry. Remove or neutralize area-rug appearance where possible so the floor material change is clearly visible.';
   }
 
   if (
@@ -328,6 +328,38 @@ function getPresetPromptAddon(presetKey, roomType) {
   }
 
   return '';
+}
+
+async function calculateVisualChangeRatio(sourceBuffer, variantBuffer) {
+  const width = 256;
+  const height = 256;
+  const src = await sharp(sourceBuffer)
+    .rotate()
+    .resize(width, height, { fit: 'cover' })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+  const next = await sharp(variantBuffer)
+    .rotate()
+    .resize(width, height, { fit: 'cover' })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+
+  const pixelCount = width * height;
+  let changedPixels = 0;
+  for (let offset = 0; offset < src.length; offset += 3) {
+    const delta =
+      (Math.abs(src[offset] - next[offset]) +
+        Math.abs(src[offset + 1] - next[offset + 1]) +
+        Math.abs(src[offset + 2] - next[offset + 2])) /
+      3;
+    if (delta >= 18) {
+      changedPixels += 1;
+    }
+  }
+
+  return Number((changedPixels / pixelCount).toFixed(4));
 }
 
 function buildCenterCropRegion(metadata, insetRatio = 0) {
@@ -1164,16 +1196,16 @@ function buildMaskShapes(metadata, presetKey, roomType) {
       {
         type: 'rect',
         left: Math.round(width * 0.08),
-        top: Math.round(height * 0.24),
+        top: Math.round(height * 0.14),
         width: Math.round(width * 0.84),
-        height: Math.round(height * 0.68),
+        height: Math.round(height * 0.76),
       },
       {
         type: 'ellipse',
         cx: Math.round(width * 0.5),
-        cy: Math.round(height * 0.66),
-        rx: Math.round(width * 0.28),
-        ry: Math.round(height * 0.2),
+        cy: Math.round(height * 0.64),
+        rx: Math.round(width * 0.35),
+        ry: Math.round(height * 0.23),
       },
     ];
   }
@@ -1220,17 +1252,17 @@ function buildMaskShapes(metadata, presetKey, roomType) {
     return [
       {
         type: 'rect',
-        left: Math.round(width * 0.06),
-        top: Math.round(height * 0.58),
-        width: Math.round(width * 0.88),
-        height: Math.round(height * 0.3),
+        left: Math.round(width * 0.04),
+        top: Math.round(height * 0.48),
+        width: Math.round(width * 0.92),
+        height: Math.round(height * 0.46),
       },
       {
         type: 'ellipse',
         cx: Math.round(width * 0.5),
-        cy: Math.round(height * 0.78),
-        rx: Math.round(width * 0.34),
-        ry: Math.round(height * 0.14),
+        cy: Math.round(height * 0.76),
+        rx: Math.round(width * 0.42),
+        ry: Math.round(height * 0.18),
       },
     ];
   }
@@ -1609,6 +1641,8 @@ export async function createImageEnhancementJob({
         outputCount: preset.outputCount || 2,
         guidanceScale: preset.guidanceScale,
         numInferenceSteps: preset.numInferenceSteps,
+        scheduler: preset.scheduler,
+        negativePrompt: preset.negativePrompt,
       });
 
       createdVariants = await Promise.all(
@@ -1623,7 +1657,14 @@ export async function createImageEnhancementJob({
             sourceImageBase64,
             variantImageBase64: buffer.toString('base64'),
           });
-          const overallScore = calculateVisionReviewOverallScore(review);
+          const visualChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer);
+          let overallScore = calculateVisionReviewOverallScore(review);
+          if (
+            (preset.key === 'remove_furniture' && visualChangeRatio < 0.2) ||
+            (preset.key.startsWith('floor_') && visualChangeRatio < 0.12)
+          ) {
+            overallScore = Math.max(0, overallScore - 18);
+          }
           const saved = await saveBinaryBuffer({
             propertyId: asset.propertyId.toString(),
             mimeType: 'image/jpeg',
@@ -1670,6 +1711,7 @@ export async function createImageEnhancementJob({
               review: {
                 ...review,
                 overallScore,
+                visualChangeRatio,
               },
             },
           });
