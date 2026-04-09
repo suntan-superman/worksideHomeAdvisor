@@ -805,7 +805,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setShowVisionHistory(false);
     setShowVisionPhotoPicker(false);
     setShowMoreVisionVariants(false);
-  }, [selectedMediaAsset?.id]);
+  }, [selectedMediaAssetId]);
 
   useEffect(() => {
     if (
@@ -817,7 +817,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }, [mediaVariants, workflowSourceVariantId]);
 
   useEffect(() => {
-    const stagePresetKeys = activeVisionWorkflowStage.groups.flatMap((group) => group.items);
+    const stagePresetKeys = getVisionWorkflowStage(activeVisionWorkflowStageKey).groups.flatMap(
+      (group) => group.items,
+    );
     if (!stagePresetKeys.length) {
       return;
     }
@@ -825,7 +827,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (!stagePresetKeys.includes(activeVisionPresetKey)) {
       setActiveVisionPresetKey(stagePresetKeys[0]);
     }
-  }, [activeVisionPresetKey, activeVisionWorkflowStage]);
+  }, [activeVisionPresetKey, activeVisionWorkflowStageKey]);
 
   useEffect(
     () => () => {
