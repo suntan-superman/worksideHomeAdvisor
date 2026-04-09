@@ -13,6 +13,7 @@ const PRO_PRESET_KEYS = new Set([
 
 const PREMIUM_PRESET_KEYS = new Set([
   'remove_furniture',
+  'cleanup_empty_room',
   'floor_light_wood',
   'floor_medium_wood',
   'floor_dark_hardwood',

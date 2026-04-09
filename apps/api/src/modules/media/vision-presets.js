@@ -89,6 +89,30 @@ export const VISION_PRESETS = [
     replicateModel: REPLICATE_INPAINT_MODEL,
   },
   {
+    key: 'cleanup_empty_room',
+    legacyKeys: [],
+    displayName: 'Cleanup Empty Room',
+    shortLabel: 'Cleanup Pass',
+    category: 'concept_preview',
+    roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'exterior', 'unknown'],
+    providerPreference: 'replicate',
+    promptVersion: 1,
+    outputCount: 2,
+    disclaimerType: 'concept_preview',
+    recommendedUse: ['report'],
+    upgradeTier: 'premium',
+    basePrompt:
+      'Refine this already-cleared room concept. Remove leftover furniture fragments, visual artifacts, rug remnants, patchy floor transitions, and uneven wall or trim edges. Preserve architecture, built-ins, shelving, windows, doors, flooring direction, and room geometry. Add nothing new. Keep the room believable, clean, and presentation-ready.',
+    helperText:
+      'Run a lighter cleanup pass after furniture removal to smooth artifacts without redesigning the room.',
+    strength: 0.78,
+    guidanceScale: 8.5,
+    numInferenceSteps: 34,
+    negativePrompt:
+      'new furniture, extra decor, fireplace, mantel, added shelving, added built-ins, new objects, unrealistic geometry, warped lines, distorted walls, overdesigned room',
+    replicateModel: REPLICATE_INPAINT_MODEL,
+  },
+  {
     key: 'paint_warm_neutral',
     legacyKeys: [],
     displayName: 'Warm Neutral Walls',

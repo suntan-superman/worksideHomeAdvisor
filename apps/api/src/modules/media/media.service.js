@@ -268,3 +268,85 @@ export async function deleteMediaAsset(assetId) {
     propertyId: asset.propertyId?.toString?.() || String(asset.propertyId),
   };
 }
+
+export async function pruneMediaVariantDrafts(assetId, keepVariantId) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to delete media variants.');
+  }
+
+  const asset = await MediaAssetModel.findById(assetId);
+  if (!asset) {
+    throw new Error('Media asset not found.');
+  }
+
+  await assertPropertyEditableById(asset.propertyId);
+
+  const variants = await MediaVariantModel.find({ mediaId: asset._id }).lean();
+  if (!variants.length) {
+    return {
+      deleted: true,
+      assetId,
+      deletedVariantIds: [],
+      keptVariantId: keepVariantId || null,
+      deletedCount: 0,
+    };
+  }
+
+  const normalizedKeepVariantId = keepVariantId?.toString?.() || String(keepVariantId || '');
+  const keepVariant = normalizedKeepVariantId
+    ? variants.find((variant) => variant._id?.toString?.() === normalizedKeepVariantId)
+    : null;
+
+  if (normalizedKeepVariantId && !keepVariant) {
+    throw new Error('Selected variant was not found for this photo.');
+  }
+
+  const variantsToDelete = variants.filter(
+    (variant) => variant._id?.toString?.() !== normalizedKeepVariantId,
+  );
+
+  await Promise.all(
+    variantsToDelete.map((variant) =>
+      deleteStoredAssetIfUnreferenced({
+        storageProvider: variant.storageProvider,
+        storageKey: variant.storageKey,
+        excludeVariantId: variant._id,
+      }),
+    ),
+  );
+
+  const deletedVariantIds = variantsToDelete.map((variant) => variant._id);
+  if (deletedVariantIds.length) {
+    await MediaVariantModel.deleteMany({ _id: { $in: deletedVariantIds } });
+  }
+
+  const affectedVisionJobIds = [
+    ...new Set(
+      variantsToDelete
+        .map((variant) => variant.visionJobId?.toString?.() || String(variant.visionJobId || ''))
+        .filter(Boolean),
+    ),
+  ];
+
+  if (affectedVisionJobIds.length) {
+    for (const visionJobId of affectedVisionJobIds) {
+      const remainingVariantCount = await MediaVariantModel.countDocuments({ visionJobId });
+      if (!remainingVariantCount) {
+        await ImageJobModel.deleteOne({ _id: visionJobId });
+      } else if (normalizedKeepVariantId) {
+        await ImageJobModel.updateOne(
+          { _id: visionJobId, selectedVariantId: { $in: deletedVariantIds } },
+          { $set: { selectedVariantId: normalizedKeepVariantId } },
+        );
+      }
+    }
+  }
+
+  return {
+    deleted: true,
+    assetId,
+    deletedVariantIds: deletedVariantIds.map((item) => item?.toString?.() || String(item)),
+    keptVariantId: normalizedKeepVariantId || null,
+    deletedCount: deletedVariantIds.length,
+  };
+}

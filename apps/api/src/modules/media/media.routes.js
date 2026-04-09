@@ -20,6 +20,7 @@ import {
   deleteMediaAsset,
   getMediaAssetById,
   listMediaAssets,
+  pruneMediaVariantDrafts,
   updateMediaAsset,
 } from './media.service.js';
 import { getVisionPresetKeys } from './vision-presets.js';
@@ -54,7 +55,9 @@ const updateMediaAssetSchema = z.object({
 const imageJobRequestSchema = z.object({
   jobType: z.string().optional(),
   presetKey: z.string().optional(),
+  sourceVariantId: z.string().min(1).optional(),
   roomType: z.string().max(80).optional(),
+  workflowStageKey: z.string().max(80).optional(),
   mode: z.enum(['preset', 'freeform']).optional(),
   instructions: z.string().trim().max(600).optional(),
   forceRegenerate: z.boolean().optional(),
@@ -89,11 +92,17 @@ const photoEnhanceSchema = z.object({
   assetId: z.string().min(1),
   presetKey: z.string().optional(),
   jobType: z.string().optional(),
+  sourceVariantId: z.string().min(1).optional(),
   roomType: z.string().max(80).optional(),
+  workflowStageKey: z.string().max(80).optional(),
   mode: z.enum(['preset', 'freeform']).optional(),
   instructions: z.string().trim().max(600).optional(),
   forceRegenerate: z.boolean().optional(),
   userPlan: z.enum(VISION_PLAN_VALUES).optional(),
+});
+
+const pruneVisionDraftsSchema = z.object({
+  keepVariantId: z.string().min(1),
 });
 
 export async function mediaRoutes(fastify) {
@@ -196,7 +205,9 @@ export async function mediaRoutes(fastify) {
         assetId,
         jobType: payload.jobType,
         presetKey: payload.presetKey,
+        sourceVariantId: payload.sourceVariantId,
         roomType: payload.roomType,
+        workflowStageKey: payload.workflowStageKey,
         mode: payload.mode,
         instructions: payload.instructions,
         forceRegenerate: payload.forceRegenerate,
@@ -222,7 +233,9 @@ export async function mediaRoutes(fastify) {
         assetId,
         jobType: payload.jobType,
         presetKey: payload.presetKey,
+        sourceVariantId: payload.sourceVariantId,
         roomType: payload.roomType,
+        workflowStageKey: payload.workflowStageKey,
         mode: payload.mode,
         instructions: payload.instructions,
         forceRegenerate: payload.forceRegenerate,
@@ -247,7 +260,9 @@ export async function mediaRoutes(fastify) {
         assetId: payload.assetId,
         jobType: payload.jobType,
         presetKey: payload.presetKey,
+        sourceVariantId: payload.sourceVariantId,
         roomType: payload.roomType,
+        workflowStageKey: payload.workflowStageKey,
         mode: payload.mode,
         instructions: payload.instructions,
         forceRegenerate: payload.forceRegenerate,
@@ -276,6 +291,18 @@ export async function mediaRoutes(fastify) {
       return reply.send({ variants });
     } catch (error) {
       return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/media/assets/:assetId/vision/prune-drafts', async (request, reply) => {
+    try {
+      const { assetId } = assetParamsSchema.parse(request.params);
+      const payload = pruneVisionDraftsSchema.parse(request.body ?? {});
+      const result = await pruneMediaVariantDrafts(assetId, payload.keepVariantId);
+      return reply.send(result);
+    } catch (error) {
+      const statusCode = error.message === 'Media asset not found.' ? 404 : 400;
+      return reply.code(statusCode).send({ message: error.message });
     }
   });
 

@@ -330,6 +330,10 @@ function getPresetPromptAddon(presetKey, roomType) {
     return 'Remove movable furniture if possible, but preserve all structural elements, built-ins, windows, doors, and permanent fixtures.';
   }
 
+  if (presetKey === 'cleanup_empty_room') {
+    return 'Refine an already-cleared room concept. Remove leftover fragments, rug remnants, patchy floor transitions, and uneven wall or trim artifacts while preserving all structural elements, built-ins, shelving, windows, doors, and permanent fixtures.';
+  }
+
   if (wallColorPresetKeys.has(presetKey)) {
     return 'Change only the wall color concept. Preserve ceilings, trim, baseboards, doors, windows, outlets, wall texture, shadows, and room geometry.';
   }
@@ -412,6 +416,13 @@ function getPresetEvaluationRegions(presetKey) {
   if (presetKey === 'remove_furniture') {
     return {
       focusRegion: { left: 0.03, top: 0.4, width: 0.94, height: 0.56 },
+      structureRegion: { left: 0, top: 0, width: 1, height: 0.52 },
+    };
+  }
+
+  if (presetKey === 'cleanup_empty_room') {
+    return {
+      focusRegion: { left: 0.03, top: 0.38, width: 0.94, height: 0.58 },
       structureRegion: { left: 0, top: 0, width: 1, height: 0.52 },
     };
   }
@@ -500,6 +511,20 @@ function buildPresetRenderPlan(presetKey) {
       differenceHint:
         'Look at the perceived openness of the room rather than exact decor details.',
       effects: ['Furniture removal', 'Open-room concept', 'Planning preview'],
+    };
+  }
+
+  if (preset.key === 'cleanup_empty_room') {
+    return {
+      preset,
+      label: 'Empty-Room Cleanup Preview',
+      warning:
+        'This is a concept preview only. It refines a cleared-room draft for planning and seller discussion, not as silent replacement of the original photo.',
+      summary:
+        'A lighter cleanup pass that smooths leftover artifacts after furniture removal while preserving the room structure.',
+      differenceHint:
+        'Look for cleaner floor and wall transitions, fewer leftovers, and a more believable empty-room presentation.',
+      effects: ['Artifact cleanup', 'Geometry preservation', 'Clean-room refinement'],
     };
   }
 
@@ -2258,6 +2283,7 @@ function buildVisionInputHash({ assetId, presetKey, roomType, promptVersion }) {
 
 function buildVisionJobHash({
   assetId,
+  sourceVariantId = '',
   presetKey,
   roomType,
   promptVersion,
@@ -2269,6 +2295,7 @@ function buildVisionJobHash({
     .update(
       JSON.stringify({
         assetId,
+        sourceVariantId: String(sourceVariantId || ''),
         presetKey,
         roomType,
         promptVersion,
@@ -3126,12 +3153,14 @@ async function persistOrchestratedVisionCandidates({
   candidates,
   job,
   asset,
+  sourceRecord,
   preset,
   renderPlan,
   resolvedRoomType,
   requestedMode,
   normalizedInstructions,
   normalizedPlan,
+  workflowStageKey,
   orchestrationResult,
   roomPromptAddon,
   presetPromptAddon,
@@ -3169,6 +3198,10 @@ async function persistOrchestratedVisionCandidates({
         effects: candidate.effects || renderPlan.effects,
         cropInsetPercent: candidate.cropInsetPercent || null,
         sourceAssetId: asset._id.toString(),
+        sourceVariantId: sourceRecord?.kind === 'variant' ? sourceRecord.id : '',
+        sourceOrigin: sourceRecord?.kind || 'asset',
+        sourceLabel: sourceRecord?.label || asset.roomLabel,
+        workflowStageKey: workflowStageKey || '',
         roomLabel: asset.roomLabel,
         roomType: resolvedRoomType,
         provider: candidate.providerKey || preset.providerPreference || 'local_sharp',
@@ -3228,6 +3261,8 @@ export async function createImageEnhancementJob({
   instructions = '',
   forceRegenerate = false,
   userPlan = '',
+  sourceVariantId = '',
+  workflowStageKey = '',
 }) {
   if (mongoose.connection.readyState !== 1) {
     throw new Error('Database connection is required to generate image variants.');
@@ -3237,6 +3272,35 @@ export async function createImageEnhancementJob({
   if (!asset) {
     throw new Error('Media asset not found.');
   }
+
+  const normalizedSourceVariantId = String(sourceVariantId || '').trim();
+  const normalizedWorkflowStageKey = String(workflowStageKey || '').trim();
+  const sourceVariant = normalizedSourceVariantId
+    ? await MediaVariantModel.findOne({ _id: normalizedSourceVariantId, mediaId: asset._id }).lean()
+    : null;
+  if (normalizedSourceVariantId && !sourceVariant) {
+    throw new Error('Selected source variant was not found for this photo.');
+  }
+
+  const sourceRecord = sourceVariant
+    ? {
+        id: sourceVariant._id.toString(),
+        kind: 'variant',
+        label: sourceVariant.label || asset.roomLabel,
+        imageUrl: sourceVariant.imageUrl || '',
+        storageProvider: sourceVariant.storageProvider,
+        storageKey: sourceVariant.storageKey,
+        mimeType: sourceVariant.mimeType || asset.mimeType,
+      }
+    : {
+        id: asset._id.toString(),
+        kind: 'asset',
+        label: asset.roomLabel,
+        imageUrl: asset.imageUrl || '',
+        storageProvider: asset.storageProvider,
+        storageKey: asset.storageKey,
+        mimeType: asset.mimeType,
+      };
 
   const requestedMode =
     mode === 'freeform' || String(instructions || '').trim() ? 'freeform' : 'preset';
@@ -3254,6 +3318,7 @@ export async function createImageEnhancementJob({
   const effectiveUserPlan = resolveVisionUserPlan({ preset, userPlan });
   const inputHash = buildVisionJobHash({
     assetId: asset._id.toString(),
+    sourceVariantId: normalizedSourceVariantId,
     presetKey: preset.key,
     roomType: resolvedRoomType,
     promptVersion: preset.promptVersion,
@@ -3305,7 +3370,7 @@ export async function createImageEnhancementJob({
     mode: requestedMode,
     instructions: normalizedInstructions,
     normalizedPlan,
-    originalUrl: asset.imageUrl || '',
+    originalUrl: sourceRecord.imageUrl || asset.imageUrl || '',
     roomType: resolvedRoomType,
     promptVersion: preset.promptVersion,
     inputHash,
@@ -3315,7 +3380,7 @@ export async function createImageEnhancementJob({
     input: {
       roomLabel: asset.roomLabel,
       roomType: resolvedRoomType,
-      mimeType: asset.mimeType,
+      mimeType: sourceRecord.mimeType || asset.mimeType,
       prompt: preset.basePrompt,
       helperText: preset.helperText,
       recommendedUse: preset.recommendedUse,
@@ -3325,6 +3390,11 @@ export async function createImageEnhancementJob({
       instructions: normalizedInstructions,
       normalizedPlan,
       forceRegenerate,
+      sourceAssetId: asset._id.toString(),
+      sourceVariantId: sourceRecord.kind === 'variant' ? sourceRecord.id : '',
+      sourceOrigin: sourceRecord.kind,
+      sourceLabel: sourceRecord.label,
+      workflowStageKey: normalizedWorkflowStageKey,
     },
   });
 
@@ -3355,8 +3425,8 @@ export async function createImageEnhancementJob({
       fullPrompt,
     };
     const stored = await readStoredAsset({
-      storageProvider: asset.storageProvider,
-      storageKey: asset.storageKey,
+      storageProvider: sourceRecord.storageProvider,
+      storageKey: sourceRecord.storageKey,
     });
     const sourceImageBase64 = stored.buffer.toString('base64');
     const orchestrationResult = await orchestrateVisionJob({
@@ -3427,12 +3497,14 @@ export async function createImageEnhancementJob({
       candidates: orchestrationResult.allCandidates,
       job,
       asset,
+      sourceRecord,
       preset,
       renderPlan,
       resolvedRoomType,
       requestedMode,
       normalizedInstructions,
       normalizedPlan,
+      workflowStageKey: normalizedWorkflowStageKey,
       orchestrationResult,
       roomPromptAddon,
       presetPromptAddon,

@@ -443,6 +443,13 @@ export function createImageEnhancementJob(assetId, payload) {
   });
 }
 
+export function pruneVisionDrafts(assetId, keepVariantId) {
+  return request(`/api/v1/media/assets/${assetId}/vision/prune-drafts`, {
+    method: 'POST',
+    body: JSON.stringify({ keepVariantId }),
+  });
+}
+
 export function listImageEnhancementJobs(assetId, limit = 10) {
   const search = new URLSearchParams();
   if (limit) {
