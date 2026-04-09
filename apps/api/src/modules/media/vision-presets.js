@@ -234,20 +234,20 @@ export const VISION_PRESETS = [
     category: 'concept_preview',
     roomCompatibility: ['living_room', 'bedroom', 'dining_room', 'office', 'unknown'],
     providerPreference: 'replicate',
-    promptVersion: 3,
-    outputCount: 3,
+    promptVersion: 4,
+    outputCount: 4,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Create a conceptual preview of this room with the flooring changed to a rich dark hardwood finish that feels upscale and intentional. Preserve room proportions, baseboards, walls, furniture perspective, and architecture. Keep the output realistic and clearly a planning concept.',
+      'Create a conceptual preview of this room with the flooring changed to a clearly darker rich hardwood finish, such as walnut or espresso-toned planks, so the floor reads noticeably deeper and more upscale than the source image. Preserve room proportions, baseboards, walls, furniture perspective, reflections, and architecture. Keep the output realistic and clearly a planning concept.',
     helperText:
       'Preview a richer dark-hardwood floor direction.',
-    strength: 0.9,
-    guidanceScale: 9,
-    numInferenceSteps: 44,
+    strength: 0.95,
+    guidanceScale: 9.6,
+    numInferenceSteps: 50,
     negativePrompt:
-      'carpet texture, rug pattern, patchy flooring, smeared wood grain, warped floor lines, low quality, unrealistic geometry',
+      'light blonde floor, unchanged flooring color, subtle floor shift, carpet texture, rug pattern, patchy flooring, smeared wood grain, warped floor lines, low quality, unrealistic geometry',
     replicateModel: REPLICATE_INPAINT_MODEL,
   },
   {

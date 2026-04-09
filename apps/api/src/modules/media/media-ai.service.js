@@ -338,6 +338,10 @@ function getPresetPromptAddon(presetKey, roomType) {
     return 'Change only the wall color concept. Preserve ceilings, trim, baseboards, doors, windows, outlets, wall texture, shadows, and room geometry.';
   }
 
+  if (presetKey === 'floor_dark_hardwood') {
+    return 'Change only the flooring concept to a distinctly darker walnut or espresso hardwood tone. Preserve sunlight pattern, reflections, baseboards, room brightness, and geometry. The floor should read noticeably darker than the original, not just slightly warmer or brighter.';
+  }
+
   if (flooringPresetKeys.has(presetKey)) {
     return 'Change only the flooring concept. Preserve baseboards, furniture perspective, transitions, reflections, shadows, and the true room geometry. Remove or neutralize area-rug appearance where possible so the floor material change is clearly visible.';
   }
@@ -809,6 +813,38 @@ function sortVisionVariants(variants = []) {
       );
       if (leftNewFurnitureAddition !== rightNewFurnitureAddition) {
         return leftNewFurnitureAddition - rightNewFurnitureAddition;
+      }
+    }
+
+    if (
+      leftPresetKey === 'floor_dark_hardwood' &&
+      rightPresetKey === 'floor_dark_hardwood'
+    ) {
+      const leftMaskedLuminanceDelta = Number(
+        left?.metadata?.review?.maskedLuminanceDelta || 0,
+      );
+      const rightMaskedLuminanceDelta = Number(
+        right?.metadata?.review?.maskedLuminanceDelta || 0,
+      );
+      if (leftMaskedLuminanceDelta !== rightMaskedLuminanceDelta) {
+        return leftMaskedLuminanceDelta - rightMaskedLuminanceDelta;
+      }
+    }
+
+    if (
+      String(leftPresetKey || '').startsWith('floor_') &&
+      String(rightPresetKey || '').startsWith('floor_')
+    ) {
+      const leftMaskedChange = Number(left?.metadata?.review?.maskedChangeRatio || 0);
+      const rightMaskedChange = Number(right?.metadata?.review?.maskedChangeRatio || 0);
+      if (leftMaskedChange !== rightMaskedChange) {
+        return rightMaskedChange - leftMaskedChange;
+      }
+
+      const leftFocusChange = Number(left?.metadata?.review?.focusRegionChangeRatio || 0);
+      const rightFocusChange = Number(right?.metadata?.review?.focusRegionChangeRatio || 0);
+      if (leftFocusChange !== rightFocusChange) {
+        return rightFocusChange - leftFocusChange;
       }
     }
 
@@ -1906,6 +1942,51 @@ async function calculateMaskedVisualChangeRatio(sourceBuffer, variantBuffer, mas
   return Number((changedPixels / Math.max(1, maskPixels)).toFixed(4));
 }
 
+async function calculateMaskedLuminanceDelta(sourceBuffer, variantBuffer, maskBuffer) {
+  const metadata = await sharp(maskBuffer).metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const [src, next, mask] = await Promise.all([
+    sharp(sourceBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(variantBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(maskBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+  ]);
+
+  let maskPixels = 0;
+  let srcLuminanceTotal = 0;
+  let nextLuminanceTotal = 0;
+  for (let i = 0; i < width * height; i += 1) {
+    if (mask[i] <= 32) {
+      continue;
+    }
+    maskPixels += 1;
+    const offset = i * 3;
+    srcLuminanceTotal +=
+      src[offset] * 0.2126 + src[offset + 1] * 0.7152 + src[offset + 2] * 0.0722;
+    nextLuminanceTotal +=
+      next[offset] * 0.2126 + next[offset + 1] * 0.7152 + next[offset + 2] * 0.0722;
+  }
+
+  const averageSourceLuminance = srcLuminanceTotal / Math.max(1, maskPixels);
+  const averageVariantLuminance = nextLuminanceTotal / Math.max(1, maskPixels);
+  return Number(
+    ((averageVariantLuminance - averageSourceLuminance) / 255).toFixed(4),
+  );
+}
+
 async function calculateOutsideMaskVisualChangeRatio(sourceBuffer, variantBuffer, maskBuffer) {
   const metadata = await sharp(maskBuffer).metadata();
   const width = Number(metadata.width || 0);
@@ -2560,6 +2641,7 @@ async function buildReviewedReplicateCandidates({
       region: evaluationRegions.focusRegion,
     });
     let maskedChangeRatio = 0;
+    let maskedLuminanceDelta = 0;
     let outsideMaskChangeRatio = 0;
     let maskedEdgeDensityDelta = 0;
     let remainingFurnitureOverlapRatio = 0;
@@ -2578,6 +2660,15 @@ async function buildReviewedReplicateCandidates({
         clearedMajorComponentCount,
         totalMajorComponentCount,
       } = await computeFurnitureRemovalMetrics(buffer));
+    }
+    if (preset.key.startsWith('floor_')) {
+      maskedChangeRatio = await calculateMaskedVisualChangeRatio(sourceBuffer, buffer, maskBuffer);
+      maskedLuminanceDelta = await calculateMaskedLuminanceDelta(sourceBuffer, buffer, maskBuffer);
+      outsideMaskChangeRatio = await calculateOutsideMaskVisualChangeRatio(
+        sourceBuffer,
+        buffer,
+        maskBuffer,
+      );
     }
 
     if (
@@ -2761,8 +2852,29 @@ async function buildReviewedReplicateCandidates({
       if (visualChangeRatio < 0.14) {
         overallScore = Math.max(0, overallScore - 20);
       }
+      if (maskedChangeRatio < 0.14) {
+        overallScore = Math.max(0, overallScore - 24);
+        qualityWarning =
+          'Low-confidence preview: the flooring region changed too little to read as a meaningful finish update.';
+        rejectionCategory = 'insufficient_floor_change';
+        shouldHideByDefault = true;
+      }
+      if (outsideMaskChangeRatio > 0.22) {
+        overallScore = Math.max(0, overallScore - 12);
+      }
       if (topHalfChangeRatio > 0.09) {
         overallScore = Math.max(0, overallScore - 20);
+      }
+      if (preset.key === 'floor_dark_hardwood') {
+        if (maskedLuminanceDelta > -0.035) {
+          overallScore = Math.max(0, overallScore - 30);
+          qualityWarning =
+            'Low-confidence preview: the floor stayed too close to the original tone instead of becoming meaningfully darker.';
+          rejectionCategory = 'insufficient_floor_change';
+          shouldHideByDefault = true;
+        } else if (maskedLuminanceDelta <= -0.08) {
+          overallScore = Math.min(100, overallScore + 10);
+        }
       }
       if (topHalfChangeRatio > 0.14) {
         overallScore = Math.max(0, overallScore - 18);
@@ -2814,6 +2926,7 @@ async function buildReviewedReplicateCandidates({
       focusRegionChangeRatio,
       topHalfChangeRatio,
       maskedChangeRatio,
+      maskedLuminanceDelta,
       outsideMaskChangeRatio,
       maskedEdgeDensityDelta,
       remainingFurnitureOverlapRatio,
@@ -2947,6 +3060,7 @@ async function buildReviewedOpenAiCandidates({
       region: evaluationRegions.focusRegion,
     });
     let maskedChangeRatio = 0;
+    let maskedLuminanceDelta = 0;
     let outsideMaskChangeRatio = 0;
     let maskedEdgeDensityDelta = 0;
     let remainingFurnitureOverlapRatio = 0;
@@ -2965,6 +3079,15 @@ async function buildReviewedOpenAiCandidates({
         clearedMajorComponentCount,
         totalMajorComponentCount,
       } = await computeFurnitureRemovalMetrics(buffer));
+    }
+    if (preset.key.startsWith('floor_')) {
+      maskedChangeRatio = await calculateMaskedVisualChangeRatio(sourceBuffer, buffer, maskBuffer);
+      maskedLuminanceDelta = await calculateMaskedLuminanceDelta(sourceBuffer, buffer, maskBuffer);
+      outsideMaskChangeRatio = await calculateOutsideMaskVisualChangeRatio(
+        sourceBuffer,
+        buffer,
+        maskBuffer,
+      );
     }
 
     const review = await reviewVisionVariant({
@@ -3083,8 +3206,29 @@ async function buildReviewedOpenAiCandidates({
       if (visualChangeRatio < 0.14) {
         overallScore = Math.max(0, overallScore - 18);
       }
+      if (maskedChangeRatio < 0.14) {
+        overallScore = Math.max(0, overallScore - 22);
+        qualityWarning =
+          'Low-confidence preview: the premium fallback changed too little in the flooring region.';
+        rejectionCategory = 'insufficient_floor_change';
+        shouldHideByDefault = true;
+      }
+      if (outsideMaskChangeRatio > 0.22) {
+        overallScore = Math.max(0, overallScore - 12);
+      }
       if (topHalfChangeRatio > 0.12) {
         overallScore = Math.max(0, overallScore - 18);
+      }
+      if (preset.key === 'floor_dark_hardwood') {
+        if (maskedLuminanceDelta > -0.035) {
+          overallScore = Math.max(0, overallScore - 28);
+          qualityWarning =
+            'Low-confidence preview: the premium fallback kept the floor too close to the original tone instead of delivering a clearly darker hardwood concept.';
+          rejectionCategory = 'insufficient_floor_change';
+          shouldHideByDefault = true;
+        } else if (maskedLuminanceDelta <= -0.08) {
+          overallScore = Math.min(100, overallScore + 10);
+        }
       }
       if (topHalfChangeRatio > 0.16) {
         overallScore = Math.max(0, overallScore - 18);
@@ -3133,6 +3277,7 @@ async function buildReviewedOpenAiCandidates({
       focusRegionChangeRatio,
       topHalfChangeRatio,
       maskedChangeRatio,
+      maskedLuminanceDelta,
       outsideMaskChangeRatio,
       maskedEdgeDensityDelta,
       remainingFurnitureOverlapRatio,
@@ -3231,6 +3376,7 @@ async function persistOrchestratedVisionCandidates({
           focusRegionChangeRatio: candidate.focusRegionChangeRatio,
           topHalfChangeRatio: candidate.topHalfChangeRatio,
           maskedChangeRatio: candidate.maskedChangeRatio,
+          maskedLuminanceDelta: candidate.maskedLuminanceDelta,
           outsideMaskChangeRatio: candidate.outsideMaskChangeRatio,
           maskedEdgeDensityDelta: candidate.maskedEdgeDensityDelta,
           remainingFurnitureOverlapRatio: candidate.remainingFurnitureOverlapRatio,

@@ -80,6 +80,8 @@ export function getReplicateSettings(providerKey, preset = {}) {
   const baseInferenceSteps = Number(preset.numInferenceSteps || 35);
   const baseOutputCount = Number(preset.outputCount || 2);
   const isRemoveFurniture = preset.key === 'remove_furniture';
+  const isFlooringPreset = String(preset.key || '').startsWith('floor_');
+  const isDarkHardwoodPreset = preset.key === 'floor_dark_hardwood';
 
   if (providerKey === 'replicate_advanced') {
     const strongerRemovalPreset = new Set(['remove_furniture', 'declutter_medium']);
@@ -94,6 +96,23 @@ export function getReplicateSettings(providerKey, preset = {}) {
         guidanceScale: Math.min(10, Number((baseGuidanceScale + 0.35).toFixed(2))),
         numInferenceSteps: baseInferenceSteps + 4,
         strength: Number(Math.min(0.98, baseStrength + 0.03).toFixed(2)),
+        scheduler: preset.scheduler,
+        negativePrompt: preset.negativePrompt,
+      };
+    }
+
+    if (isFlooringPreset) {
+      return {
+        model: preset.replicateModel,
+        outputCount: Math.max(3, baseOutputCount),
+        guidanceScale: Math.min(
+          10,
+          Number((baseGuidanceScale + (isDarkHardwoodPreset ? 0.3 : 0.2)).toFixed(2)),
+        ),
+        numInferenceSteps: baseInferenceSteps + (isDarkHardwoodPreset ? 4 : 3),
+        strength: Number(
+          Math.min(0.98, baseStrength + (isDarkHardwoodPreset ? 0.02 : 0.01)).toFixed(2),
+        ),
         scheduler: preset.scheduler,
         negativePrompt: preset.negativePrompt,
       };
@@ -212,7 +231,18 @@ export function isCandidateSufficient(candidate, presetKey) {
   }
 
   if (String(presetKey || '').startsWith('floor_')) {
-    return Number(candidate.focusRegionChangeRatio || 0) >= 0.08;
+    if (presetKey === 'floor_dark_hardwood') {
+      return (
+        Number(candidate.focusRegionChangeRatio || 0) >= 0.12 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.14 &&
+        Number(candidate.maskedLuminanceDelta || 0) <= -0.035
+      );
+    }
+
+    return (
+      Number(candidate.focusRegionChangeRatio || 0) >= 0.1 &&
+      Number(candidate.maskedChangeRatio || 0) >= 0.12
+    );
   }
 
   if (String(presetKey || '').startsWith('paint_')) {
@@ -269,6 +299,38 @@ export function rankCandidates(candidates = [], presetKey) {
         Number(right?.focusRegionChangeRatio || 0)
       ) {
         return Number(right?.focusRegionChangeRatio || 0) - Number(left?.focusRegionChangeRatio || 0);
+      }
+    }
+
+    if (String(presetKey || '').startsWith('floor_')) {
+      if (presetKey === 'floor_dark_hardwood') {
+        if (
+          Number(left?.maskedLuminanceDelta || 0) !== Number(right?.maskedLuminanceDelta || 0)
+        ) {
+          return (
+            Number(left?.maskedLuminanceDelta || 0) - Number(right?.maskedLuminanceDelta || 0)
+          );
+        }
+      }
+      if (Number(left?.maskedChangeRatio || 0) !== Number(right?.maskedChangeRatio || 0)) {
+        return Number(right?.maskedChangeRatio || 0) - Number(left?.maskedChangeRatio || 0);
+      }
+      if (
+        Number(left?.focusRegionChangeRatio || 0) !==
+        Number(right?.focusRegionChangeRatio || 0)
+      ) {
+        return Number(right?.focusRegionChangeRatio || 0) - Number(left?.focusRegionChangeRatio || 0);
+      }
+      if (
+        Number(left?.outsideMaskChangeRatio || 0) !== Number(right?.outsideMaskChangeRatio || 0)
+      ) {
+        return (
+          Number(left?.outsideMaskChangeRatio || 0) -
+          Number(right?.outsideMaskChangeRatio || 0)
+        );
+      }
+      if (Number(left?.topHalfChangeRatio || 0) !== Number(right?.topHalfChangeRatio || 0)) {
+        return Number(left?.topHalfChangeRatio || 0) - Number(right?.topHalfChangeRatio || 0);
       }
     }
 
