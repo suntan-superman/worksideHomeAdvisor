@@ -8,6 +8,10 @@ import { reviewVisionVariant } from '../../services/photoAnalysisService.js';
 import { ImageJobModel } from './image-job.model.js';
 import { MediaAssetModel } from './media.model.js';
 import { MediaVariantModel } from './media-variant.model.js';
+import {
+  isOpenAiImageEditConfigured,
+  runOpenAIImageEdit,
+} from './openai-image.provider.js';
 import { runReplicateInpainting } from './replicate-provider.service.js';
 import {
   buildActiveVariantQuery,
@@ -2374,6 +2378,232 @@ async function buildReviewedReplicateCandidates({
   return candidates;
 }
 
+async function buildReviewedOpenAiCandidates({
+  asset,
+  preset,
+  renderPlan,
+  resolvedRoomType,
+  requestedMode,
+  normalizedInstructions,
+  normalizedPlan,
+  fullPrompt,
+  roomPromptAddon,
+  presetPromptAddon,
+  sourceBuffer,
+  sourceImageBase64,
+}) {
+  const maskBuffer = await buildInpaintingMaskBuffer(sourceBuffer, preset.key, resolvedRoomType);
+  let removeFurnitureEvaluationMaskBuffer = null;
+  let sourceFurnitureEdgeDensity = null;
+  if (preset.key === 'remove_furniture') {
+    const adaptiveFurnitureMask = await buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer);
+    const adaptiveCoverageRatio = await calculateMaskCoverageRatio(
+      adaptiveFurnitureMask.adaptiveMaskBuffer,
+    );
+    removeFurnitureEvaluationMaskBuffer =
+      adaptiveCoverageRatio >= 0.03 ? adaptiveFurnitureMask.adaptiveMaskBuffer : maskBuffer;
+    sourceFurnitureEdgeDensity = await calculateMaskedEdgeDensity(
+      sourceBuffer,
+      removeFurnitureEvaluationMaskBuffer,
+    );
+  }
+
+  const providerPrompt = `${fullPrompt} Produce the strongest usable edit while preserving the true room structure. Prefer subtraction over restaging.`;
+  const providerOutputs = await runOpenAIImageEdit({
+    sourceBuffer,
+    maskBuffer,
+    prompt: providerPrompt,
+    outputCount: preset.key === 'remove_furniture' ? 1 : Math.min(2, Number(preset.outputCount || 1)),
+  });
+  const evaluationRegions = getPresetEvaluationRegions(preset.key);
+  const computeFurnitureRemovalMetrics = async (candidateBuffer) => {
+    if (!removeFurnitureEvaluationMaskBuffer || sourceFurnitureEdgeDensity == null) {
+      return {
+        maskedChangeRatio: 0,
+        outsideMaskChangeRatio: 0,
+        maskedEdgeDensityDelta: 0,
+      };
+    }
+    const maskedChangeRatio = await calculateMaskedVisualChangeRatio(
+      sourceBuffer,
+      candidateBuffer,
+      removeFurnitureEvaluationMaskBuffer,
+    );
+    const outsideMaskChangeRatio = await calculateOutsideMaskVisualChangeRatio(
+      sourceBuffer,
+      candidateBuffer,
+      removeFurnitureEvaluationMaskBuffer,
+    );
+    const variantFurnitureEdgeDensity = await calculateMaskedEdgeDensity(
+      candidateBuffer,
+      removeFurnitureEvaluationMaskBuffer,
+    );
+    const maskedEdgeDensityDelta = Number(
+      (variantFurnitureEdgeDensity - sourceFurnitureEdgeDensity).toFixed(4),
+    );
+
+    return {
+      maskedChangeRatio,
+      outsideMaskChangeRatio,
+      maskedEdgeDensityDelta,
+    };
+  };
+
+  const candidates = [];
+  for (let index = 0; index < providerOutputs.length; index += 1) {
+    const output = providerOutputs[index];
+    const buffer = await sharp(output.outputBuffer).rotate().jpeg({ quality: 92 }).toBuffer();
+    const visualChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer);
+    const focusRegionChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer, {
+      region: evaluationRegions.focusRegion,
+    });
+    let maskedChangeRatio = 0;
+    let outsideMaskChangeRatio = 0;
+    let maskedEdgeDensityDelta = 0;
+    if (preset.key === 'remove_furniture') {
+      ({
+        maskedChangeRatio,
+        outsideMaskChangeRatio,
+        maskedEdgeDensityDelta,
+      } = await computeFurnitureRemovalMetrics(buffer));
+    }
+
+    const review = await reviewVisionVariant({
+      property: null,
+      roomLabel: asset.roomLabel,
+      presetKey: preset.key,
+      variantCategory: preset.category,
+      mimeType: 'image/jpeg',
+      sourceImageBase64,
+      variantImageBase64: buffer.toString('base64'),
+    });
+    const topHalfChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer, {
+      region: evaluationRegions.structureRegion,
+    });
+    let overallScore = calculateVisionReviewOverallScore(review);
+    let shouldHideByDefault = false;
+    let rejectionCategory = '';
+    let qualityWarning = '';
+
+    if (preset.key === 'remove_furniture') {
+      if (visualChangeRatio < 0.15) {
+        overallScore = Math.max(0, overallScore - 10);
+      }
+      if (focusRegionChangeRatio < 0.12) {
+        overallScore = Math.max(0, overallScore - 12);
+      }
+      if (topHalfChangeRatio > 0.12) {
+        overallScore = Math.max(0, overallScore - 22);
+      }
+      if (maskedChangeRatio >= 0.24) {
+        overallScore = Math.min(100, overallScore + 14);
+      } else if (maskedChangeRatio >= 0.18) {
+        overallScore = Math.min(100, overallScore + 8);
+      } else {
+        overallScore = Math.max(0, overallScore - 16);
+      }
+      if (maskedEdgeDensityDelta <= -0.01) {
+        overallScore = Math.min(100, overallScore + 14);
+      } else if (maskedEdgeDensityDelta <= -0.004) {
+        overallScore = Math.min(100, overallScore + 8);
+      } else {
+        overallScore = Math.max(0, overallScore - 16);
+      }
+      if (outsideMaskChangeRatio > 0.3) {
+        overallScore = Math.max(0, overallScore - 10);
+      } else if (outsideMaskChangeRatio <= 0.18) {
+        overallScore = Math.min(100, overallScore + 4);
+      }
+
+      if (focusRegionChangeRatio < 0.08) {
+        overallScore = Math.max(0, overallScore - 18);
+        qualityWarning =
+          'Low-confidence preview: the premium fallback changed too little in the furniture region.';
+        rejectionCategory = 'insufficient_focus_change';
+        shouldHideByDefault = true;
+      }
+      if (topHalfChangeRatio > 0.24) {
+        overallScore = Math.max(0, overallScore - 18);
+        qualityWarning =
+          'Low-confidence preview: upper-architecture drift was detected in the premium fallback.';
+        rejectionCategory = rejectionCategory || 'architectural_drift';
+      }
+      if (maskedChangeRatio < 0.11) {
+        overallScore = Math.max(0, overallScore - 22);
+        qualityWarning =
+          'Low-confidence preview: premium fallback still left too much furniture in place.';
+        rejectionCategory = 'furniture_persistence';
+        shouldHideByDefault = true;
+      }
+      if (maskedEdgeDensityDelta > -0.001 && maskedChangeRatio < 0.22) {
+        overallScore = Math.max(0, overallScore - 18);
+        qualityWarning =
+          'Low-confidence preview: premium fallback restaged the room more than it removed furniture.';
+        rejectionCategory = 'furniture_persistence';
+        shouldHideByDefault = true;
+      }
+    }
+
+    if (preset.key.startsWith('floor_')) {
+      if (visualChangeRatio < 0.14) {
+        overallScore = Math.max(0, overallScore - 18);
+      }
+      if (topHalfChangeRatio > 0.12) {
+        overallScore = Math.max(0, overallScore - 18);
+      }
+      if (topHalfChangeRatio > 0.16) {
+        overallScore = Math.max(0, overallScore - 18);
+        qualityWarning =
+          'Low-confidence preview: premium fallback introduced drift outside the floor region.';
+        rejectionCategory = 'architectural_drift';
+        shouldHideByDefault = true;
+      }
+    }
+
+    const objectRemovalScore =
+      preset.key === 'remove_furniture'
+        ? calculateObjectRemovalScore({
+            visualChangeRatio,
+            focusRegionChangeRatio,
+            topHalfChangeRatio,
+            maskedChangeRatio,
+            maskedEdgeDensityDelta,
+            outsideMaskChangeRatio,
+          })
+        : 0;
+
+    candidates.push({
+      providerKey: 'openai_edit',
+      output,
+      buffer,
+      warning: qualityWarning,
+      label: `${renderPlan.label} ${String.fromCharCode(65 + index)}`,
+      summary: renderPlan.summary,
+      differenceHint: renderPlan.differenceHint,
+      effects: [...(renderPlan.effects || []), 'Premium AI fallback'],
+      roomPromptAddon,
+      presetPromptAddon,
+      mode: requestedMode,
+      instructions: normalizedInstructions,
+      normalizedPlan,
+      providerSourceUrl: output.providerSourceUrl || null,
+      review,
+      overallScore,
+      visualChangeRatio,
+      focusRegionChangeRatio,
+      topHalfChangeRatio,
+      maskedChangeRatio,
+      outsideMaskChangeRatio,
+      maskedEdgeDensityDelta,
+      objectRemovalScore,
+      shouldHideByDefault,
+      rejectionCategory,
+    });
+  }
+
+  return candidates;
+}
+
 async function persistOrchestratedVisionCandidates({
   candidates,
   job,
@@ -2642,6 +2872,23 @@ export async function createImageEnhancementJob({
             sourceBuffer: stored.buffer,
             sourceImageBase64,
           }),
+        runOpenAiEdit: isOpenAiImageEditConfigured()
+          ? async () =>
+              buildReviewedOpenAiCandidates({
+                asset,
+                preset,
+                renderPlan,
+                resolvedRoomType,
+                requestedMode,
+                normalizedInstructions,
+                normalizedPlan,
+                fullPrompt,
+                roomPromptAddon,
+                presetPromptAddon,
+                sourceBuffer: stored.buffer,
+                sourceImageBase64,
+              })
+          : undefined,
       },
     });
 

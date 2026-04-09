@@ -695,10 +695,29 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [pendingChecklistFocusTarget, setPendingChecklistFocusTarget] = useState('');
   const [status, setStatus] = useState('Loading property workspace...');
   const [toast, setToast] = useState(null);
+  const [visionGenerationState, setVisionGenerationState] = useState(null);
+  const [visionGenerationElapsedSeconds, setVisionGenerationElapsedSeconds] = useState(0);
   const viewerRole = useMemo(() => {
     const session = getStoredSession();
     return session?.user?.role === 'agent' ? 'agent' : 'seller';
   }, []);
+
+  useEffect(() => {
+    if (!visionGenerationState?.startedAt) {
+      setVisionGenerationElapsedSeconds(0);
+      return undefined;
+    }
+
+    const updateElapsedSeconds = () => {
+      setVisionGenerationElapsedSeconds(
+        Math.max(0, Math.floor((Date.now() - visionGenerationState.startedAt) / 1000)),
+      );
+    };
+
+    updateElapsedSeconds();
+    const timer = window.setInterval(updateElapsedSeconds, 1000);
+    return () => window.clearInterval(timer);
+  }, [visionGenerationState]);
 
   const liveDashboardQuery = useQuery({
     queryKey: ['property-dashboard', propertyId],
@@ -1945,6 +1964,24 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         ? 'Generating declutter variant...'
         : 'Generating enhanced listing version...',
     );
+    setVisionGenerationState({
+      kind: isFurnitureRemovalPreset
+        ? 'furniture'
+        : isDeclutterPreset
+        ? 'declutter'
+        : 'preset',
+      title: isFurnitureRemovalPreset
+        ? 'Furniture removal preview'
+        : isDeclutterPreset
+        ? 'Declutter variant'
+        : activeVisionPreset?.displayName || 'Vision enhancement',
+      detail: isFurnitureRemovalPreset
+        ? 'Generating a concept preview and checking whether fallback providers are needed.'
+        : isDeclutterPreset
+        ? 'Cleaning the photo up for listing use and reviewing the strongest result.'
+        : 'Generating a stronger listing-ready version of the selected photo.',
+      startedAt: Date.now(),
+    });
     setToast(null);
     try {
       const response = await createImageEnhancementJob(selectedMediaAsset.id, {
@@ -1972,6 +2009,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Variant generation failed', message: requestError.message });
     } finally {
+      setVisionGenerationState(null);
       setStatus('');
     }
   }
@@ -1991,6 +2029,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     setActiveTab('vision');
     setStatus('Generating custom enhancement preview...');
+    setVisionGenerationState({
+      kind: 'freeform',
+      title: 'Custom enhancement preview',
+      detail: 'Applying your natural-language request and reviewing the generated result.',
+      startedAt: Date.now(),
+    });
     setToast(null);
     try {
       const response = await createImageEnhancementJob(selectedMediaAsset.id, {
@@ -2025,6 +2069,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Custom enhancement failed', message: requestError.message });
     } finally {
+      setVisionGenerationState(null);
       setStatus('');
     }
   }
@@ -2970,10 +3015,37 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 </div>
               </div>
               <div className="workspace-action-column">
-                <button type="button" className="button-primary" onClick={() => handleGenerateVariant(activeVisionPresetKey)} disabled={Boolean(status) || isArchivedProperty}>
-                  Generate {activeVisionPreset?.displayName || 'enhancement'}
+                <button
+                  type="button"
+                  className={visionGenerationState ? 'button-primary button-busy' : 'button-primary'}
+                  onClick={() => handleGenerateVariant(activeVisionPresetKey)}
+                  disabled={Boolean(status) || isArchivedProperty}
+                >
+                  {visionGenerationState?.kind === 'freeform'
+                    ? `Generating... ${visionGenerationElapsedSeconds}s`
+                    : visionGenerationState
+                    ? `Generating... ${visionGenerationElapsedSeconds}s`
+                    : `Generate ${activeVisionPreset?.displayName || 'enhancement'}`}
                 </button>
               </div>
+              {visionGenerationState ? (
+                <div className="vision-generation-status" role="status" aria-live="polite">
+                  <div className="vision-generation-status-header">
+                    <div>
+                      <span className="label">Vision generation in progress</span>
+                      <strong>{visionGenerationState.title}</strong>
+                    </div>
+                    <span className="vision-generation-status-time">{visionGenerationElapsedSeconds}s elapsed</span>
+                  </div>
+                  <div className="vision-generation-progress" aria-hidden="true">
+                    <span className="vision-generation-progress-bar" />
+                  </div>
+                  <p>{visionGenerationState.detail}</p>
+                  <p className="workspace-control-note">
+                    Timing varies by preset and whether the job needs a stronger AI fallback, so this indicator tracks elapsed time rather than pretending to know an exact percent complete.
+                  </p>
+                </div>
+              ) : null}
               <div className="workspace-inner-card brochure-control-card">
                 <span className="label">Natural-language enhancement</span>
                 <textarea
@@ -2985,11 +3057,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 <div className="workspace-action-column">
                   <button
                     type="button"
-                    className="button-secondary"
+                    className={visionGenerationState?.kind === 'freeform' ? 'button-secondary button-busy' : 'button-secondary'}
                     onClick={handleGenerateFreeformVariant}
                     disabled={Boolean(status) || isArchivedProperty || !freeformEnhancementInstructions.trim()}
                   >
-                    Generate custom preview
+                    {visionGenerationState?.kind === 'freeform'
+                      ? `Generating... ${visionGenerationElapsedSeconds}s`
+                      : 'Generate custom preview'}
                   </button>
                 </div>
                 <p className="workspace-control-note">

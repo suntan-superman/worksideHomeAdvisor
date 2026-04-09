@@ -29,86 +29,97 @@ export async function orchestrateVisionJob({
   const allCandidates = [];
 
   for (const providerKey of chain) {
-    let providerCandidates = [];
+    try {
+      let providerCandidates = [];
 
-    if (providerKey === 'local_sharp') {
-      providerCandidates = await providerRunners.runLocalSharp?.({
-        asset,
-        preset,
-        roomType,
-        instructions,
-        normalizedPlan,
-        requestedMode,
-        userPlan: effectiveUserPlan,
-        sourceBuffer,
-        sourceImageBase64,
-        existingJob,
-      });
-    } else if (providerKey === 'replicate_basic' || providerKey === 'replicate_advanced') {
-      providerCandidates = await providerRunners.runReplicateProvider?.({
+      if (providerKey === 'local_sharp') {
+        providerCandidates = await providerRunners.runLocalSharp?.({
+          asset,
+          preset,
+          roomType,
+          instructions,
+          normalizedPlan,
+          requestedMode,
+          userPlan: effectiveUserPlan,
+          sourceBuffer,
+          sourceImageBase64,
+          existingJob,
+        });
+      } else if (providerKey === 'replicate_basic' || providerKey === 'replicate_advanced') {
+        providerCandidates = await providerRunners.runReplicateProvider?.({
+          providerKey,
+          asset,
+          preset,
+          roomType,
+          instructions,
+          normalizedPlan,
+          requestedMode,
+          userPlan: effectiveUserPlan,
+          sourceBuffer,
+          sourceImageBase64,
+          existingJob,
+        });
+      } else if (providerKey === 'openai_edit') {
+        providerCandidates = await providerRunners.runOpenAiEdit?.({
+          providerKey,
+          asset,
+          preset,
+          roomType,
+          instructions,
+          normalizedPlan,
+          requestedMode,
+          userPlan: effectiveUserPlan,
+          sourceBuffer,
+          sourceImageBase64,
+          existingJob,
+        });
+      }
+
+      const normalizedCandidates = rankCandidates(
+        (providerCandidates || []).map((candidate, index) => ({
+          ...candidate,
+          providerKey,
+          providerAttemptIndex: attempts.length,
+          providerCandidateIndex: index,
+          isSufficient: isCandidateSufficient(candidate, preset.key),
+        })),
+        preset.key,
+      );
+
+      attempts.push({
         providerKey,
-        asset,
-        preset,
-        roomType,
-        instructions,
-        normalizedPlan,
-        requestedMode,
-        userPlan: effectiveUserPlan,
-        sourceBuffer,
-        sourceImageBase64,
-        existingJob,
+        candidateCount: normalizedCandidates.length,
+        sufficientCount: normalizedCandidates.filter((candidate) => candidate.isSufficient).length,
+        topOverallScore: Number(normalizedCandidates[0]?.overallScore || 0),
+        topObjectRemovalScore: Number(normalizedCandidates[0]?.objectRemovalScore || 0),
       });
-    } else if (providerKey === 'openai_edit') {
-      providerCandidates = await providerRunners.runOpenAiEdit?.({
+
+      allCandidates.push(...normalizedCandidates);
+
+      const sufficient = rankCandidates(
+        normalizedCandidates.filter((candidate) => candidate.isSufficient),
+        preset.key,
+      )[0];
+      if (sufficient) {
+        return {
+          providerUsed: providerKey,
+          providerAttemptCount: attempts.length,
+          fallbackApplied: attempts.length > 1,
+          bestVariant: sufficient,
+          allCandidates: rankCandidates(allCandidates, preset.key),
+          orchestration: { chain, attempts },
+          userPlan: effectiveUserPlan,
+        };
+      }
+    } catch (error) {
+      attempts.push({
         providerKey,
-        asset,
-        preset,
-        roomType,
-        instructions,
-        normalizedPlan,
-        requestedMode,
-        userPlan: effectiveUserPlan,
-        sourceBuffer,
-        sourceImageBase64,
-        existingJob,
+        candidateCount: 0,
+        sufficientCount: 0,
+        topOverallScore: 0,
+        topObjectRemovalScore: 0,
+        error: error instanceof Error ? error.message : String(error),
       });
-    }
-
-    const normalizedCandidates = rankCandidates(
-      (providerCandidates || []).map((candidate, index) => ({
-        ...candidate,
-        providerKey,
-        providerAttemptIndex: attempts.length,
-        providerCandidateIndex: index,
-        isSufficient: isCandidateSufficient(candidate, preset.key),
-      })),
-      preset.key,
-    );
-
-    attempts.push({
-      providerKey,
-      candidateCount: normalizedCandidates.length,
-      sufficientCount: normalizedCandidates.filter((candidate) => candidate.isSufficient).length,
-      topOverallScore: Number(normalizedCandidates[0]?.overallScore || 0),
-      topObjectRemovalScore: Number(normalizedCandidates[0]?.objectRemovalScore || 0),
-    });
-
-    allCandidates.push(...normalizedCandidates);
-
-    const sufficient = rankCandidates(
-      normalizedCandidates.filter((candidate) => candidate.isSufficient),
-      preset.key,
-    )[0];
-    if (sufficient) {
-      return {
-        providerUsed: providerKey,
-        providerAttemptCount: attempts.length,
-        fallbackApplied: attempts.length > 1,
-        bestVariant: sufficient,
-        allCandidates: rankCandidates(allCandidates, preset.key),
-        orchestration: { chain, attempts },
-        userPlan: effectiveUserPlan,
-      };
     }
   }
 

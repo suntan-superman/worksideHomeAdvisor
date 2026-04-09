@@ -7,6 +7,7 @@ import {
   normalizeRoomType,
   resolveFreeformPresetKey,
 } from './media-ai.service.js';
+import { buildProviderChain, resolveVisionUserPlan } from './vision-orchestrator.helpers.js';
 
 test('normalizeRoomType maps common room labels to canonical room types', () => {
   assert.equal(normalizeRoomType('Living Room'), 'living_room');
@@ -89,4 +90,32 @@ test('calculateVisionReviewOverallScore blends review signals into a rounded ove
   });
 
   assert.equal(score, 86);
+});
+
+test('resolveVisionUserPlan treats remove_furniture as premium by default', () => {
+  assert.equal(
+    resolveVisionUserPlan({
+      preset: {
+        key: 'remove_furniture',
+        category: 'concept_preview',
+        upgradeTier: 'premium',
+      },
+    }),
+    'premium',
+  );
+});
+
+test('buildProviderChain includes openai_edit for premium remove_furniture when available', () => {
+  assert.deepEqual(
+    buildProviderChain({
+      preset: {
+        key: 'remove_furniture',
+        category: 'concept_preview',
+        providerPreference: 'replicate',
+      },
+      userPlan: 'premium',
+      openAiAvailable: true,
+    }),
+    ['replicate_basic', 'replicate_advanced', 'openai_edit'],
+  );
 });

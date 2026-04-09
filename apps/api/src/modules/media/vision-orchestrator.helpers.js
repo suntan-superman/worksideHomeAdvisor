@@ -6,13 +6,13 @@ const STANDARD_ONLY_PRESET_KEYS = new Set([
 ]);
 
 const PRO_PRESET_KEYS = new Set([
-  'remove_furniture',
   'paint_warm_neutral',
   'paint_bright_white',
   'paint_soft_greige',
 ]);
 
 const PREMIUM_PRESET_KEYS = new Set([
+  'remove_furniture',
   'floor_light_wood',
   'floor_medium_wood',
   'floor_dark_hardwood',
