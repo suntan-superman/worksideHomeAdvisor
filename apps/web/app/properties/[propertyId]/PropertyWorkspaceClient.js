@@ -2095,7 +2095,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
       });
     } catch (requestError) {
-      setToast({ tone: 'error', title: 'Variant generation failed', message: requestError.message });
+      setToast({
+        tone: 'error',
+        title: 'Variant generation failed',
+        message: `${requestError.message} No new variant was selected, so the compare view is still showing the last successful preview.`,
+        autoDismissMs: 0,
+      });
       void playVisionCompletionSound({
         tone: 'error',
         elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
@@ -2165,7 +2170,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
       });
     } catch (requestError) {
-      setToast({ tone: 'error', title: 'Custom enhancement failed', message: requestError.message });
+      setToast({
+        tone: 'error',
+        title: 'Custom enhancement failed',
+        message: `${requestError.message} No new variant was selected, so the compare view is still showing the last successful preview.`,
+        autoDismissMs: 0,
+      });
       void playVisionCompletionSound({
         tone: 'error',
         elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
@@ -4362,7 +4372,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   return (
     <AppFrame busy={Boolean(status)}>
-      <Toast tone={toast?.tone} title={toast?.title} message={toast?.message} onClose={() => setToast(null)} />
+      <Toast
+        tone={toast?.tone}
+        title={toast?.title}
+        message={toast?.message}
+        autoDismissMs={toast?.autoDismissMs}
+        onClose={() => setToast(null)}
+      />
       {pendingDeleteAsset ? (
         <div className="workspace-modal-backdrop" role="presentation" onClick={() => setPendingDeleteAsset(null)}>
           <div

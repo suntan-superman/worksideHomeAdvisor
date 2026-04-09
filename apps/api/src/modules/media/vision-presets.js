@@ -73,7 +73,7 @@ export const VISION_PRESETS = [
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'exterior', 'unknown'],
     providerPreference: 'replicate',
     promptVersion: 8,
-    outputCount: 2,
+    outputCount: 3,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     upgradeTier: 'premium',
@@ -83,7 +83,7 @@ export const VISION_PRESETS = [
       'Create a conceptual empty-room version for planning and persuasion, not direct listing replacement.',
     strength: 0.93,
     guidanceScale: 9,
-    numInferenceSteps: 40,
+    numInferenceSteps: 43,
     negativePrompt:
       'extra furniture, sofa, couch, chair, coffee table, side table, ottoman, rug, clutter, fireplace, mantel, built-in, low quality, unrealistic geometry, warped lines, distorted walls',
     replicateModel: REPLICATE_INPAINT_MODEL,

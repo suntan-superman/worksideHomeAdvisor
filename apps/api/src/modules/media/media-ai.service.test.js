@@ -130,22 +130,22 @@ test('buildProviderChain includes openai_edit for premium remove_furniture when 
 test('getReplicateSettings reduces remove_furniture sample counts for faster execution', () => {
   const basicSettings = getReplicateSettings('replicate_basic', {
     key: 'remove_furniture',
-    outputCount: 4,
+    outputCount: 3,
     guidanceScale: 9,
-    numInferenceSteps: 40,
+    numInferenceSteps: 43,
     strength: 0.93,
   });
   const advancedSettings = getReplicateSettings('replicate_advanced', {
     key: 'remove_furniture',
-    outputCount: 4,
+    outputCount: 3,
     guidanceScale: 9,
-    numInferenceSteps: 40,
+    numInferenceSteps: 43,
     strength: 0.93,
   });
 
-  assert.equal(basicSettings.outputCount, 2);
-  assert.equal(advancedSettings.outputCount, 2);
-  assert.equal(advancedSettings.numInferenceSteps, 44);
+  assert.equal(basicSettings.outputCount, 3);
+  assert.equal(advancedSettings.outputCount, 3);
+  assert.equal(advancedSettings.numInferenceSteps, 47);
 });
 
 test('remove_furniture sufficiency rejects candidates with strong persistence overlap', () => {
@@ -387,7 +387,7 @@ test('remove_furniture orchestration exits early when an advanced candidate is a
   assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
 });
 
-test('remove_furniture orchestration stops at the time budget once it has a usable candidate', async () => {
+test('remove_furniture orchestration does not stop at the time budget before stronger providers run', async () => {
   let now = 0;
   const callOrder = [];
   const result = await orchestrateVisionJob({
@@ -427,12 +427,27 @@ test('remove_furniture orchestration stops at the time budget once it has a usab
       },
       runOpenAiEdit: async () => {
         callOrder.push('openai_edit');
-        return [];
+        return [
+          {
+            overallScore: 88,
+            objectRemovalScore: 0.27,
+            remainingFurnitureOverlapRatio: 0.14,
+            largestComponentPersistenceRatio: 0.2,
+            newFurnitureAdditionRatio: 0.03,
+            focusRegionChangeRatio: 0.21,
+            maskedChangeRatio: 0.29,
+            maskedEdgeDensityDelta: -0.014,
+            outsideMaskChangeRatio: 0.16,
+            topHalfChangeRatio: 0.07,
+            clearedMajorComponentCount: 4,
+            totalMajorComponentCount: 4,
+          },
+        ];
       },
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic']);
-  assert.equal(result.stoppedEarlyReason, 'time_budget');
-  assert.equal(result.timeBudgetReached, true);
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit']);
+  assert.equal(result.providerUsed, 'openai_edit');
+  assert.equal(result.timeBudgetReached, false);
 });

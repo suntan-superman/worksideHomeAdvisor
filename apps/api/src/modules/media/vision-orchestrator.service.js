@@ -33,6 +33,24 @@ export async function orchestrateVisionJob({
   const maxExecutionTimeMs = getVisionExecutionTimeBudgetMs(preset?.key);
   const attempts = [];
   const allCandidates = [];
+  const allSufficientCandidates = [];
+
+  const canStopForTimeBudget = () => {
+    if (!allSufficientCandidates.length) {
+      return false;
+    }
+
+    if (preset?.key !== 'remove_furniture') {
+      return true;
+    }
+
+    const openAiPlanned = chain.includes('openai_edit');
+    if (openAiPlanned) {
+      return attempts.some((attempt) => attempt.providerKey === 'openai_edit');
+    }
+
+    return attempts.some((attempt) => attempt.providerKey === 'replicate_advanced');
+  };
 
   const buildResponse = ({
     providerUsed = null,
@@ -53,9 +71,9 @@ export async function orchestrateVisionJob({
     maxExecutionTimeMs,
   });
 
-  for (const providerKey of chain) {
+  for (const [providerIndex, providerKey] of chain.entries()) {
     const elapsedBeforeProvider = Math.max(0, Number(nowFn()) - startedAt);
-    if (elapsedBeforeProvider >= maxExecutionTimeMs && allCandidates.length) {
+    if (elapsedBeforeProvider >= maxExecutionTimeMs && allCandidates.length && canStopForTimeBudget()) {
       const rankedCandidates = rankCandidates(allCandidates, preset.key);
       const providerUsed = rankedCandidates[0]?.providerKey || null;
       return buildResponse({
@@ -142,6 +160,9 @@ export async function orchestrateVisionJob({
       });
 
       allCandidates.push(...normalizedCandidates);
+      allSufficientCandidates.push(
+        ...normalizedCandidates.filter((candidate) => candidate.isSufficient),
+      );
 
       const sufficient = rankCandidates(
         normalizedCandidates.filter((candidate) => candidate.isSufficient),
@@ -162,7 +183,12 @@ export async function orchestrateVisionJob({
       }
 
       const elapsedAfterProvider = Math.max(0, Number(nowFn()) - startedAt);
-      if (elapsedAfterProvider >= maxExecutionTimeMs && allCandidates.length) {
+      if (
+        providerIndex < chain.length - 1 &&
+        elapsedAfterProvider >= maxExecutionTimeMs &&
+        allCandidates.length &&
+        canStopForTimeBudget()
+      ) {
         const rankedCandidates = rankCandidates(allCandidates, preset.key);
         const providerUsed = rankedCandidates[0]?.providerKey || null;
         return buildResponse({

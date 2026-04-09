@@ -89,7 +89,7 @@ export function getReplicateSettings(providerKey, preset = {}) {
     if (isRemoveFurniture) {
       return {
         model: preset.replicateModel,
-        outputCount: Math.min(2, Math.max(1, baseOutputCount)),
+        outputCount: Math.min(3, Math.max(2, baseOutputCount)),
         guidanceScale: Math.min(10, Number((baseGuidanceScale + 0.35).toFixed(2))),
         numInferenceSteps: baseInferenceSteps + 4,
         strength: Number(Math.min(0.98, baseStrength + 0.03).toFixed(2)),
@@ -111,7 +111,7 @@ export function getReplicateSettings(providerKey, preset = {}) {
 
   return {
     model: preset.replicateModel,
-    outputCount: isRemoveFurniture ? Math.min(2, Math.max(1, baseOutputCount)) : baseOutputCount,
+    outputCount: isRemoveFurniture ? Math.min(3, Math.max(2, baseOutputCount)) : baseOutputCount,
     guidanceScale: baseGuidanceScale,
     numInferenceSteps: baseInferenceSteps,
     strength: baseStrength,
@@ -175,15 +175,15 @@ export function isHighConfidenceEarlyExitCandidate(candidate, presetKey) {
     totalMajorComponentCount > 0 ? clearedMajorComponentCount / totalMajorComponentCount : 1;
 
   return (
-    Number(candidate.objectRemovalScore || 0) >= 0.3 &&
-    Number(candidate.focusRegionChangeRatio || 0) >= 0.18 &&
-    Number(candidate.maskedChangeRatio || 0) >= 0.26 &&
-    Number(candidate.topHalfChangeRatio || 1) <= 0.14 &&
-    Number(candidate.outsideMaskChangeRatio || 1) <= 0.24 &&
-    Number(candidate.remainingFurnitureOverlapRatio ?? 1) <= 0.14 &&
-    Number(candidate.largestComponentPersistenceRatio ?? 1) <= 0.24 &&
+    Number(candidate.objectRemovalScore || 0) >= 0.34 &&
+    Number(candidate.focusRegionChangeRatio || 0) >= 0.2 &&
+    Number(candidate.maskedChangeRatio || 0) >= 0.3 &&
+    Number(candidate.topHalfChangeRatio || 1) <= 0.1 &&
+    Number(candidate.outsideMaskChangeRatio || 1) <= 0.2 &&
+    Number(candidate.remainingFurnitureOverlapRatio ?? 1) <= 0.1 &&
+    Number(candidate.largestComponentPersistenceRatio ?? 1) <= 0.18 &&
     Number(candidate.newFurnitureAdditionRatio ?? 1) <= 0.05 &&
-    clearanceRatio >= 0.6
+    clearanceRatio >= 0.75
   );
 }
 
