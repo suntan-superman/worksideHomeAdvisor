@@ -13,6 +13,12 @@ import {
   buildActiveVariantQuery,
   buildVariantLifecycleFields,
 } from './variant-lifecycle.service.js';
+import { orchestrateVisionJob } from './vision-orchestrator.service.js';
+import {
+  calculateObjectRemovalScore,
+  getReplicateSettings,
+  resolveVisionUserPlan,
+} from './vision-orchestrator.helpers.js';
 import { listVisionPresets, resolveVisionPreset } from './vision-presets.js';
 
 const CACHE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -53,6 +59,11 @@ function serializeImageJob(document, variants = []) {
       document.selectedVariantId?.toString?.() || document.selectedVariantId || null,
     message: document.message || '',
     warning: document.warning || '',
+    attemptCount: Number(document.attemptCount || 0),
+    maxAttempts: Number(document.maxAttempts || 1),
+    currentStage: document.currentStage || 'initial',
+    fallbackMode: document.fallbackMode || null,
+    failureReason: document.failureReason || '',
     outputUrls: variants.map((variant) => variant.imageUrl).filter(Boolean),
     variants,
     createdAt: document.createdAt,
@@ -736,6 +747,18 @@ function sortVisionVariants(variants = []) {
     const rightScore = Number(right?.metadata?.review?.overallScore || 0);
     if (leftScore !== rightScore) {
       return rightScore - leftScore;
+    }
+
+    const leftMaskedChange = Number(left?.metadata?.review?.maskedChangeRatio || 0);
+    const rightMaskedChange = Number(right?.metadata?.review?.maskedChangeRatio || 0);
+    if (leftMaskedChange !== rightMaskedChange) {
+      return rightMaskedChange - leftMaskedChange;
+    }
+
+    const leftEdgeDelta = Number(left?.metadata?.review?.maskedEdgeDensityDelta || 0);
+    const rightEdgeDelta = Number(right?.metadata?.review?.maskedEdgeDensityDelta || 0);
+    if (leftEdgeDelta !== rightEdgeDelta) {
+      return leftEdgeDelta - rightEdgeDelta;
     }
 
     return new Date(right?.createdAt || 0).getTime() - new Date(left?.createdAt || 0).getTime();
@@ -1498,6 +1521,425 @@ async function buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType) {
     .toBuffer();
 }
 
+async function buildAdaptiveFurnitureMaskBuffer(sourceBuffer, options = {}) {
+  const bridgeNearbyComponents = options.bridgeNearbyComponents !== false;
+  const probeWidth = 72;
+  const probeHeight = 72;
+  const probe = await sharp(sourceBuffer)
+    .rotate()
+    .resize(probeWidth, probeHeight, { fit: 'cover' })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+
+  function getRgb(x, y) {
+    const offset = (y * probeWidth + x) * 3;
+    return [probe[offset], probe[offset + 1], probe[offset + 2]];
+  }
+
+  const topPixels = [];
+  for (let y = 0; y < Math.floor(probeHeight * 0.3); y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      topPixels.push(getRgb(x, y));
+    }
+  }
+  const channels = [0, 1, 2].map((channelIndex) =>
+    topPixels
+      .map((pixel) => pixel[channelIndex])
+      .sort((left, right) => left - right),
+  );
+  const median = channels.map((channelValues) =>
+    channelValues[Math.floor(channelValues.length / 2)] || 128,
+  );
+  const wallLuminance = 0.2126 * median[0] + 0.7152 * median[1] + 0.0722 * median[2];
+
+  const binary = new Uint8Array(probeWidth * probeHeight);
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      if (y < Math.floor(probeHeight * 0.34)) {
+        continue;
+      }
+      const [r, g, b] = getRgb(x, y);
+      const dr = r - median[0];
+      const dg = g - median[1];
+      const db = b - median[2];
+      const colorDistance = Math.sqrt(dr * dr + dg * dg + db * db);
+      const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+      const darkObjectScore = wallLuminance - luminance;
+
+      const isCandidate =
+        colorDistance > 38 ||
+        (darkObjectScore > 20 && saturation < 68) ||
+        (darkObjectScore > 14 && colorDistance > 28);
+      if (!isCandidate) {
+        continue;
+      }
+
+      binary[y * probeWidth + x] = 255;
+    }
+  }
+
+  const dilated = new Uint8Array(binary.length);
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      let neighbors = 0;
+      for (let oy = -1; oy <= 1; oy += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          const nx = x + ox;
+          const ny = y + oy;
+          if (nx < 0 || ny < 0 || nx >= probeWidth || ny >= probeHeight) {
+            continue;
+          }
+          if (binary[ny * probeWidth + nx]) {
+            neighbors += 1;
+          }
+        }
+      }
+      if (binary[y * probeWidth + x] || neighbors >= 3) {
+        dilated[y * probeWidth + x] = 255;
+      }
+    }
+  }
+
+  const visited = new Uint8Array(dilated.length);
+  const furnitureMask = new Uint8Array(dilated.length);
+  const directions = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      const startIndex = y * probeWidth + x;
+      if (!dilated[startIndex] || visited[startIndex]) {
+        continue;
+      }
+
+      const queue = [startIndex];
+      visited[startIndex] = 1;
+      const component = [];
+      let minX = x;
+      let maxX = x;
+      let minY = y;
+      let maxY = y;
+      let sumX = 0;
+      let sumY = 0;
+      while (queue.length) {
+        const index = queue.pop();
+        const currentX = index % probeWidth;
+        const currentY = Math.floor(index / probeWidth);
+        component.push(index);
+        sumX += currentX;
+        sumY += currentY;
+        if (currentX < minX) {
+          minX = currentX;
+        }
+        if (currentX > maxX) {
+          maxX = currentX;
+        }
+        if (currentY < minY) {
+          minY = currentY;
+        }
+        if (currentY > maxY) {
+          maxY = currentY;
+        }
+
+        for (const [dx, dy] of directions) {
+          const nx = currentX + dx;
+          const ny = currentY + dy;
+          if (nx < 0 || ny < 0 || nx >= probeWidth || ny >= probeHeight) {
+            continue;
+          }
+          const nextIndex = ny * probeWidth + nx;
+          if (!dilated[nextIndex] || visited[nextIndex]) {
+            continue;
+          }
+          visited[nextIndex] = 1;
+          queue.push(nextIndex);
+        }
+      }
+
+      const area = component.length;
+      const boxWidth = maxX - minX + 1;
+      const boxHeight = maxY - minY + 1;
+      const centroidY = sumY / Math.max(1, area);
+      const aspectRatio = boxWidth / Math.max(1, boxHeight);
+      const areaRatio = area / Math.max(1, boxWidth * boxHeight);
+
+      const isLargeAnchorFurniture =
+        area >= 42 &&
+        boxWidth >= 6 &&
+        boxHeight >= 5 &&
+        centroidY >= probeHeight * 0.36 &&
+        (areaRatio > 0.18 || aspectRatio > 1.35 || boxHeight > 8);
+      const isMediumFurniture =
+        area >= 24 &&
+        boxWidth >= 4 &&
+        boxHeight >= 4 &&
+        centroidY >= probeHeight * 0.42 &&
+        (areaRatio > 0.2 || (aspectRatio >= 0.7 && aspectRatio <= 2.8));
+      const isWideSurfaceObject =
+        area >= 18 &&
+        boxWidth >= 7 &&
+        boxHeight >= 3 &&
+        centroidY >= probeHeight * 0.45 &&
+        aspectRatio >= 1.9;
+      if (!(isLargeAnchorFurniture || isMediumFurniture || isWideSurfaceObject)) {
+        continue;
+      }
+
+      const expand = area > 56 ? 2 : 1;
+      for (let yy = Math.max(0, minY - expand); yy <= Math.min(probeHeight - 1, maxY + expand); yy += 1) {
+        for (let xx = Math.max(0, minX - expand); xx <= Math.min(probeWidth - 1, maxX + expand); xx += 1) {
+          furnitureMask[yy * probeWidth + xx] = 255;
+        }
+      }
+    }
+  }
+
+  const finalMask = bridgeNearbyComponents ? new Uint8Array(furnitureMask.length) : furnitureMask;
+  if (bridgeNearbyComponents) {
+    for (let y = 0; y < probeHeight; y += 1) {
+      for (let x = 0; x < probeWidth; x += 1) {
+        const idx = y * probeWidth + x;
+        if (furnitureMask[idx]) {
+          finalMask[idx] = 255;
+          continue;
+        }
+        let nearbyFurniture = 0;
+        for (let oy = -2; oy <= 2; oy += 1) {
+          for (let ox = -2; ox <= 2; ox += 1) {
+            const nx = x + ox;
+            const ny = y + oy;
+            if (nx < 0 || ny < 0 || nx >= probeWidth || ny >= probeHeight) {
+              continue;
+            }
+            if (furnitureMask[ny * probeWidth + nx]) {
+              nearbyFurniture += 1;
+            }
+          }
+        }
+        if (nearbyFurniture >= 8) {
+          finalMask[idx] = 255;
+        }
+      }
+    }
+  }
+
+  const rgba = Buffer.alloc(probeWidth * probeHeight * 4);
+  for (let i = 0; i < finalMask.length; i += 1) {
+    const value = finalMask[i];
+    const offset = i * 4;
+    rgba[offset] = value;
+    rgba[offset + 1] = value;
+    rgba[offset + 2] = value;
+    rgba[offset + 3] = 255;
+  }
+
+  return sharp(rgba, {
+    raw: { width: probeWidth, height: probeHeight, channels: 4 },
+  })
+    .png()
+    .toBuffer();
+}
+
+async function buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer, options = {}) {
+  const metadata = await sharp(sourceBuffer).rotate().metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const adaptiveMaskProbe = await buildAdaptiveFurnitureMaskBuffer(sourceBuffer, options);
+  const adaptiveMaskBuffer = await sharp(adaptiveMaskProbe)
+    .resize(width, height, { fit: 'fill' })
+    .blur(1.1)
+    .png()
+    .toBuffer();
+
+  return {
+    width,
+    height,
+    adaptiveMaskBuffer,
+  };
+}
+
+async function calculateMaskCoverageRatio(maskBuffer) {
+  const metadata = await sharp(maskBuffer).metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const raw = await sharp(maskBuffer)
+    .resize(width, height, { fit: 'fill' })
+    .removeAlpha()
+    .greyscale()
+    .raw()
+    .toBuffer();
+  let whitePixels = 0;
+  for (let i = 0; i < raw.length; i += 1) {
+    if (raw[i] > 32) {
+      whitePixels += 1;
+    }
+  }
+
+  return Number((whitePixels / Math.max(1, width * height)).toFixed(4));
+}
+
+async function calculateMaskedVisualChangeRatio(sourceBuffer, variantBuffer, maskBuffer) {
+  const metadata = await sharp(maskBuffer).metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const [src, next, mask] = await Promise.all([
+    sharp(sourceBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(variantBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(maskBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+  ]);
+
+  let maskPixels = 0;
+  let changedPixels = 0;
+  for (let i = 0; i < width * height; i += 1) {
+    if (mask[i] <= 32) {
+      continue;
+    }
+    maskPixels += 1;
+    const offset = i * 3;
+    const delta =
+      (Math.abs(src[offset] - next[offset]) +
+        Math.abs(src[offset + 1] - next[offset + 1]) +
+        Math.abs(src[offset + 2] - next[offset + 2])) /
+      3;
+    if (delta >= 18) {
+      changedPixels += 1;
+    }
+  }
+
+  return Number((changedPixels / Math.max(1, maskPixels)).toFixed(4));
+}
+
+async function calculateOutsideMaskVisualChangeRatio(sourceBuffer, variantBuffer, maskBuffer) {
+  const metadata = await sharp(maskBuffer).metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const [src, next, rawMask] = await Promise.all([
+    sharp(sourceBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(variantBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(maskBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+  ]);
+
+  const expandedMask = new Uint8Array(width * height);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let isNearMask = false;
+      for (let oy = -2; oy <= 2 && !isNearMask; oy += 1) {
+        for (let ox = -2; ox <= 2; ox += 1) {
+          const nx = x + ox;
+          const ny = y + oy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+            continue;
+          }
+          if (rawMask[ny * width + nx] > 32) {
+            isNearMask = true;
+            break;
+          }
+        }
+      }
+      if (isNearMask) {
+        expandedMask[y * width + x] = 1;
+      }
+    }
+  }
+
+  let outsidePixels = 0;
+  let changedOutsidePixels = 0;
+  for (let i = 0; i < width * height; i += 1) {
+    if (expandedMask[i]) {
+      continue;
+    }
+    outsidePixels += 1;
+    const offset = i * 3;
+    const delta =
+      (Math.abs(src[offset] - next[offset]) +
+        Math.abs(src[offset + 1] - next[offset + 1]) +
+        Math.abs(src[offset + 2] - next[offset + 2])) /
+      3;
+    if (delta >= 18) {
+      changedOutsidePixels += 1;
+    }
+  }
+
+  return Number((changedOutsidePixels / Math.max(1, outsidePixels)).toFixed(4));
+}
+
+async function calculateMaskedEdgeDensity(imageBuffer, maskBuffer) {
+  const metadata = await sharp(maskBuffer).metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const [image, mask] = await Promise.all([
+    sharp(imageBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+    sharp(maskBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+  ]);
+
+  let maskPixels = 0;
+  let edgePixels = 0;
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const idx = y * width + x;
+      if (mask[idx] <= 32) {
+        continue;
+      }
+      maskPixels += 1;
+      const gx =
+        Math.abs(image[idx + 1] - image[idx - 1]) +
+        Math.abs(image[idx + 1 + width] - image[idx - 1 + width]) +
+        Math.abs(image[idx + 1 - width] - image[idx - 1 - width]);
+      const gy =
+        Math.abs(image[idx + width] - image[idx - width]) +
+        Math.abs(image[idx + width + 1] - image[idx - width + 1]) +
+        Math.abs(image[idx + width - 1] - image[idx - width - 1]);
+      const magnitude = (gx + gy) / 6;
+      if (magnitude > 26) {
+        edgePixels += 1;
+      }
+    }
+  }
+
+  return Number((edgePixels / Math.max(1, maskPixels)).toFixed(4));
+}
+
 function buildVisionInputHash({ assetId, presetKey, roomType, promptVersion }) {
   return createHash('sha256')
     .update(
@@ -1520,6 +1962,7 @@ function buildVisionJobHash({
   promptVersion,
   mode = 'preset',
   instructions = '',
+  userPlan = '',
 }) {
   return createHash('sha256')
     .update(
@@ -1530,6 +1973,7 @@ function buildVisionJobHash({
         promptVersion,
         mode,
         instructions: String(instructions || '').trim().toLowerCase(),
+        userPlan: String(userPlan || '').trim().toLowerCase(),
       }),
     )
     .digest('hex');
@@ -1579,6 +2023,445 @@ export async function getImageJobById(jobId) {
   return serializeImageJob(job, variants);
 }
 
+async function buildReviewedLocalSharpCandidates({
+  asset,
+  preset,
+  renderPlan,
+  resolvedRoomType,
+  requestedMode,
+  normalizedInstructions,
+  normalizedPlan,
+  sourceBuffer,
+  sourceImageBase64,
+}) {
+  const rendered = await renderVariantBuffer(sourceBuffer, preset.key, resolvedRoomType);
+  const review = await reviewVisionVariant({
+    property: null,
+    roomLabel: asset.roomLabel,
+    presetKey: preset.key,
+    variantCategory: preset.category,
+    mimeType: 'image/jpeg',
+    sourceImageBase64,
+    variantImageBase64: rendered.buffer.toString('base64'),
+  });
+  const overallScore = calculateVisionReviewOverallScore(review);
+
+  return [
+    {
+      providerKey: 'local_sharp',
+      output: null,
+      buffer: rendered.buffer,
+      warning: rendered.warning,
+      label: rendered.label,
+      summary: renderPlan.summary,
+      differenceHint: renderPlan.differenceHint,
+      effects: rendered.effects || renderPlan.effects,
+      cropInsetPercent: rendered.cropInsetPercent,
+      roomPromptAddon: rendered.roomPromptAddon,
+      presetPromptAddon: '',
+      mode: requestedMode,
+      instructions: normalizedInstructions,
+      normalizedPlan,
+      providerSourceUrl: null,
+      review,
+      overallScore,
+      visualChangeRatio: 0,
+      focusRegionChangeRatio: 0,
+      topHalfChangeRatio: 0,
+      maskedChangeRatio: 0,
+      outsideMaskChangeRatio: 0,
+      maskedEdgeDensityDelta: 0,
+      objectRemovalScore: 0,
+      shouldHideByDefault: false,
+    },
+  ];
+}
+
+async function buildReviewedReplicateCandidates({
+  providerKey,
+  asset,
+  preset,
+  renderPlan,
+  resolvedRoomType,
+  requestedMode,
+  normalizedInstructions,
+  normalizedPlan,
+  fullPrompt,
+  roomPromptAddon,
+  presetPromptAddon,
+  sourceBuffer,
+  sourceImageBase64,
+}) {
+  const maskBuffer = await buildInpaintingMaskBuffer(
+    sourceBuffer,
+    preset.key,
+    resolvedRoomType,
+  );
+  let removeFurnitureEvaluationMaskBuffer = null;
+  let sourceFurnitureEdgeDensity = null;
+  if (preset.key === 'remove_furniture') {
+    const adaptiveFurnitureMask = await buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer);
+    const adaptiveCoverageRatio = await calculateMaskCoverageRatio(
+      adaptiveFurnitureMask.adaptiveMaskBuffer,
+    );
+    removeFurnitureEvaluationMaskBuffer =
+      adaptiveCoverageRatio >= 0.03 ? adaptiveFurnitureMask.adaptiveMaskBuffer : maskBuffer;
+    sourceFurnitureEdgeDensity = await calculateMaskedEdgeDensity(
+      sourceBuffer,
+      removeFurnitureEvaluationMaskBuffer,
+    );
+  }
+
+  const settings = getReplicateSettings(providerKey, preset);
+  const providerPrompt =
+    providerKey === 'replicate_advanced'
+      ? `${fullPrompt} Return the strongest usable version for this request. Prefer meaningful improvement over near-original output, but preserve the true room structure.`
+      : fullPrompt;
+  const providerOutputs = await runReplicateInpainting({
+    image: sourceBuffer,
+    mask: maskBuffer,
+    model: settings.model,
+    prompt: providerPrompt,
+    strength: settings.strength,
+    outputCount: settings.outputCount,
+    guidanceScale: settings.guidanceScale,
+    numInferenceSteps: settings.numInferenceSteps,
+    scheduler: settings.scheduler,
+    negativePrompt: settings.negativePrompt,
+    seed: Math.floor(Math.random() * 1_000_000_000),
+  });
+
+  const evaluationRegions = getPresetEvaluationRegions(preset.key);
+  const computeFurnitureRemovalMetrics = async (candidateBuffer) => {
+    if (!removeFurnitureEvaluationMaskBuffer || sourceFurnitureEdgeDensity == null) {
+      return {
+        maskedChangeRatio: 0,
+        outsideMaskChangeRatio: 0,
+        maskedEdgeDensityDelta: 0,
+      };
+    }
+    const maskedChangeRatio = await calculateMaskedVisualChangeRatio(
+      sourceBuffer,
+      candidateBuffer,
+      removeFurnitureEvaluationMaskBuffer,
+    );
+    const outsideMaskChangeRatio = await calculateOutsideMaskVisualChangeRatio(
+      sourceBuffer,
+      candidateBuffer,
+      removeFurnitureEvaluationMaskBuffer,
+    );
+    const variantFurnitureEdgeDensity = await calculateMaskedEdgeDensity(
+      candidateBuffer,
+      removeFurnitureEvaluationMaskBuffer,
+    );
+    const maskedEdgeDensityDelta = Number(
+      (variantFurnitureEdgeDensity - sourceFurnitureEdgeDensity).toFixed(4),
+    );
+
+    return {
+      maskedChangeRatio,
+      outsideMaskChangeRatio,
+      maskedEdgeDensityDelta,
+    };
+  };
+
+  const candidates = [];
+  for (let index = 0; index < providerOutputs.length; index += 1) {
+    let output = providerOutputs[index];
+    let buffer = await convertReplicateOutputToBuffer(output);
+    let visualChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer);
+    let focusRegionChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer, {
+      region: evaluationRegions.focusRegion,
+    });
+    let maskedChangeRatio = 0;
+    let outsideMaskChangeRatio = 0;
+    let maskedEdgeDensityDelta = 0;
+    if (preset.key === 'remove_furniture') {
+      ({
+        maskedChangeRatio,
+        outsideMaskChangeRatio,
+        maskedEdgeDensityDelta,
+      } = await computeFurnitureRemovalMetrics(buffer));
+    }
+
+    if (
+      preset.key === 'remove_furniture' &&
+      providerKey === 'replicate_advanced' &&
+      (
+        focusRegionChangeRatio < 0.24 ||
+        maskedChangeRatio < 0.16 ||
+        maskedEdgeDensityDelta > -0.002
+      )
+    ) {
+      const refinementOutputs = await runReplicateInpainting({
+        image: buffer,
+        mask: maskBuffer,
+        model: settings.model,
+        prompt: `${providerPrompt} Continue removing any remaining movable furniture and clutter from the masked area. Keep architecture unchanged.`,
+        strength: Math.min(0.99, Number((settings.strength || 0.9) + 0.04)),
+        outputCount: 1,
+        guidanceScale: Math.min(10, Number((settings.guidanceScale || 9) + 0.4)),
+        numInferenceSteps: Number(settings.numInferenceSteps || 40) + 6,
+        scheduler: settings.scheduler,
+        negativePrompt: settings.negativePrompt,
+        seed: Math.floor(Math.random() * 1_000_000_000),
+      });
+      if (refinementOutputs.length) {
+        output = refinementOutputs[0];
+        buffer = await convertReplicateOutputToBuffer(output);
+        visualChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer);
+        focusRegionChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer, {
+          region: evaluationRegions.focusRegion,
+        });
+        ({
+          maskedChangeRatio,
+          outsideMaskChangeRatio,
+          maskedEdgeDensityDelta,
+        } = await computeFurnitureRemovalMetrics(buffer));
+      }
+    }
+
+    const review = await reviewVisionVariant({
+      property: null,
+      roomLabel: asset.roomLabel,
+      presetKey: preset.key,
+      variantCategory: preset.category,
+      mimeType: 'image/jpeg',
+      sourceImageBase64,
+      variantImageBase64: buffer.toString('base64'),
+    });
+    const topHalfChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer, {
+      region: evaluationRegions.structureRegion,
+    });
+    let overallScore = calculateVisionReviewOverallScore(review);
+    let shouldHideByDefault = false;
+    let rejectionCategory = '';
+    let qualityWarning = '';
+
+    if (preset.key === 'remove_furniture') {
+      if (visualChangeRatio < 0.15) {
+        overallScore = Math.max(0, overallScore - 10);
+      }
+      if (focusRegionChangeRatio < 0.12) {
+        overallScore = Math.max(0, overallScore - 12);
+      }
+      if (topHalfChangeRatio > 0.1) {
+        overallScore = Math.max(0, overallScore - 26);
+      }
+      if (maskedChangeRatio >= 0.22) {
+        overallScore = Math.min(100, overallScore + 10);
+      } else if (maskedChangeRatio >= 0.16) {
+        overallScore = Math.min(100, overallScore + 4);
+      } else {
+        overallScore = Math.max(0, overallScore - 18);
+      }
+      if (maskedEdgeDensityDelta <= -0.01) {
+        overallScore = Math.min(100, overallScore + 12);
+      } else if (maskedEdgeDensityDelta <= -0.004) {
+        overallScore = Math.min(100, overallScore + 6);
+      } else {
+        overallScore = Math.max(0, overallScore - 18);
+      }
+      if (outsideMaskChangeRatio > 0.28) {
+        overallScore = Math.max(0, overallScore - 10);
+      } else if (outsideMaskChangeRatio <= 0.16) {
+        overallScore = Math.min(100, overallScore + 4);
+      }
+
+      if (focusRegionChangeRatio < 0.08) {
+        overallScore = Math.max(0, overallScore - 18);
+        qualityWarning = 'Low-confidence preview: the generated change in the furniture region was limited.';
+        rejectionCategory = 'insufficient_focus_change';
+        shouldHideByDefault = true;
+      }
+      if (topHalfChangeRatio > 0.22) {
+        overallScore = Math.max(0, overallScore - 16);
+        qualityWarning =
+          'Low-confidence preview: upper-architecture drift was detected, so review before public use.';
+        rejectionCategory = rejectionCategory || 'architectural_drift';
+      }
+      if (maskedChangeRatio < 0.11) {
+        overallScore = Math.max(0, overallScore - 22);
+        qualityWarning =
+          'Low-confidence preview: furniture subtraction appears weak in the detected furniture zones.';
+        rejectionCategory = 'furniture_persistence';
+        shouldHideByDefault = true;
+      }
+      if (maskedEdgeDensityDelta > -0.001 && maskedChangeRatio < 0.22) {
+        overallScore = Math.max(0, overallScore - 20);
+        qualityWarning =
+          'Low-confidence preview: the room was restyled more than furniture was actually removed.';
+        rejectionCategory = 'furniture_persistence';
+        shouldHideByDefault = true;
+      }
+
+      console.log('VISION DEBUG:', {
+        presetKey: preset.key,
+        providerKey,
+        index,
+        visualChangeRatio,
+        focusRegionChangeRatio,
+        topHalfChangeRatio,
+        maskedChangeRatio,
+        outsideMaskChangeRatio,
+        maskedEdgeDensityDelta,
+        overallScore,
+        shouldHideByDefault,
+        rejectionCategory,
+      });
+    }
+
+    if (preset.key.startsWith('floor_')) {
+      if (visualChangeRatio < 0.14) {
+        overallScore = Math.max(0, overallScore - 20);
+      }
+      if (topHalfChangeRatio > 0.09) {
+        overallScore = Math.max(0, overallScore - 20);
+      }
+      if (topHalfChangeRatio > 0.14) {
+        overallScore = Math.max(0, overallScore - 18);
+        qualityWarning =
+          'Low-confidence preview: likely structural drift was detected outside the floor region.';
+        rejectionCategory = 'architectural_drift';
+        shouldHideByDefault = true;
+      }
+    }
+
+    const objectRemovalScore =
+      preset.key === 'remove_furniture'
+        ? calculateObjectRemovalScore({
+            visualChangeRatio,
+            focusRegionChangeRatio,
+            topHalfChangeRatio,
+            maskedChangeRatio,
+            maskedEdgeDensityDelta,
+            outsideMaskChangeRatio,
+          })
+        : 0;
+
+    candidates.push({
+      providerKey,
+      output,
+      buffer,
+      warning: qualityWarning,
+      label: `${renderPlan.label} ${String.fromCharCode(65 + index)}`,
+      summary: renderPlan.summary,
+      differenceHint: renderPlan.differenceHint,
+      effects: [
+        ...(renderPlan.effects || []),
+        providerKey === 'replicate_advanced' ? 'Advanced AI fallback' : 'Primary AI provider',
+      ],
+      roomPromptAddon,
+      presetPromptAddon,
+      mode: requestedMode,
+      instructions: normalizedInstructions,
+      normalizedPlan,
+      providerSourceUrl: getProviderSourceUrl(output),
+      review,
+      overallScore,
+      visualChangeRatio,
+      focusRegionChangeRatio,
+      topHalfChangeRatio,
+      maskedChangeRatio,
+      outsideMaskChangeRatio,
+      maskedEdgeDensityDelta,
+      objectRemovalScore,
+      shouldHideByDefault,
+      rejectionCategory,
+    });
+  }
+
+  return candidates;
+}
+
+async function persistOrchestratedVisionCandidates({
+  candidates,
+  job,
+  asset,
+  preset,
+  renderPlan,
+  resolvedRoomType,
+  requestedMode,
+  normalizedInstructions,
+  normalizedPlan,
+  orchestrationResult,
+  roomPromptAddon,
+  presetPromptAddon,
+}) {
+  const persistedVariants = [];
+  const topCandidates = candidates.slice(0, 4);
+
+  for (let index = 0; index < topCandidates.length; index += 1) {
+    const candidate = topCandidates[index];
+    const saved = await saveBinaryBuffer({
+      propertyId: asset.propertyId.toString(),
+      mimeType: 'image/jpeg',
+      buffer: candidate.buffer,
+    });
+
+    const variant = await MediaVariantModel.create({
+      visionJobId: job._id,
+      mediaId: asset._id,
+      propertyId: asset.propertyId,
+      variantType: preset.key,
+      variantCategory: preset.category,
+      label: candidate.label || `${renderPlan.label} ${String.fromCharCode(65 + index)}`,
+      mimeType: 'image/jpeg',
+      storageProvider: saved.storageProvider,
+      storageKey: saved.storageKey,
+      byteSize: saved.byteSize,
+      isSelected: false,
+      ...buildVariantLifecycleFields({ isSelected: false }),
+      useInBrochure: false,
+      useInReport: false,
+      metadata: {
+        warning: candidate.warning || renderPlan.warning,
+        summary: candidate.summary || renderPlan.summary,
+        differenceHint: candidate.differenceHint || renderPlan.differenceHint,
+        effects: candidate.effects || renderPlan.effects,
+        cropInsetPercent: candidate.cropInsetPercent || null,
+        sourceAssetId: asset._id.toString(),
+        roomLabel: asset.roomLabel,
+        roomType: resolvedRoomType,
+        provider: candidate.providerKey || preset.providerPreference || 'local_sharp',
+        presetKey: preset.key,
+        promptVersion: preset.promptVersion,
+        helperText: preset.helperText,
+        recommendedUse: preset.recommendedUse,
+        upgradeTier: preset.upgradeTier,
+        category: preset.category,
+        disclaimerType: preset.disclaimerType,
+        roomPromptAddon: candidate.roomPromptAddon || roomPromptAddon,
+        presetPromptAddon: candidate.presetPromptAddon || presetPromptAddon,
+        mode: requestedMode,
+        instructions: normalizedInstructions,
+        normalizedPlan,
+        providerSourceUrl: candidate.providerSourceUrl || null,
+        fallbackApplied: Boolean(orchestrationResult?.fallbackApplied),
+        orchestrationAttempts: orchestrationResult?.orchestration?.attempts || [],
+        review: {
+          ...(candidate.review || {}),
+          overallScore: candidate.overallScore,
+          visualChangeRatio: candidate.visualChangeRatio,
+          focusRegionChangeRatio: candidate.focusRegionChangeRatio,
+          topHalfChangeRatio: candidate.topHalfChangeRatio,
+          maskedChangeRatio: candidate.maskedChangeRatio,
+          outsideMaskChangeRatio: candidate.outsideMaskChangeRatio,
+          maskedEdgeDensityDelta: candidate.maskedEdgeDensityDelta,
+          objectRemovalScore: candidate.objectRemovalScore,
+          shouldHideByDefault: Boolean(candidate.shouldHideByDefault),
+          rejectionCategory: candidate.rejectionCategory || '',
+          providerKey: candidate.providerKey || '',
+        },
+      },
+    });
+
+    persistedVariants.push(serializeMediaVariant(variant.toObject()));
+  }
+
+  return persistedVariants;
+}
+
 export async function createImageEnhancementJob({
   assetId,
   jobType = 'enhance_listing_quality',
@@ -1587,6 +2470,7 @@ export async function createImageEnhancementJob({
   mode = 'preset',
   instructions = '',
   forceRegenerate = false,
+  userPlan = '',
 }) {
   if (mongoose.connection.readyState !== 1) {
     throw new Error('Database connection is required to generate image variants.');
@@ -1610,6 +2494,7 @@ export async function createImageEnhancementJob({
       ? resolveFreeformPresetKey({ presetKey, jobType, normalizedPlan })
       : presetKey || jobType;
   const preset = resolveVisionPreset(resolvedPresetKey);
+  const effectiveUserPlan = resolveVisionUserPlan({ preset, userPlan });
   const inputHash = buildVisionJobHash({
     assetId: asset._id.toString(),
     presetKey: preset.key,
@@ -1617,6 +2502,7 @@ export async function createImageEnhancementJob({
     promptVersion: preset.promptVersion,
     mode: requestedMode,
     instructions: normalizedInstructions,
+    userPlan: effectiveUserPlan,
   });
   const canUseCache = shouldUseVisionCache({
     forceRegenerate,
@@ -1657,7 +2543,7 @@ export async function createImageEnhancementJob({
     jobType: preset.key,
     jobCategory: preset.category,
     status: 'processing',
-    provider: preset.providerPreference || 'local_sharp',
+    provider: 'vision_orchestrator',
     presetKey: preset.key,
     mode: requestedMode,
     instructions: normalizedInstructions,
@@ -1666,6 +2552,9 @@ export async function createImageEnhancementJob({
     roomType: resolvedRoomType,
     promptVersion: preset.promptVersion,
     inputHash,
+    attemptCount: 0,
+    maxAttempts: preset.providerPreference === 'local_sharp' ? 1 : 2,
+    currentStage: 'initial',
     input: {
       roomLabel: asset.roomLabel,
       roomType: resolvedRoomType,
@@ -1674,6 +2563,7 @@ export async function createImageEnhancementJob({
       helperText: preset.helperText,
       recommendedUse: preset.recommendedUse,
       upgradeTier: preset.upgradeTier,
+      userPlan: effectiveUserPlan,
       mode: requestedMode,
       instructions: normalizedInstructions,
       normalizedPlan,
@@ -1707,356 +2597,98 @@ export async function createImageEnhancementJob({
       ...(job.input || {}),
       fullPrompt,
     };
-    let createdVariants = [];
     const stored = await readStoredAsset({
       storageProvider: asset.storageProvider,
       storageKey: asset.storageKey,
     });
     const sourceImageBase64 = stored.buffer.toString('base64');
-
-    if (preset.providerPreference === 'replicate') {
-      const maskBuffer = await buildInpaintingMaskBuffer(
-        stored.buffer,
-        preset.key,
-        resolvedRoomType,
-      );
-      const providerOutputs = await runReplicateInpainting({
-        image: stored.buffer,
-        mask: maskBuffer,
-        model: preset.replicateModel,
-        prompt: fullPrompt,
-        strength: preset.strength,
-        outputCount: preset.outputCount || 2,
-        guidanceScale: preset.guidanceScale,
-        numInferenceSteps: preset.numInferenceSteps,
-        scheduler: preset.scheduler,
-        negativePrompt: preset.negativePrompt,
-        seed: Math.floor(Math.random() * 1_000_000_000),
-      });
-      createdVariants = [];
-      const rejectedCandidates = [];
-      const evaluationRegions = getPresetEvaluationRegions(preset.key);
-      for (let index = 0; index < providerOutputs.length; index += 1) {
-        let output = providerOutputs[index];
-        let buffer = await convertReplicateOutputToBuffer(output);
-        let visualChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer);
-        let focusRegionChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer, {
-          region: evaluationRegions.focusRegion,
-        });
-        if (preset.key === 'remove_furniture' && focusRegionChangeRatio < 0.24) {
-          const refinementOutputs = await runReplicateInpainting({
-            image: buffer,
-            mask: maskBuffer,
-            model: preset.replicateModel,
-            prompt: `${fullPrompt} Continue removing any remaining movable furniture and clutter from the masked area. Keep architecture unchanged.`,
-            strength: Math.min(0.99, Number((preset.strength || 0.9) + 0.05)),
-            outputCount: 1,
-            guidanceScale: (preset.guidanceScale || 9) + 0.5,
-            numInferenceSteps: (preset.numInferenceSteps || 40) + 6,
-            scheduler: preset.scheduler,
-            negativePrompt: preset.negativePrompt,
-            seed: Math.floor(Math.random() * 1_000_000_000),
-          });
-          if (refinementOutputs.length) {
-            output = refinementOutputs[0];
-            buffer = await convertReplicateOutputToBuffer(output);
-            visualChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer);
-            focusRegionChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer, {
-              region: evaluationRegions.focusRegion,
-            });
-          }
-        }
-        const review = await reviewVisionVariant({
-          property: null,
-          roomLabel: asset.roomLabel,
-          presetKey: preset.key,
-          variantCategory: preset.category,
-          mimeType: 'image/jpeg',
-          sourceImageBase64,
-          variantImageBase64: buffer.toString('base64'),
-        });
-        const topHalfChangeRatio = await calculateVisualChangeRatio(stored.buffer, buffer, {
-          region: evaluationRegions.structureRegion,
-        });
-        let overallScore = calculateVisionReviewOverallScore(review);
-        let rejectForArchitecturalDrift = false;
-        let qualityWarning = '';
-
-        if (preset.key === 'remove_furniture') {
-          if (visualChangeRatio < 0.15) {
-            overallScore = Math.max(0, overallScore - 10);
-          }
-          if (focusRegionChangeRatio < 0.12) {
-            overallScore = Math.max(0, overallScore - 12);
-          }
-          if (topHalfChangeRatio > 0.1) {
-            overallScore = Math.max(0, overallScore - 26);
-          }
-          if (focusRegionChangeRatio < 0.08) {
-            rejectForArchitecturalDrift = true;
-            qualityWarning = 'Rejected variant due to insufficient furniture removal in the target region.';
-          }
-          if (topHalfChangeRatio > 0.22) {
-            rejectForArchitecturalDrift = true;
-            qualityWarning = 'Rejected variant due to likely structural drift in upper architecture.';
-          }
-          console.log('VISION DEBUG:', {
-            presetKey: preset.key,
-            index,
-            visualChangeRatio,
-            focusRegionChangeRatio,
-            topHalfChangeRatio,
-            overallScore,
-            rejectForArchitecturalDrift,
-          });
-        }
-
-        if (preset.key.startsWith('floor_')) {
-          if (visualChangeRatio < 0.14) {
-            overallScore = Math.max(0, overallScore - 20);
-          }
-          if (topHalfChangeRatio > 0.09) {
-            overallScore = Math.max(0, overallScore - 20);
-          }
-          if (topHalfChangeRatio > 0.14) {
-            rejectForArchitecturalDrift = true;
-            qualityWarning = 'Rejected variant due to likely structural drift outside floor regions.';
-          }
-        }
-
-        if (rejectForArchitecturalDrift) {
-          if (preset.key === 'remove_furniture') {
-            overallScore = Math.max(0, overallScore - 15);
-            qualityWarning =
-              'Low-confidence preview: furniture removal was retained despite localized drift because it produced usable subtraction.';
-          } else {
-            rejectedCandidates.push({
-              index,
-              output,
-              buffer,
-              review,
-              overallScore,
-              visualChangeRatio,
-              focusRegionChangeRatio,
-              topHalfChangeRatio,
-              roomPromptAddon,
-              presetPromptAddon,
-            });
-            continue;
-          }
-        }
-
-        const saved = await saveBinaryBuffer({
-          propertyId: asset.propertyId.toString(),
-          mimeType: 'image/jpeg',
-          buffer,
-        });
-
-        const variant = await MediaVariantModel.create({
-          visionJobId: job._id,
-          mediaId: asset._id,
-          propertyId: asset.propertyId,
-          variantType: preset.key,
-          variantCategory: preset.category,
-          label: `${renderPlan.label} ${String.fromCharCode(65 + index)}`,
-          mimeType: 'image/jpeg',
-          storageProvider: saved.storageProvider,
-          storageKey: saved.storageKey,
-          byteSize: saved.byteSize,
-          isSelected: false,
-          ...buildVariantLifecycleFields({ isSelected: false }),
-          useInBrochure: false,
-          useInReport: false,
-          metadata: {
-            warning: qualityWarning || renderPlan.warning,
-            summary: renderPlan.summary,
-            differenceHint: renderPlan.differenceHint,
-            effects: renderPlan.effects,
-            sourceAssetId: asset._id.toString(),
-            roomLabel: asset.roomLabel,
-            roomType: resolvedRoomType,
-            provider: 'replicate',
-            presetKey: preset.key,
-            promptVersion: preset.promptVersion,
-            helperText: preset.helperText,
-            recommendedUse: preset.recommendedUse,
-            upgradeTier: preset.upgradeTier,
-            category: preset.category,
-            disclaimerType: preset.disclaimerType,
+    const orchestrationResult = await orchestrateVisionJob({
+      asset,
+      preset,
+      roomType: resolvedRoomType,
+      instructions: normalizedInstructions,
+      normalizedPlan,
+      requestedMode,
+      userPlan: effectiveUserPlan,
+      sourceBuffer: stored.buffer,
+      sourceImageBase64,
+      existingJob: job.toObject(),
+      providerRunners: {
+        runLocalSharp: async () =>
+          buildReviewedLocalSharpCandidates({
+            asset,
+            preset,
+            renderPlan,
+            resolvedRoomType,
+            requestedMode,
+            normalizedInstructions,
+            normalizedPlan,
+            sourceBuffer: stored.buffer,
+            sourceImageBase64,
+          }),
+        runReplicateProvider: async ({ providerKey }) =>
+          buildReviewedReplicateCandidates({
+            providerKey,
+            asset,
+            preset,
+            renderPlan,
+            resolvedRoomType,
+            requestedMode,
+            normalizedInstructions,
+            normalizedPlan,
+            fullPrompt,
             roomPromptAddon,
             presetPromptAddon,
-            mode: requestedMode,
-            instructions: normalizedInstructions,
-            normalizedPlan,
-            providerSourceUrl: getProviderSourceUrl(output),
-            review: {
-              ...review,
-              overallScore,
-              visualChangeRatio,
-              focusRegionChangeRatio,
-              topHalfChangeRatio,
-            },
-          },
-        });
+            sourceBuffer: stored.buffer,
+            sourceImageBase64,
+          }),
+      },
+    });
 
-        createdVariants.push(serializeMediaVariant(variant.toObject()));
-      }
-
-      if (!createdVariants.length) {
-        if (rejectedCandidates.length) {
-          const fallbackCandidate = [...rejectedCandidates]
-            .sort((left, right) => {
-              if (preset.key === 'remove_furniture') {
-                if (left.focusRegionChangeRatio !== right.focusRegionChangeRatio) {
-                  return right.focusRegionChangeRatio - left.focusRegionChangeRatio;
-                }
-              }
-              if (left.topHalfChangeRatio !== right.topHalfChangeRatio) {
-                return left.topHalfChangeRatio - right.topHalfChangeRatio;
-              }
-              return right.visualChangeRatio - left.visualChangeRatio;
-            })[0];
-
-          const saved = await saveBinaryBuffer({
-            propertyId: asset.propertyId.toString(),
-            mimeType: 'image/jpeg',
-            buffer: fallbackCandidate.buffer,
-          });
-
-          const fallbackVariant = await MediaVariantModel.create({
-            visionJobId: job._id,
-            mediaId: asset._id,
-            propertyId: asset.propertyId,
-            variantType: preset.key,
-            variantCategory: preset.category,
-            label: `${renderPlan.label} Fallback`,
-            mimeType: 'image/jpeg',
-            storageProvider: saved.storageProvider,
-            storageKey: saved.storageKey,
-            byteSize: saved.byteSize,
-            isSelected: false,
-            ...buildVariantLifecycleFields({ isSelected: false }),
-            useInBrochure: false,
-            useInReport: false,
-            metadata: {
-              warning:
-                'Low-confidence fallback: most generated variants were rejected for structural drift. Review before any public use.',
-              summary: renderPlan.summary,
-              differenceHint: renderPlan.differenceHint,
-              effects: [...(renderPlan.effects || []), 'Low-confidence fallback'],
-              sourceAssetId: asset._id.toString(),
-              roomLabel: asset.roomLabel,
-              roomType: resolvedRoomType,
-              provider: 'replicate',
-              presetKey: preset.key,
-              promptVersion: preset.promptVersion,
-              helperText: preset.helperText,
-              recommendedUse: preset.recommendedUse,
-              upgradeTier: preset.upgradeTier,
-              category: preset.category,
-              disclaimerType: preset.disclaimerType,
-              roomPromptAddon: fallbackCandidate.roomPromptAddon,
-              presetPromptAddon: fallbackCandidate.presetPromptAddon,
-              mode: requestedMode,
-              instructions: normalizedInstructions,
-              normalizedPlan,
-              providerSourceUrl: getProviderSourceUrl(fallbackCandidate.output),
-              review: {
-                ...fallbackCandidate.review,
-                overallScore: Math.max(0, fallbackCandidate.overallScore - 12),
-                visualChangeRatio: fallbackCandidate.visualChangeRatio,
-                focusRegionChangeRatio: fallbackCandidate.focusRegionChangeRatio,
-                topHalfChangeRatio: fallbackCandidate.topHalfChangeRatio,
-                fallbackApplied: true,
-              },
-            },
-          });
-
-          createdVariants.push(serializeMediaVariant(fallbackVariant.toObject()));
-        } else {
-          throw new Error(
-            'Generated variants failed quality safeguards due to heavy structural drift. Please retry with a different source photo angle or a narrower transformation request.',
-          );
-        }
-      }
-    } else {
-      const rendered = await renderVariantBuffer(stored.buffer, preset.key, resolvedRoomType);
-      const review = await reviewVisionVariant({
-        property: null,
-        roomLabel: asset.roomLabel,
-        presetKey: preset.key,
-        variantCategory: preset.category,
-        mimeType: 'image/jpeg',
-        sourceImageBase64,
-        variantImageBase64: rendered.buffer.toString('base64'),
-      });
-      const overallScore = calculateVisionReviewOverallScore(review);
-      const saved = await saveBinaryBuffer({
-        propertyId: asset.propertyId.toString(),
-        mimeType: 'image/jpeg',
-        buffer: rendered.buffer,
-      });
-
-      const variant = await MediaVariantModel.create({
-        visionJobId: job._id,
-        mediaId: asset._id,
-        propertyId: asset.propertyId,
-        variantType: preset.key,
-        variantCategory: preset.category,
-        label: rendered.label,
-        mimeType: 'image/jpeg',
-        storageProvider: saved.storageProvider,
-        storageKey: saved.storageKey,
-        byteSize: saved.byteSize,
-        isSelected: false,
-        ...buildVariantLifecycleFields({ isSelected: false }),
-        useInBrochure: false,
-        useInReport: false,
-        metadata: {
-          warning: rendered.warning,
-          summary: rendered.summary,
-          differenceHint: rendered.differenceHint,
-          effects: rendered.effects,
-          cropInsetPercent: rendered.cropInsetPercent,
-          sourceAssetId: asset._id.toString(),
-          roomLabel: asset.roomLabel,
-          roomType: resolvedRoomType,
-          provider: preset.providerPreference || 'local_sharp',
-          presetKey: preset.key,
-          promptVersion: preset.promptVersion,
-          helperText: preset.helperText,
-          recommendedUse: preset.recommendedUse,
-          upgradeTier: preset.upgradeTier,
-          category: preset.category,
-          disclaimerType: preset.disclaimerType,
-          roomPromptAddon: rendered.roomPromptAddon,
-          mode: requestedMode,
-          instructions: normalizedInstructions,
-          normalizedPlan,
-          review: {
-            ...review,
-            overallScore,
-          },
-        },
-      });
-
-      createdVariants = [serializeMediaVariant(variant.toObject())];
+    if (!orchestrationResult.bestVariant) {
+      throw new Error('No provider produced a usable output.');
     }
 
+    let createdVariants = await persistOrchestratedVisionCandidates({
+      candidates: orchestrationResult.allCandidates,
+      job,
+      asset,
+      preset,
+      renderPlan,
+      resolvedRoomType,
+      requestedMode,
+      normalizedInstructions,
+      normalizedPlan,
+      orchestrationResult,
+      roomPromptAddon,
+      presetPromptAddon,
+    });
     createdVariants = sortVisionVariants(createdVariants);
     job.status = 'completed';
-    const usedFallbackVariant = createdVariants.some(
-      (variant) => Boolean(variant?.metadata?.review?.fallbackApplied),
-    );
+    job.provider = orchestrationResult.providerUsed || 'vision_orchestrator';
+    job.attemptCount = Number(orchestrationResult.providerAttemptCount || 0);
+    job.maxAttempts = Number(orchestrationResult.orchestration?.chain?.length || 1);
+    const usedFallbackVariant =
+      Boolean(orchestrationResult.fallbackApplied) ||
+      createdVariants.some((variant) => Boolean(variant?.metadata?.fallbackApplied));
+    job.currentStage = usedFallbackVariant ? 'fallback' : 'completed';
+    job.fallbackMode = usedFallbackVariant ? 'provider_fallback' : null;
+    job.failureReason = '';
     job.outputVariantIds = createdVariants.map((variant) => variant.id);
     job.selectedVariantId = createdVariants[0]?.id || null;
+    job.input = {
+      ...(job.input || {}),
+      userPlan: orchestrationResult.userPlan,
+      orchestrationChain: orchestrationResult.orchestration?.chain || [],
+      orchestrationAttempts: orchestrationResult.orchestration?.attempts || [],
+    };
     job.warning = usedFallbackVariant
-      ? 'Low-confidence fallback returned. Most generated variants were rejected for structural drift.'
+      ? 'Primary provider was insufficient, so an advanced AI fallback was used.'
       : renderPlan.warning;
     job.message =
       requestedMode === 'freeform'
-        ? 'Custom enhancement request saved and processed.'
-        : `${createdVariants.length} ${renderPlan.label.toLowerCase()} variant${createdVariants.length === 1 ? '' : 's'} generated.`;
+        ? `Custom enhancement request saved and processed via ${orchestrationResult.providerUsed || 'vision_orchestrator'}.`
+        : `Generated via ${orchestrationResult.providerUsed || 'vision_orchestrator'}${usedFallbackVariant ? ' after fallback' : ''}.`;
     await job.save();
 
     return {
@@ -2068,6 +2700,8 @@ export async function createImageEnhancementJob({
     };
   } catch (error) {
     job.status = 'failed';
+    job.currentStage = 'failed';
+    job.failureReason = 'orchestration_failed';
     job.message = 'Image variant generation failed.';
     job.warning = error.message;
     await job.save();

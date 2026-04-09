@@ -13,6 +13,7 @@ import {
   selectMediaVariant,
   updateMediaVariantUsage,
 } from './media-ai.service.js';
+import { VISION_PLAN_VALUES } from './vision-orchestrator.helpers.js';
 import {
   createMediaAssetAndAnalysis,
   deleteMediaAsset,
@@ -56,6 +57,7 @@ const imageJobRequestSchema = z.object({
   mode: z.enum(['preset', 'freeform']).optional(),
   instructions: z.string().trim().max(600).optional(),
   forceRegenerate: z.boolean().optional(),
+  userPlan: z.enum(VISION_PLAN_VALUES).optional(),
 }).superRefine((value, context) => {
   const requestedPresetKey = value.presetKey || value.jobType || 'enhance_listing_quality';
   if (value.mode !== 'freeform' && !getVisionPresetKeys().includes(requestedPresetKey)) {
@@ -90,6 +92,7 @@ const photoEnhanceSchema = z.object({
   mode: z.enum(['preset', 'freeform']).optional(),
   instructions: z.string().trim().max(600).optional(),
   forceRegenerate: z.boolean().optional(),
+  userPlan: z.enum(VISION_PLAN_VALUES).optional(),
 });
 
 export async function mediaRoutes(fastify) {
@@ -196,6 +199,7 @@ export async function mediaRoutes(fastify) {
         mode: payload.mode,
         instructions: payload.instructions,
         forceRegenerate: payload.forceRegenerate,
+        userPlan: payload.userPlan,
       });
       return reply.code(201).send(result);
     } catch (error) {
@@ -221,6 +225,7 @@ export async function mediaRoutes(fastify) {
         mode: payload.mode,
         instructions: payload.instructions,
         forceRegenerate: payload.forceRegenerate,
+        userPlan: payload.userPlan,
       });
       return reply.code(201).send(result);
     } catch (error) {
@@ -245,6 +250,7 @@ export async function mediaRoutes(fastify) {
         mode: payload.mode,
         instructions: payload.instructions,
         forceRegenerate: payload.forceRegenerate,
+        userPlan: payload.userPlan,
       });
       return reply.code(201).send(result);
     } catch (error) {

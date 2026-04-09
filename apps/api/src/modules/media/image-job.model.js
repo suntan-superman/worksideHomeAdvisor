@@ -59,6 +59,11 @@ const imageJobSchema = new mongoose.Schema(
     },
     message: { type: String, default: '' },
     warning: { type: String, default: '' },
+    attemptCount: { type: Number, default: 0 },
+    maxAttempts: { type: Number, default: 1 },
+    currentStage: { type: String, default: 'initial' },
+    fallbackMode: { type: String, default: null },
+    failureReason: { type: String, default: '' },
   },
   {
     timestamps: true,

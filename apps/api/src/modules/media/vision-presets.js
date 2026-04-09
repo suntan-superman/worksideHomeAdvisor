@@ -72,13 +72,13 @@ export const VISION_PRESETS = [
     category: 'concept_preview',
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'exterior', 'unknown'],
     providerPreference: 'replicate',
-    promptVersion: 4,
-    outputCount: 3,
+    promptVersion: 5,
+    outputCount: 4,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     upgradeTier: 'standard',
     basePrompt:
-      'Create a realistic version of this room with most movable furniture removed, including seating, coffee tables, side tables, rugs, accent pieces, and portable shelving where possible. Keep walls, windows, doors, built-ins, flooring lines, and layout intact. Make the room feel open, empty, and believable as a concept preview.',
+      'Create a realistic version of this room with most movable furniture removed, including seating, coffee tables, side tables, rugs, accent pieces, and portable shelving where possible. Prioritize true subtraction and empty floor area over redesigning or redecorating the remaining room. Keep walls, windows, doors, built-ins, flooring lines, and layout intact. Make the room feel open, empty, and believable as a concept preview.',
     helperText:
       'Create a conceptual empty-room version for planning and persuasion, not direct listing replacement.',
     strength: 0.93,
