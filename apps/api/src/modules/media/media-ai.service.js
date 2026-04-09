@@ -1783,23 +1783,32 @@ export async function createImageEnhancementJob({
         let qualityWarning = '';
 
         if (preset.key === 'remove_furniture') {
-          if (visualChangeRatio < 0.22) {
-            overallScore = Math.max(0, overallScore - 22);
+          if (visualChangeRatio < 0.15) {
+            overallScore = Math.max(0, overallScore - 10);
           }
-          if (focusRegionChangeRatio < 0.2) {
-            overallScore = Math.max(0, overallScore - 28);
+          if (focusRegionChangeRatio < 0.12) {
+            overallScore = Math.max(0, overallScore - 12);
           }
           if (topHalfChangeRatio > 0.1) {
             overallScore = Math.max(0, overallScore - 26);
           }
-          if (focusRegionChangeRatio < 0.14) {
+          if (focusRegionChangeRatio < 0.08) {
             rejectForArchitecturalDrift = true;
             qualityWarning = 'Rejected variant due to insufficient furniture removal in the target region.';
           }
-          if (topHalfChangeRatio > 0.16) {
+          if (topHalfChangeRatio > 0.22) {
             rejectForArchitecturalDrift = true;
             qualityWarning = 'Rejected variant due to likely structural drift in upper architecture.';
           }
+          console.log('VISION DEBUG:', {
+            presetKey: preset.key,
+            index,
+            visualChangeRatio,
+            focusRegionChangeRatio,
+            topHalfChangeRatio,
+            overallScore,
+            rejectForArchitecturalDrift,
+          });
         }
 
         if (preset.key.startsWith('floor_')) {
@@ -1816,19 +1825,25 @@ export async function createImageEnhancementJob({
         }
 
         if (rejectForArchitecturalDrift) {
-          rejectedCandidates.push({
-            index,
-            output,
-            buffer,
-            review,
-            overallScore,
-            visualChangeRatio,
-            focusRegionChangeRatio,
-            topHalfChangeRatio,
-            roomPromptAddon,
-            presetPromptAddon,
-          });
-          continue;
+          if (preset.key === 'remove_furniture') {
+            overallScore = Math.max(0, overallScore - 15);
+            qualityWarning =
+              'Low-confidence preview: furniture removal was retained despite localized drift because it produced usable subtraction.';
+          } else {
+            rejectedCandidates.push({
+              index,
+              output,
+              buffer,
+              review,
+              overallScore,
+              visualChangeRatio,
+              focusRegionChangeRatio,
+              topHalfChangeRatio,
+              roomPromptAddon,
+              presetPromptAddon,
+            });
+            continue;
+          }
         }
 
         const saved = await saveBinaryBuffer({

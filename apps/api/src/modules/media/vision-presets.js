@@ -72,7 +72,7 @@ export const VISION_PRESETS = [
     category: 'concept_preview',
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'exterior', 'unknown'],
     providerPreference: 'replicate',
-    promptVersion: 3,
+    promptVersion: 4,
     outputCount: 3,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
