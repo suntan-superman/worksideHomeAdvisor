@@ -2324,6 +2324,26 @@ export async function getImageJobById(jobId) {
   return serializeImageJob(job, variants);
 }
 
+export async function listImageJobsForAsset(assetId, options = {}) {
+  if (mongoose.connection.readyState !== 1) {
+    return [];
+  }
+
+  const limit = Math.max(1, Math.min(20, Number(options.limit || 10)));
+  const jobs = await ImageJobModel.find({ mediaId: assetId })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .lean();
+
+  const serializedJobs = [];
+  for (const job of jobs) {
+    const variants = await loadJobVariants(job._id);
+    serializedJobs.push(serializeImageJob(job, variants));
+  }
+
+  return serializedJobs;
+}
+
 async function buildReviewedLocalSharpCandidates({
   asset,
   preset,

@@ -26,6 +26,7 @@ import {
   generateSocialPack,
   getChecklist,
   getDashboard,
+  getImageEnhancementJob,
   getFlyerExportUrl,
   getLatestFlyer,
   getLatestPricing,
@@ -39,6 +40,7 @@ import {
   listProviderReferences,
   listProviders,
   listMediaAssets,
+  listImageEnhancementJobs,
   listMediaVariants,
   listVisionPresets,
   savePhoto,
@@ -145,6 +147,9 @@ const VISION_PRESET_GROUPS = [
   },
 ];
 const VISION_COMPLETION_SOUND_MIN_SECONDS = 15;
+const VISION_JOB_RECOVERY_LOOKBACK_MS = 90 * 1000;
+const VISION_JOB_RECOVERY_POLL_INTERVAL_MS = 4000;
+const VISION_JOB_RECOVERY_TIMEOUT_MS = 2 * 60 * 1000;
 
 function buildAddressQuery(property) {
   return [property?.addressLine1, property?.city, property?.state, property?.zip]
@@ -225,6 +230,12 @@ function getVariantDisclaimer(variant) {
 
 function getVariantReviewScore(variant) {
   return Number(variant?.metadata?.review?.overallScore || 0);
+}
+
+function waitForDuration(milliseconds) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
 }
 
 function formatFreeformPlanHighlights(normalizedPlan) {
@@ -760,6 +771,80 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   function getVisionGenerationDurationSeconds(startedAt) {
     return Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  }
+
+  function matchesVisionJobRequest(job, { presetKey = '', mode = 'preset', startedAt = 0 } = {}) {
+    const jobCreatedAt = new Date(job?.createdAt || 0).getTime();
+    if (!jobCreatedAt || jobCreatedAt < startedAt - VISION_JOB_RECOVERY_LOOKBACK_MS) {
+      return false;
+    }
+
+    if (mode === 'freeform') {
+      return job?.mode === 'freeform';
+    }
+
+    return String(job?.presetKey || job?.jobType || '') === String(presetKey || '');
+  }
+
+  async function recoverVisionJobAfterDisconnect({
+    assetId,
+    presetKey = '',
+    mode = 'preset',
+    startedAt = 0,
+  }) {
+    const jobListResponse = await listImageEnhancementJobs(assetId, 8);
+    const matchingJob = (jobListResponse.jobs || []).find((job) =>
+      matchesVisionJobRequest(job, { presetKey, mode, startedAt }),
+    );
+
+    if (!matchingJob) {
+      return null;
+    }
+
+    if (matchingJob.status === 'completed' || matchingJob.status === 'failed') {
+      return matchingJob;
+    }
+
+    const deadline = Date.now() + VISION_JOB_RECOVERY_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await waitForDuration(VISION_JOB_RECOVERY_POLL_INTERVAL_MS);
+      const jobResponse = await getImageEnhancementJob(matchingJob.id);
+      const latestJob = jobResponse.job;
+      if (!latestJob) {
+        continue;
+      }
+      if (latestJob.status === 'completed' || latestJob.status === 'failed') {
+        return latestJob;
+      }
+    }
+
+    return matchingJob;
+  }
+
+  async function reconcileRecoveredVisionJob(job, fallbackAssetId) {
+    if (!job) {
+      return null;
+    }
+
+    if (job.status === 'completed') {
+      const nextAssetId = fallbackAssetId || selectedMediaAsset?.id || selectedMediaAssetId;
+      await Promise.all([
+        refreshMediaAssets(nextAssetId),
+        refreshMediaVariants(nextAssetId),
+        refreshWorkflow(),
+      ]);
+      setSelectedVariantId(job.selectedVariantId || job.variants?.[0]?.id || '');
+      return job;
+    }
+
+    if (job.status === 'failed') {
+      const failureMessage = job.warning || job.message || 'The vision job failed before producing a usable variant.';
+      throw new Error(failureMessage);
+    }
+
+    throw new Error(
+      'The request disconnected before the vision job finished. Please retry once the current generation has cleared.',
+    );
   }
 
   async function playVisionCompletionSound({ tone = 'success', elapsedSeconds = 0 } = {}) {
@@ -2095,6 +2180,46 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
       });
     } catch (requestError) {
+      if (requestError?.message === 'Failed to fetch') {
+        try {
+          const recoveredJob = await recoverVisionJobAfterDisconnect({
+            assetId: selectedMediaAsset.id,
+            presetKey,
+            mode: 'preset',
+            startedAt: generationStartedAt,
+          });
+
+          if (recoveredJob) {
+            const settledJob = await reconcileRecoveredVisionJob(recoveredJob, selectedMediaAsset.id);
+            setToast({
+              tone: 'success',
+              title: 'Vision job recovered',
+              message:
+                settledJob?.warning ||
+                'The browser lost the original request, but the vision job finished and the generated variant has been recovered.',
+              autoDismissMs: 9000,
+            });
+            void playVisionCompletionSound({
+              tone: 'success',
+              elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
+            });
+            return;
+          }
+        } catch (recoveryError) {
+          setToast({
+            tone: 'error',
+            title: 'Variant generation failed',
+            message: `${recoveryError.message} No new variant was selected, so the compare view is still showing the last successful preview.`,
+            autoDismissMs: 0,
+          });
+          void playVisionCompletionSound({
+            tone: 'error',
+            elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
+          });
+          return;
+        }
+      }
+
       setToast({
         tone: 'error',
         title: 'Variant generation failed',
@@ -2170,6 +2295,52 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
       });
     } catch (requestError) {
+      if (requestError?.message === 'Failed to fetch') {
+        try {
+          const recoveredJob = await recoverVisionJobAfterDisconnect({
+            assetId: selectedMediaAsset.id,
+            mode: 'freeform',
+            startedAt: generationStartedAt,
+          });
+
+          if (recoveredJob) {
+            const settledJob = await reconcileRecoveredVisionJob(recoveredJob, selectedMediaAsset.id);
+            setShowMoreVisionVariants(true);
+            setActiveVisionPresetKey(
+              settledJob?.presetKey ||
+                settledJob?.variants?.[0]?.metadata?.presetKey ||
+                settledJob?.variants?.[0]?.variantType ||
+                'combined_listing_refresh',
+            );
+            setToast({
+              tone: 'success',
+              title: 'Custom enhancement recovered',
+              message:
+                settledJob?.warning ||
+                'The browser lost the original request, but the custom enhancement finished and the generated variant has been recovered.',
+              autoDismissMs: 9000,
+            });
+            void playVisionCompletionSound({
+              tone: 'success',
+              elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
+            });
+            return;
+          }
+        } catch (recoveryError) {
+          setToast({
+            tone: 'error',
+            title: 'Custom enhancement failed',
+            message: `${recoveryError.message} No new variant was selected, so the compare view is still showing the last successful preview.`,
+            autoDismissMs: 0,
+          });
+          void playVisionCompletionSound({
+            tone: 'error',
+            elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
+          });
+          return;
+        }
+      }
+
       setToast({
         tone: 'error',
         title: 'Custom enhancement failed',

@@ -443,6 +443,21 @@ export function createImageEnhancementJob(assetId, payload) {
   });
 }
 
+export function listImageEnhancementJobs(assetId, limit = 10) {
+  const search = new URLSearchParams();
+  if (limit) {
+    search.set('limit', String(limit));
+  }
+
+  return request(
+    `/api/v1/media/assets/${assetId}/vision/jobs${search.toString() ? `?${search.toString()}` : ''}`,
+  );
+}
+
+export function getImageEnhancementJob(jobId) {
+  return request(`/api/v1/vision/jobs/${jobId}`);
+}
+
 export function listVisionPresets() {
   return request('/api/v1/vision/presets');
 }

@@ -8,6 +8,7 @@ import {
   createImageEnhancementJob,
   getVisionPresetCatalog,
   getImageJobById,
+  listImageJobsForAsset,
   getMediaVariantById,
   listMediaVariants,
   selectMediaVariant,
@@ -360,6 +361,17 @@ export async function mediaRoutes(fastify) {
       }
 
       return reply.send({ job });
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/media/assets/:assetId/vision/jobs', async (request, reply) => {
+    try {
+      const { assetId } = assetParamsSchema.parse(request.params);
+      const limit = Math.max(1, Math.min(20, Number(request.query?.limit || 10)));
+      const jobs = await listImageJobsForAsset(assetId, { limit });
+      return reply.send({ jobs });
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }
