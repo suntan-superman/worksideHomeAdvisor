@@ -25,6 +25,7 @@ export async function orchestrateVisionJob({
     userPlan: effectiveUserPlan,
     openAiAvailable,
   });
+  const exhaustProviderChain = preset?.key === 'remove_furniture';
   const attempts = [];
   const allCandidates = [];
 
@@ -92,6 +93,15 @@ export async function orchestrateVisionJob({
         sufficientCount: normalizedCandidates.filter((candidate) => candidate.isSufficient).length,
         topOverallScore: Number(normalizedCandidates[0]?.overallScore || 0),
         topObjectRemovalScore: Number(normalizedCandidates[0]?.objectRemovalScore || 0),
+        topRemainingFurnitureOverlapRatio: Number(
+          normalizedCandidates[0]?.remainingFurnitureOverlapRatio || 0,
+        ),
+        topLargestComponentPersistenceRatio: Number(
+          normalizedCandidates[0]?.largestComponentPersistenceRatio || 0,
+        ),
+        topNewFurnitureAdditionRatio: Number(
+          normalizedCandidates[0]?.newFurnitureAdditionRatio || 0,
+        ),
       });
 
       allCandidates.push(...normalizedCandidates);
@@ -100,11 +110,11 @@ export async function orchestrateVisionJob({
         normalizedCandidates.filter((candidate) => candidate.isSufficient),
         preset.key,
       )[0];
-      if (sufficient) {
+      if (sufficient && !exhaustProviderChain) {
         return {
           providerUsed: providerKey,
           providerAttemptCount: attempts.length,
-          fallbackApplied: attempts.length > 1,
+          fallbackApplied: chain.indexOf(providerKey) > 0,
           bestVariant: sufficient,
           allCandidates: rankCandidates(allCandidates, preset.key),
           orchestration: { chain, attempts },
@@ -118,16 +128,20 @@ export async function orchestrateVisionJob({
         sufficientCount: 0,
         topOverallScore: 0,
         topObjectRemovalScore: 0,
+        topRemainingFurnitureOverlapRatio: 0,
+        topLargestComponentPersistenceRatio: 0,
+        topNewFurnitureAdditionRatio: 0,
         error: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
   const rankedCandidates = rankCandidates(allCandidates, preset.key);
+  const providerUsed = rankedCandidates[0]?.providerKey || null;
   return {
-    providerUsed: rankedCandidates[0]?.providerKey || null,
+    providerUsed,
     providerAttemptCount: attempts.length,
-    fallbackApplied: attempts.length > 1,
+    fallbackApplied: providerUsed ? chain.indexOf(providerUsed) > 0 : false,
     bestVariant: rankedCandidates[0] || null,
     allCandidates: rankedCandidates,
     orchestration: { chain, attempts },

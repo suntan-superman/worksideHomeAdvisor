@@ -113,14 +113,29 @@ export function calculateObjectRemovalScore({
   maskedChangeRatio = 0,
   maskedEdgeDensityDelta = 0,
   outsideMaskChangeRatio = 0,
+  remainingFurnitureOverlapRatio = 0,
+  largestComponentPersistenceRatio = 0,
+  newFurnitureAdditionRatio = 0,
+  clearedMajorComponentCount = 0,
+  totalMajorComponentCount = 0,
 }) {
   const subtractionReward =
     focusRegionChangeRatio * 0.42 +
     visualChangeRatio * 0.18 +
     maskedChangeRatio * 0.26 +
     Math.max(0, -maskedEdgeDensityDelta) * 3.5;
+  const clearanceReward =
+    totalMajorComponentCount > 0
+      ? (clearedMajorComponentCount / totalMajorComponentCount) * 0.18
+      : 0;
   const driftPenalty = topHalfChangeRatio * 0.15 + outsideMaskChangeRatio * 0.14;
-  return Number(Math.max(0, subtractionReward - driftPenalty).toFixed(4));
+  const persistencePenalty =
+    remainingFurnitureOverlapRatio * 0.3 +
+    largestComponentPersistenceRatio * 0.22 +
+    newFurnitureAdditionRatio * 0.24;
+  return Number(
+    Math.max(0, subtractionReward + clearanceReward - driftPenalty - persistencePenalty).toFixed(4),
+  );
 }
 
 export function isCandidateSufficient(candidate, presetKey) {
@@ -130,11 +145,18 @@ export function isCandidateSufficient(candidate, presetKey) {
 
   if (presetKey === 'remove_furniture') {
     return (
-      Number(candidate.objectRemovalScore || 0) >= 0.18 ||
+      (
+        Number(candidate.objectRemovalScore || 0) >= 0.18 &&
+        Number(candidate.remainingFurnitureOverlapRatio ?? 1) <= 0.5 &&
+        Number(candidate.largestComponentPersistenceRatio ?? 1) <= 0.72 &&
+        Number(candidate.newFurnitureAdditionRatio ?? 1) <= 0.22
+      ) ||
       (
         Number(candidate.focusRegionChangeRatio || 0) >= 0.1 &&
         Number(candidate.maskedChangeRatio || 0) >= 0.18 &&
-        Number(candidate.maskedEdgeDensityDelta || 0) <= -0.003
+        Number(candidate.maskedEdgeDensityDelta || 0) <= -0.003 &&
+        Number(candidate.remainingFurnitureOverlapRatio ?? 1) <= 0.55 &&
+        Number(candidate.newFurnitureAdditionRatio ?? 1) <= 0.24
       )
     );
   }
@@ -155,6 +177,33 @@ export function rankCandidates(candidates = [], presetKey) {
     if (presetKey === 'remove_furniture') {
       if (Number(left?.objectRemovalScore || 0) !== Number(right?.objectRemovalScore || 0)) {
         return Number(right?.objectRemovalScore || 0) - Number(left?.objectRemovalScore || 0);
+      }
+      if (
+        Number(left?.remainingFurnitureOverlapRatio || 0) !==
+        Number(right?.remainingFurnitureOverlapRatio || 0)
+      ) {
+        return (
+          Number(left?.remainingFurnitureOverlapRatio || 0) -
+          Number(right?.remainingFurnitureOverlapRatio || 0)
+        );
+      }
+      if (
+        Number(left?.largestComponentPersistenceRatio || 0) !==
+        Number(right?.largestComponentPersistenceRatio || 0)
+      ) {
+        return (
+          Number(left?.largestComponentPersistenceRatio || 0) -
+          Number(right?.largestComponentPersistenceRatio || 0)
+        );
+      }
+      if (
+        Number(left?.newFurnitureAdditionRatio || 0) !==
+        Number(right?.newFurnitureAdditionRatio || 0)
+      ) {
+        return (
+          Number(left?.newFurnitureAdditionRatio || 0) -
+          Number(right?.newFurnitureAdditionRatio || 0)
+        );
       }
       if (Number(left?.maskedChangeRatio || 0) !== Number(right?.maskedChangeRatio || 0)) {
         return Number(right?.maskedChangeRatio || 0) - Number(left?.maskedChangeRatio || 0);

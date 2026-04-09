@@ -7,7 +7,13 @@ import {
   normalizeRoomType,
   resolveFreeformPresetKey,
 } from './media-ai.service.js';
-import { buildProviderChain, resolveVisionUserPlan } from './vision-orchestrator.helpers.js';
+import {
+  buildProviderChain,
+  isCandidateSufficient,
+  rankCandidates,
+  resolveVisionUserPlan,
+} from './vision-orchestrator.helpers.js';
+import { orchestrateVisionJob } from './vision-orchestrator.service.js';
 
 test('normalizeRoomType maps common room labels to canonical room types', () => {
   assert.equal(normalizeRoomType('Living Room'), 'living_room');
@@ -118,4 +124,177 @@ test('buildProviderChain includes openai_edit for premium remove_furniture when 
     }),
     ['replicate_basic', 'replicate_advanced', 'openai_edit'],
   );
+});
+
+test('remove_furniture sufficiency rejects candidates with strong persistence overlap', () => {
+  assert.equal(
+    isCandidateSufficient(
+      {
+        objectRemovalScore: 0.22,
+        remainingFurnitureOverlapRatio: 0.71,
+        largestComponentPersistenceRatio: 0.81,
+        newFurnitureAdditionRatio: 0.08,
+        focusRegionChangeRatio: 0.18,
+        maskedChangeRatio: 0.28,
+        maskedEdgeDensityDelta: -0.01,
+      },
+      'remove_furniture',
+    ),
+    false,
+  );
+
+  assert.equal(
+    isCandidateSufficient(
+      {
+        objectRemovalScore: 0.24,
+        remainingFurnitureOverlapRatio: 0.24,
+        largestComponentPersistenceRatio: 0.33,
+        newFurnitureAdditionRatio: 0.05,
+        focusRegionChangeRatio: 0.18,
+        maskedChangeRatio: 0.28,
+        maskedEdgeDensityDelta: -0.01,
+      },
+      'remove_furniture',
+    ),
+    true,
+  );
+});
+
+test('remove_furniture ranking prefers lower persistence over prettier restaging', () => {
+  const ranked = rankCandidates(
+    [
+      {
+        overallScore: 88,
+        objectRemovalScore: 0.19,
+        remainingFurnitureOverlapRatio: 0.68,
+        largestComponentPersistenceRatio: 0.74,
+        newFurnitureAdditionRatio: 0.09,
+        maskedChangeRatio: 0.33,
+      },
+      {
+        overallScore: 83,
+        objectRemovalScore: 0.19,
+        remainingFurnitureOverlapRatio: 0.21,
+        largestComponentPersistenceRatio: 0.29,
+        newFurnitureAdditionRatio: 0.04,
+        maskedChangeRatio: 0.24,
+      },
+    ],
+    'remove_furniture',
+  );
+
+  assert.equal(ranked[0]?.remainingFurnitureOverlapRatio, 0.21);
+});
+
+test('remove_furniture sufficiency rejects candidates that add substitute furniture', () => {
+  assert.equal(
+    isCandidateSufficient(
+      {
+        objectRemovalScore: 0.23,
+        remainingFurnitureOverlapRatio: 0.26,
+        largestComponentPersistenceRatio: 0.34,
+        newFurnitureAdditionRatio: 0.31,
+        focusRegionChangeRatio: 0.19,
+        maskedChangeRatio: 0.26,
+        maskedEdgeDensityDelta: -0.01,
+      },
+      'remove_furniture',
+    ),
+    false,
+  );
+});
+
+test('remove_furniture ranking penalizes newly added furniture staging', () => {
+  const ranked = rankCandidates(
+    [
+      {
+        overallScore: 90,
+        objectRemovalScore: 0.22,
+        remainingFurnitureOverlapRatio: 0.2,
+        largestComponentPersistenceRatio: 0.32,
+        newFurnitureAdditionRatio: 0.29,
+        maskedChangeRatio: 0.28,
+      },
+      {
+        overallScore: 84,
+        objectRemovalScore: 0.22,
+        remainingFurnitureOverlapRatio: 0.2,
+        largestComponentPersistenceRatio: 0.32,
+        newFurnitureAdditionRatio: 0.05,
+        maskedChangeRatio: 0.21,
+      },
+    ],
+    'remove_furniture',
+  );
+
+  assert.equal(ranked[0]?.newFurnitureAdditionRatio, 0.05);
+});
+
+test('remove_furniture orchestration evaluates the full provider chain before selecting a winner', async () => {
+  const callOrder = [];
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: {
+      key: 'remove_furniture',
+      category: 'concept_preview',
+      providerPreference: 'replicate',
+      upgradeTier: 'premium',
+    },
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async ({ providerKey }) => {
+        callOrder.push(providerKey);
+        if (providerKey === 'replicate_basic') {
+          return [
+            {
+              overallScore: 86,
+              objectRemovalScore: 0.21,
+              remainingFurnitureOverlapRatio: 0.24,
+              largestComponentPersistenceRatio: 0.34,
+              newFurnitureAdditionRatio: 0.04,
+              focusRegionChangeRatio: 0.17,
+              maskedChangeRatio: 0.21,
+              maskedEdgeDensityDelta: -0.01,
+            },
+          ];
+        }
+
+        return [
+          {
+            overallScore: 82,
+            objectRemovalScore: 0.28,
+            remainingFurnitureOverlapRatio: 0.11,
+            largestComponentPersistenceRatio: 0.18,
+            newFurnitureAdditionRatio: 0.03,
+            focusRegionChangeRatio: 0.2,
+            maskedChangeRatio: 0.28,
+            maskedEdgeDensityDelta: -0.014,
+          },
+        ];
+      },
+      runOpenAiEdit: async () => {
+        callOrder.push('openai_edit');
+        return [
+          {
+            overallScore: 80,
+            objectRemovalScore: 0.26,
+            remainingFurnitureOverlapRatio: 0.16,
+            largestComponentPersistenceRatio: 0.22,
+            newFurnitureAdditionRatio: 0.02,
+            focusRegionChangeRatio: 0.19,
+            maskedChangeRatio: 0.27,
+            maskedEdgeDensityDelta: -0.015,
+          },
+        ];
+      },
+    },
+  });
+
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit']);
+  assert.equal(result.providerUsed, 'replicate_advanced');
+  assert.equal(result.providerAttemptCount, 3);
 });

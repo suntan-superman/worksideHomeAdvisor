@@ -747,6 +747,46 @@ function sortVisionVariants(variants = []) {
       return left?.metadata?.review?.shouldHideByDefault ? 1 : -1;
     }
 
+    const leftPresetKey = left?.metadata?.presetKey || left?.variantType || '';
+    const rightPresetKey = right?.metadata?.presetKey || right?.variantType || '';
+    if (leftPresetKey === 'remove_furniture' && rightPresetKey === 'remove_furniture') {
+      const leftObjectRemovalScore = Number(left?.metadata?.review?.objectRemovalScore || 0);
+      const rightObjectRemovalScore = Number(right?.metadata?.review?.objectRemovalScore || 0);
+      if (leftObjectRemovalScore !== rightObjectRemovalScore) {
+        return rightObjectRemovalScore - leftObjectRemovalScore;
+      }
+
+      const leftRemainingOverlap = Number(
+        left?.metadata?.review?.remainingFurnitureOverlapRatio || 0,
+      );
+      const rightRemainingOverlap = Number(
+        right?.metadata?.review?.remainingFurnitureOverlapRatio || 0,
+      );
+      if (leftRemainingOverlap !== rightRemainingOverlap) {
+        return leftRemainingOverlap - rightRemainingOverlap;
+      }
+
+      const leftLargestPersistence = Number(
+        left?.metadata?.review?.largestComponentPersistenceRatio || 0,
+      );
+      const rightLargestPersistence = Number(
+        right?.metadata?.review?.largestComponentPersistenceRatio || 0,
+      );
+      if (leftLargestPersistence !== rightLargestPersistence) {
+        return leftLargestPersistence - rightLargestPersistence;
+      }
+
+      const leftNewFurnitureAddition = Number(
+        left?.metadata?.review?.newFurnitureAdditionRatio || 0,
+      );
+      const rightNewFurnitureAddition = Number(
+        right?.metadata?.review?.newFurnitureAdditionRatio || 0,
+      );
+      if (leftNewFurnitureAddition !== rightNewFurnitureAddition) {
+        return leftNewFurnitureAddition - rightNewFurnitureAddition;
+      }
+    }
+
     const leftScore = Number(left?.metadata?.review?.overallScore || 0);
     const rightScore = Number(right?.metadata?.review?.overallScore || 0);
     if (leftScore !== rightScore) {
@@ -1944,6 +1984,220 @@ async function calculateMaskedEdgeDensity(imageBuffer, maskBuffer) {
   return Number((edgePixels / Math.max(1, maskPixels)).toFixed(4));
 }
 
+async function readBinaryMask(maskBuffer, threshold = 32) {
+  const metadata = await sharp(maskBuffer).metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const raw = await sharp(maskBuffer)
+    .resize(width, height, { fit: 'fill' })
+    .removeAlpha()
+    .greyscale()
+    .raw()
+    .toBuffer();
+  const binary = new Uint8Array(width * height);
+  for (let i = 0; i < raw.length; i += 1) {
+    binary[i] = raw[i] > threshold ? 1 : 0;
+  }
+
+  return {
+    width,
+    height,
+    binary,
+  };
+}
+
+function extractBinaryMaskComponents(binary, width, height, minArea = 0) {
+  const visited = new Uint8Array(binary.length);
+  const components = [];
+  const directions = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const startIndex = y * width + x;
+      if (!binary[startIndex] || visited[startIndex]) {
+        continue;
+      }
+
+      const queue = [startIndex];
+      visited[startIndex] = 1;
+      const pixels = [];
+      let minX = x;
+      let maxX = x;
+      let minY = y;
+      let maxY = y;
+
+      while (queue.length) {
+        const index = queue.pop();
+        const currentX = index % width;
+        const currentY = Math.floor(index / width);
+        pixels.push(index);
+        if (currentX < minX) {
+          minX = currentX;
+        }
+        if (currentX > maxX) {
+          maxX = currentX;
+        }
+        if (currentY < minY) {
+          minY = currentY;
+        }
+        if (currentY > maxY) {
+          maxY = currentY;
+        }
+
+        for (const [dx, dy] of directions) {
+          const nx = currentX + dx;
+          const ny = currentY + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+            continue;
+          }
+          const nextIndex = ny * width + nx;
+          if (!binary[nextIndex] || visited[nextIndex]) {
+            continue;
+          }
+          visited[nextIndex] = 1;
+          queue.push(nextIndex);
+        }
+      }
+
+      if (pixels.length < minArea) {
+        continue;
+      }
+
+      components.push({
+        area: pixels.length,
+        pixels,
+        minX,
+        maxX,
+        minY,
+        maxY,
+      });
+    }
+  }
+
+  return components.sort((left, right) => right.area - left.area);
+}
+
+async function calculateFurniturePersistenceMetrics({
+  sourceComponentMaskBuffer,
+  sourceComponents = [],
+  variantBuffer,
+}) {
+  if (!sourceComponentMaskBuffer || !sourceComponents.length) {
+    return {
+      remainingFurnitureOverlapRatio: 0,
+      largestComponentPersistenceRatio: 0,
+      clearedMajorComponentCount: 0,
+      totalMajorComponentCount: 0,
+    };
+  }
+
+  const variantAdaptiveFurnitureMask = await buildAdaptiveFurnitureMaskAtSourceSize(variantBuffer, {
+    bridgeNearbyComponents: false,
+  });
+  const {
+    width,
+    height,
+    binary: sourceBinary,
+  } = await readBinaryMask(sourceComponentMaskBuffer, 40);
+  const { binary: variantBinary } = await readBinaryMask(
+    variantAdaptiveFurnitureMask.adaptiveMaskBuffer,
+    40,
+  );
+  const totalSourcePixels = sourceComponents.reduce((sum, component) => sum + component.area, 0);
+  if (!totalSourcePixels) {
+    return {
+      remainingFurnitureOverlapRatio: 0,
+      largestComponentPersistenceRatio: 0,
+      newFurnitureAdditionRatio: 0,
+      clearedMajorComponentCount: 0,
+      totalMajorComponentCount: 0,
+    };
+  }
+
+  const sourceAllowanceBinary = new Uint8Array(sourceBinary.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let touchesSource = false;
+      for (let oy = -2; oy <= 2 && !touchesSource; oy += 1) {
+        for (let ox = -2; ox <= 2; ox += 1) {
+          const nx = x + ox;
+          const ny = y + oy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+            continue;
+          }
+          if (sourceBinary[ny * width + nx]) {
+            touchesSource = true;
+            break;
+          }
+        }
+      }
+      if (touchesSource) {
+        sourceAllowanceBinary[y * width + x] = 1;
+      }
+    }
+  }
+
+  const majorComponents = sourceComponents.filter(
+    (component, index) =>
+      index < 3 && component.area >= Math.max(1200, Math.round(totalSourcePixels * 0.12)),
+  );
+  const effectiveMajorComponents =
+    majorComponents.length > 0 ? majorComponents : sourceComponents.slice(0, 1);
+
+  let overlappingPixels = 0;
+  let totalVariantFurniturePixels = 0;
+  let addedFurniturePixels = 0;
+  let largestComponentPersistenceRatio = 0;
+  let clearedMajorComponentCount = 0;
+  for (let pixelIndex = 0; pixelIndex < variantBinary.length; pixelIndex += 1) {
+    if (!variantBinary[pixelIndex]) {
+      continue;
+    }
+    totalVariantFurniturePixels += 1;
+    if (!sourceAllowanceBinary[pixelIndex]) {
+      addedFurniturePixels += 1;
+    }
+  }
+  for (const component of sourceComponents) {
+    let componentOverlap = 0;
+    for (const pixelIndex of component.pixels) {
+      if (variantBinary[pixelIndex]) {
+        overlappingPixels += 1;
+        componentOverlap += 1;
+      }
+    }
+
+    if (effectiveMajorComponents.includes(component)) {
+      const persistenceRatio = Number(
+        (componentOverlap / Math.max(1, component.area)).toFixed(4),
+      );
+      if (persistenceRatio > largestComponentPersistenceRatio) {
+        largestComponentPersistenceRatio = persistenceRatio;
+      }
+      if (persistenceRatio <= 0.38) {
+        clearedMajorComponentCount += 1;
+      }
+    }
+  }
+
+  return {
+    remainingFurnitureOverlapRatio: Number(
+      (overlappingPixels / Math.max(1, totalSourcePixels)).toFixed(4),
+    ),
+    largestComponentPersistenceRatio: Number(largestComponentPersistenceRatio.toFixed(4)),
+    newFurnitureAdditionRatio: Number(
+      (addedFurniturePixels / Math.max(1, totalVariantFurniturePixels)).toFixed(4),
+    ),
+    clearedMajorComponentCount,
+    totalMajorComponentCount: effectiveMajorComponents.length,
+  };
+}
+
 function buildVisionInputHash({ assetId, presetKey, roomType, promptVersion }) {
   return createHash('sha256')
     .update(
@@ -2103,6 +2357,8 @@ async function buildReviewedReplicateCandidates({
   );
   let removeFurnitureEvaluationMaskBuffer = null;
   let sourceFurnitureEdgeDensity = null;
+  let sourceFurnitureComponentMaskBuffer = null;
+  let sourceFurnitureComponents = [];
   if (preset.key === 'remove_furniture') {
     const adaptiveFurnitureMask = await buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer);
     const adaptiveCoverageRatio = await calculateMaskCoverageRatio(
@@ -2113,6 +2369,17 @@ async function buildReviewedReplicateCandidates({
     sourceFurnitureEdgeDensity = await calculateMaskedEdgeDensity(
       sourceBuffer,
       removeFurnitureEvaluationMaskBuffer,
+    );
+    const componentMask = await buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer, {
+      bridgeNearbyComponents: false,
+    });
+    sourceFurnitureComponentMaskBuffer = componentMask.adaptiveMaskBuffer;
+    const sourceComponentBinary = await readBinaryMask(sourceFurnitureComponentMaskBuffer, 40);
+    sourceFurnitureComponents = extractBinaryMaskComponents(
+      sourceComponentBinary.binary,
+      sourceComponentBinary.width,
+      sourceComponentBinary.height,
+      Math.max(400, Math.round(sourceComponentBinary.width * sourceComponentBinary.height * 0.004)),
     );
   }
 
@@ -2142,6 +2409,11 @@ async function buildReviewedReplicateCandidates({
         maskedChangeRatio: 0,
         outsideMaskChangeRatio: 0,
         maskedEdgeDensityDelta: 0,
+        remainingFurnitureOverlapRatio: 0,
+        largestComponentPersistenceRatio: 0,
+        newFurnitureAdditionRatio: 0,
+        clearedMajorComponentCount: 0,
+        totalMajorComponentCount: 0,
       };
     }
     const maskedChangeRatio = await calculateMaskedVisualChangeRatio(
@@ -2161,11 +2433,17 @@ async function buildReviewedReplicateCandidates({
     const maskedEdgeDensityDelta = Number(
       (variantFurnitureEdgeDensity - sourceFurnitureEdgeDensity).toFixed(4),
     );
+    const persistenceMetrics = await calculateFurniturePersistenceMetrics({
+      sourceComponentMaskBuffer: sourceFurnitureComponentMaskBuffer,
+      sourceComponents: sourceFurnitureComponents,
+      variantBuffer: candidateBuffer,
+    });
 
     return {
       maskedChangeRatio,
       outsideMaskChangeRatio,
       maskedEdgeDensityDelta,
+      ...persistenceMetrics,
     };
   };
 
@@ -2180,11 +2458,21 @@ async function buildReviewedReplicateCandidates({
     let maskedChangeRatio = 0;
     let outsideMaskChangeRatio = 0;
     let maskedEdgeDensityDelta = 0;
+    let remainingFurnitureOverlapRatio = 0;
+    let largestComponentPersistenceRatio = 0;
+    let newFurnitureAdditionRatio = 0;
+    let clearedMajorComponentCount = 0;
+    let totalMajorComponentCount = 0;
     if (preset.key === 'remove_furniture') {
       ({
         maskedChangeRatio,
         outsideMaskChangeRatio,
         maskedEdgeDensityDelta,
+        remainingFurnitureOverlapRatio,
+        largestComponentPersistenceRatio,
+        newFurnitureAdditionRatio,
+        clearedMajorComponentCount,
+        totalMajorComponentCount,
       } = await computeFurnitureRemovalMetrics(buffer));
     }
 
@@ -2221,6 +2509,11 @@ async function buildReviewedReplicateCandidates({
           maskedChangeRatio,
           outsideMaskChangeRatio,
           maskedEdgeDensityDelta,
+          remainingFurnitureOverlapRatio,
+          largestComponentPersistenceRatio,
+          newFurnitureAdditionRatio,
+          clearedMajorComponentCount,
+          totalMajorComponentCount,
         } = await computeFurnitureRemovalMetrics(buffer));
       }
     }
@@ -2271,6 +2564,28 @@ async function buildReviewedReplicateCandidates({
       } else if (outsideMaskChangeRatio <= 0.16) {
         overallScore = Math.min(100, overallScore + 4);
       }
+      if (remainingFurnitureOverlapRatio >= 0.7) {
+        overallScore = Math.max(0, overallScore - 28);
+      } else if (remainingFurnitureOverlapRatio >= 0.5) {
+        overallScore = Math.max(0, overallScore - 16);
+      } else if (remainingFurnitureOverlapRatio <= 0.26) {
+        overallScore = Math.min(100, overallScore + 8);
+      }
+      if (largestComponentPersistenceRatio >= 0.72) {
+        overallScore = Math.max(0, overallScore - 24);
+      } else if (largestComponentPersistenceRatio <= 0.42 && totalMajorComponentCount > 0) {
+        overallScore = Math.min(100, overallScore + 8);
+      }
+      if (newFurnitureAdditionRatio >= 0.32) {
+        overallScore = Math.max(0, overallScore - 30);
+      } else if (newFurnitureAdditionRatio >= 0.18) {
+        overallScore = Math.max(0, overallScore - 18);
+      } else if (newFurnitureAdditionRatio <= 0.06) {
+        overallScore = Math.min(100, overallScore + 6);
+      }
+      if (totalMajorComponentCount > 0 && clearedMajorComponentCount === totalMajorComponentCount) {
+        overallScore = Math.min(100, overallScore + 10);
+      }
 
       if (focusRegionChangeRatio < 0.08) {
         overallScore = Math.max(0, overallScore - 18);
@@ -2298,6 +2613,20 @@ async function buildReviewedReplicateCandidates({
         rejectionCategory = 'furniture_persistence';
         shouldHideByDefault = true;
       }
+      if (remainingFurnitureOverlapRatio >= 0.6 || largestComponentPersistenceRatio >= 0.72) {
+        overallScore = Math.max(0, overallScore - 22);
+        qualityWarning =
+          'Low-confidence preview: major furniture silhouettes still appear to persist in the room.';
+        rejectionCategory = 'furniture_persistence';
+        shouldHideByDefault = true;
+      }
+      if (newFurnitureAdditionRatio >= 0.18) {
+        overallScore = Math.max(0, overallScore - 22);
+        qualityWarning =
+          'Low-confidence preview: the generated room appears to add substitute furniture instead of simply removing it.';
+        rejectionCategory = 'furniture_restaging';
+        shouldHideByDefault = true;
+      }
 
       console.log('VISION DEBUG:', {
         presetKey: preset.key,
@@ -2309,6 +2638,11 @@ async function buildReviewedReplicateCandidates({
         maskedChangeRatio,
         outsideMaskChangeRatio,
         maskedEdgeDensityDelta,
+        remainingFurnitureOverlapRatio,
+        largestComponentPersistenceRatio,
+        newFurnitureAdditionRatio,
+        clearedMajorComponentCount,
+        totalMajorComponentCount,
         overallScore,
         shouldHideByDefault,
         rejectionCategory,
@@ -2340,6 +2674,11 @@ async function buildReviewedReplicateCandidates({
             maskedChangeRatio,
             maskedEdgeDensityDelta,
             outsideMaskChangeRatio,
+            remainingFurnitureOverlapRatio,
+            largestComponentPersistenceRatio,
+            newFurnitureAdditionRatio,
+            clearedMajorComponentCount,
+            totalMajorComponentCount,
           })
         : 0;
 
@@ -2369,6 +2708,11 @@ async function buildReviewedReplicateCandidates({
       maskedChangeRatio,
       outsideMaskChangeRatio,
       maskedEdgeDensityDelta,
+      remainingFurnitureOverlapRatio,
+      largestComponentPersistenceRatio,
+      newFurnitureAdditionRatio,
+      clearedMajorComponentCount,
+      totalMajorComponentCount,
       objectRemovalScore,
       shouldHideByDefault,
       rejectionCategory,
@@ -2395,6 +2739,8 @@ async function buildReviewedOpenAiCandidates({
   const maskBuffer = await buildInpaintingMaskBuffer(sourceBuffer, preset.key, resolvedRoomType);
   let removeFurnitureEvaluationMaskBuffer = null;
   let sourceFurnitureEdgeDensity = null;
+  let sourceFurnitureComponentMaskBuffer = null;
+  let sourceFurnitureComponents = [];
   if (preset.key === 'remove_furniture') {
     const adaptiveFurnitureMask = await buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer);
     const adaptiveCoverageRatio = await calculateMaskCoverageRatio(
@@ -2405,6 +2751,17 @@ async function buildReviewedOpenAiCandidates({
     sourceFurnitureEdgeDensity = await calculateMaskedEdgeDensity(
       sourceBuffer,
       removeFurnitureEvaluationMaskBuffer,
+    );
+    const componentMask = await buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer, {
+      bridgeNearbyComponents: false,
+    });
+    sourceFurnitureComponentMaskBuffer = componentMask.adaptiveMaskBuffer;
+    const sourceComponentBinary = await readBinaryMask(sourceFurnitureComponentMaskBuffer, 40);
+    sourceFurnitureComponents = extractBinaryMaskComponents(
+      sourceComponentBinary.binary,
+      sourceComponentBinary.width,
+      sourceComponentBinary.height,
+      Math.max(400, Math.round(sourceComponentBinary.width * sourceComponentBinary.height * 0.004)),
     );
   }
 
@@ -2422,6 +2779,11 @@ async function buildReviewedOpenAiCandidates({
         maskedChangeRatio: 0,
         outsideMaskChangeRatio: 0,
         maskedEdgeDensityDelta: 0,
+        remainingFurnitureOverlapRatio: 0,
+        largestComponentPersistenceRatio: 0,
+        newFurnitureAdditionRatio: 0,
+        clearedMajorComponentCount: 0,
+        totalMajorComponentCount: 0,
       };
     }
     const maskedChangeRatio = await calculateMaskedVisualChangeRatio(
@@ -2441,11 +2803,17 @@ async function buildReviewedOpenAiCandidates({
     const maskedEdgeDensityDelta = Number(
       (variantFurnitureEdgeDensity - sourceFurnitureEdgeDensity).toFixed(4),
     );
+    const persistenceMetrics = await calculateFurniturePersistenceMetrics({
+      sourceComponentMaskBuffer: sourceFurnitureComponentMaskBuffer,
+      sourceComponents: sourceFurnitureComponents,
+      variantBuffer: candidateBuffer,
+    });
 
     return {
       maskedChangeRatio,
       outsideMaskChangeRatio,
       maskedEdgeDensityDelta,
+      ...persistenceMetrics,
     };
   };
 
@@ -2460,11 +2828,21 @@ async function buildReviewedOpenAiCandidates({
     let maskedChangeRatio = 0;
     let outsideMaskChangeRatio = 0;
     let maskedEdgeDensityDelta = 0;
+    let remainingFurnitureOverlapRatio = 0;
+    let largestComponentPersistenceRatio = 0;
+    let newFurnitureAdditionRatio = 0;
+    let clearedMajorComponentCount = 0;
+    let totalMajorComponentCount = 0;
     if (preset.key === 'remove_furniture') {
       ({
         maskedChangeRatio,
         outsideMaskChangeRatio,
         maskedEdgeDensityDelta,
+        remainingFurnitureOverlapRatio,
+        largestComponentPersistenceRatio,
+        newFurnitureAdditionRatio,
+        clearedMajorComponentCount,
+        totalMajorComponentCount,
       } = await computeFurnitureRemovalMetrics(buffer));
     }
 
@@ -2514,6 +2892,28 @@ async function buildReviewedOpenAiCandidates({
       } else if (outsideMaskChangeRatio <= 0.18) {
         overallScore = Math.min(100, overallScore + 4);
       }
+      if (remainingFurnitureOverlapRatio >= 0.7) {
+        overallScore = Math.max(0, overallScore - 28);
+      } else if (remainingFurnitureOverlapRatio >= 0.5) {
+        overallScore = Math.max(0, overallScore - 16);
+      } else if (remainingFurnitureOverlapRatio <= 0.26) {
+        overallScore = Math.min(100, overallScore + 10);
+      }
+      if (largestComponentPersistenceRatio >= 0.72) {
+        overallScore = Math.max(0, overallScore - 24);
+      } else if (largestComponentPersistenceRatio <= 0.42 && totalMajorComponentCount > 0) {
+        overallScore = Math.min(100, overallScore + 10);
+      }
+      if (newFurnitureAdditionRatio >= 0.32) {
+        overallScore = Math.max(0, overallScore - 32);
+      } else if (newFurnitureAdditionRatio >= 0.18) {
+        overallScore = Math.max(0, overallScore - 20);
+      } else if (newFurnitureAdditionRatio <= 0.06) {
+        overallScore = Math.min(100, overallScore + 8);
+      }
+      if (totalMajorComponentCount > 0 && clearedMajorComponentCount === totalMajorComponentCount) {
+        overallScore = Math.min(100, overallScore + 12);
+      }
 
       if (focusRegionChangeRatio < 0.08) {
         overallScore = Math.max(0, overallScore - 18);
@@ -2540,6 +2940,20 @@ async function buildReviewedOpenAiCandidates({
         qualityWarning =
           'Low-confidence preview: premium fallback restaged the room more than it removed furniture.';
         rejectionCategory = 'furniture_persistence';
+        shouldHideByDefault = true;
+      }
+      if (remainingFurnitureOverlapRatio >= 0.6 || largestComponentPersistenceRatio >= 0.72) {
+        overallScore = Math.max(0, overallScore - 24);
+        qualityWarning =
+          'Low-confidence preview: premium fallback still leaves major furniture silhouettes in place.';
+        rejectionCategory = 'furniture_persistence';
+        shouldHideByDefault = true;
+      }
+      if (newFurnitureAdditionRatio >= 0.18) {
+        overallScore = Math.max(0, overallScore - 24);
+        qualityWarning =
+          'Low-confidence preview: premium fallback appears to add replacement furniture instead of clearing the room.';
+        rejectionCategory = 'furniture_restaging';
         shouldHideByDefault = true;
       }
     }
@@ -2569,6 +2983,11 @@ async function buildReviewedOpenAiCandidates({
             maskedChangeRatio,
             maskedEdgeDensityDelta,
             outsideMaskChangeRatio,
+            remainingFurnitureOverlapRatio,
+            largestComponentPersistenceRatio,
+            newFurnitureAdditionRatio,
+            clearedMajorComponentCount,
+            totalMajorComponentCount,
           })
         : 0;
 
@@ -2595,6 +3014,11 @@ async function buildReviewedOpenAiCandidates({
       maskedChangeRatio,
       outsideMaskChangeRatio,
       maskedEdgeDensityDelta,
+      remainingFurnitureOverlapRatio,
+      largestComponentPersistenceRatio,
+      newFurnitureAdditionRatio,
+      clearedMajorComponentCount,
+      totalMajorComponentCount,
       objectRemovalScore,
       shouldHideByDefault,
       rejectionCategory,
@@ -2678,6 +3102,11 @@ async function persistOrchestratedVisionCandidates({
           maskedChangeRatio: candidate.maskedChangeRatio,
           outsideMaskChangeRatio: candidate.outsideMaskChangeRatio,
           maskedEdgeDensityDelta: candidate.maskedEdgeDensityDelta,
+          remainingFurnitureOverlapRatio: candidate.remainingFurnitureOverlapRatio,
+          largestComponentPersistenceRatio: candidate.largestComponentPersistenceRatio,
+          newFurnitureAdditionRatio: candidate.newFurnitureAdditionRatio,
+          clearedMajorComponentCount: candidate.clearedMajorComponentCount,
+          totalMajorComponentCount: candidate.totalMajorComponentCount,
           objectRemovalScore: candidate.objectRemovalScore,
           shouldHideByDefault: Boolean(candidate.shouldHideByDefault),
           rejectionCategory: candidate.rejectionCategory || '',
