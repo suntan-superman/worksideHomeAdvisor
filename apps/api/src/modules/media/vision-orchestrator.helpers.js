@@ -28,6 +28,7 @@ const PREMIUM_PRESET_KEYS = new Set([
 ]);
 
 export const VISION_PLAN_VALUES = ['standard', 'pro', 'premium'];
+const REMOVE_FURNITURE_MAX_EXECUTION_TIME_MS = 150_000;
 
 export function resolveVisionUserPlan({ preset, userPlan } = {}) {
   const normalizedUserPlan = String(userPlan || '').trim().toLowerCase();
@@ -77,12 +78,25 @@ export function getReplicateSettings(providerKey, preset = {}) {
   const baseGuidanceScale = Number(preset.guidanceScale || 7.5);
   const baseInferenceSteps = Number(preset.numInferenceSteps || 35);
   const baseOutputCount = Number(preset.outputCount || 2);
+  const isRemoveFurniture = preset.key === 'remove_furniture';
 
   if (providerKey === 'replicate_advanced') {
     const strongerRemovalPreset = new Set(['remove_furniture', 'declutter_medium']);
     const advancedStrength = strongerRemovalPreset.has(preset.key)
       ? Math.min(0.98, baseStrength + 0.05)
       : Math.max(0.2, Math.min(0.9, baseStrength - 0.06));
+
+    if (isRemoveFurniture) {
+      return {
+        model: preset.replicateModel,
+        outputCount: Math.min(2, Math.max(1, baseOutputCount)),
+        guidanceScale: Math.min(10, Number((baseGuidanceScale + 0.35).toFixed(2))),
+        numInferenceSteps: baseInferenceSteps + 4,
+        strength: Number(Math.min(0.98, baseStrength + 0.03).toFixed(2)),
+        scheduler: preset.scheduler,
+        negativePrompt: preset.negativePrompt,
+      };
+    }
 
     return {
       model: preset.replicateModel,
@@ -97,7 +111,7 @@ export function getReplicateSettings(providerKey, preset = {}) {
 
   return {
     model: preset.replicateModel,
-    outputCount: baseOutputCount,
+    outputCount: isRemoveFurniture ? Math.min(2, Math.max(1, baseOutputCount)) : baseOutputCount,
     guidanceScale: baseGuidanceScale,
     numInferenceSteps: baseInferenceSteps,
     strength: baseStrength,
@@ -135,6 +149,41 @@ export function calculateObjectRemovalScore({
     newFurnitureAdditionRatio * 0.24;
   return Number(
     Math.max(0, subtractionReward + clearanceReward - driftPenalty - persistencePenalty).toFixed(4),
+  );
+}
+
+export function getVisionExecutionTimeBudgetMs(presetKey) {
+  if (presetKey === 'remove_furniture') {
+    return REMOVE_FURNITURE_MAX_EXECUTION_TIME_MS;
+  }
+
+  return 120_000;
+}
+
+export function isHighConfidenceEarlyExitCandidate(candidate, presetKey) {
+  if (!candidate) {
+    return false;
+  }
+
+  if (presetKey !== 'remove_furniture') {
+    return true;
+  }
+
+  const totalMajorComponentCount = Number(candidate.totalMajorComponentCount || 0);
+  const clearedMajorComponentCount = Number(candidate.clearedMajorComponentCount || 0);
+  const clearanceRatio =
+    totalMajorComponentCount > 0 ? clearedMajorComponentCount / totalMajorComponentCount : 1;
+
+  return (
+    Number(candidate.objectRemovalScore || 0) >= 0.3 &&
+    Number(candidate.focusRegionChangeRatio || 0) >= 0.18 &&
+    Number(candidate.maskedChangeRatio || 0) >= 0.26 &&
+    Number(candidate.topHalfChangeRatio || 1) <= 0.14 &&
+    Number(candidate.outsideMaskChangeRatio || 1) <= 0.24 &&
+    Number(candidate.remainingFurnitureOverlapRatio ?? 1) <= 0.14 &&
+    Number(candidate.largestComponentPersistenceRatio ?? 1) <= 0.24 &&
+    Number(candidate.newFurnitureAdditionRatio ?? 1) <= 0.05 &&
+    clearanceRatio >= 0.6
   );
 }
 

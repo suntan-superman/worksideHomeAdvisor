@@ -1730,6 +1730,16 @@ async function buildAdaptiveFurnitureMaskBuffer(sourceBuffer, options = {}) {
         boxHeight >= 3 &&
         centroidY >= probeHeight * 0.45 &&
         aspectRatio >= 1.9;
+      const touchesSideEdge = minX <= 2 || maxX >= probeWidth - 3;
+      const isTallNarrowWallStorageZone =
+        touchesSideEdge &&
+        boxHeight >= 12 &&
+        aspectRatio <= 0.55 &&
+        areaRatio >= 0.34 &&
+        centroidY <= probeHeight * 0.74;
+      if (isTallNarrowWallStorageZone) {
+        continue;
+      }
       if (!(isLargeAnchorFurniture || isMediumFurniture || isWideSurfaceObject)) {
         continue;
       }
@@ -1982,6 +1992,39 @@ async function calculateMaskedEdgeDensity(imageBuffer, maskBuffer) {
   }
 
   return Number((edgePixels / Math.max(1, maskPixels)).toFixed(4));
+}
+
+async function blendVariantWithSourceMask({
+  sourceBuffer,
+  variantBuffer,
+  maskBuffer,
+  maskBlur = 2.2,
+}) {
+  const metadata = await sharp(sourceBuffer).rotate().metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+
+  const [baseBuffer, editedBuffer, alphaMaskBuffer] = await Promise.all([
+    sharp(sourceBuffer).rotate().resize(width, height, { fit: 'fill' }).png().toBuffer(),
+    sharp(variantBuffer).rotate().resize(width, height, { fit: 'fill' }).png().toBuffer(),
+    sharp(maskBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .blur(maskBlur)
+      .toBuffer(),
+  ]);
+
+  const overlayBuffer = await sharp(editedBuffer)
+    .removeAlpha()
+    .joinChannel(alphaMaskBuffer)
+    .png()
+    .toBuffer();
+
+  return sharp(baseBuffer)
+    .composite([{ input: overlayBuffer, blend: 'over' }])
+    .jpeg({ quality: 92 })
+    .toBuffer();
 }
 
 async function readBinaryMask(maskBuffer, threshold = 32) {
@@ -2446,11 +2489,25 @@ async function buildReviewedReplicateCandidates({
       ...persistenceMetrics,
     };
   };
+  const finalizeFurnitureRemovalBuffer = async (candidateBuffer) => {
+    if (preset.key !== 'remove_furniture' || !removeFurnitureEvaluationMaskBuffer) {
+      return candidateBuffer;
+    }
+
+    return blendVariantWithSourceMask({
+      sourceBuffer,
+      variantBuffer: candidateBuffer,
+      maskBuffer: removeFurnitureEvaluationMaskBuffer,
+    });
+  };
+  const maxRefinementAttempts =
+    preset.key === 'remove_furniture' && providerKey === 'replicate_advanced' ? 1 : Infinity;
+  let refinementAttempts = 0;
 
   const candidates = [];
   for (let index = 0; index < providerOutputs.length; index += 1) {
     let output = providerOutputs[index];
-    let buffer = await convertReplicateOutputToBuffer(output);
+    let buffer = await finalizeFurnitureRemovalBuffer(await convertReplicateOutputToBuffer(output));
     let visualChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer);
     let focusRegionChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer, {
       region: evaluationRegions.focusRegion,
@@ -2479,12 +2536,14 @@ async function buildReviewedReplicateCandidates({
     if (
       preset.key === 'remove_furniture' &&
       providerKey === 'replicate_advanced' &&
+      refinementAttempts < maxRefinementAttempts &&
       (
         focusRegionChangeRatio < 0.24 ||
         maskedChangeRatio < 0.16 ||
         maskedEdgeDensityDelta > -0.002
       )
     ) {
+      refinementAttempts += 1;
       const refinementOutputs = await runReplicateInpainting({
         image: buffer,
         mask: maskBuffer,
@@ -2500,7 +2559,9 @@ async function buildReviewedReplicateCandidates({
       });
       if (refinementOutputs.length) {
         output = refinementOutputs[0];
-        buffer = await convertReplicateOutputToBuffer(output);
+        buffer = await finalizeFurnitureRemovalBuffer(
+          await convertReplicateOutputToBuffer(output),
+        );
         visualChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer);
         focusRegionChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer, {
           region: evaluationRegions.focusRegion,
@@ -2816,11 +2877,24 @@ async function buildReviewedOpenAiCandidates({
       ...persistenceMetrics,
     };
   };
+  const finalizeFurnitureRemovalBuffer = async (candidateBuffer) => {
+    if (preset.key !== 'remove_furniture' || !removeFurnitureEvaluationMaskBuffer) {
+      return candidateBuffer;
+    }
+
+    return blendVariantWithSourceMask({
+      sourceBuffer,
+      variantBuffer: candidateBuffer,
+      maskBuffer: removeFurnitureEvaluationMaskBuffer,
+    });
+  };
 
   const candidates = [];
   for (let index = 0; index < providerOutputs.length; index += 1) {
     const output = providerOutputs[index];
-    const buffer = await sharp(output.outputBuffer).rotate().jpeg({ quality: 92 }).toBuffer();
+    const buffer = await finalizeFurnitureRemovalBuffer(
+      await sharp(output.outputBuffer).rotate().jpeg({ quality: 92 }).toBuffer(),
+    );
     const visualChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer);
     const focusRegionChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer, {
       region: evaluationRegions.focusRegion,
@@ -3093,6 +3167,10 @@ async function persistOrchestratedVisionCandidates({
         providerSourceUrl: candidate.providerSourceUrl || null,
         fallbackApplied: Boolean(orchestrationResult?.fallbackApplied),
         orchestrationAttempts: orchestrationResult?.orchestration?.attempts || [],
+        orchestrationElapsedMs: Number(orchestrationResult?.elapsedTimeMs || 0),
+        orchestrationTimeBudgetMs: Number(orchestrationResult?.maxExecutionTimeMs || 0),
+        orchestrationStoppedEarlyReason: orchestrationResult?.stoppedEarlyReason || '',
+        orchestrationTimeBudgetReached: Boolean(orchestrationResult?.timeBudgetReached),
         review: {
           ...(candidate.review || {}),
           overallScore: candidate.overallScore,
@@ -3357,6 +3435,10 @@ export async function createImageEnhancementJob({
       userPlan: orchestrationResult.userPlan,
       orchestrationChain: orchestrationResult.orchestration?.chain || [],
       orchestrationAttempts: orchestrationResult.orchestration?.attempts || [],
+      orchestrationElapsedMs: Number(orchestrationResult.elapsedTimeMs || 0),
+      orchestrationTimeBudgetMs: Number(orchestrationResult.maxExecutionTimeMs || 0),
+      orchestrationStoppedEarlyReason: orchestrationResult.stoppedEarlyReason || '',
+      orchestrationTimeBudgetReached: Boolean(orchestrationResult.timeBudgetReached),
     };
     job.warning = usedFallbackVariant
       ? 'Primary provider was insufficient, so an advanced AI fallback was used.'

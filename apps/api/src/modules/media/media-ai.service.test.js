@@ -9,6 +9,7 @@ import {
 } from './media-ai.service.js';
 import {
   buildProviderChain,
+  getReplicateSettings,
   isCandidateSufficient,
   rankCandidates,
   resolveVisionUserPlan,
@@ -124,6 +125,27 @@ test('buildProviderChain includes openai_edit for premium remove_furniture when 
     }),
     ['replicate_basic', 'replicate_advanced', 'openai_edit'],
   );
+});
+
+test('getReplicateSettings reduces remove_furniture sample counts for faster execution', () => {
+  const basicSettings = getReplicateSettings('replicate_basic', {
+    key: 'remove_furniture',
+    outputCount: 4,
+    guidanceScale: 9,
+    numInferenceSteps: 40,
+    strength: 0.93,
+  });
+  const advancedSettings = getReplicateSettings('replicate_advanced', {
+    key: 'remove_furniture',
+    outputCount: 4,
+    guidanceScale: 9,
+    numInferenceSteps: 40,
+    strength: 0.93,
+  });
+
+  assert.equal(basicSettings.outputCount, 2);
+  assert.equal(advancedSettings.outputCount, 2);
+  assert.equal(advancedSettings.numInferenceSteps, 44);
 });
 
 test('remove_furniture sufficiency rejects candidates with strong persistence overlap', () => {
@@ -297,4 +319,120 @@ test('remove_furniture orchestration evaluates the full provider chain before se
   assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit']);
   assert.equal(result.providerUsed, 'replicate_advanced');
   assert.equal(result.providerAttemptCount, 3);
+});
+
+test('remove_furniture orchestration exits early when an advanced candidate is already exceptional', async () => {
+  const callOrder = [];
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: {
+      key: 'remove_furniture',
+      category: 'concept_preview',
+      providerPreference: 'replicate',
+      upgradeTier: 'premium',
+    },
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async ({ providerKey }) => {
+        callOrder.push(providerKey);
+        if (providerKey === 'replicate_basic') {
+          return [
+            {
+              overallScore: 82,
+              objectRemovalScore: 0.19,
+              remainingFurnitureOverlapRatio: 0.34,
+              largestComponentPersistenceRatio: 0.44,
+              newFurnitureAdditionRatio: 0.08,
+              focusRegionChangeRatio: 0.16,
+              maskedChangeRatio: 0.22,
+              maskedEdgeDensityDelta: -0.01,
+              outsideMaskChangeRatio: 0.16,
+              topHalfChangeRatio: 0.08,
+              clearedMajorComponentCount: 2,
+              totalMajorComponentCount: 4,
+            },
+          ];
+        }
+
+        return [
+          {
+            overallScore: 90,
+            objectRemovalScore: 0.34,
+            remainingFurnitureOverlapRatio: 0.08,
+            largestComponentPersistenceRatio: 0.12,
+            newFurnitureAdditionRatio: 0.02,
+            focusRegionChangeRatio: 0.21,
+            maskedChangeRatio: 0.31,
+            maskedEdgeDensityDelta: -0.016,
+            outsideMaskChangeRatio: 0.12,
+            topHalfChangeRatio: 0.06,
+            clearedMajorComponentCount: 4,
+            totalMajorComponentCount: 4,
+          },
+        ];
+      },
+      runOpenAiEdit: async () => {
+        callOrder.push('openai_edit');
+        return [];
+      },
+    },
+  });
+
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced']);
+  assert.equal(result.providerUsed, 'replicate_advanced');
+  assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
+});
+
+test('remove_furniture orchestration stops at the time budget once it has a usable candidate', async () => {
+  let now = 0;
+  const callOrder = [];
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: {
+      key: 'remove_furniture',
+      category: 'concept_preview',
+      providerPreference: 'replicate',
+      upgradeTier: 'premium',
+    },
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    nowFn: () => now,
+    providerRunners: {
+      runReplicateProvider: async ({ providerKey }) => {
+        callOrder.push(providerKey);
+        now = 151_000;
+        return [
+          {
+            overallScore: 82,
+            objectRemovalScore: 0.19,
+            remainingFurnitureOverlapRatio: 0.3,
+            largestComponentPersistenceRatio: 0.38,
+            newFurnitureAdditionRatio: 0.08,
+            focusRegionChangeRatio: 0.16,
+            maskedChangeRatio: 0.22,
+            maskedEdgeDensityDelta: -0.01,
+            outsideMaskChangeRatio: 0.2,
+            topHalfChangeRatio: 0.08,
+            clearedMajorComponentCount: 2,
+            totalMajorComponentCount: 4,
+          },
+        ];
+      },
+      runOpenAiEdit: async () => {
+        callOrder.push('openai_edit');
+        return [];
+      },
+    },
+  });
+
+  assert.deepEqual(callOrder, ['replicate_basic']);
+  assert.equal(result.stoppedEarlyReason, 'time_budget');
+  assert.equal(result.timeBudgetReached, true);
 });

@@ -72,18 +72,18 @@ export const VISION_PRESETS = [
     category: 'concept_preview',
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'exterior', 'unknown'],
     providerPreference: 'replicate',
-    promptVersion: 6,
-    outputCount: 4,
+    promptVersion: 8,
+    outputCount: 2,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Create a realistic version of this room with most movable furniture removed, including seating, coffee tables, side tables, rugs, accent pieces, and portable shelving where possible. Prioritize true subtraction and empty floor area over redesigning or redecorating the remaining room. Keep walls, windows, doors, built-ins, flooring lines, and layout intact. Make the room feel open, empty, and believable as a concept preview.',
+      'Create a realistic version of this room with most movable furniture removed, including seating, coffee tables, side tables, rugs, and loose accent pieces. Prioritize true subtraction and empty floor area over redesigning or redecorating the remaining room. Preserve wall art, built-in shelving, wall-adjacent bookcases, permanent fixtures, flooring finish outside the cleared furniture footprint, walls, windows, doors, and layout. Make the room feel open, empty, and believable as a concept preview.',
     helperText:
       'Create a conceptual empty-room version for planning and persuasion, not direct listing replacement.',
     strength: 0.93,
     guidanceScale: 9,
-    numInferenceSteps: 45,
+    numInferenceSteps: 40,
     negativePrompt:
       'extra furniture, sofa, couch, chair, coffee table, side table, ottoman, rug, clutter, fireplace, mantel, built-in, low quality, unrealistic geometry, warped lines, distorted walls',
     replicateModel: REPLICATE_INPAINT_MODEL,

@@ -1,5 +1,7 @@
 import {
   buildProviderChain,
+  getVisionExecutionTimeBudgetMs,
+  isHighConfidenceEarlyExitCandidate,
   isCandidateSufficient,
   rankCandidates,
   resolveVisionUserPlan,
@@ -17,6 +19,7 @@ export async function orchestrateVisionJob({
   sourceImageBase64,
   existingJob = null,
   providerRunners = {},
+  nowFn = Date.now,
 }) {
   const effectiveUserPlan = resolveVisionUserPlan({ preset, userPlan });
   const openAiAvailable = typeof providerRunners.runOpenAiEdit === 'function';
@@ -26,10 +29,43 @@ export async function orchestrateVisionJob({
     openAiAvailable,
   });
   const exhaustProviderChain = preset?.key === 'remove_furniture';
+  const startedAt = Number(nowFn());
+  const maxExecutionTimeMs = getVisionExecutionTimeBudgetMs(preset?.key);
   const attempts = [];
   const allCandidates = [];
 
+  const buildResponse = ({
+    providerUsed = null,
+    bestVariant = null,
+    stoppedEarlyReason = null,
+    timeBudgetReached = false,
+  } = {}) => ({
+    providerUsed,
+    providerAttemptCount: attempts.length,
+    fallbackApplied: providerUsed ? chain.indexOf(providerUsed) > 0 : false,
+    bestVariant,
+    allCandidates: rankCandidates(allCandidates, preset.key),
+    orchestration: { chain, attempts },
+    userPlan: effectiveUserPlan,
+    stoppedEarlyReason,
+    timeBudgetReached,
+    elapsedTimeMs: Math.max(0, Number(nowFn()) - startedAt),
+    maxExecutionTimeMs,
+  });
+
   for (const providerKey of chain) {
+    const elapsedBeforeProvider = Math.max(0, Number(nowFn()) - startedAt);
+    if (elapsedBeforeProvider >= maxExecutionTimeMs && allCandidates.length) {
+      const rankedCandidates = rankCandidates(allCandidates, preset.key);
+      const providerUsed = rankedCandidates[0]?.providerKey || null;
+      return buildResponse({
+        providerUsed,
+        bestVariant: rankedCandidates[0] || null,
+        stoppedEarlyReason: 'time_budget',
+        timeBudgetReached: true,
+      });
+    }
+
     try {
       let providerCandidates = [];
 
@@ -91,6 +127,7 @@ export async function orchestrateVisionJob({
         providerKey,
         candidateCount: normalizedCandidates.length,
         sufficientCount: normalizedCandidates.filter((candidate) => candidate.isSufficient).length,
+        elapsedMs: Math.max(0, Number(nowFn()) - startedAt),
         topOverallScore: Number(normalizedCandidates[0]?.overallScore || 0),
         topObjectRemovalScore: Number(normalizedCandidates[0]?.objectRemovalScore || 0),
         topRemainingFurnitureOverlapRatio: Number(
@@ -110,22 +147,37 @@ export async function orchestrateVisionJob({
         normalizedCandidates.filter((candidate) => candidate.isSufficient),
         preset.key,
       )[0];
-      if (sufficient && !exhaustProviderChain) {
-        return {
+      const shouldStopForCurrentCandidate =
+        sufficient &&
+        (!exhaustProviderChain || isHighConfidenceEarlyExitCandidate(sufficient, preset.key));
+      if (shouldStopForCurrentCandidate) {
+        return buildResponse({
           providerUsed: providerKey,
-          providerAttemptCount: attempts.length,
-          fallbackApplied: chain.indexOf(providerKey) > 0,
           bestVariant: sufficient,
-          allCandidates: rankCandidates(allCandidates, preset.key),
-          orchestration: { chain, attempts },
-          userPlan: effectiveUserPlan,
-        };
+          stoppedEarlyReason:
+            exhaustProviderChain && preset?.key === 'remove_furniture'
+              ? 'high_confidence_candidate'
+              : 'sufficient_candidate',
+        });
+      }
+
+      const elapsedAfterProvider = Math.max(0, Number(nowFn()) - startedAt);
+      if (elapsedAfterProvider >= maxExecutionTimeMs && allCandidates.length) {
+        const rankedCandidates = rankCandidates(allCandidates, preset.key);
+        const providerUsed = rankedCandidates[0]?.providerKey || null;
+        return buildResponse({
+          providerUsed,
+          bestVariant: rankedCandidates[0] || null,
+          stoppedEarlyReason: 'time_budget',
+          timeBudgetReached: true,
+        });
       }
     } catch (error) {
       attempts.push({
         providerKey,
         candidateCount: 0,
         sufficientCount: 0,
+        elapsedMs: Math.max(0, Number(nowFn()) - startedAt),
         topOverallScore: 0,
         topObjectRemovalScore: 0,
         topRemainingFurnitureOverlapRatio: 0,
@@ -138,13 +190,8 @@ export async function orchestrateVisionJob({
 
   const rankedCandidates = rankCandidates(allCandidates, preset.key);
   const providerUsed = rankedCandidates[0]?.providerKey || null;
-  return {
+  return buildResponse({
     providerUsed,
-    providerAttemptCount: attempts.length,
-    fallbackApplied: providerUsed ? chain.indexOf(providerUsed) > 0 : false,
     bestVariant: rankedCandidates[0] || null,
-    allCandidates: rankedCandidates,
-    orchestration: { chain, attempts },
-    userPlan: effectiveUserPlan,
-  };
+  });
 }

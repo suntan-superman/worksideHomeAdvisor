@@ -144,6 +144,7 @@ const VISION_PRESET_GROUPS = [
     ],
   },
 ];
+const VISION_COMPLETION_SOUND_MIN_SECONDS = 15;
 
 function buildAddressQuery(property) {
   return [property?.addressLine1, property?.city, property?.state, property?.zip]
@@ -633,6 +634,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const visionGalleryRef = useRef(null);
   const workspaceBodyMainRef = useRef(null);
   const providerSuggestionsRef = useRef(null);
+  const visionCompletionAudioContextRef = useRef(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [property, setProperty] = useState(null);
   const [dashboard, setDashboard] = useState(null);
@@ -718,6 +720,86 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     const timer = window.setInterval(updateElapsedSeconds, 1000);
     return () => window.clearInterval(timer);
   }, [visionGenerationState]);
+
+  useEffect(
+    () => () => {
+      const audioContext = visionCompletionAudioContextRef.current;
+      if (audioContext && typeof audioContext.close === 'function') {
+        audioContext.close().catch(() => {});
+      }
+    },
+    [],
+  );
+
+  async function primeVisionCompletionAudio() {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextConstructor) {
+      return null;
+    }
+
+    let audioContext = visionCompletionAudioContextRef.current;
+    if (!audioContext || audioContext.state === 'closed') {
+      audioContext = new AudioContextConstructor();
+      visionCompletionAudioContextRef.current = audioContext;
+    }
+
+    if (audioContext.state === 'suspended') {
+      try {
+        await audioContext.resume();
+      } catch {
+        return audioContext;
+      }
+    }
+
+    return audioContext;
+  }
+
+  function getVisionGenerationDurationSeconds(startedAt) {
+    return Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  }
+
+  async function playVisionCompletionSound({ tone = 'success', elapsedSeconds = 0 } = {}) {
+    if (elapsedSeconds < VISION_COMPLETION_SOUND_MIN_SECONDS) {
+      return;
+    }
+
+    const audioContext = await primeVisionCompletionAudio();
+    if (!audioContext || audioContext.state !== 'running') {
+      return;
+    }
+
+    const notePattern =
+      tone === 'error'
+        ? [
+            { frequency: 415.3, duration: 0.08, gain: 0.028, delay: 0 },
+            { frequency: 329.6, duration: 0.12, gain: 0.026, delay: 0.13 },
+          ]
+        : [
+            { frequency: 659.3, duration: 0.08, gain: 0.03, delay: 0 },
+            { frequency: 783.99, duration: 0.12, gain: 0.032, delay: 0.13 },
+          ];
+
+    for (const note of notePattern) {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      const startTime = audioContext.currentTime + note.delay;
+      const endTime = startTime + note.duration;
+
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(note.frequency, startTime);
+      gainNode.gain.setValueAtTime(0.0001, startTime);
+      gainNode.gain.exponentialRampToValueAtTime(note.gain, startTime + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, endTime);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.start(startTime);
+      oscillator.stop(endTime + 0.02);
+    }
+  }
 
   const liveDashboardQuery = useQuery({
     queryKey: ['property-dashboard', propertyId],
@@ -1955,6 +2037,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
     setActiveTab('vision');
     setActiveVisionPresetKey(presetKey);
+    const generationStartedAt = Date.now();
     const isDeclutterPreset = String(presetKey).includes('declutter');
     const isFurnitureRemovalPreset = presetKey === 'remove_furniture';
     setStatus(
@@ -1980,9 +2063,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         : isDeclutterPreset
         ? 'Cleaning the photo up for listing use and reviewing the strongest result.'
         : 'Generating a stronger listing-ready version of the selected photo.',
-      startedAt: Date.now(),
+      startedAt: generationStartedAt,
     });
     setToast(null);
+    await primeVisionCompletionAudio();
     try {
       const response = await createImageEnhancementJob(selectedMediaAsset.id, {
         presetKey,
@@ -2006,8 +2090,16 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       requestAnimationFrame(() => {
         visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
+      void playVisionCompletionSound({
+        tone: 'success',
+        elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
+      });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Variant generation failed', message: requestError.message });
+      void playVisionCompletionSound({
+        tone: 'error',
+        elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
+      });
     } finally {
       setVisionGenerationState(null);
       setStatus('');
@@ -2028,14 +2120,16 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
 
     setActiveTab('vision');
+    const generationStartedAt = Date.now();
     setStatus('Generating custom enhancement preview...');
     setVisionGenerationState({
       kind: 'freeform',
       title: 'Custom enhancement preview',
-      detail: 'Applying your natural-language request and reviewing the generated result.',
-      startedAt: Date.now(),
+      detail: 'Applying your natural-language request, reviewing the generated result, and preparing a completion chime for longer runs.',
+      startedAt: generationStartedAt,
     });
     setToast(null);
+    await primeVisionCompletionAudio();
     try {
       const response = await createImageEnhancementJob(selectedMediaAsset.id, {
         mode: 'freeform',
@@ -2066,8 +2160,16 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       requestAnimationFrame(() => {
         visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
+      void playVisionCompletionSound({
+        tone: 'success',
+        elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
+      });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Custom enhancement failed', message: requestError.message });
+      void playVisionCompletionSound({
+        tone: 'error',
+        elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
+      });
     } finally {
       setVisionGenerationState(null);
       setStatus('');
@@ -3042,7 +3144,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   </div>
                   <p>{visionGenerationState.detail}</p>
                   <p className="workspace-control-note">
-                    Timing varies by preset and whether the job needs a stronger AI fallback, so this indicator tracks elapsed time rather than pretending to know an exact percent complete.
+                    Timing varies by preset and whether the job needs a stronger AI fallback, so this indicator tracks elapsed time rather than pretending to know an exact percent complete. A short chime will play when longer runs finish.
                   </p>
                 </div>
               ) : null}
