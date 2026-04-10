@@ -986,6 +986,11 @@ select {
   background: rgba(255, 250, 243, 0.96);
 }
 
+.toast-warning {
+  background: rgba(255, 247, 235, 0.98);
+  border-color: rgba(173, 122, 55, 0.22);
+}
+
 .toast-error {
   background: rgba(255, 243, 239, 0.98);
   border-color: rgba(173, 74, 55, 0.22);
@@ -1024,6 +1029,10 @@ select {
 .toast-success .toast-copy strong,
 .toast-info .toast-copy strong {
   color: var(--ink);
+}
+
+.toast-warning .toast-copy strong {
+  color: #8b5a22;
 }
 
 .toast-dismiss {

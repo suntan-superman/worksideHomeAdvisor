@@ -25,6 +25,8 @@ export function Toast({
         ? autoDismissMs
         : tone === 'error'
         ? 0
+        : tone === 'warning'
+        ? 0
         : tone === 'success'
         ? 6500
         : 5000;
@@ -47,8 +49,8 @@ export function Toast({
   return (
     <div
       className={`toast toast-${tone}`}
-      role={tone === 'error' ? 'alert' : 'status'}
-      aria-live={tone === 'error' ? 'assertive' : 'polite'}
+      role={tone === 'error' || tone === 'warning' ? 'alert' : 'status'}
+      aria-live={tone === 'error' || tone === 'warning' ? 'assertive' : 'polite'}
     >
       <div className="toast-copy">
         {title ? <strong>{title}</strong> : null}

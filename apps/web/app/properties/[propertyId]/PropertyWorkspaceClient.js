@@ -1185,12 +1185,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             }
 
             setToast({
-              tone: 'success',
-              title: visionRecoveryState.successTitle,
-              message:
-                settledJob?.warning ||
-                visionRecoveryState.successMessage,
-              autoDismissMs: 9000,
+              tone: settledJob?.warning ? 'warning' : 'success',
+              title: settledJob?.warning
+                ? 'Preview ready with warning'
+                : visionRecoveryState.successTitle,
+              message: settledJob?.warning || visionRecoveryState.successMessage,
+              autoDismissMs: settledJob?.warning ? 0 : 9000,
             });
             requestAnimationFrame(() => {
               visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2723,6 +2723,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setActiveVisionPresetKey(getDefaultVisionPresetKeyForStage(resolvedStageKey));
     setShowVisionPhotoPicker(false);
     setShowVisionHistory(false);
+    setPendingWorkspaceScrollTarget('vision-top');
   }
 
   function renderCollapsibleSection({
@@ -3000,18 +3001,20 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id), refreshWorkflow()]);
       setSelectedVariantId(response.variant?.id || '');
       setToast({
-        tone: 'success',
-        title:
-          isFurnitureRemovalPreset
-            ? 'Furniture removal preview ready'
-            : isCleanupPreset
-            ? 'Cleanup pass ready'
-            : isDeclutterPreset
-            ? 'Declutter variant ready'
-            : 'Enhanced photo ready',
+        tone: response.job?.warning ? 'warning' : 'success',
+        title: response.job?.warning
+          ? 'Preview ready with warning'
+          : isFurnitureRemovalPreset
+          ? 'Furniture removal preview ready'
+          : isCleanupPreset
+          ? 'Cleanup pass ready'
+          : isDeclutterPreset
+          ? 'Declutter variant ready'
+          : 'Enhanced photo ready',
         message:
           response.job?.warning ||
           'The new image is now shown in the Vision compare area and the Generated options panel.',
+        autoDismissMs: response.job?.warning ? 0 : undefined,
       });
       requestAnimationFrame(() => {
         visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -3034,12 +3037,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             if (recoveredJob.status === 'completed' || recoveredJob.status === 'failed') {
               const settledJob = await reconcileRecoveredVisionJob(recoveredJob, selectedMediaAsset.id);
               setToast({
-                tone: 'success',
-                title: 'Vision job recovered',
+                tone: settledJob?.warning ? 'warning' : 'success',
+                title: settledJob?.warning
+                  ? 'Recovered with warning'
+                  : 'Vision job recovered',
                 message:
                   settledJob?.warning ||
                   'The browser lost the original request, but the vision job finished and the generated variant has been recovered.',
-                autoDismissMs: 9000,
+                autoDismissMs: settledJob?.warning ? 0 : 9000,
               });
               void playVisionCompletionSound({
                 tone: 'success',
@@ -3146,11 +3151,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       );
       setSelectedVariantId(response.variant?.id || '');
       setToast({
-        tone: 'success',
-        title: 'Custom enhancement ready',
+        tone: response.job?.warning ? 'warning' : 'success',
+        title: response.job?.warning ? 'Custom enhancement ready with warning' : 'Custom enhancement ready',
         message:
           response.job?.warning ||
           'Your freeform enhancement request was processed and the generated result is now selected in the Vision compare area.',
+        autoDismissMs: response.job?.warning ? 0 : undefined,
       });
       requestAnimationFrame(() => {
         visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -3179,12 +3185,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   'combined_listing_refresh',
               );
               setToast({
-                tone: 'success',
-                title: 'Custom enhancement recovered',
+                tone: settledJob?.warning ? 'warning' : 'success',
+                title: settledJob?.warning
+                  ? 'Custom enhancement recovered with warning'
+                  : 'Custom enhancement recovered',
                 message:
                   settledJob?.warning ||
                   'The browser lost the original request, but the custom enhancement finished and the generated variant has been recovered.',
-                autoDismissMs: 9000,
+                autoDismissMs: settledJob?.warning ? 0 : 9000,
               });
               void playVisionCompletionSound({
                 tone: 'success',

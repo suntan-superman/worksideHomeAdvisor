@@ -235,13 +235,15 @@ export function isCandidateSufficient(candidate, presetKey) {
       return (
         Number(candidate.focusRegionChangeRatio || 0) >= 0.12 &&
         Number(candidate.maskedChangeRatio || 0) >= 0.14 &&
-        Number(candidate.maskedLuminanceDelta || 0) <= -0.035
+        Number(candidate.maskedLuminanceDelta || 0) <= -0.035 &&
+        Number(candidate.furnitureCoverageIncreaseRatio || 0) <= 0.018
       );
     }
 
     return (
       Number(candidate.focusRegionChangeRatio || 0) >= 0.1 &&
-      Number(candidate.maskedChangeRatio || 0) >= 0.12
+      Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
+      Number(candidate.furnitureCoverageIncreaseRatio || 0) <= 0.02
     );
   }
 
@@ -303,6 +305,15 @@ export function rankCandidates(candidates = [], presetKey) {
     }
 
     if (String(presetKey || '').startsWith('floor_')) {
+      if (
+        Number(left?.furnitureCoverageIncreaseRatio || 0) !==
+        Number(right?.furnitureCoverageIncreaseRatio || 0)
+      ) {
+        return (
+          Number(left?.furnitureCoverageIncreaseRatio || 0) -
+          Number(right?.furnitureCoverageIncreaseRatio || 0)
+        );
+      }
       if (presetKey === 'floor_dark_hardwood') {
         if (
           Number(left?.maskedLuminanceDelta || 0) !== Number(right?.maskedLuminanceDelta || 0)

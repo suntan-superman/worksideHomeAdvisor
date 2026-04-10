@@ -820,6 +820,16 @@ function sortVisionVariants(variants = []) {
       leftPresetKey === 'floor_dark_hardwood' &&
       rightPresetKey === 'floor_dark_hardwood'
     ) {
+      const leftFurnitureCoverageIncrease = Number(
+        left?.metadata?.review?.furnitureCoverageIncreaseRatio || 0,
+      );
+      const rightFurnitureCoverageIncrease = Number(
+        right?.metadata?.review?.furnitureCoverageIncreaseRatio || 0,
+      );
+      if (leftFurnitureCoverageIncrease !== rightFurnitureCoverageIncrease) {
+        return leftFurnitureCoverageIncrease - rightFurnitureCoverageIncrease;
+      }
+
       const leftMaskedLuminanceDelta = Number(
         left?.metadata?.review?.maskedLuminanceDelta || 0,
       );
@@ -835,6 +845,16 @@ function sortVisionVariants(variants = []) {
       String(leftPresetKey || '').startsWith('floor_') &&
       String(rightPresetKey || '').startsWith('floor_')
     ) {
+      const leftFurnitureCoverageIncrease = Number(
+        left?.metadata?.review?.furnitureCoverageIncreaseRatio || 0,
+      );
+      const rightFurnitureCoverageIncrease = Number(
+        right?.metadata?.review?.furnitureCoverageIncreaseRatio || 0,
+      );
+      if (leftFurnitureCoverageIncrease !== rightFurnitureCoverageIncrease) {
+        return leftFurnitureCoverageIncrease - rightFurnitureCoverageIncrease;
+      }
+
       const leftMaskedChange = Number(left?.metadata?.review?.maskedChangeRatio || 0);
       const rightMaskedChange = Number(right?.metadata?.review?.maskedChangeRatio || 0);
       if (leftMaskedChange !== rightMaskedChange) {
@@ -2530,29 +2550,48 @@ async function buildReviewedReplicateCandidates({
   let sourceFurnitureEdgeDensity = null;
   let sourceFurnitureComponentMaskBuffer = null;
   let sourceFurnitureComponents = [];
-  if (preset.key === 'remove_furniture') {
+  let sourceFurnitureCoverageRatio = 0;
+  if (preset.key === 'remove_furniture' || preset.key.startsWith('floor_')) {
     const adaptiveFurnitureMask = await buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer);
     const adaptiveCoverageRatio = await calculateMaskCoverageRatio(
       adaptiveFurnitureMask.adaptiveMaskBuffer,
     );
-    removeFurnitureEvaluationMaskBuffer =
-      adaptiveCoverageRatio >= 0.03 ? adaptiveFurnitureMask.adaptiveMaskBuffer : maskBuffer;
-    sourceFurnitureEdgeDensity = await calculateMaskedEdgeDensity(
-      sourceBuffer,
-      removeFurnitureEvaluationMaskBuffer,
-    );
-    const componentMask = await buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer, {
+    sourceFurnitureCoverageRatio = adaptiveCoverageRatio;
+    if (!preset.key.startsWith('floor_')) {
+      removeFurnitureEvaluationMaskBuffer =
+        adaptiveCoverageRatio >= 0.03 ? adaptiveFurnitureMask.adaptiveMaskBuffer : maskBuffer;
+      sourceFurnitureEdgeDensity = await calculateMaskedEdgeDensity(
+        sourceBuffer,
+        removeFurnitureEvaluationMaskBuffer,
+      );
+      const componentMask = await buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer, {
+        bridgeNearbyComponents: false,
+      });
+      sourceFurnitureComponentMaskBuffer = componentMask.adaptiveMaskBuffer;
+      const sourceComponentBinary = await readBinaryMask(sourceFurnitureComponentMaskBuffer, 40);
+      sourceFurnitureComponents = extractBinaryMaskComponents(
+        sourceComponentBinary.binary,
+        sourceComponentBinary.width,
+        sourceComponentBinary.height,
+        Math.max(400, Math.round(sourceComponentBinary.width * sourceComponentBinary.height * 0.004)),
+      );
+    }
+  }
+  const computeFurnitureCoverageIncreaseRatio = async (candidateBuffer) => {
+    if (!preset.key.startsWith('floor_')) {
+      return 0;
+    }
+
+    const variantAdaptiveFurnitureMask = await buildAdaptiveFurnitureMaskAtSourceSize(candidateBuffer, {
       bridgeNearbyComponents: false,
     });
-    sourceFurnitureComponentMaskBuffer = componentMask.adaptiveMaskBuffer;
-    const sourceComponentBinary = await readBinaryMask(sourceFurnitureComponentMaskBuffer, 40);
-    sourceFurnitureComponents = extractBinaryMaskComponents(
-      sourceComponentBinary.binary,
-      sourceComponentBinary.width,
-      sourceComponentBinary.height,
-      Math.max(400, Math.round(sourceComponentBinary.width * sourceComponentBinary.height * 0.004)),
+    const variantFurnitureCoverageRatio = await calculateMaskCoverageRatio(
+      variantAdaptiveFurnitureMask.adaptiveMaskBuffer,
     );
-  }
+    return Number(
+      Math.max(0, variantFurnitureCoverageRatio - sourceFurnitureCoverageRatio).toFixed(4),
+    );
+  };
 
   const settings = getReplicateSettings(providerKey, preset);
   const providerPrompt =
@@ -2649,6 +2688,7 @@ async function buildReviewedReplicateCandidates({
     let newFurnitureAdditionRatio = 0;
     let clearedMajorComponentCount = 0;
     let totalMajorComponentCount = 0;
+    let furnitureCoverageIncreaseRatio = 0;
     if (preset.key === 'remove_furniture') {
       ({
         maskedChangeRatio,
@@ -2669,6 +2709,7 @@ async function buildReviewedReplicateCandidates({
         buffer,
         maskBuffer,
       );
+      furnitureCoverageIncreaseRatio = await computeFurnitureCoverageIncreaseRatio(buffer);
     }
 
     if (
@@ -2876,6 +2917,15 @@ async function buildReviewedReplicateCandidates({
           overallScore = Math.min(100, overallScore + 10);
         }
       }
+      if (furnitureCoverageIncreaseRatio >= 0.025) {
+        overallScore = Math.max(0, overallScore - 36);
+        qualityWarning =
+          'Low-confidence preview: the flooring update appears to introduce furniture or staging that was not in the source room.';
+        rejectionCategory = 'furniture_restaging';
+        shouldHideByDefault = true;
+      } else if (furnitureCoverageIncreaseRatio >= 0.012) {
+        overallScore = Math.max(0, overallScore - 16);
+      }
       if (topHalfChangeRatio > 0.14) {
         overallScore = Math.max(0, overallScore - 18);
         qualityWarning =
@@ -2934,6 +2984,7 @@ async function buildReviewedReplicateCandidates({
       newFurnitureAdditionRatio,
       clearedMajorComponentCount,
       totalMajorComponentCount,
+      furnitureCoverageIncreaseRatio,
       objectRemovalScore,
       shouldHideByDefault,
       rejectionCategory,
@@ -2962,29 +3013,48 @@ async function buildReviewedOpenAiCandidates({
   let sourceFurnitureEdgeDensity = null;
   let sourceFurnitureComponentMaskBuffer = null;
   let sourceFurnitureComponents = [];
-  if (preset.key === 'remove_furniture') {
+  let sourceFurnitureCoverageRatio = 0;
+  if (preset.key === 'remove_furniture' || preset.key.startsWith('floor_')) {
     const adaptiveFurnitureMask = await buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer);
     const adaptiveCoverageRatio = await calculateMaskCoverageRatio(
       adaptiveFurnitureMask.adaptiveMaskBuffer,
     );
-    removeFurnitureEvaluationMaskBuffer =
-      adaptiveCoverageRatio >= 0.03 ? adaptiveFurnitureMask.adaptiveMaskBuffer : maskBuffer;
-    sourceFurnitureEdgeDensity = await calculateMaskedEdgeDensity(
-      sourceBuffer,
-      removeFurnitureEvaluationMaskBuffer,
-    );
-    const componentMask = await buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer, {
+    sourceFurnitureCoverageRatio = adaptiveCoverageRatio;
+    if (!preset.key.startsWith('floor_')) {
+      removeFurnitureEvaluationMaskBuffer =
+        adaptiveCoverageRatio >= 0.03 ? adaptiveFurnitureMask.adaptiveMaskBuffer : maskBuffer;
+      sourceFurnitureEdgeDensity = await calculateMaskedEdgeDensity(
+        sourceBuffer,
+        removeFurnitureEvaluationMaskBuffer,
+      );
+      const componentMask = await buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer, {
+        bridgeNearbyComponents: false,
+      });
+      sourceFurnitureComponentMaskBuffer = componentMask.adaptiveMaskBuffer;
+      const sourceComponentBinary = await readBinaryMask(sourceFurnitureComponentMaskBuffer, 40);
+      sourceFurnitureComponents = extractBinaryMaskComponents(
+        sourceComponentBinary.binary,
+        sourceComponentBinary.width,
+        sourceComponentBinary.height,
+        Math.max(400, Math.round(sourceComponentBinary.width * sourceComponentBinary.height * 0.004)),
+      );
+    }
+  }
+  const computeFurnitureCoverageIncreaseRatio = async (candidateBuffer) => {
+    if (!preset.key.startsWith('floor_')) {
+      return 0;
+    }
+
+    const variantAdaptiveFurnitureMask = await buildAdaptiveFurnitureMaskAtSourceSize(candidateBuffer, {
       bridgeNearbyComponents: false,
     });
-    sourceFurnitureComponentMaskBuffer = componentMask.adaptiveMaskBuffer;
-    const sourceComponentBinary = await readBinaryMask(sourceFurnitureComponentMaskBuffer, 40);
-    sourceFurnitureComponents = extractBinaryMaskComponents(
-      sourceComponentBinary.binary,
-      sourceComponentBinary.width,
-      sourceComponentBinary.height,
-      Math.max(400, Math.round(sourceComponentBinary.width * sourceComponentBinary.height * 0.004)),
+    const variantFurnitureCoverageRatio = await calculateMaskCoverageRatio(
+      variantAdaptiveFurnitureMask.adaptiveMaskBuffer,
     );
-  }
+    return Number(
+      Math.max(0, variantFurnitureCoverageRatio - sourceFurnitureCoverageRatio).toFixed(4),
+    );
+  };
 
   const providerPrompt = `${fullPrompt} Produce the strongest usable edit while preserving the true room structure. Prefer subtraction over restaging.`;
   const providerOutputs = await runOpenAIImageEdit({
@@ -3068,6 +3138,7 @@ async function buildReviewedOpenAiCandidates({
     let newFurnitureAdditionRatio = 0;
     let clearedMajorComponentCount = 0;
     let totalMajorComponentCount = 0;
+    let furnitureCoverageIncreaseRatio = 0;
     if (preset.key === 'remove_furniture') {
       ({
         maskedChangeRatio,
@@ -3088,6 +3159,7 @@ async function buildReviewedOpenAiCandidates({
         buffer,
         maskBuffer,
       );
+      furnitureCoverageIncreaseRatio = await computeFurnitureCoverageIncreaseRatio(buffer);
     }
 
     const review = await reviewVisionVariant({
@@ -3230,6 +3302,15 @@ async function buildReviewedOpenAiCandidates({
           overallScore = Math.min(100, overallScore + 10);
         }
       }
+      if (furnitureCoverageIncreaseRatio >= 0.025) {
+        overallScore = Math.max(0, overallScore - 36);
+        qualityWarning =
+          'Low-confidence preview: the premium fallback appears to introduce furniture or staging that was not in the source room.';
+        rejectionCategory = 'furniture_restaging';
+        shouldHideByDefault = true;
+      } else if (furnitureCoverageIncreaseRatio >= 0.012) {
+        overallScore = Math.max(0, overallScore - 16);
+      }
       if (topHalfChangeRatio > 0.16) {
         overallScore = Math.max(0, overallScore - 18);
         qualityWarning =
@@ -3285,6 +3366,7 @@ async function buildReviewedOpenAiCandidates({
       newFurnitureAdditionRatio,
       clearedMajorComponentCount,
       totalMajorComponentCount,
+      furnitureCoverageIncreaseRatio,
       objectRemovalScore,
       shouldHideByDefault,
       rejectionCategory,
@@ -3384,6 +3466,7 @@ async function persistOrchestratedVisionCandidates({
           newFurnitureAdditionRatio: candidate.newFurnitureAdditionRatio,
           clearedMajorComponentCount: candidate.clearedMajorComponentCount,
           totalMajorComponentCount: candidate.totalMajorComponentCount,
+          furnitureCoverageIncreaseRatio: candidate.furnitureCoverageIncreaseRatio,
           objectRemovalScore: candidate.objectRemovalScore,
           shouldHideByDefault: Boolean(candidate.shouldHideByDefault),
           rejectionCategory: candidate.rejectionCategory || '',
