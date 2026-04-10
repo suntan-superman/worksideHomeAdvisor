@@ -17,6 +17,7 @@ import {
 import { VISION_PLAN_VALUES } from './vision-orchestrator.helpers.js';
 import {
   createMediaAssetAndAnalysis,
+  deleteMediaVariantDraft,
   deleteMediaAsset,
   getMediaAssetById,
   listMediaAssets,
@@ -383,6 +384,21 @@ export async function mediaRoutes(fastify) {
       return reply.send({ variant });
     } catch (error) {
       const statusCode = error.message === 'Media variant not found.' ? 404 : 400;
+      return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
+  fastify.delete('/media/assets/:assetId/variants/:variantId', async (request, reply) => {
+    try {
+      const { assetId } = assetParamsSchema.parse(request.params);
+      const { variantId } = variantParamsSchema.parse(request.params);
+      const result = await deleteMediaVariantDraft(assetId, variantId);
+      return reply.send(result);
+    } catch (error) {
+      const statusCode =
+        error.message === 'Media asset not found.' || error.message === 'Media variant not found.'
+          ? 404
+          : 400;
       return reply.code(statusCode).send({ message: error.message });
     }
   });

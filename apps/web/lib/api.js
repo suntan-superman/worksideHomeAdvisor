@@ -450,6 +450,12 @@ export function pruneVisionDrafts(assetId, keepVariantId) {
   });
 }
 
+export function deleteMediaVariant(assetId, variantId) {
+  return request(`/api/v1/media/assets/${assetId}/variants/${variantId}`, {
+    method: 'DELETE',
+  });
+}
+
 export function saveVariantToPhotos(variantId, payload) {
   return request(`/api/v1/media/variants/${variantId}/save-to-photos`, {
     method: 'POST',

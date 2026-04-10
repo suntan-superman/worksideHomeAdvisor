@@ -19,6 +19,7 @@ import {
   createProviderReference,
   deleteProperty as deletePropertyRequest,
   deleteMediaAsset as deleteMediaAssetRequest,
+  deleteMediaVariant as deleteMediaVariantRequest,
   deleteProviderReference,
   downloadFile,
   generateFlyer,
@@ -49,7 +50,6 @@ import {
   saveProvider,
   selectMediaVariant,
   setPropertyPricingDecision,
-  setMediaVariantUsage,
   updateChecklistItem,
   updateMediaAsset,
 } from '../../../lib/api';
@@ -1510,11 +1510,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     : selectedGeneratedAssetAsResult
     ? getMediaAssetSummary(selectedGeneratedAssetAsResult)
     : 'Generate the next stage action to compare the current source with a new result.';
-  const topRankedVariant = useMemo(
-    () => mediaVariants.find((variant) => !variant?.metadata?.review?.shouldHideByDefault) || mediaVariants[0] || null,
-    [mediaVariants],
-  );
-
   const selectedVariantFreeformHighlights = useMemo(
     () => formatFreeformPlanHighlights(selectedVariant?.metadata?.normalizedPlan),
     [selectedVariant?.metadata?.normalizedPlan],
@@ -3180,6 +3175,62 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
   }
 
+  async function handleDeleteVisionVariant(variant) {
+    if (blockArchivedMutation()) {
+      return;
+    }
+    if (!selectedMediaAsset || !variant?.id) {
+      return;
+    }
+
+    const savedPhotoForVariant = mediaAssets.find(
+      (asset) => String(asset?.sourceVariantId || '') === String(variant.id),
+    );
+    const confirmationMessage = savedPhotoForVariant
+      ? `Delete "${variant.label || 'this attempt'}" permanently? The saved Photos copy will remain, but this Vision attempt will be removed from workspace history.`
+      : `Delete "${variant.label || 'this attempt'}" permanently from Vision history?`;
+
+    if (typeof window !== 'undefined' && !window.confirm(confirmationMessage)) {
+      return;
+    }
+
+    setStatus('Deleting vision attempt...');
+    setToast(null);
+    try {
+      await deleteMediaVariantRequest(selectedMediaAsset.id, variant.id);
+      const nextVariants = await refreshMediaVariants(selectedMediaAsset.id);
+      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshWorkflow()]);
+
+      if (workflowSourceVariantId === variant.id) {
+        const replacementSourceVariant = nextVariants.find(
+          (candidate) =>
+            getVisionWorkflowStageKeyForVariant(candidate) === activeVisionWorkflowStageKey,
+        );
+        setWorkflowSourceVariantId(replacementSourceVariant?.id || '');
+      }
+
+      if (!nextVariants.length) {
+        setShowVisionHistory(false);
+        setShowMoreVisionVariants(false);
+      }
+
+      setToast({
+        tone: 'success',
+        title: 'Vision attempt deleted',
+        message: `"${variant.label || 'Selected attempt'}" was removed permanently from this photo's Vision history.`,
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not delete attempt',
+        message: requestError.message,
+        autoDismissMs: 0,
+      });
+    } finally {
+      setStatus('');
+    }
+  }
+
   async function handleExportSocialPack() {
     if (blockArchivedMutation()) {
       return;
@@ -3273,45 +3324,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setToast({ tone: 'success', title: 'Preferred variant selected', message: 'Flyer and report generation will now prefer this image variant.' });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Could not select variant', message: requestError.message });
-    } finally {
-      setStatus('');
-    }
-  }
-
-  async function handleSetVariantUsage(field, value) {
-    if (blockArchivedMutation()) {
-      return;
-    }
-    if (!selectedMediaAsset || !selectedVariant) {
-      return;
-    }
-    const label = field === 'brochure' ? 'brochure' : 'report';
-    setStatus(value ? `Adding variant to ${label} use...` : `Removing variant from ${label} use...`);
-    setToast(null);
-    try {
-      const response = await setMediaVariantUsage(
-        selectedMediaAsset.id,
-        selectedVariant.id,
-        field,
-        value,
-      );
-      setMediaVariants((current) => {
-        const nextVariants = current.map((variant) =>
-          variant.id === response.variant.id ? response.variant : variant,
-        );
-        queryClient.setQueryData(['property-media-variants', selectedMediaAsset.id], nextVariants);
-        return nextVariants;
-      });
-      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id), refreshWorkflow()]);
-      setToast({
-        tone: 'success',
-        title: 'Variant usage updated',
-        message: value
-          ? `This variant is now marked for ${label} use.`
-          : `This variant is no longer marked for ${label} use.`,
-      });
-    } catch (requestError) {
-      setToast({ tone: 'error', title: 'Could not update variant usage', message: requestError.message });
     } finally {
       setStatus('');
     }
@@ -4040,7 +4052,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 <div className="vision-result-actions">
                   <button
                     type="button"
-                    className="button-primary"
+                    className={savedAssetForSelectedVariant ? 'button-secondary' : 'button-primary'}
                     onClick={savedAssetForSelectedVariant ? () => {
                       setSelectedMediaAssetId(savedAssetForSelectedVariant.id);
                       setActiveTab('photos');
@@ -4048,14 +4060,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     disabled={Boolean(status) || isArchivedProperty}
                   >
                     {savedAssetForSelectedVariant ? 'View in Photos' : 'Save as Listing Photo'}
-                  </button>
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={() => handleGenerateVariant(activeVisionPresetKey)}
-                    disabled={Boolean(status) || isArchivedProperty || !activeVisionPreset}
-                  >
-                    Try another version
                   </button>
                   {activeVisionWorkflowStage.key !== 'final' ? (
                     <button
@@ -4067,18 +4071,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       {`Use this result for ${getVisionWorkflowStage(getNextVisionWorkflowStageKey(activeVisionWorkflowStageKey)).title.toLowerCase()}`}
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={() => {
-                      setShowVisionHistory(true);
-                      requestAnimationFrame(() => {
-                        visionGalleryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                      });
-                    }}
-                  >
-                    View previous attempts
-                  </button>
                 </div>
               </div>
             ) : selectedGeneratedAssetAsResult ? (
@@ -4263,15 +4255,27 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   <div className="workspace-action-column">
                     <button
                       type="button"
-                      className={visionGenerationState ? 'button-secondary button-busy' : 'button-secondary'}
+                      className={visionGenerationState ? 'button-primary button-busy' : 'button-primary'}
                       onClick={() => handleGenerateVariant(activeVisionPresetKey)}
                       disabled={Boolean(status) || isArchivedProperty || !activeVisionPreset}
                     >
                       {visionGenerationState
                         ? `Generating... ${visionGenerationElapsedSeconds}s`
-                        : selectedVariant
-                        ? 'Try another version'
                         : `Generate ${activeVisionPreset?.displayName || 'enhancement'}`}
+                    </button>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => {
+                        setShowVisionHistory((current) => !current);
+                        requestAnimationFrame(() => {
+                          visionGalleryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        });
+                      }}
+                    >
+                      {showVisionHistory
+                        ? 'Hide attempt history'
+                        : `View attempt history (${stageScopedVisionVariants.length})`}
                     </button>
                   </div>
                   {visionGenerationState ? (
@@ -4412,60 +4416,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
         <div ref={visionGalleryRef} className="content-card workspace-side-panel vision-history-drawer">
           <span className="label">Previous attempts</span>
-          <h2>Saved image versions</h2>
+          <h2>Attempt history</h2>
           {mediaVariants.length ? (
             <div className="workspace-tab-stack">
-              {selectedVariant ? (
-                <div className="property-media-variant-selected-card">
-                  <img
-                    src={selectedVariant.imageUrl}
-                    alt={selectedVariant.label || 'Selected generated variant'}
-                    className="property-media-variant-selected-image"
-                  />
-                  <div className="property-media-variant-selected-copy">
-                    <strong>{selectedVariant.label}</strong>
-                    <div className="tag-row">
-                      {selectedVariant.id === topRankedVariant?.id ? <span>Best candidate</span> : null}
-                      {getVariantReviewScore(selectedVariant) ? <span>{getVariantReviewScore(selectedVariant)}/100 reviewed</span> : null}
-                      {selectedVariant.metadata?.review?.shouldHideByDefault ? <span>Lower confidence</span> : null}
-                      {selectedVariant.metadata?.upgradeTier === 'premium' ? <span>Premium concept</span> : null}
-                      {selectedVariant.metadata?.workflowStageKey ? <span>{getVisionWorkflowStage(selectedVariant.metadata.workflowStageKey).title}</span> : null}
-                    </div>
-                    <span>
-                      {selectedVariant.isSelected
-                        ? 'Currently selected for flyer and report materials'
-                        : preferredVisionVariant
-                          ? `Current workflow draft. Marketing materials still point to ${preferredVisionVariant.label}.`
-                          : 'Current workflow draft. Select it for materials only if you want this version to become the preferred marketing output.'}
-                    </span>
-                    {selectedVariant.metadata?.sourceLabel ? (
-                      <span>Built from {selectedVariant.metadata.sourceLabel}</span>
-                    ) : null}
-                    <span>
-                      {selectedVariant.variantCategory === 'concept_preview'
-                        ? 'Concept preview'
-                        : 'Listing enhancement'}
-                    </span>
-                    {selectedVariant.metadata?.review?.summary ? (
-                      <span>{selectedVariant.metadata.review.summary}</span>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
               <p className="workspace-control-note">
-                Older generated versions are kept here for reference. The drawer stays collapsed by default so the workspace stays focused on the current result.
+                Vision attempts are stored here until you keep them, save them to Photos, delete them, or let temporary drafts expire automatically.
               </p>
-              <div className="workspace-action-column">
-                <button
-                  type="button"
-                  className="button-secondary"
-                  onClick={() => setShowVisionHistory((current) => !current)}
-                >
-                  {showVisionHistory
-                    ? 'Hide previous attempts'
-                    : `View processing history (${stageScopedVisionVariants.length} ${activeVisionWorkflowStage.title.toLowerCase()} attempt${stageScopedVisionVariants.length === 1 ? '' : 's'})`}
-                </button>
-                {stageScopedVisionVariants.length > visibleVisionVariants.length ? (
+              {showVisionHistory && stageScopedVisionVariants.length > visibleVisionVariants.length ? (
+                <div className="workspace-action-column">
                   <button
                     type="button"
                     className="button-secondary"
@@ -4477,63 +4435,76 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         ? `Show more attempts (${hiddenVisionVariantCount} lower-confidence hidden in this stage)`
                         : 'Show more attempts'}
                   </button>
-                ) : null}
-              </div>
+                </div>
+              ) : null}
               {showVisionHistory ? (
                 <>
-                  <div className="property-media-variant-list">
-                    {visibleVisionVariants.map((variant) => (
-                      <button
-                        key={variant.id}
-                        type="button"
-                        className={variant.id === selectedVariant?.id ? 'property-media-variant-chip active' : 'property-media-variant-chip'}
-                        onClick={() => {
-                          setSelectedVariantId(variant.id);
-                          setActiveVisionWorkflowStageKey(
-                            variant.metadata?.workflowStageKey ||
-                              getVisionWorkflowStageForPreset(
-                                variant.metadata?.presetKey || variant.variantType,
-                              ),
-                          );
-                        }}
-                      >
-                        {variant.label}
-                        {variant.isSelected ? ' · Preferred' : ''}
-                        {getVariantReviewScore(variant) ? ` · ${getVariantReviewScore(variant)}/100` : ''}
-                      </button>
-                    ))}
+                  <div className="vision-attempt-grid">
+                    {visibleVisionVariants.map((variant) => {
+                      const savedPhotoForVariant = mediaAssets.find(
+                        (asset) => String(asset?.sourceVariantId || '') === String(variant.id),
+                      );
+                      const isCurrentVariant = variant.id === selectedVariant?.id;
+                      return (
+                        <article
+                          key={variant.id}
+                          className={isCurrentVariant ? 'vision-attempt-card active' : 'vision-attempt-card'}
+                        >
+                          <img
+                            src={variant.imageUrl}
+                            alt={variant.label || 'Vision attempt'}
+                            className="vision-attempt-card-image"
+                          />
+                          <div className="vision-attempt-card-copy">
+                            <strong>{variant.label}</strong>
+                            <div className="tag-row compact">
+                              {isCurrentVariant ? <span>Viewing now</span> : null}
+                              {variant.isSelected ? <span>Kept</span> : null}
+                              {savedPhotoForVariant ? <span>Saved in Photos</span> : null}
+                              {getVariantReviewScore(variant) ? <span>{getVariantReviewScore(variant)}/100</span> : null}
+                              {variant.metadata?.review?.shouldHideByDefault ? <span>Lower confidence</span> : null}
+                            </div>
+                            <p className="workspace-control-note">
+                              {getVariantSummary(variant)}
+                            </p>
+                            <div className="vision-attempt-actions">
+                              <button
+                                type="button"
+                                className="button-secondary"
+                                onClick={() => {
+                                  setSelectedVariantId(variant.id);
+                                  setActiveVisionWorkflowStageKey(
+                                    variant.metadata?.workflowStageKey ||
+                                      getVisionWorkflowStageForPreset(
+                                        variant.metadata?.presetKey || variant.variantType,
+                                      ),
+                                  );
+                                }}
+                              >
+                                {isCurrentVariant ? 'Viewing' : 'View'}
+                              </button>
+                              <button
+                                type="button"
+                                className="button-secondary"
+                                onClick={() => handleSelectVariant(variant.id)}
+                                disabled={Boolean(status) || isArchivedProperty || variant.isSelected}
+                              >
+                                {variant.isSelected ? 'Kept' : 'Keep'}
+                              </button>
+                              <button
+                                type="button"
+                                className="button-secondary button-danger"
+                                onClick={() => handleDeleteVisionVariant(variant)}
+                                disabled={Boolean(status) || isArchivedProperty}
+                              >
+                                Delete permanently
+                              </button>
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
                   </div>
-                  {selectedVariant?.metadata?.warning ? <p>{selectedVariant.metadata.warning}</p> : null}
-                  {selectedVariant?.metadata?.review?.suggestedAction ? (
-                    <p className="workspace-control-note">
-                      <strong>Suggested action:</strong> {selectedVariant.metadata.review.suggestedAction}
-                    </p>
-                  ) : null}
-                  {selectedVariant ? (
-                    <div className="workspace-action-column">
-                      <button type="button" className="button-secondary" onClick={() => handleSelectVariant(selectedVariant.id)} disabled={Boolean(status) || isArchivedProperty || selectedVariant.isSelected}>
-                        {selectedVariant.isSelected ? 'Preferred variant selected' : 'Set as preferred variant'}
-                      </button>
-                      <div className="checklist-action-row">
-                        <button
-                          type="button"
-                          className={selectedVariant.useInBrochure ? 'checklist-action-chip active' : 'checklist-action-chip'}
-                          onClick={() => handleSetVariantUsage('brochure', !selectedVariant.useInBrochure)}
-                          disabled={Boolean(status) || isArchivedProperty}
-                        >
-                          {selectedVariant.useInBrochure ? 'In brochure' : 'Use in brochure'}
-                        </button>
-                        <button
-                          type="button"
-                          className={selectedVariant.useInReport ? 'checklist-action-chip active' : 'checklist-action-chip'}
-                          onClick={() => handleSetVariantUsage('report', !selectedVariant.useInReport)}
-                          disabled={Boolean(status) || isArchivedProperty}
-                        >
-                          {selectedVariant.useInReport ? 'In report' : 'Use in report'}
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
                 </>
               ) : null}
             </div>

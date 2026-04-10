@@ -524,3 +524,60 @@ export async function pruneMediaVariantDrafts(assetId, keepVariantId) {
     deletedCount: deletedVariantIds.length,
   };
 }
+
+export async function deleteMediaVariantDraft(assetId, variantId) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to delete media variants.');
+  }
+
+  const asset = await MediaAssetModel.findById(assetId);
+  if (!asset) {
+    throw new Error('Media asset not found.');
+  }
+
+  await assertPropertyEditableById(asset.propertyId);
+
+  const variant = await MediaVariantModel.findOne({ _id: variantId, mediaId: asset._id }).lean();
+  if (!variant) {
+    throw new Error('Media variant not found.');
+  }
+
+  await deleteStoredAssetIfUnreferenced({
+    storageProvider: variant.storageProvider,
+    storageKey: variant.storageKey,
+    excludeVariantId: variant._id,
+  });
+
+  await MediaVariantModel.deleteOne({ _id: variant._id });
+
+  const normalizedVariantId = variant._id?.toString?.() || String(variant._id);
+  const normalizedVisionJobId =
+    variant.visionJobId?.toString?.() || String(variant.visionJobId || '');
+
+  if (normalizedVisionJobId) {
+    const replacementVariant = await MediaVariantModel.findOne({ visionJobId: normalizedVisionJobId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!replacementVariant) {
+      await ImageJobModel.deleteOne({ _id: normalizedVisionJobId });
+    } else {
+      await ImageJobModel.updateOne(
+        { _id: normalizedVisionJobId, selectedVariantId: normalizedVariantId },
+        {
+          $set: {
+            selectedVariantId:
+              replacementVariant._id?.toString?.() || String(replacementVariant._id || ''),
+          },
+        },
+      );
+    }
+  }
+
+  return {
+    deleted: true,
+    assetId: asset._id?.toString?.() || String(asset._id),
+    variantId: normalizedVariantId,
+    propertyId: asset.propertyId?.toString?.() || String(asset.propertyId),
+  };
+}
