@@ -184,7 +184,8 @@ const VISION_WORKFLOW_STAGES = [
 const VISION_COMPLETION_SOUND_MIN_SECONDS = 15;
 const VISION_JOB_RECOVERY_LOOKBACK_MS = 90 * 1000;
 const VISION_JOB_RECOVERY_POLL_INTERVAL_MS = 4000;
-const VISION_JOB_RECOVERY_TIMEOUT_MS = 2 * 60 * 1000;
+const VISION_JOB_RECOVERY_TIMEOUT_MS = 45 * 1000;
+const VISION_JOB_BACKGROUND_RECOVERY_TIMEOUT_MS = 10 * 60 * 1000;
 const PHOTO_LIBRARY_CATEGORY_DEFINITIONS = [
   { key: 'kitchen', label: 'Kitchen' },
   { key: 'living_room', label: 'Living Room' },
@@ -1040,6 +1041,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [showVisionHistory, setShowVisionHistory] = useState(false);
   const [showVisionPhotoPicker, setShowVisionPhotoPicker] = useState(false);
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState(null);
+  const [pendingDeleteVisionVariant, setPendingDeleteVisionVariant] = useState(null);
+  const [pendingPruneVisionDrafts, setPendingPruneVisionDrafts] = useState(null);
   const [showExpandedMap, setShowExpandedMap] = useState(false);
   const [generationPrompt, setGenerationPrompt] = useState(null);
   const [pendingDeleteProperty, setPendingDeleteProperty] = useState(null);
@@ -1054,6 +1057,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [toast, setToast] = useState(null);
   const [visionGenerationState, setVisionGenerationState] = useState(null);
   const [visionGenerationElapsedSeconds, setVisionGenerationElapsedSeconds] = useState(0);
+  const [visionRecoveryState, setVisionRecoveryState] = useState(null);
   const viewerRole = useMemo(() => {
     const session = getStoredSession();
     return session?.user?.role === 'agent' ? 'agent' : 'seller';
@@ -1128,6 +1132,129 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }, [visionGenerationState]);
 
   useEffect(() => {
+    if (!visionRecoveryState?.jobId || !visionRecoveryState.assetId) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function pollRecoveredVisionJob() {
+      const deadline = Date.now() + VISION_JOB_BACKGROUND_RECOVERY_TIMEOUT_MS;
+
+      while (!cancelled && Date.now() < deadline) {
+        await waitForDuration(VISION_JOB_RECOVERY_POLL_INTERVAL_MS);
+        if (cancelled) {
+          return;
+        }
+
+        try {
+          const jobResponse = await getImageEnhancementJob(visionRecoveryState.jobId);
+          const latestJob = jobResponse.job;
+          if (!latestJob) {
+            continue;
+          }
+
+          if (latestJob.status !== 'completed' && latestJob.status !== 'failed') {
+            continue;
+          }
+
+          try {
+            const settledJob = await reconcileRecoveredVisionJob(
+              latestJob,
+              visionRecoveryState.assetId,
+            );
+
+            if (cancelled) {
+              return;
+            }
+
+            if (visionRecoveryState.mode === 'freeform') {
+              setShowMoreVisionVariants(true);
+              setActiveVisionPresetKey(
+                settledJob?.presetKey ||
+                  settledJob?.variants?.[0]?.metadata?.presetKey ||
+                  settledJob?.variants?.[0]?.variantType ||
+                  'combined_listing_refresh',
+              );
+            } else if (visionRecoveryState.presetKey) {
+              setActiveVisionPresetKey(visionRecoveryState.presetKey);
+              setActiveVisionWorkflowStageKey(
+                visionRecoveryState.workflowStageKey ||
+                  getVisionWorkflowStageForPreset(visionRecoveryState.presetKey),
+              );
+            }
+
+            setToast({
+              tone: 'success',
+              title: visionRecoveryState.successTitle,
+              message:
+                settledJob?.warning ||
+                visionRecoveryState.successMessage,
+              autoDismissMs: 9000,
+            });
+            requestAnimationFrame(() => {
+              visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+            void playVisionCompletionSound({
+              tone: 'success',
+              elapsedSeconds: getVisionGenerationDurationSeconds(visionRecoveryState.startedAt),
+            });
+          } catch (recoveryError) {
+            if (cancelled) {
+              return;
+            }
+            setToast({
+              tone: 'error',
+              title: visionRecoveryState.failureTitle,
+              message: `${recoveryError.message} No new variant was selected, so the compare view is still showing the last successful preview.`,
+              autoDismissMs: 0,
+            });
+            void playVisionCompletionSound({
+              tone: 'error',
+              elapsedSeconds: getVisionGenerationDurationSeconds(visionRecoveryState.startedAt),
+            });
+          } finally {
+            if (!cancelled) {
+              setVisionRecoveryState(null);
+              setVisionGenerationState(null);
+              setStatus('');
+            }
+          }
+
+          return;
+        } catch (pollError) {
+          if (cancelled) {
+            return;
+          }
+        }
+      }
+
+      if (!cancelled) {
+        setToast({
+          tone: 'error',
+          title: visionRecoveryState.failureTitle,
+          message:
+            'The browser request disconnected and the vision job did not finish within the recovery window. No new variant was selected, so the compare view is still showing the last successful preview.',
+          autoDismissMs: 0,
+        });
+        void playVisionCompletionSound({
+          tone: 'error',
+          elapsedSeconds: getVisionGenerationDurationSeconds(visionRecoveryState.startedAt),
+        });
+        setVisionRecoveryState(null);
+        setVisionGenerationState(null);
+        setStatus('');
+      }
+    }
+
+    void pollRecoveredVisionJob();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [visionRecoveryState]);
+
+  useEffect(() => {
     if (!selectedMediaAssetId) {
       lastVisionAssetResetRef.current = '';
       setMediaVariants([]);
@@ -1148,6 +1275,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setShowVisionHistory(false);
     setShowVisionPhotoPicker(false);
     setShowMoreVisionVariants(false);
+    setVisionRecoveryState(null);
+    setVisionGenerationState(null);
   }, [mediaAssets, selectedMediaAssetId]);
 
   useEffect(() => {
@@ -1324,6 +1453,51 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       oscillator.start(startTime);
       oscillator.stop(endTime + 0.02);
     }
+  }
+
+  function beginVisionRecovery({
+    job,
+    assetId,
+    mode = 'preset',
+    presetKey = '',
+    workflowStageKey = '',
+    startedAt = 0,
+    successTitle = 'Vision job recovered',
+    successMessage = 'The browser lost the original request, but the vision job finished and the generated variant has been recovered.',
+    failureTitle = 'Variant generation failed',
+  }) {
+    if (!job?.id || !assetId) {
+      return;
+    }
+
+    setVisionRecoveryState({
+      jobId: job.id,
+      assetId,
+      mode,
+      presetKey,
+      workflowStageKey,
+      startedAt,
+      successTitle,
+      successMessage,
+      failureTitle,
+    });
+    setStatus('Recovering vision job...');
+    setVisionGenerationState((current) =>
+      current
+        ? {
+            ...current,
+            detail:
+              'The browser connection dropped, but the server job is still running. We are checking for the finished result now.',
+          }
+        : current,
+    );
+    setToast({
+      tone: 'info',
+      title: 'Recovering vision job',
+      message:
+        'The browser connection dropped, but the server job is still running. This workspace will update as soon as the result is ready.',
+      autoDismissMs: 9000,
+    });
   }
 
   const liveDashboardQuery = useQuery({
@@ -2775,9 +2949,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setActiveVisionWorkflowStageKey(stageKey);
     setActiveVisionPresetKey(presetKey);
     const generationStartedAt = Date.now();
+    let keepVisionGenerationState = false;
     const isDeclutterPreset = String(presetKey).includes('declutter');
     const isFurnitureRemovalPreset = presetKey === 'remove_furniture';
     const isCleanupPreset = presetKey === 'cleanup_empty_room';
+    setVisionRecoveryState(null);
     setStatus(
       isFurnitureRemovalPreset
         ? 'Generating furniture-removal preview...'
@@ -2855,19 +3031,36 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           });
 
           if (recoveredJob) {
-            const settledJob = await reconcileRecoveredVisionJob(recoveredJob, selectedMediaAsset.id);
-            setToast({
-              tone: 'success',
-              title: 'Vision job recovered',
-              message:
-                settledJob?.warning ||
+            if (recoveredJob.status === 'completed' || recoveredJob.status === 'failed') {
+              const settledJob = await reconcileRecoveredVisionJob(recoveredJob, selectedMediaAsset.id);
+              setToast({
+                tone: 'success',
+                title: 'Vision job recovered',
+                message:
+                  settledJob?.warning ||
+                  'The browser lost the original request, but the vision job finished and the generated variant has been recovered.',
+                autoDismissMs: 9000,
+              });
+              void playVisionCompletionSound({
+                tone: 'success',
+                elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
+              });
+              return;
+            }
+
+            beginVisionRecovery({
+              job: recoveredJob,
+              assetId: selectedMediaAsset.id,
+              mode: 'preset',
+              presetKey,
+              workflowStageKey: stageKey,
+              startedAt: generationStartedAt,
+              successTitle: 'Vision job recovered',
+              successMessage:
                 'The browser lost the original request, but the vision job finished and the generated variant has been recovered.',
-              autoDismissMs: 9000,
+              failureTitle: 'Variant generation failed',
             });
-            void playVisionCompletionSound({
-              tone: 'success',
-              elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
-            });
+            keepVisionGenerationState = true;
             return;
           }
         } catch (recoveryError) {
@@ -2896,8 +3089,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
       });
     } finally {
-      setVisionGenerationState(null);
-      setStatus('');
+      if (!keepVisionGenerationState) {
+        setVisionGenerationState(null);
+        setStatus('');
+      }
     }
   }
 
@@ -2917,6 +3112,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setActiveTab('vision');
     setActiveVisionWorkflowStageKey('style');
     const generationStartedAt = Date.now();
+    let keepVisionGenerationState = false;
+    setVisionRecoveryState(null);
     setStatus('Generating custom enhancement preview...');
     setVisionGenerationState({
       kind: 'freeform',
@@ -2972,26 +3169,41 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           });
 
           if (recoveredJob) {
-            const settledJob = await reconcileRecoveredVisionJob(recoveredJob, selectedMediaAsset.id);
-            setShowMoreVisionVariants(true);
-            setActiveVisionPresetKey(
-              settledJob?.presetKey ||
-                settledJob?.variants?.[0]?.metadata?.presetKey ||
-                settledJob?.variants?.[0]?.variantType ||
-                'combined_listing_refresh',
-            );
-            setToast({
-              tone: 'success',
-              title: 'Custom enhancement recovered',
-              message:
-                settledJob?.warning ||
+            if (recoveredJob.status === 'completed' || recoveredJob.status === 'failed') {
+              const settledJob = await reconcileRecoveredVisionJob(recoveredJob, selectedMediaAsset.id);
+              setShowMoreVisionVariants(true);
+              setActiveVisionPresetKey(
+                settledJob?.presetKey ||
+                  settledJob?.variants?.[0]?.metadata?.presetKey ||
+                  settledJob?.variants?.[0]?.variantType ||
+                  'combined_listing_refresh',
+              );
+              setToast({
+                tone: 'success',
+                title: 'Custom enhancement recovered',
+                message:
+                  settledJob?.warning ||
+                  'The browser lost the original request, but the custom enhancement finished and the generated variant has been recovered.',
+                autoDismissMs: 9000,
+              });
+              void playVisionCompletionSound({
+                tone: 'success',
+                elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
+              });
+              return;
+            }
+
+            beginVisionRecovery({
+              job: recoveredJob,
+              assetId: selectedMediaAsset.id,
+              mode: 'freeform',
+              startedAt: generationStartedAt,
+              successTitle: 'Custom enhancement recovered',
+              successMessage:
                 'The browser lost the original request, but the custom enhancement finished and the generated variant has been recovered.',
-              autoDismissMs: 9000,
+              failureTitle: 'Custom enhancement failed',
             });
-            void playVisionCompletionSound({
-              tone: 'success',
-              elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
-            });
+            keepVisionGenerationState = true;
             return;
           }
         } catch (recoveryError) {
@@ -3020,8 +3232,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
       });
     } finally {
-      setVisionGenerationState(null);
-      setStatus('');
+      if (!keepVisionGenerationState) {
+        setVisionGenerationState(null);
+        setStatus('');
+      }
     }
   }
 
@@ -3134,25 +3348,35 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (!selectedMediaAsset || !selectedVariant) {
       return;
     }
-    if (
-      typeof window !== 'undefined' &&
-      !window.confirm(
-        `Delete every earlier Vision draft for ${selectedMediaAsset.roomLabel || 'this photo'} and keep only "${selectedVariant.label || 'the selected version'}"?`,
-      )
-    ) {
+    setPendingPruneVisionDrafts({
+      assetId: selectedMediaAsset.id,
+      roomLabel: selectedMediaAsset.roomLabel || 'this photo',
+      variantId: selectedVariant.id,
+      variantLabel: selectedVariant.label || 'the selected version',
+    });
+  }
+
+  async function handleConfirmPruneVisionDraftHistory() {
+    if (blockArchivedMutation()) {
+      return;
+    }
+    if (!pendingPruneVisionDrafts?.assetId || !pendingPruneVisionDrafts?.variantId) {
       return;
     }
 
     setStatus('Deleting earlier vision drafts...');
     try {
-      const response = await pruneVisionDrafts(selectedMediaAsset.id, selectedVariant.id);
-      const nextVariants = await refreshMediaVariants(selectedMediaAsset.id);
+      const response = await pruneVisionDrafts(
+        pendingPruneVisionDrafts.assetId,
+        pendingPruneVisionDrafts.variantId,
+      );
+      const nextVariants = await refreshMediaVariants(pendingPruneVisionDrafts.assetId);
       setSelectedVariantId(
-        nextVariants.find((variant) => variant.id === selectedVariant.id)?.id ||
+        nextVariants.find((variant) => variant.id === pendingPruneVisionDrafts.variantId)?.id ||
           nextVariants[0]?.id ||
           '',
       );
-      setWorkflowSourceVariantId(selectedVariant.id);
+      setWorkflowSourceVariantId(pendingPruneVisionDrafts.variantId);
       setShowVisionHistory(false);
       setShowMoreVisionVariants(false);
       setToast({
@@ -3171,6 +3395,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         autoDismissMs: 0,
       });
     } finally {
+      setPendingPruneVisionDrafts(null);
       setStatus('');
     }
   }
@@ -3186,27 +3411,47 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     const savedPhotoForVariant = mediaAssets.find(
       (asset) => String(asset?.sourceVariantId || '') === String(variant.id),
     );
-    const confirmationMessage = savedPhotoForVariant
-      ? `Delete "${variant.label || 'this attempt'}" permanently? The saved Photos copy will remain, but this Vision attempt will be removed from workspace history.`
-      : `Delete "${variant.label || 'this attempt'}" permanently from Vision history?`;
+    setPendingDeleteVisionVariant({
+      id: variant.id,
+      label: variant.label || 'Selected attempt',
+      imageUrl: variant.imageUrl,
+      summary: getVariantSummary(variant),
+      reviewScore: getVariantReviewScore(variant),
+      savedPhotoLabel:
+        savedPhotoForVariant?.roomLabel || savedPhotoForVariant?.generationLabel || '',
+    });
+  }
 
-    if (typeof window !== 'undefined' && !window.confirm(confirmationMessage)) {
+  async function handleConfirmDeleteVisionVariant() {
+    if (blockArchivedMutation()) {
+      return;
+    }
+    if (!selectedMediaAsset || !pendingDeleteVisionVariant?.id) {
       return;
     }
 
     setStatus('Deleting vision attempt...');
     setToast(null);
     try {
-      await deleteMediaVariantRequest(selectedMediaAsset.id, variant.id);
+      await deleteMediaVariantRequest(selectedMediaAsset.id, pendingDeleteVisionVariant.id);
       const nextVariants = await refreshMediaVariants(selectedMediaAsset.id);
       await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshWorkflow()]);
 
-      if (workflowSourceVariantId === variant.id) {
+      if (workflowSourceVariantId === pendingDeleteVisionVariant.id) {
         const replacementSourceVariant = nextVariants.find(
           (candidate) =>
             getVisionWorkflowStageKeyForVariant(candidate) === activeVisionWorkflowStageKey,
         );
         setWorkflowSourceVariantId(replacementSourceVariant?.id || '');
+      }
+
+      if (selectedVariantId === pendingDeleteVisionVariant.id) {
+        const replacementSelectedVariant =
+          nextVariants.find(
+            (candidate) =>
+              getVisionWorkflowStageKeyForVariant(candidate) === activeVisionWorkflowStageKey,
+          ) || nextVariants[0];
+        setSelectedVariantId(replacementSelectedVariant?.id || '');
       }
 
       if (!nextVariants.length) {
@@ -3217,7 +3462,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setToast({
         tone: 'success',
         title: 'Vision attempt deleted',
-        message: `"${variant.label || 'Selected attempt'}" was removed permanently from this photo's Vision history.`,
+        message: `"${pendingDeleteVisionVariant.label || 'Selected attempt'}" was removed permanently from this photo's Vision history.`,
       });
     } catch (requestError) {
       setToast({
@@ -3227,6 +3472,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         autoDismissMs: 0,
       });
     } finally {
+      setPendingDeleteVisionVariant(null);
       setStatus('');
     }
   }
@@ -5752,6 +5998,112 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </button>
               <button type="button" className="button-danger" onClick={handleDeleteArchivedProperty} disabled={Boolean(status)}>
                 {status === 'Deleting property...' ? 'Deleting...' : 'Delete permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {pendingDeleteVisionVariant ? (
+        <div
+          className="workspace-modal-backdrop"
+          role="presentation"
+          onClick={() => setPendingDeleteVisionVariant(null)}
+        >
+          <div
+            className="workspace-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-vision-variant-title"
+            aria-describedby="delete-vision-variant-description"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="label">Delete attempt</span>
+            <h2 id="delete-vision-variant-title">
+              Delete {pendingDeleteVisionVariant.label || 'this vision attempt'} permanently?
+            </h2>
+            <p id="delete-vision-variant-description">
+              This will remove the attempt from Vision history for this photo.
+              {pendingDeleteVisionVariant.savedPhotoLabel
+                ? ` The saved Photos copy for ${pendingDeleteVisionVariant.savedPhotoLabel} will stay in the library.`
+                : ''}
+            </p>
+            <div className="workspace-modal-preview-row">
+              <img
+                src={pendingDeleteVisionVariant.imageUrl}
+                alt={pendingDeleteVisionVariant.label || 'Vision attempt'}
+                className="workspace-modal-preview-image"
+              />
+              <div className="workspace-modal-preview-copy">
+                <strong>{pendingDeleteVisionVariant.label || 'Vision attempt'}</strong>
+                {pendingDeleteVisionVariant.reviewScore ? (
+                  <span>{pendingDeleteVisionVariant.reviewScore}/100 reviewed</span>
+                ) : null}
+                <span>{pendingDeleteVisionVariant.summary || 'This generated attempt is no longer needed.'}</span>
+              </div>
+            </div>
+            <div className="workspace-modal-actions">
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => setPendingDeleteVisionVariant(null)}
+                disabled={Boolean(status)}
+              >
+                Keep attempt
+              </button>
+              <button
+                type="button"
+                className="button-danger"
+                onClick={handleConfirmDeleteVisionVariant}
+                disabled={Boolean(status)}
+              >
+                {status === 'Deleting vision attempt...' ? 'Deleting...' : 'Delete permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {pendingPruneVisionDrafts ? (
+        <div
+          className="workspace-modal-backdrop"
+          role="presentation"
+          onClick={() => setPendingPruneVisionDrafts(null)}
+        >
+          <div
+            className="workspace-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="prune-vision-drafts-title"
+            aria-describedby="prune-vision-drafts-description"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="label">Delete earlier drafts</span>
+            <h2 id="prune-vision-drafts-title">
+              Keep only {pendingPruneVisionDrafts.variantLabel || 'the selected version'}?
+            </h2>
+            <p id="prune-vision-drafts-description">
+              Every earlier Vision draft for {pendingPruneVisionDrafts.roomLabel || 'this photo'} will be removed permanently.
+              The current selected version will stay in place.
+            </p>
+            <div className="workspace-modal-preview-copy">
+              <strong>{pendingPruneVisionDrafts.roomLabel || 'Selected photo'}</strong>
+              <span>{pendingPruneVisionDrafts.variantLabel || 'Selected version'} will remain as the kept draft.</span>
+            </div>
+            <div className="workspace-modal-actions">
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => setPendingPruneVisionDrafts(null)}
+                disabled={Boolean(status)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button-danger"
+                onClick={handleConfirmPruneVisionDraftHistory}
+                disabled={Boolean(status)}
+              >
+                {status === 'Deleting earlier vision drafts...' ? 'Deleting...' : 'Delete earlier drafts'}
               </button>
             </div>
           </div>
