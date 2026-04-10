@@ -1606,14 +1606,19 @@ select {
 
 .property-media-candidate-card {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
   gap: 12px;
-  align-items: center;
-  padding: 10px;
+  padding: 14px;
   border-radius: 18px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.68);
   text-align: left;
+}
+
+.property-media-candidate-preview {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
 }
 
 .property-media-candidate-card.active {
@@ -1622,10 +1627,11 @@ select {
 }
 
 .property-media-candidate-card img {
-  width: 88px;
-  height: 88px;
+  width: 100%;
+  aspect-ratio: 4 / 3;
   object-fit: cover;
-  border-radius: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(25, 33, 42, 0.08);
 }
 
 .property-media-candidate-card strong {
@@ -1635,7 +1641,7 @@ select {
 
 .property-media-candidate-meta {
   display: grid;
-  gap: 4px;
+  gap: 10px;
 }
 
 .property-media-candidate-card span {
@@ -1649,6 +1655,59 @@ select {
   font-size: 0.82rem;
   font-style: normal;
   font-weight: 700;
+}
+
+.photo-card-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.photo-card-badge-row-large {
+  margin-bottom: 4px;
+}
+
+.photo-card-status-pill,
+.photo-card-action-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.photo-card-status-pill {
+  border: 1px solid rgba(70, 99, 79, 0.12);
+  background: rgba(70, 99, 79, 0.08);
+  color: var(--moss);
+}
+
+.photo-card-action-pill {
+  border: 1px solid rgba(200, 116, 71, 0.18);
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--clay);
+  cursor: pointer;
+}
+
+.photo-card-action-pill.active {
+  background: rgba(200, 116, 71, 0.12);
+  border-color: rgba(200, 116, 71, 0.24);
+}
+
+.photo-card-action-pill:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.photo-card-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .tag-row.compact {
@@ -1745,6 +1804,13 @@ select {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.photo-panel-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .property-media-rail {
@@ -3453,6 +3519,14 @@ select {
   justify-content: flex-end;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.photo-details-modal-card {
+  max-width: 940px;
+}
+
+.photo-details-modal-preview {
+  align-items: flex-start;
 }
 
 .workspace-map-modal-card {

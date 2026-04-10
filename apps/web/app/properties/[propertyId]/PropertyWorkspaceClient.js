@@ -941,6 +941,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [showExpandedMap, setShowExpandedMap] = useState(false);
   const [generationPrompt, setGenerationPrompt] = useState(null);
   const [pendingDeleteProperty, setPendingDeleteProperty] = useState(null);
+  const [activePhotoDetailsAsset, setActivePhotoDetailsAsset] = useState(null);
   const [guidedWorkflow, setGuidedWorkflow] = useState(null);
   const [workflowPreviewStepKey, setWorkflowPreviewStepKey] = useState('');
   const [checklistSummaryMode, setChecklistSummaryMode] = useState('open');
@@ -984,6 +985,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       mediaAssets.find((asset) => asset.id === selectedMediaAssetId) || null;
     const nextStageKey = getDefaultVisionStageForAsset(nextSelectedAsset);
     lastVisionAssetResetRef.current = selectedMediaAssetId;
+    setSelectedVariantId('');
     setWorkflowSourceVariantId('');
     setActiveVisionWorkflowStageKey(nextStageKey);
     setActiveVisionPresetKey(getDefaultVisionPresetKeyForStage(nextStageKey));
@@ -1252,17 +1254,24 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const defaultVisionWorkspaceVariantId = useMemo(
     () =>
       pickVisionWorkspaceVariantId(mediaVariants, {
+        currentVariantId: selectedVariantId,
         stageKey: activeVisionWorkflowStageKey,
         sourceVariantId: workflowSourceVariantId,
       }),
-    [activeVisionWorkflowStageKey, mediaVariants, workflowSourceVariantId],
+    [activeVisionWorkflowStageKey, mediaVariants, selectedVariantId, workflowSourceVariantId],
   );
+  const resolvedSelectedVariantId = useMemo(() => {
+    if (selectedVariantId && mediaVariants.some((variant) => variant.id === selectedVariantId)) {
+      return selectedVariantId;
+    }
+    return defaultVisionWorkspaceVariantId;
+  }, [defaultVisionWorkspaceVariantId, mediaVariants, selectedVariantId]);
   const selectedVariant = useMemo(
     () =>
       mediaVariants.find(
-        (variant) => variant.id === (selectedVariantId || defaultVisionWorkspaceVariantId),
+        (variant) => variant.id === resolvedSelectedVariantId,
       ) || null,
-    [defaultVisionWorkspaceVariantId, mediaVariants, selectedVariantId],
+    [mediaVariants, resolvedSelectedVariantId],
   );
   const workflowSourceVariant = useMemo(
     () =>
@@ -1284,6 +1293,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       ) || null,
     [mediaAssets, selectedVariant?.id],
   );
+  const selectedMediaAssetSourceAsset = useMemo(
+    () =>
+      mediaAssets.find(
+        (asset) => String(asset?.id || '') === String(selectedMediaAsset?.sourceMediaId || ''),
+      ) || null,
+    [mediaAssets, selectedMediaAsset?.sourceMediaId],
+  );
   const activeVisionWorkflowStage = useMemo(
     () => getVisionWorkflowStage(activeVisionWorkflowStageKey),
     [activeVisionWorkflowStageKey],
@@ -1304,8 +1320,28 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     (workflowSourceVariant && workflowSourceVariant.id !== selectedVariant?.id
       ? workflowSourceVariant
       : null);
-  const compareSourceImageUrl = compareSourceVariant?.imageUrl || selectedMediaAsset?.imageUrl || '';
-  const compareSourceLabel = compareSourceVariant?.label || selectedMediaAsset?.roomLabel || 'Original photo';
+  const selectedGeneratedAssetAsResult =
+    !selectedVariant && selectedMediaAsset?.assetType === 'generated'
+      ? selectedMediaAsset
+      : null;
+  const compareSourceImageUrl = selectedGeneratedAssetAsResult
+    ? selectedMediaAssetSourceAsset?.imageUrl || selectedMediaAsset?.imageUrl || ''
+    : compareSourceVariant?.imageUrl || selectedMediaAsset?.imageUrl || '';
+  const compareSourceLabel = selectedGeneratedAssetAsResult
+    ? selectedMediaAssetSourceAsset?.roomLabel || 'Original photo'
+    : compareSourceVariant?.label || selectedMediaAsset?.roomLabel || 'Original photo';
+  const effectiveVisionResultImageUrl =
+    selectedVariant?.imageUrl || selectedGeneratedAssetAsResult?.imageUrl || '';
+  const effectiveVisionResultLabel =
+    selectedVariant?.label ||
+    selectedGeneratedAssetAsResult?.generationLabel ||
+    (selectedGeneratedAssetAsResult ? getMediaAssetPrimaryLabel(selectedGeneratedAssetAsResult) : '') ||
+    'No result yet';
+  const effectiveVisionResultSummary = selectedVariant
+    ? getVariantSummary(selectedVariant)
+    : selectedGeneratedAssetAsResult
+    ? getMediaAssetSummary(selectedGeneratedAssetAsResult)
+    : 'Generate the next stage action to compare the current source with a new result.';
   const topRankedVariant = useMemo(
     () => mediaVariants.find((variant) => !variant?.metadata?.review?.shouldHideByDefault) || mediaVariants[0] || null,
     [mediaVariants],
@@ -2353,6 +2389,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     const resolvedStageKey = nextStageKey || getDefaultVisionStageForAsset(asset);
     setSelectedMediaAssetId(asset.id);
+    setSelectedVariantId('');
     setActiveTab('vision');
     setActiveVisionWorkflowStageKey(resolvedStageKey);
     setActiveVisionPresetKey(getDefaultVisionPresetKeyForStage(resolvedStageKey));
@@ -3617,21 +3654,44 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             </div>
             <div className="property-media-candidate-list">
               {listingCandidateAssets.map((asset) => (
-                <button
+                <article
                   key={`candidate-${asset.id}`}
-                  type="button"
                   className={asset.id === selectedMediaAsset?.id ? 'property-media-candidate-card active' : 'property-media-candidate-card'}
-                  onClick={() => setSelectedMediaAssetId(asset.id)}
                 >
-                  <img src={asset.imageUrl} alt={asset.roomLabel || 'Listing candidate'} />
+                  <button
+                    type="button"
+                    className="property-media-candidate-preview"
+                    onClick={() => setSelectedMediaAssetId(asset.id)}
+                  >
+                    <img src={asset.imageUrl} alt={asset.roomLabel || 'Listing candidate'} />
+                  </button>
                   <div className="property-media-candidate-meta">
+                    <div className="photo-card-badge-row">
+                      <span className="photo-card-status-pill">{getMediaAssetPrimaryLabel(asset)}</span>
+                      {asset.savedFromVision ? <span className="photo-card-status-pill">Saved from Vision</span> : null}
+                      <button
+                        type="button"
+                        className={asset.listingCandidate ? 'photo-card-action-pill active' : 'photo-card-action-pill'}
+                        onClick={() => handleToggleListingCandidateForAsset(asset)}
+                        disabled={Boolean(status) || isArchivedProperty}
+                      >
+                        {asset.listingCandidate ? 'Seller Pick' : 'Add Seller Pick'}
+                      </button>
+                    </div>
                     <strong>{asset.roomLabel}</strong>
-                    <span>{asset.listingNote || getMediaAssetSummary(asset)}</span>
-                    <div className="tag-row compact">
-                      {getMediaAssetBadges(asset).map((badge) => <em key={`${asset.id}-${badge}`} className="property-media-candidate-tag">{badge}</em>)}
+                    <span className="photo-card-summary">
+                      {asset.listingNote || getMediaAssetSummary(asset)}
+                    </span>
+                    <div className="photo-library-card-actions">
+                      <button type="button" className="button-secondary" onClick={() => handleOpenAssetInVision(asset)}>
+                        Open in Vision
+                      </button>
+                      <button type="button" className="button-secondary" onClick={() => setActivePhotoDetailsAsset(asset)}>
+                        Details
+                      </button>
                     </div>
                   </div>
-                </button>
+                </article>
               ))}
             </div>
           </div>
@@ -3662,14 +3722,26 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         <img src={asset.imageUrl} alt={asset.roomLabel || 'Property photo'} />
                       </button>
                       <div className="photo-library-card-body">
-                        <div className="tag-row compact">
-                          {getMediaAssetBadges(asset).map((badge) => <span key={`${asset.id}-${badge}`}>{badge}</span>)}
+                        <div className="photo-card-badge-row">
+                          <span className="photo-card-status-pill">{getMediaAssetPrimaryLabel(asset)}</span>
+                          {asset.savedFromVision ? <span className="photo-card-status-pill">Saved from Vision</span> : null}
+                          <button
+                            type="button"
+                            className={asset.listingCandidate ? 'photo-card-action-pill active' : 'photo-card-action-pill'}
+                            onClick={() => handleToggleListingCandidateForAsset(asset)}
+                            disabled={Boolean(status) || isArchivedProperty}
+                          >
+                            {asset.listingCandidate ? 'Seller Pick' : 'Add Seller Pick'}
+                          </button>
                         </div>
                         <strong>{asset.roomLabel}</strong>
-                        <p>{getMediaAssetSummary(asset)}</p>
+                        <p className="photo-card-summary">{getMediaAssetSummary(asset)}</p>
                         <div className="photo-library-card-actions">
                           <button type="button" className="button-secondary" onClick={() => handleOpenAssetInVision(asset)}>
                             Open in Vision
+                          </button>
+                          <button type="button" className="button-secondary" onClick={() => setActivePhotoDetailsAsset(asset)}>
+                            Details
                           </button>
                           <button
                             type="button"
@@ -3710,8 +3782,17 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         {selectedMediaAsset ? (
           <div className="workspace-tab-stack">
             <img src={selectedMediaAsset.imageUrl} alt={selectedMediaAsset.roomLabel || 'Selected property photo'} className="property-media-hero" />
-            <div className="tag-row">
-              {getMediaAssetBadges(selectedMediaAsset).map((badge) => <span key={`selected-asset-${badge}`}>{badge}</span>)}
+            <div className="photo-card-badge-row photo-card-badge-row-large">
+              <span className="photo-card-status-pill">{getMediaAssetPrimaryLabel(selectedMediaAsset)}</span>
+              {selectedMediaAsset.savedFromVision ? <span className="photo-card-status-pill">Saved from Vision</span> : null}
+              <button
+                type="button"
+                className={selectedMediaAsset.listingCandidate ? 'photo-card-action-pill active' : 'photo-card-action-pill'}
+                onClick={handleToggleListingCandidate}
+                disabled={Boolean(status) || isArchivedProperty}
+              >
+                {selectedMediaAsset.listingCandidate ? 'Seller Pick' : 'Add Seller Pick'}
+              </button>
             </div>
             <p>
               Saved {new Date(selectedMediaAsset.createdAt).toLocaleDateString()}
@@ -3721,43 +3802,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 ? ` · AI sees ${selectedMediaAsset.analysis.roomGuess.toLowerCase()}`
                 : ''}
             </p>
-            <p>{getMediaAssetSummary(selectedMediaAsset)}</p>
-            {selectedMediaAsset.assetType === 'generated' ? (
-              <div className="workspace-inner-card brochure-control-card">
-                <span className="label">Generated image details</span>
-                <strong>{selectedMediaAsset.generationLabel || getMediaAssetPrimaryLabel(selectedMediaAsset)}</strong>
-                <p>
-                  This is a saved AI-generated photo asset. It lives in Photos like any other image and can be reopened in Vision for the next step.
-                </p>
-                <div className="tag-row">
-                  <span>{selectedMediaAsset.generationStage === 'clean_room'
-                    ? 'Clean room'
-                    : selectedMediaAsset.generationStage === 'finishes'
-                    ? 'Finish updates'
-                    : selectedMediaAsset.generationStage === 'style'
-                    ? 'Style concept'
-                    : 'Saved image version'}</span>
-                  {selectedMediaAsset.savedFromVision ? <span>Saved from Vision</span> : null}
-                </div>
-              </div>
-            ) : null}
-            {selectedMediaAsset.assetType !== 'generated' && typeof selectedMediaAsset.analysis?.overallQualityScore === 'number' ? (
-              <div className="property-media-badges">
-                <span>Quality {selectedMediaAsset.analysis.overallQualityScore}/100</span>
-                {typeof selectedMediaAsset.analysis?.lightingScore === 'number' ? <span>Light {selectedMediaAsset.analysis.lightingScore}/100</span> : null}
-                {typeof selectedMediaAsset.analysis?.compositionScore === 'number' ? <span>Composition {selectedMediaAsset.analysis.compositionScore}/100</span> : null}
-                {selectedMediaAsset.analysis?.retakeRecommended ? <span>Retake suggested</span> : <span>Ready for listing review</span>}
-              </div>
-            ) : null}
-            {selectedMediaAsset.selectedVariant ? (
-              <div className="workspace-inner-card brochure-control-card">
-                <span className="label">Preferred vision result</span>
-                <strong>{selectedMediaAsset.selectedVariant.label || 'Vision preferred result'}</strong>
-                <p>
-                  This original photo still has a preferred Vision variant attached for brochure and report materials. Saved generated photos appear in this library separately as their own assets.
-                </p>
-              </div>
-            ) : null}
+            <p className="workspace-control-note photo-panel-summary">
+              {getMediaAssetSummary(selectedMediaAsset)}
+            </p>
             <div className="workspace-action-column">
               <button
                 type="button"
@@ -3766,6 +3813,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 disabled={Boolean(status) || isArchivedProperty}
               >
                 Open in Vision
+              </button>
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => setActivePhotoDetailsAsset(selectedMediaAsset)}
+              >
+                View details
               </button>
               <button
                 type="button"
@@ -3811,11 +3865,21 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             <div className="vision-context-header">
               <div className="vision-context-item">
                 <span className="label">Editing</span>
-                <strong>{selectedMediaAsset.roomLabel || 'Selected photo'}</strong>
+                <strong>
+                  {selectedMediaAsset.assetType === 'generated'
+                    ? `${selectedMediaAsset.roomLabel || 'Selected photo'} · ${selectedMediaAsset.generationLabel || getMediaAssetPrimaryLabel(selectedMediaAsset)}`
+                    : selectedMediaAsset.roomLabel || 'Selected photo'}
+                </strong>
               </div>
               <div className="vision-context-item">
                 <span className="label">Source</span>
-                <strong>{workflowSourceVariant ? workflowSourceVariant.label : 'Original photo'}</strong>
+                <strong>
+                  {workflowSourceVariant
+                    ? workflowSourceVariant.label
+                    : selectedGeneratedAssetAsResult
+                    ? selectedMediaAssetSourceAsset?.roomLabel || 'Original photo'
+                    : 'Original photo'}
+                </strong>
               </div>
               <div className="vision-context-item">
                 <span className="label">Current stage</span>
@@ -3823,13 +3887,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </div>
               <div className="vision-context-item">
                 <span className="label">Current result</span>
-                <strong>{selectedVariant?.label || 'No result yet'}</strong>
+                <strong>{effectiveVisionResultLabel}</strong>
               </div>
             </div>
-            {selectedVariant ? (
+            {selectedVariant || selectedGeneratedAssetAsResult ? (
               <div className="property-media-slider-card">
                 <span className="label">Before / after slider</span>
-                <p className="property-media-variant-caption">{getVariantSummary(selectedVariant)}</p>
+                <p className="property-media-variant-caption">{effectiveVisionResultSummary}</p>
                 <div className="property-media-slider-shell">
                   <ReactCompareSlider
                     itemOne={
@@ -3866,12 +3930,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               <div>
                 <span className="label">Vision output</span>
                 <p className="property-media-variant-caption">
-                  {selectedVariant
-                    ? getVariantSummary(selectedVariant)
-                    : 'Generate the next stage action to compare the current source with a new result.'}
+                  {effectiveVisionResultSummary}
                 </p>
-                {selectedVariant ? (
-                  <img src={selectedVariant.imageUrl} alt={selectedVariant.label || 'Generated image variant'} className="property-media-variant-image" />
+                {effectiveVisionResultImageUrl ? (
+                  <img src={effectiveVisionResultImageUrl} alt={effectiveVisionResultLabel || 'Generated image result'} className="property-media-variant-image" />
                 ) : (
                   <div className="property-media-variant-empty">Generate your first stage action to start the workspace history for this photo.</div>
                 )}
@@ -3976,8 +4038,35 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   </button>
                 </div>
               </div>
+            ) : selectedGeneratedAssetAsResult ? (
+              <div className="vision-result-actions-card">
+                <div className="workspace-tab-stack">
+                  <span className="label">Current result</span>
+                  <strong>{effectiveVisionResultLabel}</strong>
+                  <p>{effectiveVisionResultSummary}</p>
+                  <p className="workspace-control-note">
+                    This saved Vision result is the current source for the next stage. Generate the next step when you are ready, or reopen the original photo if you want to branch from the beginning.
+                  </p>
+                </div>
+                <div className="vision-result-actions">
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={() => setActiveTab('photos')}
+                  >
+                    View in Photos
+                  </button>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => setActivePhotoDetailsAsset(selectedMediaAsset)}
+                  >
+                    View details
+                  </button>
+                </div>
+              </div>
             ) : null}
-            {selectedVariant ? (
+            {selectedVariant || selectedGeneratedAssetAsResult ? (
               <p className="workspace-control-note">
                 Work on one photo at a time here. The current result stays in focus, and older drafts live in the workflow history drawer below.
               </p>
@@ -4046,7 +4135,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                           onClick={() => setSelectedMediaAssetId(asset.id)}
                         >
                           <img src={asset.imageUrl} alt={asset.roomLabel || 'Property photo'} />
-                          <div><strong>{asset.roomLabel}</strong></div>
+                          <div>
+                            <strong>{asset.roomLabel}</strong>
+                            <small>{asset.generationLabel || getMediaAssetPrimaryLabel(asset)}</small>
+                          </div>
                         </button>
                       ))}
                     </div>
@@ -4099,7 +4191,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   <p>{activeVisionWorkflowStage.description}</p>
                   <div className="tag-row">
                     <span>{workflowSourceVariant ? 'Using selected draft as the source' : 'Using the original photo as the source'}</span>
-                    {selectedVariant ? <span>Current result: {selectedVariant.label}</span> : null}
+                    {selectedVariant || selectedGeneratedAssetAsResult ? <span>Current result: {effectiveVisionResultLabel}</span> : null}
                   </div>
                   {preferredVisionVariant && selectedVariant && preferredVisionVariant.id !== selectedVariant.id ? (
                     <p className="workspace-control-note">
@@ -5451,6 +5543,130 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         onAction={toast?.onAction}
         onClose={() => setToast(null)}
       />
+      {activePhotoDetailsAsset ? (
+        <div className="workspace-modal-backdrop" role="presentation" onClick={() => setActivePhotoDetailsAsset(null)}>
+          <div
+            className="workspace-modal-card photo-details-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Photo details"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="section-header-tight">
+              <div>
+                <span className="label">Photo details</span>
+                <h2>{activePhotoDetailsAsset.roomLabel || 'Selected photo'}</h2>
+              </div>
+              <button
+                type="button"
+                className="button-secondary inline-button"
+                onClick={() => setActivePhotoDetailsAsset(null)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="workspace-modal-preview-row photo-details-modal-preview">
+              <img
+                src={activePhotoDetailsAsset.imageUrl}
+                alt={activePhotoDetailsAsset.roomLabel || 'Selected property photo'}
+                className="workspace-modal-preview-image"
+              />
+              <div className="workspace-modal-preview-copy">
+                <div className="photo-card-badge-row photo-card-badge-row-large">
+                  <span className="photo-card-status-pill">{getMediaAssetPrimaryLabel(activePhotoDetailsAsset)}</span>
+                  {activePhotoDetailsAsset.savedFromVision ? <span className="photo-card-status-pill">Saved from Vision</span> : null}
+                  <button
+                    type="button"
+                    className={activePhotoDetailsAsset.listingCandidate ? 'photo-card-action-pill active' : 'photo-card-action-pill'}
+                    onClick={() => handleToggleListingCandidateForAsset(activePhotoDetailsAsset)}
+                    disabled={Boolean(status) || isArchivedProperty}
+                  >
+                    {activePhotoDetailsAsset.listingCandidate ? 'Seller Pick' : 'Add Seller Pick'}
+                  </button>
+                </div>
+                <strong>
+                  {activePhotoDetailsAsset.assetType === 'generated'
+                    ? activePhotoDetailsAsset.generationLabel || getMediaAssetPrimaryLabel(activePhotoDetailsAsset)
+                    : activePhotoDetailsAsset.roomLabel || 'Original photo'}
+                </strong>
+                <span>{getMediaAssetSummary(activePhotoDetailsAsset)}</span>
+                <span>
+                  Saved {new Date(activePhotoDetailsAsset.createdAt).toLocaleString()}
+                  {activePhotoDetailsAsset.assetType === 'generated'
+                    ? ' · Added from Vision'
+                    : activePhotoDetailsAsset.analysis?.roomGuess
+                    ? ` · AI sees ${activePhotoDetailsAsset.analysis.roomGuess.toLowerCase()}`
+                    : ''}
+                </span>
+                {activePhotoDetailsAsset.assetType === 'generated' ? (
+                  <span>
+                    Stage:{' '}
+                    {activePhotoDetailsAsset.generationStage === 'clean_room'
+                      ? 'Clean room'
+                      : activePhotoDetailsAsset.generationStage === 'finishes'
+                      ? 'Finish updates'
+                      : activePhotoDetailsAsset.generationStage === 'style'
+                      ? 'Style concept'
+                      : 'Saved image version'}
+                  </span>
+                ) : null}
+                {activePhotoDetailsAsset.assetType !== 'generated' &&
+                typeof activePhotoDetailsAsset.analysis?.overallQualityScore === 'number' ? (
+                  <div className="property-media-badges">
+                    <span>Quality {activePhotoDetailsAsset.analysis.overallQualityScore}/100</span>
+                    {typeof activePhotoDetailsAsset.analysis?.lightingScore === 'number' ? <span>Light {activePhotoDetailsAsset.analysis.lightingScore}/100</span> : null}
+                    {typeof activePhotoDetailsAsset.analysis?.compositionScore === 'number' ? <span>Composition {activePhotoDetailsAsset.analysis.compositionScore}/100</span> : null}
+                    {activePhotoDetailsAsset.analysis?.retakeRecommended ? <span>Retake suggested</span> : <span>Ready for listing review</span>}
+                  </div>
+                ) : null}
+                {activePhotoDetailsAsset.selectedVariant ? (
+                  <span>
+                    Marketing-preferred Vision output: {activePhotoDetailsAsset.selectedVariant.label || 'Preferred result'}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <div className="workspace-modal-actions">
+              <button
+                type="button"
+                className="button-primary"
+                onClick={() => {
+                  handleOpenAssetInVision(activePhotoDetailsAsset);
+                  setActivePhotoDetailsAsset(null);
+                }}
+                disabled={Boolean(status) || isArchivedProperty}
+              >
+                Open in Vision
+              </button>
+              {activePhotoDetailsAsset.assetType === 'generated' && activePhotoDetailsAsset.sourceMediaId ? (
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => {
+                    setSelectedMediaAssetId(activePhotoDetailsAsset.sourceMediaId);
+                    setActivePhotoDetailsAsset(null);
+                    setActiveTab('photos');
+                  }}
+                >
+                  View original photo
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="button-secondary button-danger"
+                onClick={() => {
+                  setPendingDeleteAsset(activePhotoDetailsAsset);
+                  setActivePhotoDetailsAsset(null);
+                }}
+                disabled={Boolean(status) || isArchivedProperty}
+              >
+                {activePhotoDetailsAsset.assetType === 'generated' ? 'Delete saved version' : 'Delete original photo'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {pendingDeleteAsset ? (
         <div className="workspace-modal-backdrop" role="presentation" onClick={() => setPendingDeleteAsset(null)}>
           <div
