@@ -999,6 +999,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [mediaVariants, setMediaVariants] = useState([]);
   const [visionPresets, setVisionPresets] = useState([]);
   const [selectedVariantId, setSelectedVariantId] = useState('');
+  const [latestGeneratedVariantId, setLatestGeneratedVariantId] = useState('');
   const [selectedMediaAssetId, setSelectedMediaAssetId] = useState('');
   const [workflowSourceVariantId, setWorkflowSourceVariantId] = useState('');
   const [activeVisionWorkflowStageKey, setActiveVisionWorkflowStageKey] = useState('clean');
@@ -1275,6 +1276,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setShowVisionHistory(false);
     setShowVisionPhotoPicker(false);
     setShowMoreVisionVariants(false);
+    setLatestGeneratedVariantId('');
     setVisionRecoveryState(null);
     setVisionGenerationState(null);
   }, [mediaAssets, selectedMediaAssetId]);
@@ -1287,6 +1289,15 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setWorkflowSourceVariantId('');
     }
   }, [mediaVariants, workflowSourceVariantId]);
+
+  useEffect(() => {
+    if (
+      latestGeneratedVariantId &&
+      !mediaVariants.some((variant) => variant.id === latestGeneratedVariantId)
+    ) {
+      setLatestGeneratedVariantId('');
+    }
+  }, [latestGeneratedVariantId, mediaVariants]);
 
   useEffect(() => {
     const stagePresetKeys = getVisionWorkflowStage(activeVisionWorkflowStageKey).groups.flatMap(
@@ -1614,6 +1625,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         (variant) => variant.id === resolvedSelectedVariantId,
       ) || null,
     [mediaVariants, resolvedSelectedVariantId],
+  );
+  const latestGeneratedVariant = useMemo(
+    () => mediaVariants.find((variant) => variant.id === latestGeneratedVariantId) || null,
+    [latestGeneratedVariantId, mediaVariants],
   );
   const workflowSourceVariant = useMemo(
     () =>
@@ -2999,6 +3014,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         workflowStageKey: stageKey,
       });
       await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id), refreshWorkflow()]);
+      setLatestGeneratedVariantId(response.variant?.id || '');
       setSelectedVariantId(response.variant?.id || '');
       setToast({
         tone: response.job?.warning ? 'warning' : 'success',
@@ -3046,6 +3062,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   'The browser lost the original request, but the vision job finished and the generated variant has been recovered.',
                 autoDismissMs: settledJob?.warning ? 0 : 9000,
               });
+              setLatestGeneratedVariantId(
+                settledJob?.selectedVariantId || settledJob?.variants?.[0]?.id || '',
+              );
               void playVisionCompletionSound({
                 tone: 'success',
                 elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
@@ -3143,6 +3162,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         refreshWorkflow(),
       ]);
       setShowMoreVisionVariants(true);
+      setLatestGeneratedVariantId(response.variant?.id || '');
       setActiveVisionPresetKey(
         response.job?.presetKey ||
           response.variant?.metadata?.presetKey ||
@@ -3194,6 +3214,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   'The browser lost the original request, but the custom enhancement finished and the generated variant has been recovered.',
                 autoDismissMs: settledJob?.warning ? 0 : 9000,
               });
+              setLatestGeneratedVariantId(
+                settledJob?.selectedVariantId || settledJob?.variants?.[0]?.id || '',
+              );
               void playVisionCompletionSound({
                 tone: 'success',
                 elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
@@ -3453,6 +3476,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         setWorkflowSourceVariantId(replacementSourceVariant?.id || '');
       }
 
+      if (latestGeneratedVariantId === pendingDeleteVisionVariant.id) {
+        setLatestGeneratedVariantId('');
+      }
+
       if (selectedVariantId === pendingDeleteVisionVariant.id) {
         const replacementSelectedVariant =
           nextVariants.find(
@@ -3575,6 +3602,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       await selectMediaVariant(selectedMediaAsset.id, variantId);
       await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id), refreshWorkflow()]);
       setSelectedVariantId(variantId);
+      requestAnimationFrame(() => {
+        scrollWorkspaceSectionIntoView(visionCompareRef);
+      });
       setToast({ tone: 'success', title: 'Preferred variant selected', message: 'Flyer and report generation will now prefer this image variant.' });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Could not select variant', message: requestError.message });
@@ -4325,6 +4355,20 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       {`Use this result for ${getVisionWorkflowStage(getNextVisionWorkflowStageKey(activeVisionWorkflowStageKey)).title.toLowerCase()}`}
                     </button>
                   ) : null}
+                  {latestGeneratedVariant && selectedVariant && latestGeneratedVariant.id !== selectedVariant.id ? (
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => {
+                        setSelectedVariantId(latestGeneratedVariant.id);
+                        requestAnimationFrame(() => {
+                          scrollWorkspaceSectionIntoView(visionCompareRef);
+                        });
+                      }}
+                    >
+                      Return to latest generated result
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : selectedGeneratedAssetAsResult ? (
@@ -4481,10 +4525,16 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   <div className="tag-row">
                     <span>{workflowSourceVariant ? 'Using selected draft as the source' : 'Using the original photo as the source'}</span>
                     {selectedVariant || selectedGeneratedAssetAsResult ? <span>Current result: {effectiveVisionResultLabel}</span> : null}
+                    {latestGeneratedVariant ? <span>Latest generated: {latestGeneratedVariant.label}</span> : null}
                   </div>
                   {preferredVisionVariant && selectedVariant && preferredVisionVariant.id !== selectedVariant.id ? (
                     <p className="workspace-control-note">
                       Marketing-preferred output: <strong>{preferredVisionVariant.label}</strong>. The workspace is keeping <strong>{selectedVariant.label}</strong> in focus for this step so you can continue editing without losing the preferred pick.
+                    </p>
+                  ) : null}
+                  {latestGeneratedVariant && selectedVariant && latestGeneratedVariant.id !== selectedVariant.id ? (
+                    <p className="workspace-control-note">
+                      You are viewing an older attempt right now. The newest generated result is <strong>{latestGeneratedVariant.label}</strong> from {formatDateTimeLabel(latestGeneratedVariant.createdAt)}.
                     </p>
                   ) : null}
                   <p className="workspace-control-note">
@@ -4713,11 +4763,15 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                             <strong>{variant.label}</strong>
                             <div className="tag-row compact">
                               {isCurrentVariant ? <span>Viewing now</span> : null}
+                              {latestGeneratedVariant?.id === variant.id ? <span>Latest generated</span> : null}
                               {variant.isSelected ? <span>Kept</span> : null}
                               {savedPhotoForVariant ? <span>Saved in Photos</span> : null}
                               {getVariantReviewScore(variant) ? <span>{getVariantReviewScore(variant)}/100</span> : null}
                               {variant.metadata?.review?.shouldHideByDefault ? <span>Lower confidence</span> : null}
                             </div>
+                            <p className="workspace-control-note vision-attempt-card-timestamp">
+                              {formatDateTimeLabel(variant.createdAt)}
+                            </p>
                             <p className="workspace-control-note">
                               {getVariantSummary(variant)}
                             </p>
@@ -4733,9 +4787,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                                         variant.metadata?.presetKey || variant.variantType,
                                       ),
                                   );
+                                  requestAnimationFrame(() => {
+                                    scrollWorkspaceSectionIntoView(visionCompareRef);
+                                  });
                                 }}
                               >
-                                {isCurrentVariant ? 'Viewing' : 'View'}
+                                {isCurrentVariant ? 'Viewing' : 'View in compare'}
                               </button>
                               <button
                                 type="button"

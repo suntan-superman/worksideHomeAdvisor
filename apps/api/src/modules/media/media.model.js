@@ -94,6 +94,7 @@ const mediaAssetSchema = new mongoose.Schema(
 );
 
 mediaAssetSchema.index({ propertyId: 1, createdAt: -1 });
+mediaAssetSchema.index({ storageProvider: 1, storageKey: 1 });
 
 export const MediaAssetModel =
   mongoose.models.MediaAsset || mongoose.model('MediaAsset', mediaAssetSchema);

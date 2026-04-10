@@ -2065,6 +2065,10 @@ select {
   align-content: start;
 }
 
+.vision-attempt-card-timestamp {
+  margin-top: -2px;
+}
+
 .vision-attempt-card-copy strong {
   color: var(--ink);
   font-size: 1rem;

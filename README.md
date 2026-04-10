@@ -175,3 +175,15 @@ https://worksidehomeadvisoradmin.netlify.app/login
 /////////////////////////////////////////////////////////////
 npm run clone:demo --workspace=@workside/api -- --source=demo@worksidesoftware.com --target=demo@worksideadvisor.com
 ////////////////////////////////////////////////////////////
+To clean up photo variants
+
+From c:\Users\sjroy\Source\HomeAdvisor\apps\api, use:
+
+npm run cleanup:variants-before-date -- --before=2026-04-09
+That shows what would be deleted.
+
+If the dry run looks right, run:
+
+npm run cleanup:variants-before-date -- --before=2026-04-09 --confirm
+
+////////////////////////////////////////////////////////////

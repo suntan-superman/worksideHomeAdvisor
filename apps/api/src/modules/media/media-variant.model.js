@@ -65,6 +65,8 @@ const mediaVariantSchema = new mongoose.Schema(
 );
 
 mediaVariantSchema.index({ mediaId: 1, createdAt: -1 });
+mediaVariantSchema.index({ visionJobId: 1, createdAt: -1 });
+mediaVariantSchema.index({ storageProvider: 1, storageKey: 1 });
 mediaVariantSchema.index({ isSelected: 1, expiresAt: 1, createdAt: 1 });
 
 export const MediaVariantModel =

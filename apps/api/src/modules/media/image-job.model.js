@@ -73,6 +73,8 @@ const imageJobSchema = new mongoose.Schema(
 
 imageJobSchema.index({ mediaId: 1, createdAt: -1 });
 imageJobSchema.index({ mediaId: 1, inputHash: 1, createdAt: -1 });
+imageJobSchema.index({ selectedVariantId: 1 });
+imageJobSchema.index({ outputVariantIds: 1 });
 
 export const ImageJobModel =
   mongoose.models.ImageJob || mongoose.model('ImageJob', imageJobSchema);
