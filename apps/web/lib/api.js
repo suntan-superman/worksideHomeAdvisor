@@ -450,6 +450,13 @@ export function pruneVisionDrafts(assetId, keepVariantId) {
   });
 }
 
+export function saveVariantToPhotos(variantId, payload) {
+  return request(`/api/v1/media/variants/${variantId}/save-to-photos`, {
+    method: 'POST',
+    body: JSON.stringify(payload || {}),
+  });
+}
+
 export function listImageEnhancementJobs(assetId, limit = 10) {
   const search = new URLSearchParams();
   if (limit) {

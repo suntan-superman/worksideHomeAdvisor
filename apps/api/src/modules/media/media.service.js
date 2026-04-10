@@ -4,9 +4,11 @@ import { analyzePropertyPhoto } from '../../services/photoAnalysisService.js';
 import {
   buildMediaAssetUrl,
   buildMediaVariantUrl,
+  readStoredAsset,
+  saveBinaryBuffer,
   saveImageBuffer,
 } from '../../services/storageService.js';
-import { assertPropertyEditableById, getPropertyById } from '../properties/property.service.js';
+import { assertPropertyEditableById } from '../properties/property.service.js';
 import { ImageJobModel } from './image-job.model.js';
 import { MediaAssetModel } from './media.model.js';
 import { MediaVariantModel } from './media-variant.model.js';
@@ -26,6 +28,47 @@ function shouldIgnorePersistedMediaUrl(url) {
   );
 }
 
+function normalizeGenerationStage(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_');
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === 'clean' || normalized === 'clean_room') {
+    return 'clean_room';
+  }
+
+  if (normalized === 'finish' || normalized === 'finishes') {
+    return 'finishes';
+  }
+
+  if (normalized === 'style') {
+    return 'style';
+  }
+
+  return null;
+}
+
+function buildGeneratedAssetAnalysisSnapshot({ roomLabel, generationLabel, variant }) {
+  const overallQualityScore = Number(variant?.metadata?.review?.overallScore || 0) || undefined;
+  const summaryParts = ['This AI-generated image was saved from Vision.'];
+  if (generationLabel) {
+    summaryParts.push(generationLabel);
+  }
+
+  return {
+    roomGuess: roomLabel || '',
+    overallQualityScore,
+    summary: summaryParts.join(' '),
+    source: 'vision_saved',
+    warning: variant?.metadata?.warning || '',
+  };
+}
+
 function serializeMediaAsset(document, selectedVariant = null) {
   if (!document) {
     return null;
@@ -40,6 +83,13 @@ function serializeMediaAsset(document, selectedVariant = null) {
     propertyId: document.propertyId?.toString?.() || String(document.propertyId),
     roomLabel: document.roomLabel,
     source: document.source || 'mobile_capture',
+    assetType: document.assetType || 'original',
+    generationStage: document.generationStage || null,
+    sourceMediaId: document.sourceMediaId?.toString?.() || String(document.sourceMediaId || ''),
+    sourceVariantId:
+      document.sourceVariantId?.toString?.() || String(document.sourceVariantId || ''),
+    savedFromVision: Boolean(document.savedFromVision),
+    generationLabel: document.generationLabel || '',
     notes: document.notes || '',
     mimeType: document.mimeType,
     width: document.width,
@@ -151,6 +201,12 @@ export async function createMediaAssetAndAnalysis({
     propertyId,
     roomLabel,
     source,
+    assetType: 'original',
+    generationStage: null,
+    sourceMediaId: null,
+    sourceVariantId: null,
+    savedFromVision: false,
+    generationLabel: '',
     notes: String(notes || '').trim().slice(0, 500),
     mimeType,
     width,
@@ -266,6 +322,124 @@ export async function deleteMediaAsset(assetId) {
     deleted: true,
     assetId,
     propertyId: asset.propertyId?.toString?.() || String(asset.propertyId),
+  };
+}
+
+export async function saveMediaVariantToPhotos(variantId, payload = {}) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to save generated photos.');
+  }
+
+  const variant = await MediaVariantModel.findById(variantId).lean();
+  if (!variant) {
+    throw new Error('Media variant not found.');
+  }
+
+  const propertyId = variant.propertyId?.toString?.() || String(variant.propertyId || '');
+  if (!propertyId) {
+    throw new Error('Variant property was not found.');
+  }
+
+  if (payload.propertyId && String(payload.propertyId) !== propertyId) {
+    throw new Error('Variant does not belong to the requested property.');
+  }
+
+  await assertPropertyEditableById(propertyId);
+
+  const sourceAsset = await MediaAssetModel.findById(variant.mediaId).lean();
+  if (!sourceAsset) {
+    throw new Error('Source photo for this variant was not found.');
+  }
+
+  const normalizedStage =
+    normalizeGenerationStage(payload.generationStage) ||
+    normalizeGenerationStage(variant?.metadata?.workflowStageKey) ||
+    normalizeGenerationStage(variant?.metadata?.generationStage) ||
+    'style';
+  const roomLabel = String(payload.roomLabel || sourceAsset.roomLabel || '').trim() || 'Generated photo';
+  const listingCandidate =
+    typeof payload.listingCandidate === 'boolean' ? payload.listingCandidate : true;
+  const generationLabel = String(payload.generationLabel || variant.label || '').trim() || 'Saved Vision Result';
+
+  let existingAsset = await MediaAssetModel.findOne({
+    propertyId,
+    sourceVariantId: variant._id,
+    assetType: 'generated',
+  });
+
+  if (existingAsset) {
+    let didUpdate = false;
+    if (!existingAsset.listingCandidate && listingCandidate) {
+      existingAsset.listingCandidate = true;
+      didUpdate = true;
+    }
+    if (!existingAsset.savedFromVision) {
+      existingAsset.savedFromVision = true;
+      didUpdate = true;
+    }
+    if (!existingAsset.generationLabel) {
+      existingAsset.generationLabel = generationLabel;
+      didUpdate = true;
+    }
+    if (!existingAsset.generationStage && normalizedStage) {
+      existingAsset.generationStage = normalizedStage;
+      didUpdate = true;
+    }
+    if (didUpdate) {
+      await existingAsset.save();
+    }
+
+    return {
+      created: false,
+      message: 'Saved to Photos',
+      asset: serializeMediaAsset(existingAsset.toObject()),
+    };
+  }
+
+  const storedVariant = await readStoredAsset({
+    storageProvider: variant.storageProvider,
+    storageKey: variant.storageKey,
+  });
+  const storedImage = await saveBinaryBuffer({
+    propertyId,
+    mimeType: variant.mimeType || 'image/jpeg',
+    buffer: storedVariant.buffer,
+  });
+
+  const asset = await MediaAssetModel.create({
+    propertyId,
+    roomLabel,
+    source: 'vision_generated',
+    assetType: 'generated',
+    generationStage: normalizedStage,
+    sourceMediaId: sourceAsset._id,
+    sourceVariantId: variant._id,
+    savedFromVision: true,
+    generationLabel,
+    notes: '',
+    mimeType: variant.mimeType || 'image/jpeg',
+    width: sourceAsset.width,
+    height: sourceAsset.height,
+    uploadedByUserId: sourceAsset.uploadedByUserId || null,
+    storageProvider: storedImage.storageProvider,
+    storageKey: storedImage.storageKey,
+    byteSize: storedImage.byteSize,
+    listingCandidate,
+    analysis: buildGeneratedAssetAnalysisSnapshot({
+      roomLabel,
+      generationLabel,
+      variant,
+    }),
+  });
+
+  asset.imageUrl = buildMediaAssetUrl(asset._id.toString());
+  await asset.save();
+
+  existingAsset = asset;
+  return {
+    created: true,
+    message: 'Saved to Photos',
+    asset: serializeMediaAsset(existingAsset.toObject()),
   };
 }
 

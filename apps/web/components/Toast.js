@@ -2,7 +2,15 @@
 
 import { useEffect } from 'react';
 
-export function Toast({ tone = 'info', title, message, onClose, autoDismissMs }) {
+export function Toast({
+  tone = 'info',
+  title,
+  message,
+  onClose,
+  autoDismissMs,
+  actionLabel,
+  onAction,
+}) {
   useEffect(() => {
     if (!message) {
       return undefined;
@@ -45,6 +53,11 @@ export function Toast({ tone = 'info', title, message, onClose, autoDismissMs })
       <div className="toast-copy">
         {title ? <strong>{title}</strong> : null}
         <span>{message}</span>
+        {actionLabel && onAction ? (
+          <button type="button" className="toast-action" onClick={onAction}>
+            {actionLabel}
+          </button>
+        ) : null}
       </div>
       <button type="button" className="toast-dismiss" onClick={onClose} aria-label="Dismiss notification">
         ×

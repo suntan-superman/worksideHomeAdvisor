@@ -45,6 +45,7 @@ import {
   listVisionPresets,
   pruneVisionDrafts,
   savePhoto,
+  saveVariantToPhotos,
   saveProvider,
   selectMediaVariant,
   setPropertyPricingDecision,
@@ -294,10 +295,182 @@ function getVariantReviewScore(variant) {
   return Number(variant?.metadata?.review?.overallScore || 0);
 }
 
+function getAssetGenerationStageKey(asset) {
+  const normalized = String(asset?.generationStage || '').trim().toLowerCase();
+  if (normalized === 'clean_room') {
+    return 'clean';
+  }
+  if (normalized === 'finishes' || normalized === 'finish') {
+    return 'finish';
+  }
+  if (normalized === 'style') {
+    return 'style';
+  }
+  return '';
+}
+
+function getVariantCreatedAtTimestamp(variant) {
+  const timestamp = new Date(
+    variant?.updatedAt || variant?.createdAt || variant?.selectedAt || 0,
+  ).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function getVisionWorkflowStageKeyForVariant(variant) {
+  return (
+    variant?.metadata?.workflowStageKey ||
+    getVisionWorkflowStageForPreset(variant?.metadata?.presetKey || variant?.variantType)
+  );
+}
+
+function getNewestVisionVariants(variants = []) {
+  return [...variants].sort(
+    (left, right) => getVariantCreatedAtTimestamp(right) - getVariantCreatedAtTimestamp(left),
+  );
+}
+
+function pickVisionWorkspaceVariantId(
+  variants = [],
+  { currentVariantId = '', stageKey = 'clean', sourceVariantId = '' } = {},
+) {
+  if (!variants.length) {
+    return '';
+  }
+
+  if (currentVariantId && variants.some((variant) => variant.id === currentVariantId)) {
+    return currentVariantId;
+  }
+
+  const nonHiddenVariants = variants.filter(
+    (variant) => !variant?.metadata?.review?.shouldHideByDefault,
+  );
+  const candidatePool = nonHiddenVariants.length ? nonHiddenVariants : variants;
+  const newestCandidates = getNewestVisionVariants(candidatePool);
+  const normalizedStageKey = String(stageKey || 'clean').trim() || 'clean';
+  const normalizedSourceVariantId = String(sourceVariantId || '').trim();
+
+  if (normalizedSourceVariantId) {
+    const sourceDescendants = newestCandidates.filter(
+      (variant) => String(variant?.metadata?.sourceVariantId || '') === normalizedSourceVariantId,
+    );
+    const sameStageSourceDescendants = sourceDescendants.filter(
+      (variant) => getVisionWorkflowStageKeyForVariant(variant) === normalizedStageKey,
+    );
+    if (sameStageSourceDescendants[0]?.id) {
+      return sameStageSourceDescendants[0].id;
+    }
+    if (sourceDescendants[0]?.id) {
+      return sourceDescendants[0].id;
+    }
+    const exactSourceVariant = newestCandidates.find(
+      (variant) => variant.id === normalizedSourceVariantId,
+    );
+    if (exactSourceVariant?.id) {
+      return exactSourceVariant.id;
+    }
+  }
+
+  const sameStageVariants = newestCandidates.filter(
+    (variant) => getVisionWorkflowStageKeyForVariant(variant) === normalizedStageKey,
+  );
+  if (sameStageVariants[0]?.id) {
+    return sameStageVariants[0].id;
+  }
+
+  return newestCandidates[0]?.id || variants[0]?.id || '';
+}
+
 function waitForDuration(milliseconds) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, milliseconds);
   });
+}
+
+function getMediaAssetCreatedAtTimestamp(asset) {
+  const timestamp = new Date(asset?.updatedAt || asset?.createdAt || 0).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function getDefaultVisionStageForAsset(asset) {
+  if (asset?.assetType !== 'generated') {
+    return 'clean';
+  }
+
+  const sourceStageKey = getAssetGenerationStageKey(asset);
+  if (!sourceStageKey) {
+    return 'clean';
+  }
+
+  return getNextVisionWorkflowStageKey(sourceStageKey);
+}
+
+function getMediaAssetPrimaryLabel(asset) {
+  if (asset?.assetType === 'generated') {
+    if (asset?.generationStage === 'clean_room') {
+      return 'AI Cleaned';
+    }
+    if (asset?.generationStage === 'finishes') {
+      return 'AI Finish Update';
+    }
+    if (asset?.generationStage === 'style') {
+      return 'AI Styled';
+    }
+    return 'AI Generated';
+  }
+
+  return 'Original';
+}
+
+function getMediaAssetBadges(asset) {
+  const badges = [getMediaAssetPrimaryLabel(asset)];
+  if (asset?.savedFromVision) {
+    badges.push('Saved from Vision');
+  }
+  if (asset?.listingCandidate) {
+    badges.push('Seller Pick');
+  }
+  return badges;
+}
+
+function getMediaAssetSummary(asset) {
+  if (asset?.assetType === 'generated') {
+    const stageLabel =
+      asset?.generationStage === 'clean_room'
+        ? 'room cleanup'
+        : asset?.generationStage === 'finishes'
+        ? 'finish update'
+        : asset?.generationStage === 'style'
+        ? 'style concept'
+        : 'Vision edit';
+    return asset?.generationLabel
+      ? `${asset.generationLabel}. Saved from Vision for ${stageLabel} review.`
+      : `Saved from Vision for ${stageLabel} review.`;
+  }
+
+  return asset?.analysis?.summary || 'Original photo saved to the shared property gallery.';
+}
+
+function groupMediaAssetsByRoom(assets = []) {
+  const roomMap = new Map();
+  for (const asset of assets) {
+    const roomKey = String(asset?.roomLabel || 'Unlabeled room').trim() || 'Unlabeled room';
+    if (!roomMap.has(roomKey)) {
+      roomMap.set(roomKey, []);
+    }
+    roomMap.get(roomKey).push(asset);
+  }
+
+  return [...roomMap.entries()]
+    .map(([roomLabel, roomAssets]) => ({
+      roomLabel,
+      assets: [...roomAssets].sort((left, right) => {
+        if ((left?.assetType || 'original') !== (right?.assetType || 'original')) {
+          return left?.assetType === 'original' ? -1 : 1;
+        }
+        return getMediaAssetCreatedAtTimestamp(right) - getMediaAssetCreatedAtTimestamp(left);
+      }),
+    }))
+    .sort((left, right) => left.roomLabel.localeCompare(right.roomLabel));
 }
 
 function formatFreeformPlanHighlights(normalizedPlan) {
@@ -705,6 +878,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const reportPreviewRef = useRef(null);
   const visionCompareRef = useRef(null);
   const visionGalleryRef = useRef(null);
+  const lastVisionAssetResetRef = useRef('');
   const workspaceBodyMainRef = useRef(null);
   const providerSuggestionsRef = useRef(null);
   const visionCompletionAudioContextRef = useRef(null);
@@ -799,13 +973,24 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }, [visionGenerationState]);
 
   useEffect(() => {
+    if (!selectedMediaAssetId) {
+      lastVisionAssetResetRef.current = '';
+      return;
+    }
+    if (lastVisionAssetResetRef.current === selectedMediaAssetId) {
+      return;
+    }
+    const nextSelectedAsset =
+      mediaAssets.find((asset) => asset.id === selectedMediaAssetId) || null;
+    const nextStageKey = getDefaultVisionStageForAsset(nextSelectedAsset);
+    lastVisionAssetResetRef.current = selectedMediaAssetId;
     setWorkflowSourceVariantId('');
-    setActiveVisionWorkflowStageKey('clean');
-    setActiveVisionPresetKey(getDefaultVisionPresetKeyForStage('clean'));
+    setActiveVisionWorkflowStageKey(nextStageKey);
+    setActiveVisionPresetKey(getDefaultVisionPresetKeyForStage(nextStageKey));
     setShowVisionHistory(false);
     setShowVisionPhotoPicker(false);
     setShowMoreVisionVariants(false);
-  }, [selectedMediaAssetId]);
+  }, [mediaAssets, selectedMediaAssetId]);
 
   useEffect(() => {
     if (
@@ -1048,18 +1233,36 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     () => mediaAssets.filter((asset) => asset.listingCandidate),
     [mediaAssets],
   );
+  const mediaAssetGroups = useMemo(() => groupMediaAssetsByRoom(mediaAssets), [mediaAssets]);
   const brochurePhotoPool = useMemo(
     () => (listingCandidateAssets.length ? listingCandidateAssets : mediaAssets),
     [listingCandidateAssets, mediaAssets],
   );
   const reportPhotoPool = useMemo(() => mediaAssets, [mediaAssets]);
+  const preferredVisionVariant = useMemo(
+    () => mediaVariants.find((variant) => variant.isSelected) || null,
+    [mediaVariants],
+  );
+  const stageScopedVisionVariants = useMemo(() => {
+    const stageVariants = mediaVariants.filter(
+      (variant) => getVisionWorkflowStageKeyForVariant(variant) === activeVisionWorkflowStageKey,
+    );
+    return getNewestVisionVariants(stageVariants.length ? stageVariants : mediaVariants);
+  }, [activeVisionWorkflowStageKey, mediaVariants]);
+  const defaultVisionWorkspaceVariantId = useMemo(
+    () =>
+      pickVisionWorkspaceVariantId(mediaVariants, {
+        stageKey: activeVisionWorkflowStageKey,
+        sourceVariantId: workflowSourceVariantId,
+      }),
+    [activeVisionWorkflowStageKey, mediaVariants, workflowSourceVariantId],
+  );
   const selectedVariant = useMemo(
     () =>
-      mediaVariants.find((variant) => variant.id === selectedVariantId) ||
-      mediaVariants.find((variant) => variant.isSelected) ||
-      mediaVariants[0] ||
-      null,
-    [mediaVariants, selectedVariantId],
+      mediaVariants.find(
+        (variant) => variant.id === (selectedVariantId || defaultVisionWorkspaceVariantId),
+      ) || null,
+    [defaultVisionWorkspaceVariantId, mediaVariants, selectedVariantId],
   );
   const workflowSourceVariant = useMemo(
     () =>
@@ -1073,6 +1276,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         (variant) => variant.id === String(selectedVariant?.metadata?.sourceVariantId || ''),
       ) || null,
     [mediaVariants, selectedVariant?.metadata?.sourceVariantId],
+  );
+  const savedAssetForSelectedVariant = useMemo(
+    () =>
+      mediaAssets.find(
+        (asset) => String(asset?.sourceVariantId || '') === String(selectedVariant?.id || ''),
+      ) || null,
+    [mediaAssets, selectedVariant?.id],
   );
   const activeVisionWorkflowStage = useMemo(
     () => getVisionWorkflowStage(activeVisionWorkflowStageKey),
@@ -1120,14 +1330,15 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     [activeSocialPackVariant, latestSocialPack],
   );
   const visibleVisionVariants = useMemo(() => {
+    const historyVariants = stageScopedVisionVariants;
     if (showMoreVisionVariants) {
-      return mediaVariants;
+      return historyVariants;
     }
 
-    const preferredVariants = mediaVariants.filter(
+    const preferredVariants = historyVariants.filter(
       (variant) => !variant?.metadata?.review?.shouldHideByDefault,
     );
-    const defaultVariants = (preferredVariants.length ? preferredVariants : mediaVariants).slice(0, 2);
+    const defaultVariants = (preferredVariants.length ? preferredVariants : historyVariants).slice(0, 3);
     if (
       selectedVariant &&
       !defaultVariants.some((variant) => variant.id === selectedVariant.id)
@@ -1136,11 +1347,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
 
     return defaultVariants;
-  }, [mediaVariants, selectedVariant, showMoreVisionVariants]);
+  }, [selectedVariant, showMoreVisionVariants, stageScopedVisionVariants]);
   const hiddenVisionVariantCount = useMemo(
     () =>
-      mediaVariants.filter((variant) => variant?.metadata?.review?.shouldHideByDefault).length,
-    [mediaVariants],
+      stageScopedVisionVariants.filter((variant) => variant?.metadata?.review?.shouldHideByDefault)
+        .length,
+    [stageScopedVisionVariants],
   );
   const activeVisionPreset = useMemo(
     () => visionPresets.find((preset) => preset.key === activeVisionPresetKey) || null,
@@ -1449,16 +1661,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     const nextVariants = liveMediaVariantsQuery.data || [];
     setMediaVariants(nextVariants);
     setSelectedVariantId((current) => {
-      if (nextVariants.some((variant) => variant.id === current)) {
-        return current;
-      }
-      return (
-        nextVariants.find((variant) => variant.isSelected)?.id ||
-        nextVariants[0]?.id ||
-        ''
-      );
+      return pickVisionWorkspaceVariantId(nextVariants, {
+        currentVariantId: current,
+        stageKey: activeVisionWorkflowStageKey,
+        sourceVariantId: workflowSourceVariantId,
+      });
     });
-  }, [liveMediaVariantsQuery.data]);
+  }, [activeVisionWorkflowStageKey, liveMediaVariantsQuery.data, workflowSourceVariantId]);
 
   useEffect(() => {
     if (!workflowQuery.data) {
@@ -1687,7 +1896,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     const nextVariants = variantsResponse.variants || [];
     queryClient.setQueryData(['property-media-variants', assetId], nextVariants);
     setMediaVariants(nextVariants);
-    setSelectedVariantId(nextVariants.find((variant) => variant.isSelected)?.id || nextVariants[0]?.id || '');
+    setSelectedVariantId((current) =>
+      pickVisionWorkspaceVariantId(nextVariants, {
+        currentVariantId: current,
+        stageKey: activeVisionWorkflowStageKey,
+        sourceVariantId: workflowSourceVariantId,
+      }),
+    );
     return nextVariants;
   }
 
@@ -2095,18 +2310,54 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (!selectedMediaAsset) {
       return;
     }
-    const nextValue = !selectedMediaAsset.listingCandidate;
+    await handleToggleListingCandidateForAsset(selectedMediaAsset);
+  }
+
+  async function handleToggleListingCandidateForAsset(asset, explicitValue) {
+    if (blockArchivedMutation()) {
+      return;
+    }
+    if (!asset) {
+      return;
+    }
+    const nextValue =
+      typeof explicitValue === 'boolean' ? explicitValue : !Boolean(asset.listingCandidate);
     setStatus(nextValue ? 'Marking photo as listing candidate...' : 'Removing listing-candidate mark...');
     setToast(null);
     try {
-      await updateMediaAsset(selectedMediaAsset.id, { listingCandidate: nextValue });
-      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
-      setToast({ tone: 'success', title: nextValue ? 'Listing candidate selected' : 'Listing candidate removed', message: nextValue ? 'This photo will now be prioritized for flyer generation.' : 'This photo will no longer be prioritized for the flyer.' });
+      await updateMediaAsset(asset.id, { listingCandidate: nextValue });
+      await Promise.all([
+        refreshMediaAssets(asset.id),
+        refreshDashboardSnapshot(),
+        refreshChecklist(),
+        refreshWorkflow(),
+      ]);
+      setToast({
+        tone: 'success',
+        title: nextValue ? 'Listing candidate selected' : 'Listing candidate removed',
+        message: nextValue
+          ? 'This photo will now be prioritized for flyer generation.'
+          : 'This photo will no longer be prioritized for the flyer.',
+      });
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Could not update photo', message: requestError.message });
     } finally {
       setStatus('');
     }
+  }
+
+  function handleOpenAssetInVision(asset, nextStageKey = '') {
+    if (!asset) {
+      return;
+    }
+
+    const resolvedStageKey = nextStageKey || getDefaultVisionStageForAsset(asset);
+    setSelectedMediaAssetId(asset.id);
+    setActiveTab('vision');
+    setActiveVisionWorkflowStageKey(resolvedStageKey);
+    setActiveVisionPresetKey(getDefaultVisionPresetKeyForStage(resolvedStageKey));
+    setShowVisionPhotoPicker(false);
+    setShowVisionHistory(false);
   }
 
   function toggleFlyerPhotoSelection(assetId) {
@@ -2496,6 +2747,74 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       });
     } finally {
       setVisionGenerationState(null);
+      setStatus('');
+    }
+  }
+
+  async function handleSaveCurrentVisionResultToPhotos() {
+    if (blockArchivedMutation()) {
+      return;
+    }
+    if (!selectedVariant || !selectedMediaAsset) {
+      return;
+    }
+
+    setStatus('Saving generated result to Photos...');
+    setToast(null);
+    try {
+      const generationStage =
+        selectedVariant?.metadata?.workflowStageKey === 'clean'
+          ? 'clean_room'
+          : selectedVariant?.metadata?.workflowStageKey === 'finish'
+          ? 'finishes'
+          : selectedVariant?.metadata?.workflowStageKey === 'style'
+          ? 'style'
+          : activeVisionWorkflowStageKey === 'clean'
+          ? 'clean_room'
+          : activeVisionWorkflowStageKey === 'finish'
+          ? 'finishes'
+          : 'style';
+      const response = await saveVariantToPhotos(selectedVariant.id, {
+        propertyId,
+        roomLabel: selectedMediaAsset.roomLabel,
+        generationStage,
+        generationLabel: selectedVariant.label,
+        listingCandidate: true,
+      });
+
+      await Promise.all([
+        refreshMediaAssets(selectedMediaAsset.id),
+        refreshDashboardSnapshot(),
+        refreshChecklist(),
+        refreshWorkflow(),
+      ]);
+
+      const savedAsset = response.asset || null;
+      setToast({
+        tone: 'success',
+        title: 'Saved to Photos',
+        message:
+          response.created === false
+            ? 'This AI-generated version was already in your photo library and is ready to review there.'
+            : 'This AI-generated version has been added to your photo library.',
+        actionLabel: savedAsset ? 'View in Photos' : '',
+        onAction: savedAsset
+          ? () => {
+              setSelectedMediaAssetId(savedAsset.id);
+              setActiveTab('photos');
+              setToast(null);
+            }
+          : null,
+        autoDismissMs: 9000,
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not save to Photos',
+        message: requestError.message,
+        autoDismissMs: 0,
+      });
+    } finally {
       setStatus('');
     }
   }
@@ -3224,7 +3543,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         <div className="section-header-tight">
           <div>
             <span className="label">Photos</span>
-            <h2>Shared property gallery</h2>
+            <h2>Saved photo library</h2>
           </div>
           <span className="section-header-meta">{mediaAssets.length} saved photo{mediaAssets.length === 1 ? '' : 's'}</span>
         </div>
@@ -3291,19 +3610,26 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           <div className="property-media-candidate-strip">
             <div className="property-media-candidate-header">
               <div>
-                <span className="label">Best listing photos</span>
+                <span className="label">Listing picks</span>
                 <h3>Seller-selected candidates</h3>
               </div>
               <span className="section-header-meta">{listingCandidateAssets.length} chosen</span>
             </div>
             <div className="property-media-candidate-list">
               {listingCandidateAssets.map((asset) => (
-                <button key={`candidate-${asset.id}`} type="button" className={asset.id === selectedMediaAsset?.id ? 'property-media-candidate-card active' : 'property-media-candidate-card'} onClick={() => setSelectedMediaAssetId(asset.id)}>
+                <button
+                  key={`candidate-${asset.id}`}
+                  type="button"
+                  className={asset.id === selectedMediaAsset?.id ? 'property-media-candidate-card active' : 'property-media-candidate-card'}
+                  onClick={() => setSelectedMediaAssetId(asset.id)}
+                >
                   <img src={asset.imageUrl} alt={asset.roomLabel || 'Listing candidate'} />
                   <div className="property-media-candidate-meta">
                     <strong>{asset.roomLabel}</strong>
-                    <span>{asset.listingNote || 'Ready for flyer and listing materials'}</span>
-                    {asset.selectedVariant ? <em className="property-media-candidate-tag">{asset.selectedVariant.label || 'Preferred vision variant ready'}</em> : null}
+                    <span>{asset.listingNote || getMediaAssetSummary(asset)}</span>
+                    <div className="tag-row compact">
+                      {getMediaAssetBadges(asset).map((badge) => <em key={`${asset.id}-${badge}`} className="property-media-candidate-tag">{badge}</em>)}
+                    </div>
                   </div>
                 </button>
               ))}
@@ -3311,16 +3637,62 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           </div>
         ) : null}
 
-        {mediaAssets.length ? (
-          <div className="property-media-rail property-photo-grid">
-            {mediaAssets.map((asset) => (
-              <button key={asset.id} type="button" className={asset.id === selectedMediaAsset?.id ? 'property-media-thumb active' : 'property-media-thumb'} onClick={() => setSelectedMediaAssetId(asset.id)}>
-                <img src={asset.imageUrl} alt={asset.roomLabel || 'Property photo'} />
-                <div>
-                  <strong>{asset.roomLabel}</strong>
-                  {asset.selectedVariant ? <small>{asset.selectedVariant.label || 'Vision preferred'}</small> : asset.listingCandidate ? <small>Seller pick</small> : null}
+        {mediaAssetGroups.length ? (
+          <div className="photo-room-stack">
+            {mediaAssetGroups.map((group) => (
+              <section key={`photo-room-${group.roomLabel}`} className="photo-room-section">
+                <div className="photo-room-header">
+                  <div>
+                    <span className="label">Room</span>
+                    <h3>{group.roomLabel}</h3>
+                  </div>
+                  <span className="section-header-meta">{group.assets.length} image{group.assets.length === 1 ? '' : 's'}</span>
                 </div>
-              </button>
+                <div className="photo-room-grid">
+                  {group.assets.map((asset) => (
+                    <article
+                      key={asset.id}
+                      className={asset.id === selectedMediaAsset?.id ? 'photo-library-card active' : 'photo-library-card'}
+                    >
+                      <button
+                        type="button"
+                        className="photo-library-card-preview"
+                        onClick={() => setSelectedMediaAssetId(asset.id)}
+                      >
+                        <img src={asset.imageUrl} alt={asset.roomLabel || 'Property photo'} />
+                      </button>
+                      <div className="photo-library-card-body">
+                        <div className="tag-row compact">
+                          {getMediaAssetBadges(asset).map((badge) => <span key={`${asset.id}-${badge}`}>{badge}</span>)}
+                        </div>
+                        <strong>{asset.roomLabel}</strong>
+                        <p>{getMediaAssetSummary(asset)}</p>
+                        <div className="photo-library-card-actions">
+                          <button type="button" className="button-secondary" onClick={() => handleOpenAssetInVision(asset)}>
+                            Open in Vision
+                          </button>
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            onClick={() => handleToggleListingCandidateForAsset(asset)}
+                            disabled={Boolean(status) || isArchivedProperty}
+                          >
+                            {asset.listingCandidate ? 'Remove listing pick' : 'Add to listing picks'}
+                          </button>
+                          <button
+                            type="button"
+                            className="button-secondary button-danger"
+                            onClick={() => setPendingDeleteAsset(asset)}
+                            disabled={Boolean(status) || isArchivedProperty}
+                          >
+                            {asset.assetType === 'generated' ? 'Delete saved version' : 'Delete original photo'}
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         ) : (
@@ -3331,19 +3703,45 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       <div className="content-card workspace-side-panel photo-detail-panel">
         <div className="section-header-tight">
           <div>
-            <span className="label">Selected photo</span>
+            <span className="label">Selected library photo</span>
             <h2>{selectedMediaAsset?.roomLabel || 'Choose a photo'}</h2>
           </div>
         </div>
         {selectedMediaAsset ? (
           <div className="workspace-tab-stack">
             <img src={selectedMediaAsset.imageUrl} alt={selectedMediaAsset.roomLabel || 'Selected property photo'} className="property-media-hero" />
+            <div className="tag-row">
+              {getMediaAssetBadges(selectedMediaAsset).map((badge) => <span key={`selected-asset-${badge}`}>{badge}</span>)}
+            </div>
             <p>
               Saved {new Date(selectedMediaAsset.createdAt).toLocaleDateString()}
-              {selectedMediaAsset.analysis?.roomGuess ? ` · AI sees ${selectedMediaAsset.analysis.roomGuess.toLowerCase()}` : ''}
+              {selectedMediaAsset.assetType === 'generated'
+                ? ' · Added from the Vision workspace'
+                : selectedMediaAsset.analysis?.roomGuess
+                ? ` · AI sees ${selectedMediaAsset.analysis.roomGuess.toLowerCase()}`
+                : ''}
             </p>
-            <p>{selectedMediaAsset.analysis?.summary || 'No AI photo summary is stored for this image yet.'}</p>
-            {typeof selectedMediaAsset.analysis?.overallQualityScore === 'number' ? (
+            <p>{getMediaAssetSummary(selectedMediaAsset)}</p>
+            {selectedMediaAsset.assetType === 'generated' ? (
+              <div className="workspace-inner-card brochure-control-card">
+                <span className="label">Generated image details</span>
+                <strong>{selectedMediaAsset.generationLabel || getMediaAssetPrimaryLabel(selectedMediaAsset)}</strong>
+                <p>
+                  This is a saved AI-generated photo asset. It lives in Photos like any other image and can be reopened in Vision for the next step.
+                </p>
+                <div className="tag-row">
+                  <span>{selectedMediaAsset.generationStage === 'clean_room'
+                    ? 'Clean room'
+                    : selectedMediaAsset.generationStage === 'finishes'
+                    ? 'Finish updates'
+                    : selectedMediaAsset.generationStage === 'style'
+                    ? 'Style concept'
+                    : 'Saved image version'}</span>
+                  {selectedMediaAsset.savedFromVision ? <span>Saved from Vision</span> : null}
+                </div>
+              </div>
+            ) : null}
+            {selectedMediaAsset.assetType !== 'generated' && typeof selectedMediaAsset.analysis?.overallQualityScore === 'number' ? (
               <div className="property-media-badges">
                 <span>Quality {selectedMediaAsset.analysis.overallQualityScore}/100</span>
                 {typeof selectedMediaAsset.analysis?.lightingScore === 'number' ? <span>Light {selectedMediaAsset.analysis.lightingScore}/100</span> : null}
@@ -3351,18 +3749,34 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 {selectedMediaAsset.analysis?.retakeRecommended ? <span>Retake suggested</span> : <span>Ready for listing review</span>}
               </div>
             ) : null}
+            {selectedMediaAsset.selectedVariant ? (
+              <div className="workspace-inner-card brochure-control-card">
+                <span className="label">Preferred vision result</span>
+                <strong>{selectedMediaAsset.selectedVariant.label || 'Vision preferred result'}</strong>
+                <p>
+                  This original photo still has a preferred Vision variant attached for brochure and report materials. Saved generated photos appear in this library separately as their own assets.
+                </p>
+              </div>
+            ) : null}
             <div className="workspace-action-column">
-              <button type="button" className={selectedMediaAsset.listingCandidate ? 'button-secondary' : 'button-primary'} onClick={handleToggleListingCandidate} disabled={Boolean(status) || isArchivedProperty}>
-                {selectedMediaAsset.listingCandidate ? 'Remove from listing picks' : 'Mark as listing candidate'}
+              <button
+                type="button"
+                className="button-primary"
+                onClick={() => handleOpenAssetInVision(selectedMediaAsset)}
+                disabled={Boolean(status) || isArchivedProperty}
+              >
+                Open in Vision
               </button>
-              <button type="button" className="button-secondary" onClick={() => { setActiveTab('vision'); handleGenerateVariant('enhance_listing_quality'); }} disabled={Boolean(status) || isArchivedProperty}>
-                Enhance
-              </button>
-              <button type="button" className="button-secondary" onClick={() => { setActiveTab('vision'); handleGenerateVariant('declutter_light'); }} disabled={Boolean(status) || isArchivedProperty}>
-                Declutter
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={handleToggleListingCandidate}
+                disabled={Boolean(status) || isArchivedProperty}
+              >
+                {selectedMediaAsset.listingCandidate ? 'Remove from listing picks' : 'Add to listing picks'}
               </button>
               <button type="button" className="button-secondary button-danger" onClick={() => setPendingDeleteAsset(selectedMediaAsset)} disabled={Boolean(status) || isArchivedProperty}>
-                Delete photo
+                {selectedMediaAsset.assetType === 'generated' ? 'Delete saved version' : 'Delete original photo'}
               </button>
             </div>
             <label className="property-media-note-field">
@@ -3388,10 +3802,30 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             <span className="label">Single-photo vision workspace</span>
             <h2>Before and after</h2>
           </div>
-          <span className="section-header-meta">{selectedVariant ? selectedVariant.label : 'No variant selected yet'}</span>
+          <span className="section-header-meta">
+            {selectedVariant ? `Current workflow draft: ${selectedVariant.label}` : 'No draft selected yet'}
+          </span>
         </div>
         {selectedMediaAsset ? (
           <div className="property-media-variant-panel">
+            <div className="vision-context-header">
+              <div className="vision-context-item">
+                <span className="label">Editing</span>
+                <strong>{selectedMediaAsset.roomLabel || 'Selected photo'}</strong>
+              </div>
+              <div className="vision-context-item">
+                <span className="label">Source</span>
+                <strong>{workflowSourceVariant ? workflowSourceVariant.label : 'Original photo'}</strong>
+              </div>
+              <div className="vision-context-item">
+                <span className="label">Current stage</span>
+                <strong>{activeVisionWorkflowStage.title}</strong>
+              </div>
+              <div className="vision-context-item">
+                <span className="label">Current result</span>
+                <strong>{selectedVariant?.label || 'No result yet'}</strong>
+              </div>
+            </div>
             {selectedVariant ? (
               <div className="property-media-slider-card">
                 <span className="label">Before / after slider</span>
@@ -3485,6 +3919,65 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </div>
             ) : null}
             {selectedVariant ? (
+              <div className="vision-result-actions-card">
+                <div className="workspace-tab-stack">
+                  <span className="label">Current result</span>
+                  <strong>{selectedVariant.label || 'Generated result'}</strong>
+                  <p>
+                    {getVariantSummary(selectedVariant)}
+                  </p>
+                  {savedAssetForSelectedVariant ? (
+                    <p className="workspace-control-note">
+                      This result is already saved in Photos as <strong>{savedAssetForSelectedVariant.roomLabel}</strong>.
+                    </p>
+                  ) : null}
+                </div>
+                <div className="vision-result-actions">
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={savedAssetForSelectedVariant ? () => {
+                      setSelectedMediaAssetId(savedAssetForSelectedVariant.id);
+                      setActiveTab('photos');
+                    } : handleSaveCurrentVisionResultToPhotos}
+                    disabled={Boolean(status) || isArchivedProperty}
+                  >
+                    {savedAssetForSelectedVariant ? 'View in Photos' : 'Save as Listing Photo'}
+                  </button>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => handleGenerateVariant(activeVisionPresetKey)}
+                    disabled={Boolean(status) || isArchivedProperty || !activeVisionPreset}
+                  >
+                    Try another version
+                  </button>
+                  {activeVisionWorkflowStage.key !== 'final' ? (
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={handlePromoteVariantToNextStage}
+                      disabled={Boolean(status) || isArchivedProperty}
+                    >
+                      {`Use this result for ${getVisionWorkflowStage(getNextVisionWorkflowStageKey(activeVisionWorkflowStageKey)).title.toLowerCase()}`}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => {
+                      setShowVisionHistory(true);
+                      requestAnimationFrame(() => {
+                        visionGalleryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      });
+                    }}
+                  >
+                    View previous attempts
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {selectedVariant ? (
               <p className="workspace-control-note">
                 Work on one photo at a time here. The current result stays in focus, and older drafts live in the workflow history drawer below.
               </p>
@@ -3503,7 +3996,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             <>
               <div className="workspace-tab-stack">
                 <div className="workspace-inner-card brochure-control-card vision-source-card">
-                  <span className="label">Selected photo</span>
+                  <span className="label">Editing photo</span>
                   <strong>{selectedMediaAsset.roomLabel || 'Property photo'}</strong>
                   <p>
                     Work on one source photo at a time. Other property photos stay hidden unless you open the photo picker.
@@ -3523,13 +4016,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     {selectedVariant ? (
                       <button
                         type="button"
-                        className="button-primary"
+                        className="button-secondary"
                         onClick={handlePromoteVariantToNextStage}
                         disabled={Boolean(status) || isArchivedProperty}
                       >
                         {activeVisionWorkflowStage.key === 'final'
                           ? 'Keep selected result for final review'
-                          : `Use selected result for ${getVisionWorkflowStage(getNextVisionWorkflowStageKey(activeVisionWorkflowStageKey)).title.toLowerCase()}`}
+                          : `Use this result for ${getVisionWorkflowStage(getNextVisionWorkflowStageKey(activeVisionWorkflowStageKey)).title.toLowerCase()}`}
                       </button>
                     ) : null}
                     {workflowSourceVariant ? (
@@ -3608,6 +4101,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     <span>{workflowSourceVariant ? 'Using selected draft as the source' : 'Using the original photo as the source'}</span>
                     {selectedVariant ? <span>Current result: {selectedVariant.label}</span> : null}
                   </div>
+                  {preferredVisionVariant && selectedVariant && preferredVisionVariant.id !== selectedVariant.id ? (
+                    <p className="workspace-control-note">
+                      Marketing-preferred output: <strong>{preferredVisionVariant.label}</strong>. The workspace is keeping <strong>{selectedVariant.label}</strong> in focus for this step so you can continue editing without losing the preferred pick.
+                    </p>
+                  ) : null}
+                  <p className="workspace-control-note">
+                    This stage currently has {stageScopedVisionVariants.length} saved image version{stageScopedVisionVariants.length === 1 ? '' : 's'} for this photo. Switch stages to see the attempts that belong to each step.
+                  </p>
                 </div>
               </div>
               {activeVisionWorkflowStage.key !== 'final' ? (
@@ -3627,12 +4128,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   <div className="workspace-action-column">
                     <button
                       type="button"
-                      className={visionGenerationState ? 'button-primary button-busy' : 'button-primary'}
+                      className={visionGenerationState ? 'button-secondary button-busy' : 'button-secondary'}
                       onClick={() => handleGenerateVariant(activeVisionPresetKey)}
                       disabled={Boolean(status) || isArchivedProperty || !activeVisionPreset}
                     >
                       {visionGenerationState
                         ? `Generating... ${visionGenerationElapsedSeconds}s`
+                        : selectedVariant
+                        ? 'Try another version'
                         : `Generate ${activeVisionPreset?.displayName || 'enhancement'}`}
                     </button>
                   </div>
@@ -3758,11 +4261,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       onClick={handlePruneVisionDraftHistory}
                       disabled={Boolean(status) || isArchivedProperty || !selectedVariant}
                     >
-                      Delete earlier drafts
+                      Delete earlier saved versions
                     </button>
                   </div>
                   <p className="workspace-control-note">
-                    This keeps the selected result and permanently removes the other saved drafts for this photo.
+                    This keeps the selected result and permanently removes the other saved image versions for this photo.
                   </p>
                 </div>
               )}
@@ -3773,8 +4276,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         </div>
 
         <div ref={visionGalleryRef} className="content-card workspace-side-panel vision-history-drawer">
-          <span className="label">Workflow history</span>
-          <h2>Saved drafts</h2>
+          <span className="label">Previous attempts</span>
+          <h2>Saved image versions</h2>
           {mediaVariants.length ? (
             <div className="workspace-tab-stack">
               {selectedVariant ? (
@@ -3796,7 +4299,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     <span>
                       {selectedVariant.isSelected
                         ? 'Currently selected for flyer and report materials'
-                        : 'Preview this version, then select it for materials if you want to use it'}
+                        : preferredVisionVariant
+                          ? `Current workflow draft. Marketing materials still point to ${preferredVisionVariant.label}.`
+                          : 'Current workflow draft. Select it for materials only if you want this version to become the preferred marketing output.'}
                     </span>
                     {selectedVariant.metadata?.sourceLabel ? (
                       <span>Built from {selectedVariant.metadata.sourceLabel}</span>
@@ -3813,7 +4318,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 </div>
               ) : null}
               <p className="workspace-control-note">
-                History stays collapsed by default so the workspace stays focused on this one photo and the current step.
+                Older generated versions are kept here for reference. The drawer stays collapsed by default so the workspace stays focused on the current result.
               </p>
               <div className="workspace-action-column">
                 <button
@@ -3822,20 +4327,20 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   onClick={() => setShowVisionHistory((current) => !current)}
                 >
                   {showVisionHistory
-                    ? 'Hide workflow history'
-                    : `Show workflow history (${mediaVariants.length} saved draft${mediaVariants.length === 1 ? '' : 's'})`}
+                    ? 'Hide previous attempts'
+                    : `View processing history (${stageScopedVisionVariants.length} ${activeVisionWorkflowStage.title.toLowerCase()} attempt${stageScopedVisionVariants.length === 1 ? '' : 's'})`}
                 </button>
-                {mediaVariants.length > visibleVisionVariants.length ? (
+                {stageScopedVisionVariants.length > visibleVisionVariants.length ? (
                   <button
                     type="button"
                     className="button-secondary"
                     onClick={() => setShowMoreVisionVariants((current) => !current)}
                   >
                     {showMoreVisionVariants
-                      ? 'Show top-ranked variants only'
+                      ? 'Show fewer attempts'
                       : hiddenVisionVariantCount
-                        ? `Show more variants (${hiddenVisionVariantCount} lower-confidence hidden)`
-                        : 'Show more variants'}
+                        ? `Show more attempts (${hiddenVisionVariantCount} lower-confidence hidden in this stage)`
+                        : 'Show more attempts'}
                   </button>
                 ) : null}
               </div>
@@ -4942,6 +5447,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         title={toast?.title}
         message={toast?.message}
         autoDismissMs={toast?.autoDismissMs}
+        actionLabel={toast?.actionLabel}
+        onAction={toast?.onAction}
         onClose={() => setToast(null)}
       />
       {pendingDeleteAsset ? (

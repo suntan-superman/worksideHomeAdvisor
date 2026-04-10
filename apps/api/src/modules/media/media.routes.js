@@ -21,6 +21,7 @@ import {
   getMediaAssetById,
   listMediaAssets,
   pruneMediaVariantDrafts,
+  saveMediaVariantToPhotos,
   updateMediaAsset,
 } from './media.service.js';
 import { getVisionPresetKeys } from './vision-presets.js';
@@ -103,6 +104,14 @@ const photoEnhanceSchema = z.object({
 
 const pruneVisionDraftsSchema = z.object({
   keepVariantId: z.string().min(1),
+});
+
+const saveVariantToPhotosSchema = z.object({
+  propertyId: z.string().min(1).optional(),
+  roomLabel: z.string().min(1).max(120).optional(),
+  generationStage: z.enum(['clean_room', 'finishes', 'style']).optional(),
+  generationLabel: z.string().max(160).optional(),
+  listingCandidate: z.boolean().optional(),
 });
 
 export async function mediaRoutes(fastify) {
@@ -302,6 +311,21 @@ export async function mediaRoutes(fastify) {
       return reply.send(result);
     } catch (error) {
       const statusCode = error.message === 'Media asset not found.' ? 404 : 400;
+      return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/media/variants/:variantId/save-to-photos', async (request, reply) => {
+    try {
+      const { variantId } = variantParamsSchema.parse(request.params);
+      const payload = saveVariantToPhotosSchema.parse(request.body ?? {});
+      const result = await saveMediaVariantToPhotos(variantId, payload);
+      return reply.code(result.created ? 201 : 200).send(result);
+    } catch (error) {
+      const statusCode =
+        error.message === 'Media variant not found.' || error.message === 'Source photo for this variant was not found.'
+          ? 404
+          : 400;
       return reply.code(statusCode).send({ message: error.message });
     }
   });
