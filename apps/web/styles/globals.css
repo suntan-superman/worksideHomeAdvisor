@@ -1806,13 +1806,6 @@ select {
   flex-wrap: wrap;
 }
 
-.photo-panel-summary {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
 .property-media-rail {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
@@ -3436,11 +3429,6 @@ select {
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
 }
 
-.photo-detail-panel {
-  position: sticky;
-  top: 252px;
-}
-
 .workspace-action-column {
   display: grid;
   gap: 10px;
@@ -3658,8 +3646,7 @@ select {
   }
 
   .workspace-quick-rail,
-  .workspace-workflow-nav,
-  .photo-detail-panel {
+  .workspace-workflow-nav {
     position: static;
   }
 

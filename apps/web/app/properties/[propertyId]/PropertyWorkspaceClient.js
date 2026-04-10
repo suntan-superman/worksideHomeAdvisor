@@ -1017,7 +1017,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   );
   const [selectedListPriceDraft, setSelectedListPriceDraft] = useState('');
   const [selectedListPriceSourceDraft, setSelectedListPriceSourceDraft] = useState('recommended_mid');
-  const [listingNoteDraft, setListingNoteDraft] = useState('');
   const [photoImportSource, setPhotoImportSource] = useState('web_upload');
   const [photoImportRoomLabel, setPhotoImportRoomLabel] = useState('Living room');
   const [photoImportNotes, setPhotoImportNotes] = useState('');
@@ -1938,10 +1937,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }, [activeTab, activeProviderTaskKey, pendingChecklistFocusTarget]);
 
   useEffect(() => {
-    setListingNoteDraft(selectedMediaAsset?.listingNote || '');
-  }, [selectedMediaAsset?.id, selectedMediaAsset?.listingNote]);
-
-  useEffect(() => {
     if (property?.selectedListPrice) {
       setSelectedListPriceDraft(String(property.selectedListPrice));
       setSelectedListPriceSourceDraft(property.selectedListPriceSource || 'custom');
@@ -2509,16 +2504,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
   }
 
-  async function handleToggleListingCandidate() {
-    if (blockArchivedMutation()) {
-      return;
-    }
-    if (!selectedMediaAsset) {
-      return;
-    }
-    await handleToggleListingCandidateForAsset(selectedMediaAsset);
-  }
-
   async function handleToggleListingCandidateForAsset(asset, explicitValue) {
     if (blockArchivedMutation()) {
       return;
@@ -2628,7 +2613,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               <button
                 type="button"
                 className="photo-library-card-preview"
-                onClick={() => setSelectedMediaAssetId(asset.id)}
+                onClick={() => {
+                  setSelectedMediaAssetId(asset.id);
+                  setActivePhotoDetailsAsset(asset);
+                }}
               >
                 <img src={asset.imageUrl} alt={asset.roomLabel || 'Property photo'} />
               </button>
@@ -2651,14 +2639,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   <button
                     type="button"
                     className="button-secondary"
-                    onClick={() => setSelectedMediaAssetId(asset.id)}
-                  >
-                    {asset.id === selectedMediaAsset?.id ? 'Selected' : 'Select photo'}
-                  </button>
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={() => setActivePhotoDetailsAsset(asset)}
+                    onClick={() => {
+                      setSelectedMediaAssetId(asset.id);
+                      setActivePhotoDetailsAsset(asset);
+                    }}
                   >
                     Details
                   </button>
@@ -2701,26 +2685,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       }
       return [...current, sectionId];
     });
-  }
-
-  async function handleSaveListingNote() {
-    if (blockArchivedMutation()) {
-      return;
-    }
-    if (!selectedMediaAsset) {
-      return;
-    }
-    setStatus('Saving photo note...');
-    setToast(null);
-    try {
-      await updateMediaAsset(selectedMediaAsset.id, { listingNote: listingNoteDraft });
-      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshWorkflow()]);
-      setToast({ tone: 'success', title: 'Photo note saved', message: 'Your note will stay attached to this photo for listing review.' });
-    } catch (requestError) {
-      setToast({ tone: 'error', title: 'Could not save note', message: requestError.message });
-    } finally {
-      setStatus('');
-    }
   }
 
   async function handleDeleteSelectedPhoto() {
@@ -3853,8 +3817,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   );
 
   const renderPhotosTab = () => (
-    <div className="workspace-two-column workspace-photos-grid">
-      <div className="workspace-tab-stack">
+    <div className="workspace-tab-stack">
         {renderCollapsibleSection({
           sectionKey: 'photos_import',
           label: 'Photos',
@@ -3925,76 +3888,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         <section className="photo-library-workspace-card">
           {photoCategoryGroups.map((group) => renderPhotoLibrarySection(group))}
         </section>
-      </div>
-
-      <div className="content-card workspace-side-panel photo-detail-panel">
-        <div className="section-header-tight">
-          <div>
-            <span className="label">Selected photo</span>
-            <h2>{selectedMediaAsset?.roomLabel || 'Choose a photo'}</h2>
-          </div>
-          <span className="section-header-meta">
-            {selectedMediaAssetPhotoCategory?.label || 'No room selected'}
-          </span>
-        </div>
-        {selectedMediaAsset ? (
-          <div className="workspace-tab-stack">
-            <img src={selectedMediaAsset.imageUrl} alt={selectedMediaAsset.roomLabel || 'Selected property photo'} className="property-media-hero" />
-            <div className="photo-card-badge-row photo-card-badge-row-large">
-              <span className="photo-card-status-pill">{getMediaAssetPrimaryLabel(selectedMediaAsset)}</span>
-              {selectedMediaAsset.savedFromVision ? <span className="photo-card-status-pill">Saved from Vision</span> : null}
-              <button
-                type="button"
-                className={selectedMediaAsset.listingCandidate ? 'photo-card-action-pill active' : 'photo-card-action-pill'}
-                onClick={handleToggleListingCandidate}
-                disabled={Boolean(status) || isArchivedProperty}
-              >
-                {selectedMediaAsset.listingCandidate ? 'Seller Pick' : 'Add Seller Pick'}
-              </button>
-            </div>
-            <p>
-              Saved {new Date(selectedMediaAsset.createdAt).toLocaleDateString()}
-              {selectedMediaAsset.assetType === 'generated'
-                ? ' · Added from the Vision workspace'
-                : selectedMediaAsset.analysis?.roomGuess
-                ? ` · AI sees ${selectedMediaAsset.analysis.roomGuess.toLowerCase()}`
-                : ''}
-            </p>
-            <p className="workspace-control-note photo-panel-summary">
-              {getMediaAssetSummary(selectedMediaAsset)}
-            </p>
-            <div className="workspace-action-column">
-              <button
-                type="button"
-                className="button-primary"
-                onClick={() => handleOpenAssetInVision(selectedMediaAsset)}
-                disabled={Boolean(status) || isArchivedProperty}
-              >
-                Open Vision workspace
-              </button>
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={() => setActivePhotoDetailsAsset(selectedMediaAsset)}
-              >
-                View details
-              </button>
-              <button type="button" className="button-secondary button-danger" onClick={() => setPendingDeleteAsset(selectedMediaAsset)} disabled={Boolean(status) || isArchivedProperty}>
-                {selectedMediaAsset.assetType === 'generated' ? 'Delete saved version' : 'Delete original photo'}
-              </button>
-            </div>
-            <label className="property-media-note-field">
-              Listing note
-              <textarea value={listingNoteDraft} onChange={(event) => setListingNoteDraft(event.target.value)} maxLength={280} placeholder="Why this photo is strong, what it should lead with, or where it belongs in the story." />
-            </label>
-            <button type="button" className="button-secondary" onClick={handleSaveListingNote} disabled={Boolean(status) || isArchivedProperty}>
-              Save photo note
-            </button>
-          </div>
-        ) : (
-          <p>Select a photo to review details and take action.</p>
-        )}
-      </div>
     </div>
   );
 
