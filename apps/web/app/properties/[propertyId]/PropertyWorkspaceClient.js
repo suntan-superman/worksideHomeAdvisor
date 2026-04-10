@@ -185,6 +185,26 @@ const VISION_COMPLETION_SOUND_MIN_SECONDS = 15;
 const VISION_JOB_RECOVERY_LOOKBACK_MS = 90 * 1000;
 const VISION_JOB_RECOVERY_POLL_INTERVAL_MS = 4000;
 const VISION_JOB_RECOVERY_TIMEOUT_MS = 2 * 60 * 1000;
+const PHOTO_LIBRARY_CATEGORY_DEFINITIONS = [
+  { key: 'living_room', label: 'Living Room' },
+  { key: 'kitchen', label: 'Kitchen' },
+  { key: 'primary_bedroom', label: 'Primary Bedroom' },
+  { key: 'bathroom', label: 'Bathroom' },
+  { key: 'exterior', label: 'Exterior' },
+  { key: 'other', label: 'Other' },
+];
+const DEFAULT_WORKSPACE_SECTION_STATE = {
+  photos_import: true,
+  brochure_controls: true,
+  brochure_preview: true,
+  brochure_social: false,
+  report_builder: true,
+  report_preview: true,
+  checklist_tasks: true,
+  checklist_summary: true,
+  checklist_custom: false,
+  checklist_providers: false,
+};
 
 function getVisionWorkflowStage(stageKey) {
   return (
@@ -471,6 +491,83 @@ function groupMediaAssetsByRoom(assets = []) {
       }),
     }))
     .sort((left, right) => left.roomLabel.localeCompare(right.roomLabel));
+}
+
+function resolvePhotoLibraryCategoryKey(roomLabel = '') {
+  const normalizedLabel = String(roomLabel || '').trim().toLowerCase();
+  if (!normalizedLabel) {
+    return 'other';
+  }
+
+  if (
+    normalizedLabel.includes('living') ||
+    normalizedLabel.includes('family') ||
+    normalizedLabel.includes('great room') ||
+    normalizedLabel.includes('den')
+  ) {
+    return 'living_room';
+  }
+  if (normalizedLabel.includes('kitchen') || normalizedLabel.includes('pantry')) {
+    return 'kitchen';
+  }
+  if (
+    normalizedLabel.includes('primary bedroom') ||
+    normalizedLabel.includes('master bedroom') ||
+    normalizedLabel.includes('owner bedroom')
+  ) {
+    return 'primary_bedroom';
+  }
+  if (normalizedLabel.includes('bath')) {
+    return 'bathroom';
+  }
+  if (
+    normalizedLabel.includes('exterior') ||
+    normalizedLabel.includes('yard') ||
+    normalizedLabel.includes('patio') ||
+    normalizedLabel.includes('backyard') ||
+    normalizedLabel.includes('front yard') ||
+    normalizedLabel.includes('curb')
+  ) {
+    return 'exterior';
+  }
+
+  return 'other';
+}
+
+function buildPhotoCategoryGroups(assets = []) {
+  const categoryMap = new Map(
+    PHOTO_LIBRARY_CATEGORY_DEFINITIONS.map((definition) => [definition.key, []]),
+  );
+
+  for (const asset of assets) {
+    const categoryKey = resolvePhotoLibraryCategoryKey(asset?.roomLabel);
+    categoryMap.get(categoryKey)?.push(asset);
+  }
+
+  return PHOTO_LIBRARY_CATEGORY_DEFINITIONS.map((definition) => ({
+    ...definition,
+    assets: [...(categoryMap.get(definition.key) || [])].sort(
+      (left, right) => getMediaAssetCreatedAtTimestamp(right) - getMediaAssetCreatedAtTimestamp(left),
+    ),
+  })).filter((group) => group.assets.length);
+}
+
+function readWorkspaceSectionState(storageKey) {
+  if (typeof window === 'undefined' || !storageKey) {
+    return {};
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(storageKey);
+    if (!rawValue) {
+      return {};
+    }
+
+    const parsed = JSON.parse(rawValue);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 function formatFreeformPlanHighlights(normalizedPlan) {
@@ -945,6 +1042,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [guidedWorkflow, setGuidedWorkflow] = useState(null);
   const [workflowPreviewStepKey, setWorkflowPreviewStepKey] = useState('');
   const [checklistSummaryMode, setChecklistSummaryMode] = useState('open');
+  const [activePhotoCategoryKey, setActivePhotoCategoryKey] = useState('');
+  const [workspaceSectionState, setWorkspaceSectionState] = useState({});
   const [pendingWorkspaceScrollTarget, setPendingWorkspaceScrollTarget] = useState('');
   const [pendingChecklistFocusTarget, setPendingChecklistFocusTarget] = useState('');
   const [status, setStatus] = useState('Loading property workspace...');
@@ -955,6 +1054,57 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     const session = getStoredSession();
     return session?.user?.role === 'agent' ? 'agent' : 'seller';
   }, []);
+  const viewerIdentityKey = useMemo(() => {
+    const session = getStoredSession();
+    return (
+      session?.user?.id ||
+      session?.user?.email ||
+      session?.user?.phone ||
+      viewerRole
+    );
+  }, [viewerRole]);
+  const workspaceSectionStorageKey = useMemo(
+    () => `workside.workspace.sections.${viewerIdentityKey}.${propertyId}`,
+    [propertyId, viewerIdentityKey],
+  );
+
+  useEffect(() => {
+    setWorkspaceSectionState(readWorkspaceSectionState(workspaceSectionStorageKey));
+  }, [workspaceSectionStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !workspaceSectionStorageKey) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        workspaceSectionStorageKey,
+        JSON.stringify(workspaceSectionState),
+      );
+    } catch {}
+  }, [workspaceSectionState, workspaceSectionStorageKey]);
+
+  function isWorkspaceSectionOpen(sectionKey, defaultOpen = true) {
+    if (Object.prototype.hasOwnProperty.call(workspaceSectionState, sectionKey)) {
+      return Boolean(workspaceSectionState[sectionKey]);
+    }
+    return defaultOpen;
+  }
+
+  function setWorkspaceSectionOpen(sectionKey, nextValue, defaultOpen = true) {
+    setWorkspaceSectionState((current) => ({
+      ...current,
+      [sectionKey]:
+        typeof nextValue === 'function'
+          ? nextValue(
+              Object.prototype.hasOwnProperty.call(current, sectionKey)
+                ? Boolean(current[sectionKey])
+                : defaultOpen,
+            )
+          : Boolean(nextValue),
+    }));
+  }
 
   useEffect(() => {
     if (!visionGenerationState?.startedAt) {
@@ -1235,6 +1385,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     () => mediaAssets.filter((asset) => asset.listingCandidate),
     [mediaAssets],
   );
+  const photoCategoryGroups = useMemo(() => buildPhotoCategoryGroups(mediaAssets), [mediaAssets]);
+  const activePhotoCategory = useMemo(
+    () =>
+      photoCategoryGroups.find((group) => group.key === activePhotoCategoryKey) ||
+      photoCategoryGroups[0] ||
+      null,
+    [activePhotoCategoryKey, photoCategoryGroups],
+  );
   const mediaAssetGroups = useMemo(() => groupMediaAssetsByRoom(mediaAssets), [mediaAssets]);
   const brochurePhotoPool = useMemo(
     () => (listingCandidateAssets.length ? listingCandidateAssets : mediaAssets),
@@ -1346,6 +1504,17 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     () => mediaVariants.find((variant) => !variant?.metadata?.review?.shouldHideByDefault) || mediaVariants[0] || null,
     [mediaVariants],
   );
+
+  useEffect(() => {
+    if (selectedMediaAsset?.roomLabel) {
+      setActivePhotoCategoryKey(resolvePhotoLibraryCategoryKey(selectedMediaAsset.roomLabel));
+      return;
+    }
+
+    if (!activePhotoCategoryKey && photoCategoryGroups[0]?.key) {
+      setActivePhotoCategoryKey(photoCategoryGroups[0].key);
+    }
+  }, [activePhotoCategoryKey, photoCategoryGroups, selectedMediaAsset?.roomLabel]);
   const selectedVariantFreeformHighlights = useMemo(
     () => formatFreeformPlanHighlights(selectedVariant?.metadata?.normalizedPlan),
     [selectedVariant?.metadata?.normalizedPlan],
@@ -2395,6 +2564,57 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setActiveVisionPresetKey(getDefaultVisionPresetKeyForStage(resolvedStageKey));
     setShowVisionPhotoPicker(false);
     setShowVisionHistory(false);
+  }
+
+  function handleSelectPhotoCategory(categoryKey) {
+    setActivePhotoCategoryKey(categoryKey);
+    const nextCategory = photoCategoryGroups.find((group) => group.key === categoryKey);
+    if (!nextCategory?.assets?.length) {
+      return;
+    }
+
+    const currentSelectedInCategory = nextCategory.assets.some(
+      (asset) => asset.id === selectedMediaAsset?.id,
+    );
+    if (!currentSelectedInCategory) {
+      setSelectedMediaAssetId(nextCategory.assets[0].id);
+    }
+  }
+
+  function renderCollapsibleSection({
+    sectionKey,
+    label,
+    title,
+    meta = '',
+    defaultOpen = true,
+    className = 'content-card',
+    children,
+  }) {
+    const isOpen = isWorkspaceSectionOpen(sectionKey, defaultOpen);
+    return (
+      <section
+        className={`${className} workspace-collapsible-section${isOpen ? ' open' : ' collapsed'}`}
+      >
+        <button
+          type="button"
+          className="workspace-collapsible-section-toggle"
+          onClick={() =>
+            setWorkspaceSectionOpen(sectionKey, (current) => !current, defaultOpen)
+          }
+          aria-expanded={isOpen}
+        >
+          <div>
+            {label ? <span className="label">{label}</span> : null}
+            <h2>{title}</h2>
+          </div>
+          <div className="workspace-collapsible-section-meta">
+            {meta ? <span>{meta}</span> : null}
+            <strong>{isOpen ? 'Hide' : 'Show'}</strong>
+          </div>
+        </button>
+        {isOpen ? <div className="workspace-collapsible-section-body">{children}</div> : null}
+      </section>
+    );
   }
 
   function toggleFlyerPhotoSelection(assetId) {
@@ -3576,206 +3796,167 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   const renderPhotosTab = () => (
     <div className="workspace-two-column workspace-photos-grid">
-      <div className="content-card">
-        <div className="section-header-tight">
-          <div>
-            <span className="label">Photos</span>
-            <h2>Saved photo library</h2>
-          </div>
-          <span className="section-header-meta">{mediaAssets.length} saved photo{mediaAssets.length === 1 ? '' : 's'}</span>
-        </div>
-
-        <div
-          className="workspace-inner-card brochure-control-card"
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-            handleImportPhotoFiles(event.dataTransfer?.files);
-          }}
-        >
-          <span className="label">Photo import manager</span>
-          <div className="brochure-control-grid brochure-control-grid-form">
-            <label className="workspace-control-field">
-              <span>Import source</span>
-              <select
-                className="select-input"
-                value={photoImportSource}
-                onChange={(event) => setPhotoImportSource(event.target.value)}
-              >
-                {PHOTO_IMPORT_SOURCE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="workspace-control-field">
-              <span>Room label</span>
-              <input
-                type="text"
-                value={photoImportRoomLabel}
-                onChange={(event) => setPhotoImportRoomLabel(event.target.value)}
-                placeholder="Kitchen"
-              />
-            </label>
-            <label className="workspace-control-field workspace-control-field-full">
-              <span>Notes</span>
-              <textarea
-                value={photoImportNotes}
-                onChange={(event) => setPhotoImportNotes(event.target.value)}
-                placeholder="Add optional context for imported third-party or web-uploaded photos."
-                maxLength={500}
-              />
-            </label>
-          </div>
-          <label className="button-secondary inline-button" style={{ display: 'inline-flex', cursor: 'pointer' }}>
-            Upload or drop photos
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              style={{ display: 'none' }}
-              onChange={(event) => handleImportPhotoFiles(event.target.files)}
-            />
-          </label>
-          <p className="workspace-control-note">
-            Drag-and-drop works here too. Imports keep their source label so mobile capture, web upload, and third-party assets stay distinguishable.
-          </p>
-        </div>
-
-        {listingCandidateAssets.length ? (
-          <div className="property-media-candidate-strip">
-            <div className="property-media-candidate-header">
-              <div>
-                <span className="label">Listing picks</span>
-                <h3>Seller-selected candidates</h3>
-              </div>
-              <span className="section-header-meta">{listingCandidateAssets.length} chosen</span>
-            </div>
-            <div className="property-media-candidate-list">
-              {listingCandidateAssets.map((asset) => (
-                <article
-                  key={`candidate-${asset.id}`}
-                  className={asset.id === selectedMediaAsset?.id ? 'property-media-candidate-card active' : 'property-media-candidate-card'}
-                >
-                  <button
-                    type="button"
-                    className="property-media-candidate-preview"
-                    onClick={() => setSelectedMediaAssetId(asset.id)}
+      <div className="workspace-tab-stack">
+        {renderCollapsibleSection({
+          sectionKey: 'photos_import',
+          label: 'Photos',
+          title: 'Import photos',
+          meta: `${mediaAssets.length} saved`,
+          defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.photos_import,
+          children: (
+            <div
+              className="workspace-inner-card brochure-control-card"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                handleImportPhotoFiles(event.dataTransfer?.files);
+              }}
+            >
+              <div className="brochure-control-grid brochure-control-grid-form">
+                <label className="workspace-control-field">
+                  <span>Import source</span>
+                  <select
+                    className="select-input"
+                    value={photoImportSource}
+                    onChange={(event) => setPhotoImportSource(event.target.value)}
                   >
-                    <img src={asset.imageUrl} alt={asset.roomLabel || 'Listing candidate'} />
-                  </button>
-                  <div className="property-media-candidate-meta">
-                    <div className="photo-card-badge-row">
-                      <span className="photo-card-status-pill">{getMediaAssetPrimaryLabel(asset)}</span>
-                      {asset.savedFromVision ? <span className="photo-card-status-pill">Saved from Vision</span> : null}
-                      <button
-                        type="button"
-                        className={asset.listingCandidate ? 'photo-card-action-pill active' : 'photo-card-action-pill'}
-                        onClick={() => handleToggleListingCandidateForAsset(asset)}
-                        disabled={Boolean(status) || isArchivedProperty}
-                      >
-                        {asset.listingCandidate ? 'Seller Pick' : 'Add Seller Pick'}
-                      </button>
-                    </div>
-                    <strong>{asset.roomLabel}</strong>
-                    <span className="photo-card-summary">
-                      {asset.listingNote || getMediaAssetSummary(asset)}
-                    </span>
-                    <div className="photo-library-card-actions">
-                      <button type="button" className="button-secondary" onClick={() => handleOpenAssetInVision(asset)}>
-                        Open in Vision
-                      </button>
-                      <button type="button" className="button-secondary" onClick={() => setActivePhotoDetailsAsset(asset)}>
-                        Details
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              ))}
+                    {PHOTO_IMPORT_SOURCE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="workspace-control-field">
+                  <span>Room label</span>
+                  <input
+                    type="text"
+                    value={photoImportRoomLabel}
+                    onChange={(event) => setPhotoImportRoomLabel(event.target.value)}
+                    placeholder="Kitchen"
+                  />
+                </label>
+                <label className="workspace-control-field workspace-control-field-full">
+                  <span>Notes</span>
+                  <textarea
+                    value={photoImportNotes}
+                    onChange={(event) => setPhotoImportNotes(event.target.value)}
+                    placeholder="Add optional context for imported third-party or web-uploaded photos."
+                    maxLength={500}
+                  />
+                </label>
+              </div>
+              <label className="button-secondary inline-button" style={{ display: 'inline-flex', cursor: 'pointer' }}>
+                Upload or drop photos
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={(event) => handleImportPhotoFiles(event.target.files)}
+                />
+              </label>
+              <p className="workspace-control-note">
+                Drag-and-drop works here too. Import first, then choose one room photo and continue into Vision.
+              </p>
             </div>
-          </div>
-        ) : null}
+          ),
+        })}
 
-        {mediaAssetGroups.length ? (
-          <div className="photo-room-stack">
-            {mediaAssetGroups.map((group) => (
-              <section key={`photo-room-${group.roomLabel}`} className="photo-room-section">
-                <div className="photo-room-header">
-                  <div>
-                    <span className="label">Room</span>
-                    <h3>{group.roomLabel}</h3>
-                  </div>
-                  <span className="section-header-meta">{group.assets.length} image{group.assets.length === 1 ? '' : 's'}</span>
-                </div>
-                <div className="photo-room-grid">
-                  {group.assets.map((asset) => (
-                    <article
-                      key={asset.id}
-                      className={asset.id === selectedMediaAsset?.id ? 'photo-library-card active' : 'photo-library-card'}
-                    >
-                      <button
-                        type="button"
-                        className="photo-library-card-preview"
-                        onClick={() => setSelectedMediaAssetId(asset.id)}
-                      >
-                        <img src={asset.imageUrl} alt={asset.roomLabel || 'Property photo'} />
-                      </button>
-                      <div className="photo-library-card-body">
-                        <div className="photo-card-badge-row">
-                          <span className="photo-card-status-pill">{getMediaAssetPrimaryLabel(asset)}</span>
-                          {asset.savedFromVision ? <span className="photo-card-status-pill">Saved from Vision</span> : null}
-                          <button
-                            type="button"
-                            className={asset.listingCandidate ? 'photo-card-action-pill active' : 'photo-card-action-pill'}
-                            onClick={() => handleToggleListingCandidateForAsset(asset)}
-                            disabled={Boolean(status) || isArchivedProperty}
-                          >
-                            {asset.listingCandidate ? 'Seller Pick' : 'Add Seller Pick'}
-                          </button>
-                        </div>
-                        <strong>{asset.roomLabel}</strong>
-                        <p className="photo-card-summary">{getMediaAssetSummary(asset)}</p>
-                        <div className="photo-library-card-actions">
-                          <button type="button" className="button-secondary" onClick={() => handleOpenAssetInVision(asset)}>
-                            Open in Vision
-                          </button>
-                          <button type="button" className="button-secondary" onClick={() => setActivePhotoDetailsAsset(asset)}>
-                            Details
-                          </button>
-                          <button
-                            type="button"
-                            className="button-secondary"
-                            onClick={() => handleToggleListingCandidateForAsset(asset)}
-                            disabled={Boolean(status) || isArchivedProperty}
-                          >
-                            {asset.listingCandidate ? 'Remove listing pick' : 'Add to listing picks'}
-                          </button>
-                          <button
-                            type="button"
-                            className="button-secondary button-danger"
-                            onClick={() => setPendingDeleteAsset(asset)}
-                            disabled={Boolean(status) || isArchivedProperty}
-                          >
-                            {asset.assetType === 'generated' ? 'Delete saved version' : 'Delete original photo'}
-                          </button>
-                        </div>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            ))}
+        <section className="content-card photo-library-workspace-card">
+          <div className="section-header-tight">
+            <div>
+              <span className="label">Photo categories</span>
+              <h2>Choose a room photo</h2>
+            </div>
+            <span className="section-header-meta">
+              {activePhotoCategory ? `${activePhotoCategory.assets.length} in ${activePhotoCategory.label}` : 'No photos yet'}
+            </span>
           </div>
-        ) : (
-          <p>No photos have been saved for this property yet. Capture them in the mobile app first.</p>
-        )}
+          <p className="workspace-control-note">
+            Start here. Pick a room category, choose the best source photo for that room, then open the Vision workspace and work only on that photo and its saved versions.
+          </p>
+
+          {photoCategoryGroups.length ? (
+            <div className="workspace-tab-stack">
+              <div className="photo-category-tab-row">
+                {photoCategoryGroups.map((group) => (
+                  <button
+                    key={`photo-category-${group.key}`}
+                    type="button"
+                    className={group.key === activePhotoCategory?.key ? 'photo-category-tab active' : 'photo-category-tab'}
+                    onClick={() => handleSelectPhotoCategory(group.key)}
+                  >
+                    <strong>{group.label}</strong>
+                    <span>{group.assets.length}</span>
+                  </button>
+                ))}
+              </div>
+
+              {activePhotoCategory ? (
+                <div className="photo-room-section">
+                  <div className="photo-room-header">
+                    <div>
+                      <span className="label">Current category</span>
+                      <h3>{activePhotoCategory.label}</h3>
+                    </div>
+                    <span className="section-header-meta">
+                      {activePhotoCategory.assets.length} photo{activePhotoCategory.assets.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                  <div className="photo-room-grid">
+                    {activePhotoCategory.assets.map((asset) => (
+                      <article
+                        key={asset.id}
+                        className={asset.id === selectedMediaAsset?.id ? 'photo-library-card active' : 'photo-library-card'}
+                      >
+                        <button
+                          type="button"
+                          className="photo-library-card-preview"
+                          onClick={() => setSelectedMediaAssetId(asset.id)}
+                        >
+                          <img src={asset.imageUrl} alt={asset.roomLabel || 'Property photo'} />
+                        </button>
+                        <div className="photo-library-card-body">
+                          <div className="photo-card-badge-row">
+                            <span className="photo-card-status-pill">{getMediaAssetPrimaryLabel(asset)}</span>
+                            {asset.savedFromVision ? <span className="photo-card-status-pill">Saved from Vision</span> : null}
+                            <button
+                              type="button"
+                              className={asset.listingCandidate ? 'photo-card-action-pill active' : 'photo-card-action-pill'}
+                              onClick={() => handleToggleListingCandidateForAsset(asset)}
+                              disabled={Boolean(status) || isArchivedProperty}
+                            >
+                              {asset.listingCandidate ? 'Seller Pick' : 'Add Seller Pick'}
+                            </button>
+                          </div>
+                          <strong>{asset.roomLabel}</strong>
+                          <p className="photo-card-summary">{getMediaAssetSummary(asset)}</p>
+                          <div className="photo-library-card-actions">
+                            <button type="button" className="button-secondary" onClick={() => handleOpenAssetInVision(asset)}>
+                              Open in Vision
+                            </button>
+                            <button type="button" className="button-secondary" onClick={() => setActivePhotoDetailsAsset(asset)}>
+                              Details
+                            </button>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p>No photos have been saved for this property yet. Capture them in mobile or upload them here first.</p>
+          )}
+        </section>
       </div>
 
       <div className="content-card workspace-side-panel photo-detail-panel">
         <div className="section-header-tight">
           <div>
-            <span className="label">Selected library photo</span>
+            <span className="label">Selected photo</span>
             <h2>{selectedMediaAsset?.roomLabel || 'Choose a photo'}</h2>
           </div>
         </div>
@@ -3812,7 +3993,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 onClick={() => handleOpenAssetInVision(selectedMediaAsset)}
                 disabled={Boolean(status) || isArchivedProperty}
               >
-                Open in Vision
+                Open Vision workspace
               </button>
               <button
                 type="button"
@@ -3820,14 +4001,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 onClick={() => setActivePhotoDetailsAsset(selectedMediaAsset)}
               >
                 View details
-              </button>
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={handleToggleListingCandidate}
-                disabled={Boolean(status) || isArchivedProperty}
-              >
-                {selectedMediaAsset.listingCandidate ? 'Remove from listing picks' : 'Add to listing picks'}
               </button>
               <button type="button" className="button-secondary button-danger" onClick={() => setPendingDeleteAsset(selectedMediaAsset)} disabled={Boolean(status) || isArchivedProperty}>
                 {selectedMediaAsset.assetType === 'generated' ? 'Delete saved version' : 'Delete original photo'}
@@ -3904,15 +4077,15 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     }
                     itemTwo={
                       <ReactCompareSliderImage
-                        src={selectedVariant.imageUrl}
-                        alt={selectedVariant.label || 'Generated image variant'}
+                        src={effectiveVisionResultImageUrl}
+                        alt={effectiveVisionResultLabel || 'Generated image variant'}
                       />
                     }
                   />
                 </div>
                 <div className="tag-row">
-                  <span>{compareSourceVariant ? 'Stage source' : 'Original'}</span>
-                  <span>{selectedVariant.variantCategory === 'concept_preview' ? 'Concept Preview' : 'Enhanced'}</span>
+                  <span>{compareSourceVariant || selectedGeneratedAssetAsResult ? 'Stage source' : 'Original'}</span>
+                  <span>{selectedVariant?.variantCategory === 'concept_preview' ? 'Concept Preview' : 'Enhanced'}</span>
                   <span>{activeVisionWorkflowStage.title}</span>
                 </div>
               </div>
@@ -4503,78 +4676,56 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   );
 
   const renderBrochureTab = () => (
-    <div className="workspace-two-column">
-      <div className="content-card flyer-generator-card">
-        <div className="workspace-tab-stack">
-          <span className="label">Brochure controls</span>
-          <h2>AI flyer draft</h2>
-          <p>Generate a brochure-style flyer from live pricing, selected photos, and the strongest seller-ready language.</p>
-          <div className="mode-switch">
-            <button type="button" className={flyerType === 'sale' ? 'mode-chip active' : 'mode-chip'} onClick={() => setFlyerType('sale')}>Sale flyer</button>
-            <button type="button" className={flyerType === 'rental' ? 'mode-chip active' : 'mode-chip'} onClick={() => setFlyerType('rental')}>Rental flyer</button>
-          </div>
-          <div className="mini-stats">
-            <div className="stat-card"><strong>Listing picks</strong><span>{listingCandidateAssets.length} chosen</span></div>
-            <div className="stat-card"><strong>Vision-ready</strong><span>{mediaAssets.filter((asset) => asset.selectedVariant).length} preferred variants</span></div>
-            <div className="stat-card"><strong>Price source</strong><span>{latestPricing ? 'Live pricing attached' : 'Using latest saved pricing'}</span></div>
-          </div>
-          <div className="workspace-inner-card brochure-control-card">
-            <span className="label">Headline + copy plan</span>
-            <div className="brochure-control-grid brochure-control-grid-form">
-              <label className="workspace-control-field">
-                <span>Headline</span>
-                <input
-                  type="text"
-                  value={flyerHeadlineDraft}
-                  onChange={(event) => setFlyerHeadlineDraft(event.target.value)}
-                  placeholder="Seller-ready headline"
-                  maxLength={140}
-                />
-              </label>
-              <label className="workspace-control-field">
-                <span>Subheadline</span>
-                <input
-                  type="text"
-                  value={flyerSubheadlineDraft}
-                  onChange={(event) => setFlyerSubheadlineDraft(event.target.value)}
-                  placeholder="Short positioning line"
-                  maxLength={220}
-                />
-              </label>
-              <label className="workspace-control-field workspace-control-field-full">
-                <span>Summary</span>
-                <textarea
-                  value={flyerSummaryDraft}
-                  onChange={(event) => setFlyerSummaryDraft(event.target.value)}
-                  placeholder="How should this brochure frame the property?"
-                  maxLength={600}
-                />
-              </label>
-              <label className="workspace-control-field workspace-control-field-full">
-                <span>Call to action</span>
-                <input
-                  type="text"
-                  value={flyerCallToActionDraft}
-                  onChange={(event) => setFlyerCallToActionDraft(event.target.value)}
-                  placeholder="What should the seller or buyer do next?"
-                  maxLength={180}
-                />
-              </label>
+    <div className="workspace-tab-stack">
+      {renderCollapsibleSection({
+        sectionKey: 'brochure_controls',
+        label: 'Brochure',
+        title: 'Brochure controls',
+        meta: latestFlyer ? 'Draft ready' : 'No draft yet',
+        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.brochure_controls,
+        className: 'content-card flyer-generator-card',
+        children: (
+          <div className="workspace-tab-stack">
+            <p>Generate a brochure-style flyer from live pricing, selected photos, and the strongest seller-ready language.</p>
+            <div className="mode-switch">
+              <button type="button" className={flyerType === 'sale' ? 'mode-chip active' : 'mode-chip'} onClick={() => setFlyerType('sale')}>Sale flyer</button>
+              <button type="button" className={flyerType === 'rental' ? 'mode-chip active' : 'mode-chip'} onClick={() => setFlyerType('rental')}>Rental flyer</button>
             </div>
-          </div>
-          <div className="workspace-inner-card brochure-control-card">
-            <span className="label">Image selection</span>
-            {brochurePhotoPool.length ? (
-              <div className="brochure-photo-plan">
-                {brochurePhotoPool.slice(0, 6).map((asset) => (
+            <div className="mini-stats">
+              <div className="stat-card"><strong>Listing picks</strong><span>{listingCandidateAssets.length} chosen</span></div>
+              <div className="stat-card"><strong>Vision-ready</strong><span>{mediaAssets.filter((asset) => asset.selectedVariant).length} preferred variants</span></div>
+              <div className="stat-card"><strong>Price source</strong><span>{latestPricing ? 'Live pricing attached' : 'Using latest saved pricing'}</span></div>
+            </div>
+            <div className="workspace-inner-card brochure-control-card">
+              <span className="label">Headline + copy plan</span>
+              <div className="brochure-control-grid brochure-control-grid-form">
+                <label className="workspace-control-field">
+                  <span>Headline</span>
+                  <input type="text" value={flyerHeadlineDraft} onChange={(event) => setFlyerHeadlineDraft(event.target.value)} placeholder="Seller-ready headline" maxLength={140} />
+                </label>
+                <label className="workspace-control-field">
+                  <span>Subheadline</span>
+                  <input type="text" value={flyerSubheadlineDraft} onChange={(event) => setFlyerSubheadlineDraft(event.target.value)} placeholder="Short positioning line" maxLength={220} />
+                </label>
+                <label className="workspace-control-field workspace-control-field-full">
+                  <span>Summary</span>
+                  <textarea value={flyerSummaryDraft} onChange={(event) => setFlyerSummaryDraft(event.target.value)} placeholder="How should this brochure frame the property?" maxLength={600} />
+                </label>
+                <label className="workspace-control-field workspace-control-field-full">
+                  <span>Call to action</span>
+                  <input type="text" value={flyerCallToActionDraft} onChange={(event) => setFlyerCallToActionDraft(event.target.value)} placeholder="What should the seller or buyer do next?" maxLength={180} />
+                </label>
+              </div>
+            </div>
+            <div className="workspace-inner-card brochure-control-card">
+              <span className="label">Image selection</span>
+              {brochurePhotoPool.length ? (
+                <div className="brochure-photo-plan">
+                  {brochurePhotoPool.slice(0, 6).map((asset) => (
                     <button
                       key={`brochure-photo-${asset.id}`}
                       type="button"
-                      className={
-                        flyerSelectedPhotoIds.includes(asset.id)
-                          ? 'brochure-photo-plan-card active'
-                          : 'brochure-photo-plan-card'
-                      }
+                      className={flyerSelectedPhotoIds.includes(asset.id) ? 'brochure-photo-plan-card active' : 'brochure-photo-plan-card'}
                       onClick={() => toggleFlyerPhotoSelection(asset.id)}
                     >
                       <img src={asset.imageUrl} alt={asset.roomLabel || 'Brochure candidate'} />
@@ -4590,27 +4741,33 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       </div>
                     </button>
                   ))}
-              </div>
-            ) : (
-              <p>No photos are available yet. Add them in mobile, then return here to shape the brochure.</p>
-            )}
-            <p className="workspace-control-note">
-              Up to 4 photos are used. Seller picks stay prioritized, and preferred vision variants still flow through automatically.
-            </p>
+                </div>
+              ) : (
+                <p>No photos are available yet. Add them in mobile, then return here to shape the brochure.</p>
+              )}
+              <p className="workspace-control-note">
+                Up to 4 photos are used. Seller picks stay prioritized, and preferred vision variants still flow through automatically.
+              </p>
+            </div>
+            <div className="button-stack flyer-generator-actions">
+              <button type="button" className={status.includes('Generating') ? 'button-primary button-busy' : 'button-primary'} onClick={handleGenerateFlyer} disabled={Boolean(status) || isArchivedProperty}>
+                {status.includes('Generating') ? 'Generating flyer...' : 'Generate flyer'}
+              </button>
+              <button type="button" className="button-secondary" onClick={handleDownloadFlyerPdf} disabled={Boolean(status)}>Download PDF</button>
+            </div>
           </div>
-          <div className="button-stack flyer-generator-actions">
-            <button type="button" className={status.includes('Generating') ? 'button-primary button-busy' : 'button-primary'} onClick={handleGenerateFlyer} disabled={Boolean(status) || isArchivedProperty}>
-              {status.includes('Generating') ? 'Generating flyer...' : 'Generate flyer'}
-            </button>
-            <button type="button" className="button-secondary" onClick={handleDownloadFlyerPdf} disabled={Boolean(status)}>Download PDF</button>
-          </div>
-        </div>
-      </div>
+        ),
+      })}
 
-      <div ref={flyerPreviewRef} className="content-card">
-        <span className="label">Live preview</span>
-        {latestFlyer ? (
-          <div className="flyer-preview">
+      {renderCollapsibleSection({
+        sectionKey: 'brochure_preview',
+        label: 'Brochure',
+        title: 'Live preview',
+        meta: latestFlyer ? latestFlyer.flyerType : 'No preview',
+        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.brochure_preview,
+        className: 'content-card',
+        children: latestFlyer ? (
+          <div ref={flyerPreviewRef} className="flyer-preview">
             <div className="flyer-hero">
               <span className="label">{latestFlyer.flyerType} flyer</span>
               <h2>{latestFlyer.headline}</h2>
@@ -4662,205 +4819,201 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           </div>
         ) : (
           <p>No flyer draft yet. Generate one to preview brochure output.</p>
-        )}
+        ),
+      })}
 
-        <div className="report-preview-section" style={{ marginTop: '1.5rem' }}>
-          <strong>Social ad pack</strong>
-          <div className="workspace-action-column" style={{ marginTop: '0.75rem' }}>
-            <button
-              type="button"
-              className="button-secondary"
-              onClick={handleExportSocialPack}
-              disabled={Boolean(status) || isArchivedProperty}
-            >
-              Export social ad pack
-            </button>
-          </div>
-          {latestSocialPack ? (
-            <div className="workspace-tab-stack" style={{ marginTop: '1rem' }}>
-              <p className="workspace-control-note">
-                Select a format chip to inspect the copy, CTA, and guidance for that specific social placement.
-              </p>
-              <div className="tag-row">
-                {(latestSocialPack.variants || []).map((variant, index) => {
-                  const variantKey = getSocialPackVariantKey(variant, index);
-                  const isActive = variantKey === activeSocialPackVariantKey;
-                  return (
-                    <button
-                      key={variantKey}
-                      type="button"
-                      className={isActive ? 'social-pack-chip active' : 'social-pack-chip'}
-                      onClick={() => setActiveSocialPackVariantKey(variantKey)}
-                    >
-                      {getSocialPackVariantLabel(variant)}
-                    </button>
-                  );
-                })}
-              </div>
-              {activeSocialPackVariantDetails ? (
-                <div className="social-pack-detail-card">
-                  <div className="workspace-tab-stack">
-                    <div>
-                      <span className="label">Selected format</span>
-                      <h3>{activeSocialPackVariantDetails.title}</h3>
-                    </div>
-                    <p>{activeSocialPackVariantDetails.summary}</p>
-                    {activeSocialPackVariantDetails.highlights.length ? (
-                      <div className="tag-row">
-                        {activeSocialPackVariantDetails.highlights.map((item) => (
-                          <span key={`social-pack-highlight-${item}`}>{item}</span>
+      {renderCollapsibleSection({
+        sectionKey: 'brochure_social',
+        label: 'Brochure',
+        title: 'Social ad pack',
+        meta: latestSocialPack ? 'Available' : 'Not generated',
+        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.brochure_social,
+        className: 'content-card',
+        children: (
+          <div className="workspace-tab-stack">
+            <div className="workspace-action-column">
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={handleExportSocialPack}
+                disabled={Boolean(status) || isArchivedProperty}
+              >
+                Export social ad pack
+              </button>
+            </div>
+            {latestSocialPack ? (
+              <div className="workspace-tab-stack">
+                <p className="workspace-control-note">
+                  Select a format chip to inspect the copy, CTA, and guidance for that specific social placement.
+                </p>
+                <div className="tag-row">
+                  {(latestSocialPack.variants || []).map((variant, index) => {
+                    const variantKey = getSocialPackVariantKey(variant, index);
+                    const isActive = variantKey === activeSocialPackVariantKey;
+                    return (
+                      <button
+                        key={variantKey}
+                        type="button"
+                        className={isActive ? 'social-pack-chip active' : 'social-pack-chip'}
+                        onClick={() => setActiveSocialPackVariantKey(variantKey)}
+                      >
+                        {getSocialPackVariantLabel(variant)}
+                      </button>
+                    );
+                  })}
+                </div>
+                {activeSocialPackVariantDetails ? (
+                  <div className="social-pack-detail-card">
+                    <div className="workspace-tab-stack">
+                      <div>
+                        <span className="label">Selected format</span>
+                        <h3>{activeSocialPackVariantDetails.title}</h3>
+                      </div>
+                      <p>{activeSocialPackVariantDetails.summary}</p>
+                      {activeSocialPackVariantDetails.highlights.length ? (
+                        <div className="tag-row">
+                          {activeSocialPackVariantDetails.highlights.map((item) => (
+                            <span key={`social-pack-highlight-${item}`}>{item}</span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <p className="workspace-control-note">
+                        <strong>Guidance:</strong> {activeSocialPackVariantDetails.guidance}
+                      </p>
+                      <div className="social-pack-detail-grid">
+                        {activeSocialPackVariantDetails.sections.map((section) => (
+                          <div key={`${activeSocialPackVariantDetails.title}-${section.label}`} className="social-pack-detail-block">
+                            <strong>{section.label}</strong>
+                            <span>{section.value}</span>
+                          </div>
                         ))}
                       </div>
-                    ) : null}
-                    <p className="workspace-control-note">
-                      <strong>Guidance:</strong> {activeSocialPackVariantDetails.guidance}
-                    </p>
-                    <div className="social-pack-detail-grid">
-                      {activeSocialPackVariantDetails.sections.map((section) => (
-                        <div key={`${activeSocialPackVariantDetails.title}-${section.label}`} className="social-pack-detail-block">
-                          <strong>{section.label}</strong>
-                          <span>{section.value}</span>
-                        </div>
-                      ))}
                     </div>
                   </div>
-                </div>
-              ) : null}
-              <p><strong>Headline:</strong> {latestSocialPack.headline}</p>
-              <p><strong>Primary text:</strong> {latestSocialPack.primaryText}</p>
-              <p><strong>Short caption:</strong> {latestSocialPack.shortCaption}</p>
-              <p><strong>CTA:</strong> {latestSocialPack.cta}</p>
-              {(latestSocialPack.disclaimers || []).length ? (
-                <ul className="plain-list">
-                  {(latestSocialPack.disclaimers || []).map((item) => <li key={`social-disclaimer-${item}`}>{item}</li>)}
-                </ul>
-              ) : null}
-              <pre className="workspace-control-note" style={{ whiteSpace: 'pre-wrap' }}>{latestSocialPack.markdown}</pre>
-            </div>
-          ) : (
-            <p className="workspace-control-note">Generate a social pack to get square/story guidance plus ad-ready headline, caption, CTA, and markdown copy.</p>
-          )}
-        </div>
-      </div>
+                ) : null}
+                <p><strong>Headline:</strong> {latestSocialPack.headline}</p>
+                <p><strong>Primary text:</strong> {latestSocialPack.primaryText}</p>
+                <p><strong>Short caption:</strong> {latestSocialPack.shortCaption}</p>
+                <p><strong>CTA:</strong> {latestSocialPack.cta}</p>
+                {(latestSocialPack.disclaimers || []).length ? (
+                  <ul className="plain-list">
+                    {(latestSocialPack.disclaimers || []).map((item) => <li key={`social-disclaimer-${item}`}>{item}</li>)}
+                  </ul>
+                ) : null}
+                <pre className="workspace-control-note" style={{ whiteSpace: 'pre-wrap' }}>{latestSocialPack.markdown}</pre>
+              </div>
+            ) : (
+              <p className="workspace-control-note">Generate a social pack to get square/story guidance plus ad-ready headline, caption, CTA, and markdown copy.</p>
+            )}
+          </div>
+        ),
+      })}
     </div>
   );
 
   const renderReportTab = () => (
-    <div className="workspace-two-column">
-      <div className="content-card report-generator-card">
-        <div className="workspace-tab-stack">
-          <span className="label">Report builder</span>
-          <h2>Seller intelligence report</h2>
-          <p>Make the report feel premium by combining pricing, comps, photos, checklist progress, and marketing guidance into one place.</p>
-          <div className="workspace-action-column">
-            <button type="button" className={status.includes('report') ? 'button-primary button-busy' : 'button-primary'} onClick={handleGenerateReport} disabled={Boolean(status) || isArchivedProperty}>
-              {status.includes('report') ? 'Generating report...' : 'Generate report'}
-            </button>
-            <button type="button" className="button-secondary" onClick={handleDownloadReportPdf} disabled={Boolean(status)}>Download report PDF</button>
-          </div>
-          <div className="mini-stats">
-            <div className="stat-card"><strong>Status</strong><span>{latestReport ? (latestReport.freshness?.isStale ? 'Refresh recommended' : 'Current report ready') : 'No report generated yet'}</span></div>
-            <div className="stat-card"><strong>Photos</strong><span>{latestReport?.selectedPhotos?.length ? `${latestReport.selectedPhotos.length} in latest report` : `${listingCandidateAssets.length || mediaAssets.length} available`}</span></div>
-            <div className="stat-card"><strong>Checklist</strong><span>{checklist?.summary?.completedCount ?? 0} complete</span></div>
-            <div className="stat-card"><strong>Comps</strong><span>{selectedComps.length} included</span></div>
-          </div>
-          <div className="workspace-inner-card report-outline-card">
-            <span className="label">Title + summary</span>
-            <div className="brochure-control-grid brochure-control-grid-form">
-              <label className="workspace-control-field workspace-control-field-full">
-                <span>Report title</span>
-                <input
-                  type="text"
-                  value={reportTitleDraft}
-                  onChange={(event) => setReportTitleDraft(event.target.value)}
-                  placeholder="Seller-facing report title"
-                  maxLength={180}
-                />
-              </label>
-              <label className="workspace-control-field workspace-control-field-full">
-                <span>Executive summary</span>
-                <textarea
-                  value={reportExecutiveSummaryDraft}
-                  onChange={(event) => setReportExecutiveSummaryDraft(event.target.value)}
-                  placeholder="Lead with the main pricing, readiness, and launch story."
-                  maxLength={1200}
-                />
-              </label>
-              <label className="workspace-control-field workspace-control-field-full">
-                <span>Draft listing description</span>
-                <textarea
-                  value={reportListingDescriptionDraft}
-                  onChange={(event) => setReportListingDescriptionDraft(event.target.value)}
-                  placeholder="Optional seller-facing listing-description draft."
-                  maxLength={1200}
-                />
-              </label>
+    <div className="workspace-tab-stack">
+      {renderCollapsibleSection({
+        sectionKey: 'report_builder',
+        label: 'Report',
+        title: 'Report builder',
+        meta: latestReport ? 'Draft ready' : 'No report yet',
+        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.report_builder,
+        className: 'content-card report-generator-card',
+        children: (
+          <div className="workspace-tab-stack">
+            <p>Make the report feel premium by combining pricing, comps, photos, checklist progress, and marketing guidance into one place.</p>
+            <div className="workspace-action-column">
+              <button type="button" className={status.includes('report') ? 'button-primary button-busy' : 'button-primary'} onClick={handleGenerateReport} disabled={Boolean(status) || isArchivedProperty}>
+                {status.includes('report') ? 'Generating report...' : 'Generate report'}
+              </button>
+              <button type="button" className="button-secondary" onClick={handleDownloadReportPdf} disabled={Boolean(status)}>Download report PDF</button>
             </div>
-          </div>
-          <div className="workspace-inner-card report-outline-card">
-            <span className="label">Section toggles</span>
-            <div className="report-outline-grid">
-              {REPORT_SECTION_OPTIONS.map((section) => (
-                <button
-                  key={`outline-${section.id}`}
-                  type="button"
-                  className={
-                    reportIncludedSections.includes(section.id)
-                      ? 'report-outline-item active'
-                      : 'report-outline-item'
-                  }
-                  onClick={() => toggleReportSection(section.id)}
-                >
-                  <strong>{section.label}</strong>
-                  <span>
-                    {reportIncludedSections.includes(section.id)
-                      ? 'Included in the generated report'
-                      : 'Click to include this section'}
-                  </span>
-                </button>
-              ))}
+            <div className="mini-stats">
+              <div className="stat-card"><strong>Status</strong><span>{latestReport ? (latestReport.freshness?.isStale ? 'Refresh recommended' : 'Current report ready') : 'No report generated yet'}</span></div>
+              <div className="stat-card"><strong>Photos</strong><span>{latestReport?.selectedPhotos?.length ? `${latestReport.selectedPhotos.length} in latest report` : `${listingCandidateAssets.length || mediaAssets.length} available`}</span></div>
+              <div className="stat-card"><strong>Checklist</strong><span>{checklist?.summary?.completedCount ?? 0} complete</span></div>
+              <div className="stat-card"><strong>Comps</strong><span>{selectedComps.length} included</span></div>
             </div>
-          </div>
-          <div className="workspace-inner-card brochure-control-card">
-            <span className="label">Photo set</span>
-            {reportPhotoPool.length ? (
-              <div className="brochure-photo-plan">
-                {reportPhotoPool.slice(0, 6).map((asset) => (
+            <div className="workspace-inner-card report-outline-card">
+              <span className="label">Title + summary</span>
+              <div className="brochure-control-grid brochure-control-grid-form">
+                <label className="workspace-control-field workspace-control-field-full">
+                  <span>Report title</span>
+                  <input type="text" value={reportTitleDraft} onChange={(event) => setReportTitleDraft(event.target.value)} placeholder="Seller-facing report title" maxLength={180} />
+                </label>
+                <label className="workspace-control-field workspace-control-field-full">
+                  <span>Executive summary</span>
+                  <textarea value={reportExecutiveSummaryDraft} onChange={(event) => setReportExecutiveSummaryDraft(event.target.value)} placeholder="Lead with the main pricing, readiness, and launch story." maxLength={1200} />
+                </label>
+                <label className="workspace-control-field workspace-control-field-full">
+                  <span>Draft listing description</span>
+                  <textarea value={reportListingDescriptionDraft} onChange={(event) => setReportListingDescriptionDraft(event.target.value)} placeholder="Optional seller-facing listing-description draft." maxLength={1200} />
+                </label>
+              </div>
+            </div>
+            <div className="workspace-inner-card report-outline-card">
+              <span className="label">Section toggles</span>
+              <div className="report-outline-grid">
+                {REPORT_SECTION_OPTIONS.map((section) => (
                   <button
-                    key={`report-photo-${asset.id}`}
+                    key={`outline-${section.id}`}
                     type="button"
-                    className={
-                      reportSelectedPhotoIds.includes(asset.id)
-                        ? 'brochure-photo-plan-card active'
-                        : 'brochure-photo-plan-card'
-                    }
-                    onClick={() => toggleReportPhotoSelection(asset.id)}
+                    className={reportIncludedSections.includes(section.id) ? 'report-outline-item active' : 'report-outline-item'}
+                    onClick={() => toggleReportSection(section.id)}
                   >
-                    <img src={asset.imageUrl} alt={asset.roomLabel || 'Report candidate'} />
-                    <div>
-                      <strong>{asset.roomLabel}</strong>
-                      <span>
-                        {asset.listingNote ||
-                          (asset.selectedVariant
-                            ? `${asset.selectedVariant.label || 'Vision-ready'} selected`
-                            : 'Available for report use')}
-                      </span>
-                      <em>{reportSelectedPhotoIds.includes(asset.id) ? 'Included in report' : 'Click to include'}</em>
-                    </div>
+                    <strong>{section.label}</strong>
+                    <span>
+                      {reportIncludedSections.includes(section.id)
+                        ? 'Included in the generated report'
+                        : 'Click to include this section'}
+                    </span>
                   </button>
                 ))}
               </div>
-            ) : (
-              <p>No photos are available yet for report review.</p>
-            )}
+            </div>
+            <div className="workspace-inner-card brochure-control-card">
+              <span className="label">Photo set</span>
+              {reportPhotoPool.length ? (
+                <div className="brochure-photo-plan">
+                  {reportPhotoPool.slice(0, 6).map((asset) => (
+                    <button
+                      key={`report-photo-${asset.id}`}
+                      type="button"
+                      className={reportSelectedPhotoIds.includes(asset.id) ? 'brochure-photo-plan-card active' : 'brochure-photo-plan-card'}
+                      onClick={() => toggleReportPhotoSelection(asset.id)}
+                    >
+                      <img src={asset.imageUrl} alt={asset.roomLabel || 'Report candidate'} />
+                      <div>
+                        <strong>{asset.roomLabel}</strong>
+                        <span>
+                          {asset.listingNote ||
+                            (asset.selectedVariant
+                              ? `${asset.selectedVariant.label || 'Vision-ready'} selected`
+                              : 'Available for report use')}
+                        </span>
+                        <em>{reportSelectedPhotoIds.includes(asset.id) ? 'Included in report' : 'Click to include'}</em>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p>No photos are available yet for report review.</p>
+              )}
+            </div>
           </div>
-        </div>
-      </div>
+        ),
+      })}
 
-      <div ref={reportPreviewRef} className="content-card">
-        <span className="label">Report preview</span>
-        {latestReport ? (
-          <div className="report-preview">
+      {renderCollapsibleSection({
+        sectionKey: 'report_preview',
+        label: 'Report',
+        title: 'Live preview',
+        meta: latestReport ? 'Report ready' : 'No preview',
+        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.report_preview,
+        className: 'content-card',
+        children: latestReport ? (
+          <div ref={reportPreviewRef} className="report-preview">
             <div className="flyer-hero">
               <span className="label">{latestReport.reportType}</span>
               <h2>{latestReport.title}</h2>
@@ -4969,140 +5122,170 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           </div>
         ) : (
           <p>No seller report has been generated yet. Create one to preview the premium report flow.</p>
-        )}
-      </div>
+        ),
+      })}
     </div>
   );
 
   const renderChecklistTab = () => (
-    <div className="workspace-two-column">
-      <div className="content-card checklist-card">
-        <div className="section-header-tight">
-          <div>
-            <span className="label">Checklist workflow</span>
-            <h2>Listing-prep phases</h2>
-          </div>
-          <span className="section-header-meta">{checklist?.summary?.progressPercent ?? 0}% ready</span>
-        </div>
-        {checklistGroups.length ? (
+    <div className="workspace-tab-stack">
+      {renderCollapsibleSection({
+        sectionKey: 'checklist_tasks',
+        label: 'Checklist',
+        title: 'Listing-prep phases',
+        meta: `${checklist?.summary?.progressPercent ?? 0}% ready`,
+        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.checklist_tasks,
+        className: 'content-card checklist-card',
+        children: checklistGroups.length ? (
           <div className="workspace-accordion-list">
-            {checklistGroups.map(([groupName, items]) => (
-              <details key={groupName} className="workspace-accordion" open>
-                <summary><span>{groupName}</span><span>{items.length} task(s)</span></summary>
-                <div className="checklist-list">
-                  {items.map((item) => (
-                    <article key={item.id} className="checklist-item-card">
-                      <div className="checklist-item-meta">
-                        <span className={`checklist-status checklist-status-${item.status}`}>{formatChecklistStatus(item.status)}</span>
-                        <span className={`checklist-chip checklist-chip-${item.priority}`}>{formatChecklistPriority(item.priority)}</span>
-                      </div>
-                      <h3>{item.title}</h3>
-                      <p>{item.detail || 'No additional guidance is attached to this task yet.'}</p>
-                      {item.providerCategoryLabel ? (
-                        <div className="checklist-provider-inline">
-                          <div>
-                            <strong>{item.providerCategoryLabel}</strong>
-                            <span>{item.providerPrompt || 'Local provider recommendations are available for this task.'}</span>
-                          </div>
-                          <button
-                            type="button"
-                            className="button-secondary"
-                            onClick={() => focusProviderSuggestions(item.id)}
-                          >
-                            Show providers
-                          </button>
+            {checklistGroups.map(([groupName, items]) => {
+              const groupSectionKey = `checklist_group_${groupName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+              const groupOpen = isWorkspaceSectionOpen(groupSectionKey, true);
+              return (
+                <details
+                  key={groupName}
+                  className="workspace-accordion"
+                  open={groupOpen}
+                  onToggle={(event) => setWorkspaceSectionOpen(groupSectionKey, event.currentTarget.open, true)}
+                >
+                  <summary><span>{groupName}</span><span>{items.length} task(s)</span></summary>
+                  <div className="checklist-list">
+                    {items.map((item) => (
+                      <article key={item.id} className="checklist-item-card">
+                        <div className="checklist-item-meta">
+                          <span className={`checklist-status checklist-status-${item.status}`}>{formatChecklistStatus(item.status)}</span>
+                          <span className={`checklist-chip checklist-chip-${item.priority}`}>{formatChecklistPriority(item.priority)}</span>
                         </div>
-                      ) : null}
-                      <div className="checklist-action-row">
-                        {['todo', 'in_progress', 'done'].map((nextStatus) => (
-                          <button key={`${item.id}-${nextStatus}`} type="button" className={item.status === nextStatus ? 'checklist-action-chip active' : 'checklist-action-chip'} onClick={() => handleSetChecklistItemStatus(item.id, nextStatus)} disabled={Boolean(status) || isArchivedProperty}>{formatChecklistStatus(nextStatus)}</button>
-                        ))}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </details>
-            ))}
+                        <h3>{item.title}</h3>
+                        <p>{item.detail || 'No additional guidance is attached to this task yet.'}</p>
+                        {item.providerCategoryLabel ? (
+                          <div className="checklist-provider-inline">
+                            <div>
+                              <strong>{item.providerCategoryLabel}</strong>
+                              <span>{item.providerPrompt || 'Local provider recommendations are available for this task.'}</span>
+                            </div>
+                            <button
+                              type="button"
+                              className="button-secondary"
+                              onClick={() => focusProviderSuggestions(item.id)}
+                            >
+                              Show providers
+                            </button>
+                          </div>
+                        ) : null}
+                        <div className="checklist-action-row">
+                          {['todo', 'in_progress', 'done'].map((nextStatus) => (
+                            <button key={`${item.id}-${nextStatus}`} type="button" className={item.status === nextStatus ? 'checklist-action-chip active' : 'checklist-action-chip'} onClick={() => handleSetChecklistItemStatus(item.id, nextStatus)} disabled={Boolean(status) || isArchivedProperty}>{formatChecklistStatus(nextStatus)}</button>
+                          ))}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </details>
+              );
+            })}
           </div>
         ) : (
           <p>No checklist items yet. The shared seller-prep workflow will appear here.</p>
-        )}
-      </div>
+        ),
+      })}
 
-      <div className="workspace-tab-stack">
-        <div className="content-card workspace-side-panel">
-          <span className="label">Progress summary</span>
-          <h2>{readinessScore}/100 readiness</h2>
-          <div className="mini-stats">
-            <button
-              type="button"
-              className={checklistSummaryMode === 'completed' ? 'stat-card stat-card-button active' : 'stat-card stat-card-button'}
-              onClick={() => setChecklistSummaryMode('completed')}
-            >
-              <strong>Completed</strong>
-              <span>{checklist?.summary?.completedCount ?? 0}</span>
-            </button>
-            <button
-              type="button"
-              className={checklistSummaryMode === 'open' ? 'stat-card stat-card-button active' : 'stat-card stat-card-button'}
-              onClick={() => setChecklistSummaryMode('open')}
-            >
-              <strong>Open</strong>
-              <span>{checklist?.summary?.openCount ?? 0}</span>
-            </button>
+      {renderCollapsibleSection({
+        sectionKey: 'checklist_summary',
+        label: 'Checklist',
+        title: 'Progress summary',
+        meta: `${readinessScore}/100 readiness`,
+        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.checklist_summary,
+        className: 'content-card workspace-side-panel',
+        children: (
+          <div className="workspace-tab-stack">
+            <div className="mini-stats">
+              <button
+                type="button"
+                className={checklistSummaryMode === 'completed' ? 'stat-card stat-card-button active' : 'stat-card stat-card-button'}
+                onClick={() => setChecklistSummaryMode('completed')}
+              >
+                <strong>Completed</strong>
+                <span>{checklist?.summary?.completedCount ?? 0}</span>
+              </button>
+              <button
+                type="button"
+                className={checklistSummaryMode === 'open' ? 'stat-card stat-card-button active' : 'stat-card stat-card-button'}
+                onClick={() => setChecklistSummaryMode('open')}
+              >
+                <strong>Open</strong>
+                <span>{checklist?.summary?.openCount ?? 0}</span>
+              </button>
+            </div>
+            <p><strong>Next task:</strong> {checklist?.nextTask?.title || 'No open tasks right now'}</p>
+            <div className="workspace-inner-card checklist-summary-card">
+              <strong>{checklistSummaryMode === 'completed' ? 'Completed items' : 'Open items'}</strong>
+              {(checklistSummaryMode === 'completed' ? completedChecklistItems : openChecklistItems).length ? (
+                <ul className="plain-list checklist-summary-list">
+                  {(checklistSummaryMode === 'completed' ? completedChecklistItems : openChecklistItems)
+                    .slice(0, 6)
+                    .map((item) => (
+                      <li key={`summary-${item.id}`}>
+                        <strong>{item.title}</strong>
+                        <span>{formatChecklistCategory(item.category)}</span>
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <p className="workspace-control-note">
+                  {checklistSummaryMode === 'completed'
+                    ? 'Completed tasks will appear here as you finish them.'
+                    : 'Open tasks will appear here until they are completed.'}
+                </p>
+              )}
+            </div>
           </div>
-          <p><strong>Next task:</strong> {checklist?.nextTask?.title || 'No open tasks right now'}</p>
-          <div className="workspace-inner-card checklist-summary-card">
-            <strong>{checklistSummaryMode === 'completed' ? 'Completed items' : 'Open items'}</strong>
-            {(checklistSummaryMode === 'completed' ? completedChecklistItems : openChecklistItems).length ? (
-              <ul className="plain-list checklist-summary-list">
-                {(checklistSummaryMode === 'completed' ? completedChecklistItems : openChecklistItems)
-                  .slice(0, 6)
-                  .map((item) => (
-                    <li key={`summary-${item.id}`}>
-                      <strong>{item.title}</strong>
-                      <span>{formatChecklistCategory(item.category)}</span>
-                    </li>
-                  ))}
-              </ul>
-            ) : (
-              <p className="workspace-control-note">
-                {checklistSummaryMode === 'completed'
-                  ? 'Completed tasks will appear here as you finish them.'
-                  : 'Open tasks will appear here until they are completed.'}
-              </p>
-            )}
-          </div>
-        </div>
+        ),
+      })}
 
-        <form className="content-card checklist-form" onSubmit={handleCreateChecklistTask}>
-          <span className="label">Add custom task</span>
-          <input type="text" value={customChecklistTitle} onChange={(event) => setCustomChecklistTitle(event.target.value)} placeholder="Example: book pre-listing cleaner" maxLength={80} />
-          <input type="text" value={customChecklistDetail} onChange={(event) => setCustomChecklistDetail(event.target.value)} placeholder="Optional context or reminder" maxLength={180} />
-          <button type="submit" className="button-secondary" disabled={Boolean(status) || isArchivedProperty}>Save task</button>
-        </form>
+      {renderCollapsibleSection({
+        sectionKey: 'checklist_custom',
+        label: 'Checklist',
+        title: 'Add custom task',
+        meta: 'Optional',
+        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.checklist_custom,
+        className: 'content-card checklist-form',
+        children: (
+          <form className="workspace-tab-stack" onSubmit={handleCreateChecklistTask}>
+            <input type="text" value={customChecklistTitle} onChange={(event) => setCustomChecklistTitle(event.target.value)} placeholder="Example: book pre-listing cleaner" maxLength={80} />
+            <input type="text" value={customChecklistDetail} onChange={(event) => setCustomChecklistDetail(event.target.value)} placeholder="Optional context or reminder" maxLength={180} />
+            <button type="submit" className="button-secondary" disabled={Boolean(status) || isArchivedProperty}>Save task</button>
+          </form>
+        ),
+      })}
 
-        <div ref={providerSuggestionsRef} className="content-card workspace-side-panel">
-          <span className="label">Provider suggestions</span>
-          <h2>{providerSuggestionTask?.providerCategoryLabel || 'No provider-linked task yet'}</h2>
-          <p>
-            {providerSuggestionTask?.providerPrompt ||
-              'Provider recommendations appear here when a checklist task has a linked marketplace category.'}
-          </p>
-          {providerSearchStatus ? (
-            <p className="workspace-control-note">{providerSearchStatus}</p>
-          ) : null}
-          {providerRecommendations.length ? (
-            <div className="provider-card-list">
-              <div className="section-header-tight">
-                <div>
-                  <strong>Workside marketplace providers</strong>
-                  <p className="workspace-control-note">
-                    Ranked internal providers matched by category, coverage, and marketplace readiness.
-                  </p>
+      {renderCollapsibleSection({
+        sectionKey: 'checklist_providers',
+        label: 'Checklist',
+        title: 'Provider suggestions',
+        meta: providerSuggestionTask?.providerCategoryLabel || 'No linked task',
+        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.checklist_providers,
+        className: 'content-card workspace-side-panel',
+        children: (
+          <div ref={providerSuggestionsRef} className="workspace-tab-stack">
+            <p>
+              {providerSuggestionTask?.providerPrompt ||
+                'Provider recommendations appear here when a checklist task has a linked marketplace category.'}
+            </p>
+            {providerSearchStatus ? (
+              <p className="workspace-control-note">{providerSearchStatus}</p>
+            ) : null}
+            {providerRecommendations.length ? (
+              <div className="provider-card-list">
+                <div className="section-header-tight">
+                  <div>
+                    <strong>Workside marketplace providers</strong>
+                    <p className="workspace-control-note">
+                      Ranked internal providers matched by category, coverage, and marketplace readiness.
+                    </p>
+                  </div>
                 </div>
-              </div>
-              {providerRecommendations.map((provider) => (
+                {providerRecommendations.map((provider) => (
                 <article key={provider.id} className="provider-card">
                   <div className="provider-card-header">
                     <div>
@@ -5179,20 +5362,20 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     ) : null}
                   </div>
                 </article>
-              ))}
-            </div>
-          ) : null}
-          {unavailableProviderRecommendations.length ? (
-            <div className="provider-card-list">
-              <div className="section-header-tight">
-                <div>
-                  <strong>Matching providers still in setup</strong>
-                  <p className="workspace-control-note">
-                    These providers match the category and coverage, but they are not fully live in the marketplace yet.
-                  </p>
-                </div>
+                ))}
               </div>
-              {unavailableProviderRecommendations.map((provider) => (
+            ) : null}
+            {unavailableProviderRecommendations.length ? (
+              <div className="provider-card-list">
+                <div className="section-header-tight">
+                  <div>
+                    <strong>Matching providers still in setup</strong>
+                    <p className="workspace-control-note">
+                      These providers match the category and coverage, but they are not fully live in the marketplace yet.
+                    </p>
+                  </div>
+                </div>
+                {unavailableProviderRecommendations.map((provider) => (
                 <article key={provider.id} className="provider-card provider-card-unavailable">
                   <div className="provider-card-header">
                     <div>
@@ -5241,97 +5424,97 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     ) : null}
                   </div>
                 </article>
-              ))}
-            </div>
-          ) : null}
-          {providerSource?.googleFallbackEnabled || providerGoogleSearchUrl || providerMapProviders.length ? (
-            <div className="provider-card-actions">
-              {providerMapProviders.length ? (
+                ))}
+              </div>
+            ) : null}
+            {providerSource?.googleFallbackEnabled || providerGoogleSearchUrl || providerMapProviders.length ? (
+              <div className="provider-card-actions">
+                {providerMapProviders.length ? (
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={() => {
+                      setProviderMapScope(hasInternalProviderResults ? 'internal' : 'all');
+                      setShowProviderMap(true);
+                    }}
+                    disabled={Boolean(status)}
+                  >
+                    Open provider map
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className="button-primary"
-                  onClick={() => {
-                    setProviderMapScope(hasInternalProviderResults ? 'internal' : 'all');
-                    setShowProviderMap(true);
-                  }}
-                  disabled={Boolean(status)}
+                  className="button-secondary"
+                  onClick={handleBrowseGoogleFallback}
+                  disabled={Boolean(status) || Boolean(providerSearchStatus)}
                 >
-                  Open provider map
+                  {externalProviderRecommendations.length || showExternalProviderFallback
+                    ? 'Refresh Google fallback'
+                    : 'Browse Google fallback'}
                 </button>
-              ) : null}
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={handleBrowseGoogleFallback}
-                disabled={Boolean(status) || Boolean(providerSearchStatus)}
-              >
-                {externalProviderRecommendations.length || showExternalProviderFallback
-                  ? 'Refresh Google fallback'
-                  : 'Browse Google fallback'}
-              </button>
-              {providerGoogleSearchUrl ? (
-                <a
-                  href={providerGoogleSearchUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="button-secondary inline-button"
-                >
-                  Open map search
-                </a>
-              ) : null}
-            </div>
-          ) : null}
-          {providerCoverageGuidance ? (
-            <div className={`workspace-inner-card provider-coverage-card provider-coverage-card-${providerCoverageGuidance.tone}`}>
-              <div className="provider-coverage-card-header">
-                <span className="label">{providerCoverageGuidance.eyebrow}</span>
-                <strong>{providerCoverageGuidance.title}</strong>
+                {providerGoogleSearchUrl ? (
+                  <a
+                    href={providerGoogleSearchUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="button-secondary inline-button"
+                  >
+                    Open map search
+                  </a>
+                ) : null}
               </div>
-              <p>{providerCoverageGuidance.message}</p>
-              {providerCoverageGuidance.highlights?.length ? (
-                <div className="provider-quality-row provider-coverage-highlights">
-                  {providerCoverageGuidance.highlights.map((highlight) => (
-                    <span key={highlight}>{highlight}</span>
-                  ))}
+            ) : null}
+            {providerCoverageGuidance ? (
+              <div className={`workspace-inner-card provider-coverage-card provider-coverage-card-${providerCoverageGuidance.tone}`}>
+                <div className="provider-coverage-card-header">
+                  <span className="label">{providerCoverageGuidance.eyebrow}</span>
+                  <strong>{providerCoverageGuidance.title}</strong>
                 </div>
-              ) : null}
-              {providerCoverageGuidance.nextStep ? (
-                <p className="workspace-control-note provider-coverage-next-step">{providerCoverageGuidance.nextStep}</p>
-              ) : null}
-            </div>
-          ) : null}
-          {providerSearchStatus ? <p className="workspace-control-note">{providerSearchStatus}</p> : null}
-          {renderExternalProviderList()}
-          {providerSource ? (
-            <p className="workspace-control-note">
-              {buildProviderSourceSummary(providerSource)}
-            </p>
-          ) : null}
-          {providerSource?.googleFallback && !providerCoverageGuidance ? (
-            <p className="workspace-control-note">
-              {buildGoogleFallbackSummary(providerSource)}
-            </p>
-          ) : null}
-          {hasInternalProviderResults ? (
-            <p className="workspace-control-note provider-disclaimer">
-              {providerRecommendations[0]?.verification?.disclaimer ||
-                unavailableProviderRecommendations[0]?.verification?.disclaimer ||
-                'Provider credentials are self-reported or verified where indicated. Workside does not guarantee accuracy.'}
-            </p>
-          ) : null}
-          <div className="workspace-inner-card provider-reference-sheet-card">
-            <div className="section-header-tight">
-              <div>
-                <strong>Provider reference sheet</strong>
-                <p className="workspace-control-note">
-                  Save up to 5 internal or Google-discovered contacts here, then export a printable reference sheet.
-                </p>
+                <p>{providerCoverageGuidance.message}</p>
+                {providerCoverageGuidance.highlights?.length ? (
+                  <div className="provider-quality-row provider-coverage-highlights">
+                    {providerCoverageGuidance.highlights.map((highlight) => (
+                      <span key={highlight}>{highlight}</span>
+                    ))}
+                  </div>
+                ) : null}
+                {providerCoverageGuidance.nextStep ? (
+                  <p className="workspace-control-note provider-coverage-next-step">{providerCoverageGuidance.nextStep}</p>
+                ) : null}
               </div>
-              <span className="section-header-meta">{providerReferences.length}/5 saved</span>
-            </div>
-            {providerReferences.length ? (
-              <div className="provider-reference-list">
-                {providerReferences.map((reference) => (
+            ) : null}
+            {providerSearchStatus ? <p className="workspace-control-note">{providerSearchStatus}</p> : null}
+            {renderExternalProviderList()}
+            {providerSource ? (
+              <p className="workspace-control-note">
+                {buildProviderSourceSummary(providerSource)}
+              </p>
+            ) : null}
+            {providerSource?.googleFallback && !providerCoverageGuidance ? (
+              <p className="workspace-control-note">
+                {buildGoogleFallbackSummary(providerSource)}
+              </p>
+            ) : null}
+            {hasInternalProviderResults ? (
+              <p className="workspace-control-note provider-disclaimer">
+                {providerRecommendations[0]?.verification?.disclaimer ||
+                  unavailableProviderRecommendations[0]?.verification?.disclaimer ||
+                  'Provider credentials are self-reported or verified where indicated. Workside does not guarantee accuracy.'}
+              </p>
+            ) : null}
+            <div className="workspace-inner-card provider-reference-sheet-card">
+              <div className="section-header-tight">
+                <div>
+                  <strong>Provider reference sheet</strong>
+                  <p className="workspace-control-note">
+                    Save up to 5 internal or Google-discovered contacts here, then export a printable reference sheet.
+                  </p>
+                </div>
+                <span className="section-header-meta">{providerReferences.length}/5 saved</span>
+              </div>
+              {providerReferences.length ? (
+                <div className="provider-reference-list">
+                  {providerReferences.map((reference) => (
                   <article key={reference.id} className="provider-reference-item">
                     <div className="provider-reference-copy">
                       <strong>{reference.businessName}</strong>
@@ -5380,28 +5563,28 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       </button>
                     </div>
                   </article>
-                ))}
+                  ))}
+                </div>
+              ) : (
+                <p className="workspace-control-note">
+                  Save providers from the recommendations above to build a printable shortlist for this property.
+                </p>
+              )}
+              <div className="provider-card-actions">
+                <button
+                  type="button"
+                  className="button-primary"
+                  onClick={handleDownloadProviderReferenceSheet}
+                  disabled={!providerReferences.length}
+                >
+                  Download reference sheet
+                </button>
               </div>
-            ) : (
-              <p className="workspace-control-note">
-                Save providers from the recommendations above to build a printable shortlist for this property.
-              </p>
-            )}
-            <div className="provider-card-actions">
-              <button
-                type="button"
-                className="button-primary"
-                onClick={handleDownloadProviderReferenceSheet}
-                disabled={!providerReferences.length}
-              >
-                Download reference sheet
-              </button>
             </div>
-          </div>
-          {providerLeads.length ? (
-            <div className="provider-lead-list">
-              <strong>Recent lead requests</strong>
-              {providerLeads.slice(0, 3).map((lead) => (
+            {providerLeads.length ? (
+              <div className="provider-lead-list">
+                <strong>Recent lead requests</strong>
+                {providerLeads.slice(0, 3).map((lead) => (
                 <article key={lead.id} className="provider-card provider-lead-card">
                   <div className="provider-card-header">
                     <div>
@@ -5438,11 +5621,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       : ''}
                   </p>
                 </article>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ),
+      })}
     </div>
   );
 
@@ -6030,7 +6214,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
           <div className="workspace-page-header-actions">
             <button type="button" className={status.includes('Refreshing') ? 'button-primary button-busy' : 'button-primary'} onClick={handleAnalyzePricing} disabled={Boolean(status) || isArchivedProperty}>{status.includes('Refreshing') ? 'Refreshing analysis...' : 'Refresh pricing'}</button>
-            <button type="button" className={status.includes('report') ? 'button-secondary button-busy' : 'button-secondary'} onClick={() => { setActiveTab('report'); handleGenerateReport(); }} disabled={Boolean(status) || isArchivedProperty}>{status.includes('report') ? 'Generating report...' : 'Generate report'}</button>
             <Link href="/dashboard" className="button-secondary inline-button">Back to dashboard</Link>
           </div>
         </section>
@@ -6105,77 +6288,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             </div>
           </aside>
           <div ref={workspaceBodyMainRef} className="workspace-body-main">
-            <section className="workspace-action-bar">
-              <div className="workspace-action-tooltip">
-                <button
-                  type="button"
-                  className="workspace-action-pill"
-                  onClick={() => setActiveTab('photos')}
-                  title="Open the Photos tab to review images captured from mobile and add them to your listing workflow."
-                >
-                  Add photos
-                </button>
-                <div className="workspace-action-tooltip-bubble" role="tooltip">
-                  Open the Photos tab to review images captured from mobile and add them to your listing workflow.
-                </div>
-              </div>
-              <div className="workspace-action-tooltip">
-                <button
-                  type="button"
-                  className="workspace-action-pill"
-                  onClick={() => setActiveTab('photos')}
-                  title="Choose your strongest listing candidates so brochure and report outputs prioritize them automatically."
-                >
-                  Select photos
-                </button>
-                <div className="workspace-action-tooltip-bubble" role="tooltip">
-                  Choose your strongest listing candidates so brochure and report outputs prioritize them automatically.
-                </div>
-              </div>
-              <div className="workspace-action-tooltip">
-                <button
-                  type="button"
-                  className="workspace-action-pill workspace-action-pill-accent"
-                  onClick={() => { setActiveTab('vision'); if (selectedMediaAsset) { handleGenerateVariant('enhance_listing_quality'); } }}
-                  disabled={Boolean(status) || isArchivedProperty}
-                  title="Generate an improved version of the currently selected photo to test cleaner, brighter marketing-ready presentation."
-                >
-                  Enhance
-                </button>
-                <div className="workspace-action-tooltip-bubble" role="tooltip">
-                  Generate an improved version of the currently selected photo to test cleaner, brighter marketing-ready presentation.
-                </div>
-              </div>
-              <div className="workspace-action-tooltip">
-                <button
-                  type="button"
-                  className="workspace-action-pill"
-                  onClick={() => { setActiveTab('brochure'); handleGenerateFlyer(); }}
-                  disabled={Boolean(status) || isArchivedProperty}
-                  title="Build a one-page marketing flyer using current pricing, selected photos, and your brochure copy settings."
-                >
-                  Generate flyer
-                </button>
-                <div className="workspace-action-tooltip-bubble" role="tooltip">
-                  Build a one-page marketing flyer using current pricing, selected photos, and your brochure copy settings.
-                </div>
-              </div>
-              <div className="workspace-action-tooltip">
-                <button
-                  type="button"
-                  className="workspace-action-pill workspace-action-pill-primary"
-                  onClick={() => { setActiveTab('report'); handleGenerateReport(); }}
-                  disabled={Boolean(status) || isArchivedProperty}
-                  title="Create the full seller report with pricing analysis, checklist progress, selected photos, and marketing guidance."
-                >
-                  Generate report
-                </button>
-                <div className="workspace-action-tooltip-bubble" role="tooltip">
-                  Create the full seller report with pricing analysis, checklist progress, selected photos, and marketing guidance.
-                </div>
-              </div>
-            </section>
-
             <section className="workspace-tab-bar" aria-label="Workspace tabs">
               {WORKSPACE_TABS.map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'workspace-tab active' : 'workspace-tab'} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
             </section>
