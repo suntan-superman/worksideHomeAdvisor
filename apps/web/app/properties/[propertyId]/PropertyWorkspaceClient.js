@@ -186,15 +186,21 @@ const VISION_JOB_RECOVERY_LOOKBACK_MS = 90 * 1000;
 const VISION_JOB_RECOVERY_POLL_INTERVAL_MS = 4000;
 const VISION_JOB_RECOVERY_TIMEOUT_MS = 2 * 60 * 1000;
 const PHOTO_LIBRARY_CATEGORY_DEFINITIONS = [
-  { key: 'living_room', label: 'Living Room' },
   { key: 'kitchen', label: 'Kitchen' },
-  { key: 'primary_bedroom', label: 'Primary Bedroom' },
-  { key: 'bathroom', label: 'Bathroom' },
-  { key: 'exterior', label: 'Exterior' },
+  { key: 'living_room', label: 'Living Room' },
+  { key: 'master_bedroom', label: 'Master Bedroom' },
+  { key: 'master_bathroom', label: 'Master Bathroom' },
   { key: 'other', label: 'Other' },
+  { key: 'exterior', label: 'Exterior' },
 ];
 const DEFAULT_WORKSPACE_SECTION_STATE = {
   photos_import: true,
+  photos_room_kitchen: true,
+  photos_room_living_room: true,
+  photos_room_master_bedroom: true,
+  photos_room_master_bathroom: true,
+  photos_room_other: false,
+  photos_room_exterior: true,
   brochure_controls: true,
   brochure_preview: true,
   brochure_social: false,
@@ -515,10 +521,10 @@ function resolvePhotoLibraryCategoryKey(roomLabel = '') {
     normalizedLabel.includes('master bedroom') ||
     normalizedLabel.includes('owner bedroom')
   ) {
-    return 'primary_bedroom';
+    return 'master_bedroom';
   }
   if (normalizedLabel.includes('bath')) {
-    return 'bathroom';
+    return 'master_bathroom';
   }
   if (
     normalizedLabel.includes('exterior') ||
@@ -549,7 +555,7 @@ function buildPhotoCategoryGroups(assets = []) {
     assets: [...(categoryMap.get(definition.key) || [])].sort(
       (left, right) => getMediaAssetCreatedAtTimestamp(right) - getMediaAssetCreatedAtTimestamp(left),
     ),
-  })).filter((group) => group.assets.length);
+  }));
 }
 
 function readWorkspaceSectionState(storageKey) {
@@ -1042,7 +1048,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [guidedWorkflow, setGuidedWorkflow] = useState(null);
   const [workflowPreviewStepKey, setWorkflowPreviewStepKey] = useState('');
   const [checklistSummaryMode, setChecklistSummaryMode] = useState('open');
-  const [activePhotoCategoryKey, setActivePhotoCategoryKey] = useState('');
   const [workspaceSectionState, setWorkspaceSectionState] = useState({});
   const [pendingWorkspaceScrollTarget, setPendingWorkspaceScrollTarget] = useState('');
   const [pendingChecklistFocusTarget, setPendingChecklistFocusTarget] = useState('');
@@ -1126,6 +1131,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   useEffect(() => {
     if (!selectedMediaAssetId) {
       lastVisionAssetResetRef.current = '';
+      setMediaVariants([]);
       return;
     }
     if (lastVisionAssetResetRef.current === selectedMediaAssetId) {
@@ -1135,6 +1141,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       mediaAssets.find((asset) => asset.id === selectedMediaAssetId) || null;
     const nextStageKey = getDefaultVisionStageForAsset(nextSelectedAsset);
     lastVisionAssetResetRef.current = selectedMediaAssetId;
+    setMediaVariants([]);
     setSelectedVariantId('');
     setWorkflowSourceVariantId('');
     setActiveVisionWorkflowStageKey(nextStageKey);
@@ -1386,12 +1393,16 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     [mediaAssets],
   );
   const photoCategoryGroups = useMemo(() => buildPhotoCategoryGroups(mediaAssets), [mediaAssets]);
-  const activePhotoCategory = useMemo(
+  const selectedMediaAssetPhotoCategory = useMemo(
     () =>
-      photoCategoryGroups.find((group) => group.key === activePhotoCategoryKey) ||
-      photoCategoryGroups[0] ||
-      null,
-    [activePhotoCategoryKey, photoCategoryGroups],
+      photoCategoryGroups.find((group) =>
+        group.assets.some((asset) => asset.id === selectedMediaAsset?.id),
+      ) || null,
+    [photoCategoryGroups, selectedMediaAsset?.id],
+  );
+  const firstPopulatedPhotoCategoryKey = useMemo(
+    () => photoCategoryGroups.find((group) => group.assets.length)?.key || photoCategoryGroups[0]?.key || '',
+    [photoCategoryGroups],
   );
   const mediaAssetGroups = useMemo(() => groupMediaAssetsByRoom(mediaAssets), [mediaAssets]);
   const brochurePhotoPool = useMemo(
@@ -1505,16 +1516,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     [mediaVariants],
   );
 
-  useEffect(() => {
-    if (selectedMediaAsset?.roomLabel) {
-      setActivePhotoCategoryKey(resolvePhotoLibraryCategoryKey(selectedMediaAsset.roomLabel));
-      return;
-    }
-
-    if (!activePhotoCategoryKey && photoCategoryGroups[0]?.key) {
-      setActivePhotoCategoryKey(photoCategoryGroups[0].key);
-    }
-  }, [activePhotoCategoryKey, photoCategoryGroups, selectedMediaAsset?.roomLabel]);
   const selectedVariantFreeformHighlights = useMemo(
     () => formatFreeformPlanHighlights(selectedVariant?.metadata?.normalizedPlan),
     [selectedVariant?.metadata?.normalizedPlan],
@@ -2557,28 +2558,17 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
 
     const resolvedStageKey = nextStageKey || getDefaultVisionStageForAsset(asset);
+    if (asset.id !== selectedMediaAssetId) {
+      setMediaVariants([]);
+    }
     setSelectedMediaAssetId(asset.id);
     setSelectedVariantId('');
+    setWorkflowSourceVariantId('');
     setActiveTab('vision');
     setActiveVisionWorkflowStageKey(resolvedStageKey);
     setActiveVisionPresetKey(getDefaultVisionPresetKeyForStage(resolvedStageKey));
     setShowVisionPhotoPicker(false);
     setShowVisionHistory(false);
-  }
-
-  function handleSelectPhotoCategory(categoryKey) {
-    setActivePhotoCategoryKey(categoryKey);
-    const nextCategory = photoCategoryGroups.find((group) => group.key === categoryKey);
-    if (!nextCategory?.assets?.length) {
-      return;
-    }
-
-    const currentSelectedInCategory = nextCategory.assets.some(
-      (asset) => asset.id === selectedMediaAsset?.id,
-    );
-    if (!currentSelectedInCategory) {
-      setSelectedMediaAssetId(nextCategory.assets[0].id);
-    }
   }
 
   function renderCollapsibleSection({
@@ -2615,6 +2605,74 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         {isOpen ? <div className="workspace-collapsible-section-body">{children}</div> : null}
       </section>
     );
+  }
+
+  function renderPhotoLibrarySection(group) {
+    const isSelectedCategory = selectedMediaAssetPhotoCategory?.key === group.key;
+    const defaultOpen = isSelectedCategory || group.key === firstPopulatedPhotoCategoryKey;
+
+    return renderCollapsibleSection({
+      sectionKey: `photos_room_${group.key}`,
+      label: 'Photo category',
+      title: group.label,
+      meta: `${group.assets.length} photo${group.assets.length === 1 ? '' : 's'}`,
+      defaultOpen,
+      className: 'content-card workspace-collapsible-section photo-library-section',
+      children: group.assets.length ? (
+        <div className="photo-room-grid">
+          {group.assets.map((asset) => (
+            <article
+              key={asset.id}
+              className={asset.id === selectedMediaAsset?.id ? 'photo-library-card active' : 'photo-library-card'}
+            >
+              <button
+                type="button"
+                className="photo-library-card-preview"
+                onClick={() => setSelectedMediaAssetId(asset.id)}
+              >
+                <img src={asset.imageUrl} alt={asset.roomLabel || 'Property photo'} />
+              </button>
+              <div className="photo-library-card-body">
+                <div className="photo-card-badge-row">
+                  <span className="photo-card-status-pill">{getMediaAssetPrimaryLabel(asset)}</span>
+                  {asset.savedFromVision ? <span className="photo-card-status-pill">Saved from Vision</span> : null}
+                  <button
+                    type="button"
+                    className={asset.listingCandidate ? 'photo-card-action-pill active' : 'photo-card-action-pill'}
+                    onClick={() => handleToggleListingCandidateForAsset(asset)}
+                    disabled={Boolean(status) || isArchivedProperty}
+                  >
+                    {asset.listingCandidate ? 'Seller Pick' : 'Add Seller Pick'}
+                  </button>
+                </div>
+                <strong>{asset.roomLabel}</strong>
+                <p className="photo-card-summary">{getMediaAssetSummary(asset)}</p>
+                <div className="photo-library-card-actions">
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => setSelectedMediaAssetId(asset.id)}
+                  >
+                    {asset.id === selectedMediaAsset?.id ? 'Selected' : 'Select photo'}
+                  </button>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => setActivePhotoDetailsAsset(asset)}
+                  >
+                    Details
+                  </button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="workspace-control-note photo-library-empty-state">
+          No photos have been added to {group.label.toLowerCase()} yet.
+        </p>
+      ),
+    });
   }
 
   function toggleFlyerPhotoSelection(assetId) {
@@ -3803,9 +3861,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           title: 'Import photos',
           meta: `${mediaAssets.length} saved`,
           defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.photos_import,
+          className: 'content-card workspace-collapsible-section photo-import-section',
           children: (
             <div
-              className="workspace-inner-card brochure-control-card"
+              className="workspace-inner-card brochure-control-card photo-import-card-compact"
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => {
                 event.preventDefault();
@@ -3863,93 +3922,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           ),
         })}
 
-        <section className="content-card photo-library-workspace-card">
-          <div className="section-header-tight">
-            <div>
-              <span className="label">Photo categories</span>
-              <h2>Choose a room photo</h2>
-            </div>
-            <span className="section-header-meta">
-              {activePhotoCategory ? `${activePhotoCategory.assets.length} in ${activePhotoCategory.label}` : 'No photos yet'}
-            </span>
-          </div>
-          <p className="workspace-control-note">
-            Start here. Pick a room category, choose the best source photo for that room, then open the Vision workspace and work only on that photo and its saved versions.
-          </p>
-
-          {photoCategoryGroups.length ? (
-            <div className="workspace-tab-stack">
-              <div className="photo-category-tab-row">
-                {photoCategoryGroups.map((group) => (
-                  <button
-                    key={`photo-category-${group.key}`}
-                    type="button"
-                    className={group.key === activePhotoCategory?.key ? 'photo-category-tab active' : 'photo-category-tab'}
-                    onClick={() => handleSelectPhotoCategory(group.key)}
-                  >
-                    <strong>{group.label}</strong>
-                    <span>{group.assets.length}</span>
-                  </button>
-                ))}
-              </div>
-
-              {activePhotoCategory ? (
-                <div className="photo-room-section">
-                  <div className="photo-room-header">
-                    <div>
-                      <span className="label">Current category</span>
-                      <h3>{activePhotoCategory.label}</h3>
-                    </div>
-                    <span className="section-header-meta">
-                      {activePhotoCategory.assets.length} photo{activePhotoCategory.assets.length === 1 ? '' : 's'}
-                    </span>
-                  </div>
-                  <div className="photo-room-grid">
-                    {activePhotoCategory.assets.map((asset) => (
-                      <article
-                        key={asset.id}
-                        className={asset.id === selectedMediaAsset?.id ? 'photo-library-card active' : 'photo-library-card'}
-                      >
-                        <button
-                          type="button"
-                          className="photo-library-card-preview"
-                          onClick={() => setSelectedMediaAssetId(asset.id)}
-                        >
-                          <img src={asset.imageUrl} alt={asset.roomLabel || 'Property photo'} />
-                        </button>
-                        <div className="photo-library-card-body">
-                          <div className="photo-card-badge-row">
-                            <span className="photo-card-status-pill">{getMediaAssetPrimaryLabel(asset)}</span>
-                            {asset.savedFromVision ? <span className="photo-card-status-pill">Saved from Vision</span> : null}
-                            <button
-                              type="button"
-                              className={asset.listingCandidate ? 'photo-card-action-pill active' : 'photo-card-action-pill'}
-                              onClick={() => handleToggleListingCandidateForAsset(asset)}
-                              disabled={Boolean(status) || isArchivedProperty}
-                            >
-                              {asset.listingCandidate ? 'Seller Pick' : 'Add Seller Pick'}
-                            </button>
-                          </div>
-                          <strong>{asset.roomLabel}</strong>
-                          <p className="photo-card-summary">{getMediaAssetSummary(asset)}</p>
-                          <div className="photo-library-card-actions">
-                            <button type="button" className="button-secondary" onClick={() => handleOpenAssetInVision(asset)}>
-                              Open in Vision
-                            </button>
-                            <button type="button" className="button-secondary" onClick={() => setActivePhotoDetailsAsset(asset)}>
-                              Details
-                            </button>
-                          </div>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <p>No photos have been saved for this property yet. Capture them in mobile or upload them here first.</p>
-          )}
+        <section className="photo-library-workspace-card">
+          {photoCategoryGroups.map((group) => renderPhotoLibrarySection(group))}
         </section>
       </div>
 
@@ -3959,6 +3933,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             <span className="label">Selected photo</span>
             <h2>{selectedMediaAsset?.roomLabel || 'Choose a photo'}</h2>
           </div>
+          <span className="section-header-meta">
+            {selectedMediaAssetPhotoCategory?.label || 'No room selected'}
+          </span>
         </div>
         {selectedMediaAsset ? (
           <div className="workspace-tab-stack">

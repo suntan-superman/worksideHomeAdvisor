@@ -2824,40 +2824,57 @@ select {
 
 .photo-library-workspace-card {
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
-.photo-category-tab-row {
-  display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 4px;
+.photo-import-section .workspace-collapsible-section-toggle h2 {
+  font-size: 1.72rem;
 }
 
-.photo-category-tab {
-  display: grid;
+.photo-import-section .workspace-collapsible-section-body,
+.photo-library-section .workspace-collapsible-section-body {
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.photo-import-card-compact {
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.photo-import-card-compact .brochure-control-grid {
+  gap: 12px;
+}
+
+.photo-import-card-compact .workspace-control-field {
+  gap: 6px;
+}
+
+.photo-import-card-compact .workspace-control-field textarea {
+  min-height: 96px;
+}
+
+.photo-library-section .workspace-collapsible-section-toggle h2 {
+  margin-top: 4px;
+  font-size: 1.5rem;
+}
+
+.photo-library-section .workspace-collapsible-section-meta {
   gap: 4px;
-  min-width: 124px;
-  padding: 12px 14px;
-  border-radius: 18px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.74);
-  text-align: left;
 }
 
-.photo-category-tab strong {
-  color: var(--ink);
-  font-size: 0.95rem;
+.photo-library-section .photo-room-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
 }
 
-.photo-category-tab span {
-  color: var(--muted);
-  font-size: 0.84rem;
+.photo-library-section .photo-library-card {
+  gap: 10px;
+  padding: 12px;
 }
 
-.photo-category-tab.active {
-  border-color: var(--clay);
-  box-shadow: 0 10px 22px rgba(200, 116, 71, 0.14);
+.photo-library-empty-state {
+  margin: 0;
 }
 
 .workspace-content-layout {
