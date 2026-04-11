@@ -2,9 +2,11 @@ import mongoose from 'mongoose';
 
 import { env } from '../config/env.js';
 import { logError, logInfo } from './logger.js';
+import { enableMongooseQueryLogging } from './mongoose-query-logger.js';
 
 export async function connectToDatabase() {
   try {
+    enableMongooseQueryLogging();
     await mongoose.connect(env.MONGODB_URI, {
       dbName: env.MONGODB_DB_NAME,
     });

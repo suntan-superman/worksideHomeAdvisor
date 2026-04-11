@@ -2957,7 +2957,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       return;
     }
 
-    setSelectedMediaAssetId(asset.id);
     setActivePhotoVariationsAssetId(asset.id);
     setActivePhotoDetailsAsset(null);
     setToast(null);
@@ -6278,6 +6277,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         src={variant.imageUrl}
                         alt={variant.label || 'Photo variation'}
                         className="vision-attempt-card-image"
+                        loading="lazy"
+                        decoding="async"
                       />
                       <div className="vision-attempt-card-copy">
                         <strong>{variant.label || 'Saved variation'}</strong>

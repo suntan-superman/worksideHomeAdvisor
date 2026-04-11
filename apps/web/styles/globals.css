@@ -3620,6 +3620,12 @@ select {
   max-width: 940px;
 }
 
+.photo-variations-modal-card {
+  width: min(1080px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+
 .vision-history-modal-card {
   width: min(1080px, 100%);
   max-height: calc(100vh - 48px);
