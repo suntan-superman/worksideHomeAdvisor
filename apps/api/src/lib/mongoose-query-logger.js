@@ -1,16 +1,8 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import mongoose from 'mongoose';
 
 import { logError, logInfo } from './logger.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const queryLogDirectory = path.resolve(__dirname, '../../../../logs');
-const queryLogFilePath = path.join(queryLogDirectory, 'mongo-queries.log');
-
-let queryLogStream = null;
+const QUERY_LOG_DESTINATION = 'stdout';
 let loggerInstalled = false;
 
 function isQueryLoggingEnabled() {
@@ -18,19 +10,6 @@ function isQueryLoggingEnabled() {
     .trim()
     .toLowerCase();
   return ['1', 'true', 'yes', 'on'].includes(rawValue);
-}
-
-function ensureQueryLogStream() {
-  if (queryLogStream) {
-    return queryLogStream;
-  }
-
-  fs.mkdirSync(queryLogDirectory, { recursive: true });
-  queryLogStream = fs.createWriteStream(queryLogFilePath, {
-    flags: 'a',
-    encoding: 'utf8',
-  });
-  return queryLogStream;
 }
 
 function normalizeForLog(value, depth = 0) {
@@ -126,7 +105,7 @@ function resolveResultCount(result) {
 
 function writeQueryLog(entry) {
   try {
-    ensureQueryLogStream().write(`${JSON.stringify(entry)}\n`);
+    console.log(JSON.stringify(entry));
   } catch (error) {
     logError('Mongo query logging failed', { message: error.message });
   }
@@ -269,18 +248,17 @@ export function enableMongooseQueryLogging() {
   if (!isQueryLoggingEnabled()) {
     return {
       enabled: false,
-      logFilePath: queryLogFilePath,
+      destination: QUERY_LOG_DESTINATION,
     };
   }
 
   if (loggerInstalled) {
     return {
       enabled: true,
-      logFilePath: queryLogFilePath,
+      destination: QUERY_LOG_DESTINATION,
     };
   }
 
-  ensureQueryLogStream();
   installQueryExecLogger();
   installAggregateExecLogger();
   loggerInstalled = true;
@@ -289,19 +267,19 @@ export function enableMongooseQueryLogging() {
     timestamp: new Date().toISOString(),
     event: 'mongo_query_logging_enabled',
     success: true,
-    logFilePath: queryLogFilePath,
+    destination: QUERY_LOG_DESTINATION,
   });
 
   logInfo('Mongo query logging enabled', {
-    logFilePath: queryLogFilePath,
+    destination: QUERY_LOG_DESTINATION,
   });
 
   return {
     enabled: true,
-    logFilePath: queryLogFilePath,
+    destination: QUERY_LOG_DESTINATION,
   };
 }
 
 export function getMongoQueryLogFilePath() {
-  return queryLogFilePath;
+  return null;
 }
