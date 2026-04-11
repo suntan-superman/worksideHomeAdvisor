@@ -1968,6 +1968,12 @@ select {
   gap: 10px;
 }
 
+.vision-current-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .property-media-slider-card {
   display: grid;
   gap: 12px;
@@ -3580,6 +3586,12 @@ select {
 
 .photo-details-modal-card {
   max-width: 940px;
+}
+
+.vision-history-modal-card {
+  width: min(1080px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
 }
 
 .photo-details-modal-preview {
