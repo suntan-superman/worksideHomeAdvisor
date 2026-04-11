@@ -3697,7 +3697,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (blockArchivedMutation()) {
       return;
     }
-    if (!selectedMediaAsset || !variant?.id) {
+    if (!variant?.id) {
       return;
     }
 
@@ -3706,6 +3706,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     );
     setPendingDeleteVisionVariant({
       id: variant.id,
+      assetId: String(variant.mediaId || selectedMediaAsset?.id || ''),
       label: variant.label || 'Selected attempt',
       imageUrl: variant.imageUrl,
       summary: getVariantSummary(variant),
@@ -3738,12 +3739,15 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (blockArchivedMutation()) {
       return;
     }
-    if (!selectedMediaAsset || !pendingDeleteVisionVariant?.id) {
+    if (!pendingDeleteVisionVariant?.id) {
       return;
     }
 
     const variantToDelete = pendingDeleteVisionVariant;
-    const selectedAssetId = selectedMediaAsset.id;
+    const selectedAssetId = String(selectedMediaAsset?.id || '');
+    const assetIdForDelete = String(variantToDelete.assetId || selectedAssetId);
+    const deletingCurrentWorkspaceVariant =
+      Boolean(selectedAssetId) && assetIdForDelete === selectedAssetId;
     const optimisticNextVariants = mediaVariants.filter(
       (variant) => variant.id !== variantToDelete.id,
     );
@@ -3753,13 +3757,15 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           getVisionWorkflowStageKeyForVariant(candidate) === activeVisionWorkflowStageKey,
       ) || optimisticNextVariants[0];
     const nextWorkflowSourceVariantId =
-      workflowSourceVariantId === variantToDelete.id
+      deletingCurrentWorkspaceVariant && workflowSourceVariantId === variantToDelete.id
         ? replacementStageVariant?.id || ''
         : workflowSourceVariantId;
     const nextLatestGeneratedVariantId =
-      latestGeneratedVariantId === variantToDelete.id ? '' : latestGeneratedVariantId;
+      deletingCurrentWorkspaceVariant && latestGeneratedVariantId === variantToDelete.id
+        ? ''
+        : latestGeneratedVariantId;
     const nextSelectedVariantId =
-      selectedVariantId === variantToDelete.id
+      deletingCurrentWorkspaceVariant && selectedVariantId === variantToDelete.id
         ? replacementStageVariant?.id || ''
         : selectedVariantId;
 
@@ -3767,22 +3773,24 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setStatus('Deleting vision attempt...');
     setToast(null);
     try {
-      await deleteMediaVariantRequest(selectedAssetId, variantToDelete.id);
-      queryClient.setQueryData(
-        ['property-media-variants', selectedAssetId],
-        optimisticNextVariants,
-      );
-      setMediaVariants(optimisticNextVariants);
-      setWorkflowSourceVariantId(nextWorkflowSourceVariantId);
-      setLatestGeneratedVariantId(nextLatestGeneratedVariantId);
-      setSelectedVariantId(nextSelectedVariantId);
+      await deleteMediaVariantRequest(assetIdForDelete, variantToDelete.id);
+      if (deletingCurrentWorkspaceVariant) {
+        queryClient.setQueryData(
+          ['property-media-variants', selectedAssetId],
+          optimisticNextVariants,
+        );
+        setMediaVariants(optimisticNextVariants);
+        setWorkflowSourceVariantId(nextWorkflowSourceVariantId);
+        setLatestGeneratedVariantId(nextLatestGeneratedVariantId);
+        setSelectedVariantId(nextSelectedVariantId);
 
-      if (!optimisticNextVariants.length) {
-        setShowVisionHistory(false);
-        setShowMoreVisionVariants(false);
+        if (!optimisticNextVariants.length) {
+          setShowVisionHistory(false);
+          setShowMoreVisionVariants(false);
+        }
       }
 
-      if (selectedVariantId === variantToDelete.id) {
+      if (deletingCurrentWorkspaceVariant && selectedVariantId === variantToDelete.id) {
         requestAnimationFrame(() => {
           scrollWorkspaceSectionIntoView(visionCompareRef);
         });
@@ -3795,8 +3803,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       });
 
       void Promise.all([
-        refreshMediaVariants(selectedAssetId),
-        refreshMediaAssets(selectedAssetId),
+        refreshMediaVariants(assetIdForDelete),
+        refreshMediaAssets(assetIdForDelete),
         refreshWorkflow(),
       ]).catch(() => {});
     } catch (requestError) {

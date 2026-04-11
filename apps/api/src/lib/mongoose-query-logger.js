@@ -280,9 +280,17 @@ export function enableMongooseQueryLogging() {
     };
   }
 
+  ensureQueryLogStream();
   installQueryExecLogger();
   installAggregateExecLogger();
   loggerInstalled = true;
+
+  writeQueryLog({
+    timestamp: new Date().toISOString(),
+    event: 'mongo_query_logging_enabled',
+    success: true,
+    logFilePath: queryLogFilePath,
+  });
 
   logInfo('Mongo query logging enabled', {
     logFilePath: queryLogFilePath,
