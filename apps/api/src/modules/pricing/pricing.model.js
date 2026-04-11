@@ -28,7 +28,6 @@ const pricingAnalysisSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Property',
       required: true,
-      index: true,
     },
     source: { type: String, required: true },
     usedLiveData: { type: Boolean, default: false },

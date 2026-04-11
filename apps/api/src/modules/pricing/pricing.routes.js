@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { assertPropertyEditableById, getPropertyById } from '../properties/property.service.js';
+import { assertPropertyEditableById } from '../properties/property.service.js';
 import {
   enforceAnalysisRequest,
   finalizeCachedAnalysisReturn,
@@ -30,7 +30,7 @@ export async function pricingRoutes(fastify) {
         featureKey: 'pricing.full',
         latestResult: latestAnalysis,
         resultTimestamp: latestAnalysis?.createdAt,
-        cooldownHours: 24,
+        cooldownHours: 0,
         inputSignature: {
           propertyId,
           updatedAt: property.updatedAt,
@@ -53,6 +53,7 @@ export async function pricingRoutes(fastify) {
             servedFromCache: true,
             cacheReason: decision.cacheReason,
             cachedAt: decision.cachedAt,
+            policy: decision.policy || null,
           },
         });
       }
@@ -61,7 +62,17 @@ export async function pricingRoutes(fastify) {
         return reply.code(402).send({
           message: 'Plan limit reached or feature not included.',
           ...decision,
-        });
+          });
+      }
+
+      if (decision.action === 'DENY_PROPERTY_QUERY_LIMIT') {
+        return reply
+          .code(429)
+          .header('Retry-After', String(decision.retryAfterSeconds))
+          .send({
+            message: 'The pricing query limit for this property has been reached.',
+            ...decision,
+          });
       }
 
       if (decision.action === 'DENY_RATE_LIMIT') {
@@ -75,9 +86,10 @@ export async function pricingRoutes(fastify) {
       }
 
       let analysis;
+      let finalizeResult;
       try {
         analysis = await analyzePropertyPricing(propertyId);
-        await finalizeFreshAnalysisRun({
+        finalizeResult = await finalizeFreshAnalysisRun({
           userId: property.ownerUserId,
           propertyId,
           analysisType: 'pricing',
@@ -98,6 +110,30 @@ export async function pricingRoutes(fastify) {
         analysis,
         metadata: {
           servedFromCache: false,
+          cacheReason: null,
+          cachedAt: null,
+          policy: decision.policy
+            ? {
+                ...decision.policy,
+                runsUsedForProperty:
+                  finalizeResult?.pricingPropertyUsage?.freshRunsTotal ??
+                  decision.policy.runsUsedForProperty,
+                runsRemainingForProperty:
+                  decision.policy.maxRunsPerPropertyPerUser > 0
+                    ? Math.max(
+                        0,
+                        decision.policy.maxRunsPerPropertyPerUser -
+                          (finalizeResult?.pricingPropertyUsage?.freshRunsTotal ??
+                            decision.policy.runsUsedForProperty),
+                      )
+                    : null,
+                lastFreshRunAt:
+                  finalizeResult?.pricingPropertyUsage?.lastFreshRunAt ||
+                  analysis?.createdAt ||
+                  decision.policy.lastFreshRunAt ||
+                  null,
+              }
+            : null,
         },
       });
     } catch (error) {

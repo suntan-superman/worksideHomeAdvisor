@@ -389,12 +389,31 @@ export async function mediaRoutes(fastify) {
   });
 
   fastify.delete('/media/assets/:assetId/variants/:variantId', async (request, reply) => {
+    const startedAt = Date.now();
     try {
       const { assetId } = assetParamsSchema.parse(request.params);
       const { variantId } = variantParamsSchema.parse(request.params);
       const result = await deleteMediaVariantDraft(assetId, variantId);
+      request.log.info(
+        {
+          assetId,
+          variantId,
+          durationMs: Date.now() - startedAt,
+          timing: result.timing || null,
+        },
+        'media variant delete completed',
+      );
       return reply.send(result);
     } catch (error) {
+      request.log.error(
+        {
+          err: error,
+          assetId: request.params?.assetId,
+          variantId: request.params?.variantId,
+          durationMs: Date.now() - startedAt,
+        },
+        'media variant delete failed',
+      );
       const statusCode =
         error.message === 'Media asset not found.' || error.message === 'Media variant not found.'
           ? 404

@@ -1048,6 +1048,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [generationPrompt, setGenerationPrompt] = useState(null);
   const [pendingDeleteProperty, setPendingDeleteProperty] = useState(null);
   const [activePhotoDetailsAsset, setActivePhotoDetailsAsset] = useState(null);
+  const [activePhotoVariationsAssetId, setActivePhotoVariationsAssetId] = useState('');
   const [guidedWorkflow, setGuidedWorkflow] = useState(null);
   const [workflowPreviewStepKey, setWorkflowPreviewStepKey] = useState('');
   const [checklistSummaryMode, setChecklistSummaryMode] = useState('open');
@@ -1572,6 +1573,23 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     () => mediaAssets.find((asset) => asset.id === selectedMediaAssetId) || mediaAssets[0] || null,
     [mediaAssets, selectedMediaAssetId],
   );
+  const resolvedActivePhotoDetailsAsset = useMemo(() => {
+    if (!activePhotoDetailsAsset?.id) {
+      return null;
+    }
+
+    return (
+      mediaAssets.find((asset) => asset.id === activePhotoDetailsAsset.id) ||
+      activePhotoDetailsAsset
+    );
+  }, [activePhotoDetailsAsset, mediaAssets]);
+  const resolvedActivePhotoVariationsAsset = useMemo(() => {
+    if (!activePhotoVariationsAssetId) {
+      return null;
+    }
+
+    return mediaAssets.find((asset) => asset.id === activePhotoVariationsAssetId) || null;
+  }, [activePhotoVariationsAssetId, mediaAssets]);
   const listingCandidateAssets = useMemo(
     () => mediaAssets.filter((asset) => asset.listingCandidate),
     [mediaAssets],
@@ -1660,6 +1678,21 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const activeVisionWorkflowStage = useMemo(
     () => getVisionWorkflowStage(activeVisionWorkflowStageKey),
     [activeVisionWorkflowStageKey],
+  );
+  const photoVariations = useMemo(() => {
+    if (
+      !activePhotoVariationsAssetId ||
+      String(selectedMediaAssetId || '') !== String(activePhotoVariationsAssetId)
+    ) {
+      return [];
+    }
+
+    return getNewestVisionVariants(mediaVariants);
+  }, [activePhotoVariationsAssetId, mediaVariants, selectedMediaAssetId]);
+  const isLoadingPhotoVariations = Boolean(activePhotoVariationsAssetId) && (
+    String(selectedMediaAssetId || '') !== String(activePhotoVariationsAssetId) ||
+    liveMediaVariantsQuery.isPending ||
+    liveMediaVariantsQuery.isFetching
   );
   const activeVisionWorkflowPresetGroups = useMemo(() => {
     const presetByKey = new Map(visionPresets.map((preset) => [preset.key, preset]));
@@ -2041,6 +2074,22 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       return nextAssets[0]?.id || '';
     });
   }, [liveMediaAssetsQuery.data]);
+
+  useEffect(() => {
+    if (!activePhotoDetailsAsset?.id) {
+      return;
+    }
+
+    const refreshedAsset =
+      mediaAssets.find((asset) => asset.id === activePhotoDetailsAsset.id) || null;
+
+    if (refreshedAsset) {
+      setActivePhotoDetailsAsset(refreshedAsset);
+      return;
+    }
+
+    setActivePhotoDetailsAsset(null);
+  }, [activePhotoDetailsAsset?.id, mediaAssets]);
 
   useEffect(() => {
     if (!liveMediaVariantsQuery.data) {
@@ -2540,7 +2589,30 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setLatestPricing(analysisResponse.analysis);
       setDashboard(dashboardResponse);
       setChecklist(checklistResponse);
-      setToast({ tone: 'success', title: 'Pricing refreshed', message: 'The latest analysis and comp set are ready.' });
+      const pricingMetadata = analysisResponse.metadata || {};
+      const pricingPolicy = pricingMetadata.policy || {};
+      if (pricingMetadata.servedFromCache && pricingMetadata.cacheReason === 'COOLDOWN_ACTIVE') {
+        setToast({
+          tone: 'info',
+          title: 'Recent comps already available',
+          message: pricingMetadata.cachedAt
+            ? `Last live comps were run ${formatDateTimeLabel(pricingMetadata.cachedAt)}. Showing the saved analysis because the ${pricingPolicy.pricingCooldownHours || 24}-hour cooldown is still active.`
+            : `Showing the saved analysis because the ${pricingPolicy.pricingCooldownHours || 24}-hour cooldown is still active.`,
+        });
+      } else if (
+        pricingMetadata.servedFromCache &&
+        pricingMetadata.cacheReason === 'PROPERTY_QUERY_LIMIT_REACHED'
+      ) {
+        setToast({
+          tone: 'warning',
+          title: 'Pricing query limit reached',
+          message: pricingMetadata.cachedAt
+            ? `This property has already used ${pricingPolicy.runsUsedForProperty || 0} live RentCast pricing runs. Showing the latest saved analysis from ${formatDateTimeLabel(pricingMetadata.cachedAt)}.`
+            : `This property has already used ${pricingPolicy.runsUsedForProperty || 0} live RentCast pricing runs, so the latest saved analysis is being shown instead.`,
+        });
+      } else {
+        setToast({ tone: 'success', title: 'Pricing refreshed', message: 'The latest analysis and comp set are ready.' });
+      }
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Pricing refresh failed', message: requestError.message });
     } finally {
@@ -2697,9 +2769,20 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
     const nextValue =
       typeof explicitValue === 'boolean' ? explicitValue : !Boolean(asset.listingCandidate);
+    const previousValue = Boolean(asset.listingCandidate);
     setStatus(nextValue ? 'Marking photo as listing candidate...' : 'Removing listing-candidate mark...');
     setToast(null);
     try {
+      setMediaAssets((current) =>
+        current.map((currentAsset) =>
+          currentAsset.id === asset.id
+            ? { ...currentAsset, listingCandidate: nextValue }
+            : currentAsset,
+        ),
+      );
+      setActivePhotoDetailsAsset((current) =>
+        current?.id === asset.id ? { ...current, listingCandidate: nextValue } : current,
+      );
       await updateMediaAsset(asset.id, { listingCandidate: nextValue });
       await Promise.all([
         refreshMediaAssets(asset.id),
@@ -2715,6 +2798,16 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           : 'This photo will no longer be prioritized for the flyer.',
       });
     } catch (requestError) {
+      setMediaAssets((current) =>
+        current.map((currentAsset) =>
+          currentAsset.id === asset.id
+            ? { ...currentAsset, listingCandidate: previousValue }
+            : currentAsset,
+        ),
+      );
+      setActivePhotoDetailsAsset((current) =>
+        current?.id === asset.id ? { ...current, listingCandidate: previousValue } : current,
+      );
       setToast({ tone: 'error', title: 'Could not update photo', message: requestError.message });
     } finally {
       setStatus('');
@@ -2739,6 +2832,49 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setShowVisionPhotoPicker(false);
     setShowVisionHistory(false);
     setPendingWorkspaceScrollTarget('vision-top');
+  }
+
+  function handleOpenPhotoVariations(asset) {
+    if (!asset) {
+      return;
+    }
+
+    setSelectedMediaAssetId(asset.id);
+    setActivePhotoVariationsAssetId(asset.id);
+    setActivePhotoDetailsAsset(null);
+    setToast(null);
+    void refreshMediaVariants(asset.id).catch(() => {});
+  }
+
+  function handleUseVariantAsVisionBaseline(asset, variant) {
+    if (!asset || !variant) {
+      return;
+    }
+
+    const sourceStageKey = getVisionWorkflowStageKeyForVariant(variant);
+    const nextStageKey = getNextVisionWorkflowStageKey(sourceStageKey);
+
+    setSelectedMediaAssetId(asset.id);
+    setSelectedVariantId(variant.id);
+    setWorkflowSourceVariantId(variant.id);
+    setActiveTab('vision');
+    setActiveVisionWorkflowStageKey(nextStageKey);
+    if (nextStageKey !== 'final') {
+      setActiveVisionPresetKey(getDefaultVisionPresetKeyForStage(nextStageKey));
+    }
+    setShowVisionPhotoPicker(false);
+    setShowVisionHistory(false);
+    setShowMoreVisionVariants(false);
+    setActivePhotoVariationsAssetId('');
+    setPendingWorkspaceScrollTarget('vision-top');
+    setToast({
+      tone: 'success',
+      title: 'Vision baseline updated',
+      message:
+        nextStageKey === 'final'
+          ? `${variant.label || 'This variation'} is now the final review source in Vision.`
+          : `${variant.label || 'This variation'} is now the source for ${getVisionWorkflowStage(nextStageKey).title.toLowerCase()}.`,
+    });
   }
 
   function renderCollapsibleSection({
@@ -2780,12 +2916,15 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   function renderPhotoLibrarySection(group) {
     const isSelectedCategory = selectedMediaAssetPhotoCategory?.key === group.key;
     const defaultOpen = isSelectedCategory || group.key === firstPopulatedPhotoCategoryKey;
+    const sellerPickCount = group.assets.filter((asset) => asset.listingCandidate).length;
+    const photoCountLabel = `${group.assets.length} photo${group.assets.length === 1 ? '' : 's'}`;
+    const sellerPickLabel = `${sellerPickCount} seller pick${sellerPickCount === 1 ? '' : 's'}`;
 
     return renderCollapsibleSection({
       sectionKey: `photos_room_${group.key}`,
       label: 'Photo category',
       title: group.label,
-      meta: `${group.assets.length} photo${group.assets.length === 1 ? '' : 's'}`,
+      meta: `${photoCountLabel} · ${sellerPickLabel}`,
       defaultOpen,
       className: 'content-card workspace-collapsible-section photo-library-section',
       children: group.assets.length ? (
@@ -2821,6 +2960,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 <strong>{asset.roomLabel}</strong>
                 <p className="photo-card-summary">{getMediaAssetSummary(asset)}</p>
                 <div className="photo-library-card-actions">
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => handleOpenPhotoVariations(asset)}
+                  >
+                    Variations
+                  </button>
                   <button
                     type="button"
                     className="button-secondary"
@@ -3461,44 +3607,63 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       return;
     }
 
+    const variantToDelete = pendingDeleteVisionVariant;
+    const selectedAssetId = selectedMediaAsset.id;
+    const optimisticNextVariants = mediaVariants.filter(
+      (variant) => variant.id !== variantToDelete.id,
+    );
+    const replacementStageVariant =
+      optimisticNextVariants.find(
+        (candidate) =>
+          getVisionWorkflowStageKeyForVariant(candidate) === activeVisionWorkflowStageKey,
+      ) || optimisticNextVariants[0];
+    const nextWorkflowSourceVariantId =
+      workflowSourceVariantId === variantToDelete.id
+        ? replacementStageVariant?.id || ''
+        : workflowSourceVariantId;
+    const nextLatestGeneratedVariantId =
+      latestGeneratedVariantId === variantToDelete.id ? '' : latestGeneratedVariantId;
+    const nextSelectedVariantId =
+      selectedVariantId === variantToDelete.id
+        ? replacementStageVariant?.id || ''
+        : selectedVariantId;
+
+    setPendingDeleteVisionVariant(null);
     setStatus('Deleting vision attempt...');
     setToast(null);
     try {
-      await deleteMediaVariantRequest(selectedMediaAsset.id, pendingDeleteVisionVariant.id);
-      const nextVariants = await refreshMediaVariants(selectedMediaAsset.id);
-      await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshWorkflow()]);
+      await deleteMediaVariantRequest(selectedAssetId, variantToDelete.id);
+      queryClient.setQueryData(
+        ['property-media-variants', selectedAssetId],
+        optimisticNextVariants,
+      );
+      setMediaVariants(optimisticNextVariants);
+      setWorkflowSourceVariantId(nextWorkflowSourceVariantId);
+      setLatestGeneratedVariantId(nextLatestGeneratedVariantId);
+      setSelectedVariantId(nextSelectedVariantId);
 
-      if (workflowSourceVariantId === pendingDeleteVisionVariant.id) {
-        const replacementSourceVariant = nextVariants.find(
-          (candidate) =>
-            getVisionWorkflowStageKeyForVariant(candidate) === activeVisionWorkflowStageKey,
-        );
-        setWorkflowSourceVariantId(replacementSourceVariant?.id || '');
-      }
-
-      if (latestGeneratedVariantId === pendingDeleteVisionVariant.id) {
-        setLatestGeneratedVariantId('');
-      }
-
-      if (selectedVariantId === pendingDeleteVisionVariant.id) {
-        const replacementSelectedVariant =
-          nextVariants.find(
-            (candidate) =>
-              getVisionWorkflowStageKeyForVariant(candidate) === activeVisionWorkflowStageKey,
-          ) || nextVariants[0];
-        setSelectedVariantId(replacementSelectedVariant?.id || '');
-      }
-
-      if (!nextVariants.length) {
+      if (!optimisticNextVariants.length) {
         setShowVisionHistory(false);
         setShowMoreVisionVariants(false);
+      }
+
+      if (selectedVariantId === variantToDelete.id) {
+        requestAnimationFrame(() => {
+          scrollWorkspaceSectionIntoView(visionCompareRef);
+        });
       }
 
       setToast({
         tone: 'success',
         title: 'Vision attempt deleted',
-        message: `"${pendingDeleteVisionVariant.label || 'Selected attempt'}" was removed permanently from this photo's Vision history.`,
+        message: `"${variantToDelete.label || 'Selected attempt'}" was removed permanently from this photo's Vision history.`,
       });
+
+      void Promise.all([
+        refreshMediaVariants(selectedAssetId),
+        refreshMediaAssets(selectedAssetId),
+        refreshWorkflow(),
+      ]).catch(() => {});
     } catch (requestError) {
       setToast({
         tone: 'error',
@@ -3507,7 +3672,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         autoDismissMs: 0,
       });
     } finally {
-      setPendingDeleteVisionVariant(null);
       setStatus('');
     }
   }
@@ -5879,7 +6043,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         onAction={toast?.onAction}
         onClose={() => setToast(null)}
       />
-      {activePhotoDetailsAsset ? (
+      {resolvedActivePhotoDetailsAsset ? (
         <div className="workspace-modal-backdrop" role="presentation" onClick={() => setActivePhotoDetailsAsset(null)}>
           <div
             className="workspace-modal-card photo-details-modal-card"
@@ -5891,7 +6055,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             <div className="section-header-tight">
               <div>
                 <span className="label">Photo details</span>
-                <h2>{activePhotoDetailsAsset.roomLabel || 'Selected photo'}</h2>
+                <h2>{resolvedActivePhotoDetailsAsset.roomLabel || 'Selected photo'}</h2>
               </div>
               <button
                 type="button"
@@ -5903,61 +6067,61 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             </div>
             <div className="workspace-modal-preview-row photo-details-modal-preview">
               <img
-                src={activePhotoDetailsAsset.imageUrl}
-                alt={activePhotoDetailsAsset.roomLabel || 'Selected property photo'}
+                src={resolvedActivePhotoDetailsAsset.imageUrl}
+                alt={resolvedActivePhotoDetailsAsset.roomLabel || 'Selected property photo'}
                 className="workspace-modal-preview-image"
               />
               <div className="workspace-modal-preview-copy">
                 <div className="photo-card-badge-row photo-card-badge-row-large">
-                  <span className="photo-card-status-pill">{getMediaAssetPrimaryLabel(activePhotoDetailsAsset)}</span>
-                  {activePhotoDetailsAsset.savedFromVision ? <span className="photo-card-status-pill">Saved from Vision</span> : null}
+                  <span className="photo-card-status-pill">{getMediaAssetPrimaryLabel(resolvedActivePhotoDetailsAsset)}</span>
+                  {resolvedActivePhotoDetailsAsset.savedFromVision ? <span className="photo-card-status-pill">Saved from Vision</span> : null}
                   <button
                     type="button"
-                    className={activePhotoDetailsAsset.listingCandidate ? 'photo-card-action-pill active' : 'photo-card-action-pill'}
-                    onClick={() => handleToggleListingCandidateForAsset(activePhotoDetailsAsset)}
+                    className={resolvedActivePhotoDetailsAsset.listingCandidate ? 'photo-card-action-pill active' : 'photo-card-action-pill'}
+                    onClick={() => handleToggleListingCandidateForAsset(resolvedActivePhotoDetailsAsset)}
                     disabled={Boolean(status) || isArchivedProperty}
                   >
-                    {activePhotoDetailsAsset.listingCandidate ? 'Seller Pick' : 'Add Seller Pick'}
+                    {resolvedActivePhotoDetailsAsset.listingCandidate ? 'Seller Pick' : 'Add Seller Pick'}
                   </button>
                 </div>
                 <strong>
-                  {activePhotoDetailsAsset.assetType === 'generated'
-                    ? activePhotoDetailsAsset.generationLabel || getMediaAssetPrimaryLabel(activePhotoDetailsAsset)
-                    : activePhotoDetailsAsset.roomLabel || 'Original photo'}
+                  {resolvedActivePhotoDetailsAsset.assetType === 'generated'
+                    ? resolvedActivePhotoDetailsAsset.generationLabel || getMediaAssetPrimaryLabel(resolvedActivePhotoDetailsAsset)
+                    : resolvedActivePhotoDetailsAsset.roomLabel || 'Original photo'}
                 </strong>
-                <span>{getMediaAssetSummary(activePhotoDetailsAsset)}</span>
+                <span>{getMediaAssetSummary(resolvedActivePhotoDetailsAsset)}</span>
                 <span>
-                  Saved {new Date(activePhotoDetailsAsset.createdAt).toLocaleString()}
-                  {activePhotoDetailsAsset.assetType === 'generated'
+                  Saved {new Date(resolvedActivePhotoDetailsAsset.createdAt).toLocaleString()}
+                  {resolvedActivePhotoDetailsAsset.assetType === 'generated'
                     ? ' · Added from Vision'
-                    : activePhotoDetailsAsset.analysis?.roomGuess
-                    ? ` · AI sees ${activePhotoDetailsAsset.analysis.roomGuess.toLowerCase()}`
+                    : resolvedActivePhotoDetailsAsset.analysis?.roomGuess
+                    ? ` · AI sees ${resolvedActivePhotoDetailsAsset.analysis.roomGuess.toLowerCase()}`
                     : ''}
                 </span>
-                {activePhotoDetailsAsset.assetType === 'generated' ? (
+                {resolvedActivePhotoDetailsAsset.assetType === 'generated' ? (
                   <span>
                     Stage:{' '}
-                    {activePhotoDetailsAsset.generationStage === 'clean_room'
+                    {resolvedActivePhotoDetailsAsset.generationStage === 'clean_room'
                       ? 'Clean room'
-                      : activePhotoDetailsAsset.generationStage === 'finishes'
+                      : resolvedActivePhotoDetailsAsset.generationStage === 'finishes'
                       ? 'Finish updates'
-                      : activePhotoDetailsAsset.generationStage === 'style'
+                      : resolvedActivePhotoDetailsAsset.generationStage === 'style'
                       ? 'Style concept'
                       : 'Saved image version'}
                   </span>
                 ) : null}
-                {activePhotoDetailsAsset.assetType !== 'generated' &&
-                typeof activePhotoDetailsAsset.analysis?.overallQualityScore === 'number' ? (
+                {resolvedActivePhotoDetailsAsset.assetType !== 'generated' &&
+                typeof resolvedActivePhotoDetailsAsset.analysis?.overallQualityScore === 'number' ? (
                   <div className="property-media-badges">
-                    <span>Quality {activePhotoDetailsAsset.analysis.overallQualityScore}/100</span>
-                    {typeof activePhotoDetailsAsset.analysis?.lightingScore === 'number' ? <span>Light {activePhotoDetailsAsset.analysis.lightingScore}/100</span> : null}
-                    {typeof activePhotoDetailsAsset.analysis?.compositionScore === 'number' ? <span>Composition {activePhotoDetailsAsset.analysis.compositionScore}/100</span> : null}
-                    {activePhotoDetailsAsset.analysis?.retakeRecommended ? <span>Retake suggested</span> : <span>Ready for listing review</span>}
+                    <span>Quality {resolvedActivePhotoDetailsAsset.analysis.overallQualityScore}/100</span>
+                    {typeof resolvedActivePhotoDetailsAsset.analysis?.lightingScore === 'number' ? <span>Light {resolvedActivePhotoDetailsAsset.analysis.lightingScore}/100</span> : null}
+                    {typeof resolvedActivePhotoDetailsAsset.analysis?.compositionScore === 'number' ? <span>Composition {resolvedActivePhotoDetailsAsset.analysis.compositionScore}/100</span> : null}
+                    {resolvedActivePhotoDetailsAsset.analysis?.retakeRecommended ? <span>Retake suggested</span> : <span>Ready for listing review</span>}
                   </div>
                 ) : null}
-                {activePhotoDetailsAsset.selectedVariant ? (
+                {resolvedActivePhotoDetailsAsset.selectedVariant ? (
                   <span>
-                    Marketing-preferred Vision output: {activePhotoDetailsAsset.selectedVariant.label || 'Preferred result'}
+                    Marketing-preferred Vision output: {resolvedActivePhotoDetailsAsset.selectedVariant.label || 'Preferred result'}
                   </span>
                 ) : null}
               </div>
@@ -5965,21 +6129,28 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             <div className="workspace-modal-actions">
               <button
                 type="button"
+                className="button-secondary"
+                onClick={() => handleOpenPhotoVariations(resolvedActivePhotoDetailsAsset)}
+              >
+                Variations
+              </button>
+              <button
+                type="button"
                 className="button-primary"
                 onClick={() => {
-                  handleOpenAssetInVision(activePhotoDetailsAsset);
+                  handleOpenAssetInVision(resolvedActivePhotoDetailsAsset);
                   setActivePhotoDetailsAsset(null);
                 }}
                 disabled={Boolean(status) || isArchivedProperty}
               >
                 Open in Vision
               </button>
-              {activePhotoDetailsAsset.assetType === 'generated' && activePhotoDetailsAsset.sourceMediaId ? (
+              {resolvedActivePhotoDetailsAsset.assetType === 'generated' && resolvedActivePhotoDetailsAsset.sourceMediaId ? (
                 <button
                   type="button"
                   className="button-secondary"
                   onClick={() => {
-                    setSelectedMediaAssetId(activePhotoDetailsAsset.sourceMediaId);
+                    setSelectedMediaAssetId(resolvedActivePhotoDetailsAsset.sourceMediaId);
                     setActivePhotoDetailsAsset(null);
                     setActiveTab('photos');
                   }}
@@ -5991,14 +6162,122 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 type="button"
                 className="button-secondary button-danger"
                 onClick={() => {
-                  setPendingDeleteAsset(activePhotoDetailsAsset);
+                  setPendingDeleteAsset(resolvedActivePhotoDetailsAsset);
                   setActivePhotoDetailsAsset(null);
                 }}
                 disabled={Boolean(status) || isArchivedProperty}
               >
-                {activePhotoDetailsAsset.assetType === 'generated' ? 'Delete saved version' : 'Delete original photo'}
+                {resolvedActivePhotoDetailsAsset.assetType === 'generated' ? 'Delete saved version' : 'Delete original photo'}
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {resolvedActivePhotoVariationsAsset ? (
+        <div
+          className="workspace-modal-backdrop"
+          role="presentation"
+          onClick={() => setActivePhotoVariationsAssetId('')}
+        >
+          <div
+            className="workspace-modal-card photo-variations-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Photo variations"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="section-header-tight">
+              <div>
+                <span className="label">Photo variations</span>
+                <h2>{resolvedActivePhotoVariationsAsset.roomLabel || 'Selected photo'}</h2>
+              </div>
+              <button
+                type="button"
+                className="button-secondary inline-button"
+                onClick={() => setActivePhotoVariationsAssetId('')}
+              >
+                Close
+              </button>
+            </div>
+            <p className="workspace-control-note">
+              Review every generated variation for this source photo. Use the best one as the
+              baseline for Vision, or permanently delete the variations you do not need.
+            </p>
+            {isLoadingPhotoVariations ? (
+              <p>Loading variations...</p>
+            ) : photoVariations.length ? (
+              <div className="vision-attempt-grid">
+                {photoVariations.map((variant) => {
+                  const savedPhotoForVariant = mediaAssets.find(
+                    (asset) => String(asset?.sourceVariantId || '') === String(variant.id),
+                  );
+                  const isCurrentVariant = variant.id === selectedVariant?.id;
+                  return (
+                    <article
+                      key={`photo-variation-${variant.id}`}
+                      className={isCurrentVariant ? 'vision-attempt-card active' : 'vision-attempt-card'}
+                    >
+                      <img
+                        src={variant.imageUrl}
+                        alt={variant.label || 'Photo variation'}
+                        className="vision-attempt-card-image"
+                      />
+                      <div className="vision-attempt-card-copy">
+                        <strong>{variant.label || 'Saved variation'}</strong>
+                        <div className="tag-row compact">
+                          <span>{getVisionWorkflowStage(getVisionWorkflowStageKeyForVariant(variant)).title}</span>
+                          {isCurrentVariant ? <span>Viewing now</span> : null}
+                          {variant.isSelected ? <span>Kept</span> : null}
+                          {savedPhotoForVariant ? <span>Saved in Photos</span> : null}
+                          {getVariantReviewScore(variant) ? <span>{getVariantReviewScore(variant)}/100</span> : null}
+                        </div>
+                        <p className="workspace-control-note vision-attempt-card-timestamp">
+                          {formatDateTimeLabel(variant.createdAt)}
+                        </p>
+                        <p className="workspace-control-note">{getVariantSummary(variant)}</p>
+                        <div className="vision-attempt-actions">
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            onClick={() =>
+                              handleUseVariantAsVisionBaseline(
+                                resolvedActivePhotoVariationsAsset,
+                                variant,
+                              )
+                            }
+                          >
+                            Use as Vision baseline
+                          </button>
+                          <button
+                            type="button"
+                            className="button-secondary button-danger"
+                            onClick={() => handleDeleteVisionVariant(variant)}
+                            disabled={Boolean(status) || isArchivedProperty}
+                          >
+                            Delete permanently
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="workspace-tab-stack">
+                <p>No generated variations exist for this photo yet.</p>
+                <button
+                  type="button"
+                  className="button-primary"
+                  onClick={() => {
+                    handleOpenAssetInVision(resolvedActivePhotoVariationsAsset);
+                    setActivePhotoVariationsAssetId('');
+                  }}
+                >
+                  Open in Vision
+                </button>
+              </div>
+            )}
           </div>
         </div>
       ) : null}

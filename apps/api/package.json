@@ -7,13 +7,15 @@
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "lint": "node -e \"console.log('api lint placeholder')\"",
-    "test": "node --test src/modules/public/public.service.test.js src/modules/providers/providers.service.test.js src/modules/billing/billing.service.test.js src/modules/auth/auth.service.test.js src/modules/media/media-ai.service.test.js src/modules/documents/social-pack.service.test.js src/modules/properties/property-lifecycle.service.test.js src/modules/properties/property.service.test.js src/modules/marketplace-sms/provider-reply-parser.service.test.js",
+    "test": "node --test src/modules/public/public.service.test.js src/modules/providers/providers.service.test.js src/modules/billing/billing.service.test.js src/modules/auth/auth.service.test.js src/modules/media/media-ai.service.test.js src/modules/documents/social-pack.service.test.js src/modules/properties/property-lifecycle.service.test.js src/modules/properties/property.service.test.js src/modules/marketplace-sms/provider-reply-parser.service.test.js src/modules/pricing/pricing.service.test.js src/modules/usage/pricing-query-policy.service.test.js",
     "seed": "node scripts/seed-demo.js",
     "admin:user": "node scripts/set-admin-user.js",
     "clone:demo": "node scripts/clone-demo-account.js",
     "sms:test": "node scripts/send-test-sms.js",
     "cleanup:variants-before-date": "node scripts/delete-photo-variants-before-date.js",
-    "db:ensure-media-indexes": "node scripts/ensure-media-indexes.js"
+    "cleanup:pricing-analyses": "node scripts/cleanup-pricing-analyses.js",
+    "db:ensure-media-indexes": "node scripts/ensure-media-indexes.js",
+    "test:pricing": "node --test src/modules/pricing/pricing.service.test.js"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

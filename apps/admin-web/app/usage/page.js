@@ -1,6 +1,7 @@
 import { AdminSection } from '../_components/AdminSection';
 import { DataTable } from '../_components/DataTable';
 import { MetricCard } from '../_components/MetricCard';
+import { PricingQueryPolicyCard } from './PricingQueryPolicyCard';
 import { getAdminUsage } from '../../lib/admin-api';
 import { formatDateTime } from '../../lib/format';
 
@@ -24,6 +25,8 @@ export default async function AdminUsagePage() {
         <MetricCard label="Open Locks" value={summary.openLocks || 0} />
         <MetricCard label="Last 24h Rate Limits" value={summary.last24hRateLimitEvents || 0} />
       </div>
+
+      <PricingQueryPolicyCard initialPolicy={payload.pricingQueryPolicy} />
 
       <DataTable
         columns={[

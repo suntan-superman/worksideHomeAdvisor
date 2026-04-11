@@ -3,6 +3,11 @@ import crypto from 'node:crypto';
 import { BillingSubscriptionModel } from '../billing/billing.model.js';
 import { UserModel } from '../auth/auth.model.js';
 import { AnalysisLockModel } from './analysis-lock.model.js';
+import {
+  getPricingPropertyUsage,
+  getPricingQueryPolicy,
+  incrementPricingPropertyUsage,
+} from './pricing-query-policy.service.js';
 import { RateLimitEventModel } from './rate-limit.model.js';
 import { UsageTrackingModel } from './usage-tracking.model.js';
 
@@ -309,6 +314,33 @@ function buildUpgradeDecision(context, reason, analysisType) {
   };
 }
 
+function buildPricingPolicyMetadata(pricingQueryPolicy, pricingPropertyUsage) {
+  const pricingCooldownHours = Math.max(
+    0,
+    Number(pricingQueryPolicy?.pricingCooldownHours || 0),
+  );
+  const maxRunsPerPropertyPerUser = Math.max(
+    0,
+    Number(pricingQueryPolicy?.maxRunsPerPropertyPerUser || 0),
+  );
+  const runsUsedForProperty = Math.max(
+    0,
+    Number(pricingPropertyUsage?.freshRunsTotal || 0),
+  );
+  const runsRemainingForProperty =
+    maxRunsPerPropertyPerUser > 0
+      ? Math.max(0, maxRunsPerPropertyPerUser - runsUsedForProperty)
+      : null;
+
+  return {
+    pricingCooldownHours,
+    maxRunsPerPropertyPerUser,
+    runsUsedForProperty,
+    runsRemainingForProperty,
+    lastFreshRunAt: pricingPropertyUsage?.lastFreshRunAt || null,
+  };
+}
+
 export async function enforceAnalysisRequest({
   userId,
   propertyId,
@@ -356,6 +388,57 @@ export async function enforceAnalysisRequest({
     return buildUpgradeDecision(context, 'MONTHLY_LIMIT_REACHED', analysisType);
   }
 
+  let pricingPolicy = null;
+  if (analysisType === 'pricing') {
+    const [pricingQueryPolicy, pricingPropertyUsage] = await Promise.all([
+      getPricingQueryPolicy(),
+      getPricingPropertyUsage({ userId, propertyId }),
+    ]);
+
+    pricingPolicy = buildPricingPolicyMetadata(
+      pricingQueryPolicy,
+      pricingPropertyUsage,
+    );
+    cooldownHours = pricingPolicy.pricingCooldownHours;
+
+    if (latestResult && withinCooldown(resultTimestamp, cooldownHours)) {
+      return {
+        action: 'RETURN_CACHED_RESULT',
+        cacheReason: 'COOLDOWN_ACTIVE',
+        cachedResult: latestResult,
+        cachedAt: resultTimestamp,
+        context,
+        policy: pricingPolicy,
+      };
+    }
+
+    const hasPropertyLimit =
+      pricingPolicy.maxRunsPerPropertyPerUser > 0;
+    const limitReached =
+      hasPropertyLimit &&
+      pricingPolicy.runsUsedForProperty >= pricingPolicy.maxRunsPerPropertyPerUser;
+
+    if (limitReached) {
+      if (latestResult) {
+        return {
+          action: 'RETURN_CACHED_RESULT',
+          cacheReason: 'PROPERTY_QUERY_LIMIT_REACHED',
+          cachedResult: latestResult,
+          cachedAt: resultTimestamp,
+          context,
+          policy: pricingPolicy,
+        };
+      }
+
+      return {
+        action: 'DENY_PROPERTY_QUERY_LIMIT',
+        retryAfterSeconds: 24 * 60 * 60,
+        context,
+        policy: pricingPolicy,
+      };
+    }
+  }
+
   if (latestResult && withinCooldown(resultTimestamp, cooldownHours)) {
     return {
       action: 'RETURN_CACHED_RESULT',
@@ -363,6 +446,7 @@ export async function enforceAnalysisRequest({
       cachedResult: latestResult,
       cachedAt: resultTimestamp,
       context,
+      policy: pricingPolicy,
     };
   }
 
@@ -397,6 +481,7 @@ export async function enforceAnalysisRequest({
     context,
     usageId: usage._id.toString(),
     inputHash,
+    policy: pricingPolicy,
   };
 }
 
@@ -442,6 +527,18 @@ export async function finalizeFreshAnalysisRun({
     analysisType,
     inputHash,
   });
+
+  let pricingPropertyUsage = null;
+  if (analysisType === 'pricing') {
+    pricingPropertyUsage = await incrementPricingPropertyUsage({
+      userId,
+      propertyId,
+    });
+  }
+
+  return {
+    pricingPropertyUsage,
+  };
 }
 
 export async function finalizeCachedAnalysisReturn({

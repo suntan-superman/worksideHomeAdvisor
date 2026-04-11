@@ -5,6 +5,7 @@ import {
   createAdminProvider,
   createAdminProviderCategoryAction,
   deleteAdminProviderAction,
+  getAdminPricingQueryPolicy,
   getAdminBillingSnapshot,
   getAdminFunnelOverview,
   getAdminMediaVariantSnapshot,
@@ -20,6 +21,7 @@ import {
   resendAdminProviderLeadAction,
   runAdminMediaVariantCleanup,
   syncAdminProviderBillingAction,
+  updateAdminPricingQueryPolicyAction,
   updateAdminProviderCategoryAction,
   updateAdminProviderReviewAction,
 } from './admin.service.js';
@@ -94,6 +96,11 @@ const linkProviderAccountSchema = z.object({
   forceRelink: z.boolean().optional(),
 });
 
+const updatePricingQueryPolicySchema = z.object({
+  pricingCooldownHours: z.coerce.number().int().min(0).max(168),
+  maxRunsPerPropertyPerUser: z.coerce.number().int().min(0).max(100),
+});
+
 export async function adminRoutes(fastify) {
   fastify.addHook('preHandler', async (request, reply) => {
     try {
@@ -141,6 +148,23 @@ export async function adminRoutes(fastify) {
   fastify.get('/usage', async (_request, reply) => {
     try {
       return reply.send(await getAdminUsageSnapshot());
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/pricing-query-policy', async (_request, reply) => {
+    try {
+      return reply.send(await getAdminPricingQueryPolicy());
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.patch('/pricing-query-policy', async (request, reply) => {
+    try {
+      const payload = updatePricingQueryPolicySchema.parse(request.body || {});
+      return reply.send(await updateAdminPricingQueryPolicyAction(payload));
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }

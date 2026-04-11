@@ -30,6 +30,10 @@ import { PricingAnalysisModel } from '../pricing/pricing.model.js';
 import { PropertyModel } from '../properties/property.model.js';
 import { getAdminFunnelSnapshot } from '../public/public.service.js';
 import { AnalysisLockModel } from '../usage/analysis-lock.model.js';
+import {
+  getPricingQueryPolicy,
+  updatePricingQueryPolicy,
+} from '../usage/pricing-query-policy.service.js';
 import { RateLimitEventModel } from '../usage/rate-limit.model.js';
 import { UsageTrackingModel } from '../usage/usage-tracking.model.js';
 
@@ -451,11 +455,12 @@ export async function getAdminUsageSnapshot() {
         last24hRateLimitEvents: 0,
         usageRecordCount: 0,
       },
+      pricingQueryPolicy: await getPricingQueryPolicy(),
       topUsage: [],
     };
   }
 
-  const [usageRecords, openLocks, last24hRateLimitEvents] = await Promise.all([
+  const [usageRecords, openLocks, last24hRateLimitEvents, pricingQueryPolicy] = await Promise.all([
     UsageTrackingModel.find({})
       .sort({ updatedAt: -1 })
       .limit(25)
@@ -464,6 +469,7 @@ export async function getAdminUsageSnapshot() {
     RateLimitEventModel.countDocuments({
       createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
     }),
+    getPricingQueryPolicy(),
   ]);
 
   return {
@@ -473,6 +479,7 @@ export async function getAdminUsageSnapshot() {
       last24hRateLimitEvents,
       usageRecordCount: await UsageTrackingModel.countDocuments({}),
     },
+    pricingQueryPolicy,
     topUsage: usageRecords.map((record) => ({
       id: record._id?.toString?.() || String(record._id),
       userId: record.userId?.toString?.() || String(record.userId),
@@ -617,6 +624,18 @@ export async function updateAdminProviderCategoryAction(categoryKey, payload) {
 
 export async function getAdminProviderLeadSnapshot({ limit = 50 } = {}) {
   return listAdminProviderLeads({ limit });
+}
+
+export async function getAdminPricingQueryPolicy() {
+  return {
+    pricingQueryPolicy: await getPricingQueryPolicy(),
+  };
+}
+
+export async function updateAdminPricingQueryPolicyAction(payload) {
+  return {
+    pricingQueryPolicy: await updatePricingQueryPolicy(payload),
+  };
 }
 
 export async function resendAdminProviderLeadAction(leadRequestId) {

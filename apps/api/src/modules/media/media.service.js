@@ -530,32 +530,61 @@ export async function deleteMediaVariantDraft(assetId, variantId) {
     throw new Error('Database connection is required to delete media variants.');
   }
 
-  const asset = await MediaAssetModel.findById(assetId);
+  const timings = {};
+  const startedAt = Date.now();
+
+  let checkpointStartedAt = Date.now();
+  const asset = await MediaAssetModel.findById(assetId).select('_id propertyId');
+  timings.assetLookupMs = Date.now() - checkpointStartedAt;
   if (!asset) {
     throw new Error('Media asset not found.');
   }
 
+  checkpointStartedAt = Date.now();
   await assertPropertyEditableById(asset.propertyId);
+  timings.authorizationMs = Date.now() - checkpointStartedAt;
 
-  const variant = await MediaVariantModel.findOne({ _id: variantId, mediaId: asset._id }).lean();
+  checkpointStartedAt = Date.now();
+  const variant = await MediaVariantModel.findOne({ _id: variantId, mediaId: asset._id })
+    .select('_id mediaId propertyId visionJobId storageProvider storageKey')
+    .lean();
+  timings.variantLookupMs = Date.now() - checkpointStartedAt;
   if (!variant) {
     throw new Error('Media variant not found.');
   }
 
+  checkpointStartedAt = Date.now();
   await deleteStoredAssetIfUnreferenced({
     storageProvider: variant.storageProvider,
     storageKey: variant.storageKey,
     excludeVariantId: variant._id,
   });
+  timings.storageCleanupMs = Date.now() - checkpointStartedAt;
 
+  checkpointStartedAt = Date.now();
   await MediaVariantModel.deleteOne({ _id: variant._id });
+  timings.variantDeleteMs = Date.now() - checkpointStartedAt;
 
   const normalizedVariantId = variant._id?.toString?.() || String(variant._id);
   const normalizedVisionJobId =
     variant.visionJobId?.toString?.() || String(variant.visionJobId || '');
 
+  checkpointStartedAt = Date.now();
+  await MediaAssetModel.updateMany(
+    { sourceVariantId: variant._id },
+    { $set: { sourceVariantId: null } },
+  );
+  timings.savedPhotoDetachMs = Date.now() - checkpointStartedAt;
+
   if (normalizedVisionJobId) {
+    checkpointStartedAt = Date.now();
+    await ImageJobModel.updateOne(
+      { _id: normalizedVisionJobId },
+      { $pull: { outputVariantIds: variant._id } },
+    );
+
     const replacementVariant = await MediaVariantModel.findOne({ visionJobId: normalizedVisionJobId })
+      .select('_id')
       .sort({ createdAt: -1 })
       .lean();
 
@@ -572,12 +601,18 @@ export async function deleteMediaVariantDraft(assetId, variantId) {
         },
       );
     }
+    timings.jobCleanupMs = Date.now() - checkpointStartedAt;
+  } else {
+    timings.jobCleanupMs = 0;
   }
+
+  timings.totalMs = Date.now() - startedAt;
 
   return {
     deleted: true,
     assetId: asset._id?.toString?.() || String(asset._id),
     variantId: normalizedVariantId,
     propertyId: asset.propertyId?.toString?.() || String(asset.propertyId),
+    timing: timings,
   };
 }

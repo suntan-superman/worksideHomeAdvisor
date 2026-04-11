@@ -8,6 +8,13 @@ import { PropertyModel } from '../properties/property.model.js';
 import { serializeProperty } from '../properties/property.service.js';
 import { PricingAnalysisModel } from './pricing.model.js';
 
+export const pricingServiceDependencies = {
+  PropertyModel,
+  PricingAnalysisModel,
+  getComparableSalesForProperty,
+  generatePricingInsights,
+};
+
 function buildDemoStoredAnalysis() {
   return {
     id: 'demo-pricing-analysis-001',
@@ -70,25 +77,8 @@ function serializePricingAnalysis(document) {
   };
 }
 
-export async function analyzePropertyPricing(propertyId) {
-  if (mongoose.connection.readyState !== 1) {
-    return buildDemoStoredAnalysis();
-  }
-
-  const propertyDocument = await PropertyModel.findById(propertyId);
-  if (!propertyDocument) {
-    throw new Error('Property not found.');
-  }
-
-  const property = serializeProperty(propertyDocument.toObject());
-  const pricingAnalysis = await getComparableSalesForProperty(property);
-  const narrative = await generatePricingInsights({
-    property,
-    pricingAnalysis,
-    sellerGoals: property.sellerProfile?.goals || ['maximize-profit'],
-  });
-
-  const record = await PricingAnalysisModel.create({
+function buildStoredPricingAnalysisPayload({ propertyDocument, property, pricingAnalysis, narrative }) {
+  return {
     propertyId: propertyDocument._id,
     source: pricingAnalysis.source,
     usedLiveData: pricingAnalysis.usedLiveData,
@@ -125,7 +115,54 @@ export async function analyzePropertyPricing(propertyId) {
     pricingStrategy: narrative.pricingStrategy,
     warning: narrative.warning || pricingAnalysis.warning,
     rawAnalysis: pricingAnalysis,
+  };
+}
+
+export async function deleteStalePricingAnalysesForProperty(propertyId, keepAnalysisId = null) {
+  if (mongoose.connection.readyState !== 1) {
+    return 0;
+  }
+
+  const deleteFilter = {
+    propertyId,
+  };
+
+  if (keepAnalysisId) {
+    deleteFilter._id = { $ne: keepAnalysisId };
+  }
+
+  const deleteResult = await pricingServiceDependencies.PricingAnalysisModel.deleteMany(deleteFilter);
+  return deleteResult.deletedCount || 0;
+}
+
+export async function analyzePropertyPricing(propertyId) {
+  if (mongoose.connection.readyState !== 1) {
+    return buildDemoStoredAnalysis();
+  }
+
+  const propertyDocument = await pricingServiceDependencies.PropertyModel.findById(propertyId);
+  if (!propertyDocument) {
+    throw new Error('Property not found.');
+  }
+
+  const property = serializeProperty(propertyDocument.toObject());
+  const pricingAnalysis = await pricingServiceDependencies.getComparableSalesForProperty(property);
+  const narrative = await pricingServiceDependencies.generatePricingInsights({
+    property,
+    pricingAnalysis,
+    sellerGoals: property.sellerProfile?.goals || ['maximize-profit'],
   });
+
+  const record = await pricingServiceDependencies.PricingAnalysisModel.create(
+    buildStoredPricingAnalysisPayload({
+      propertyDocument,
+      property,
+      pricingAnalysis,
+      narrative,
+    }),
+  );
+
+  await deleteStalePricingAnalysesForProperty(propertyDocument._id, record._id);
 
   return serializePricingAnalysis(record.toObject());
 }
@@ -135,7 +172,7 @@ export async function getLatestPricingAnalysis(propertyId) {
     return buildDemoStoredAnalysis();
   }
 
-  const record = await PricingAnalysisModel.findOne({ propertyId })
+  const record = await pricingServiceDependencies.PricingAnalysisModel.findOne({ propertyId })
     .sort({ createdAt: -1 })
     .lean();
 
