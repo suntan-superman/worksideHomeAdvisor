@@ -35,6 +35,23 @@ const assetParamsSchema = z.object({
   assetId: z.string().min(1),
 });
 
+const mediaVariantListQuerySchema = z.object({
+  offset: z.coerce.number().int().min(0).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  includeTotalCount: z
+    .union([z.boolean(), z.enum(['true', 'false', '1', '0'])])
+    .optional()
+    .transform((value) => {
+      if (value === undefined) {
+        return false;
+      }
+      if (typeof value === 'boolean') {
+        return value;
+      }
+      return value === 'true' || value === '1';
+    }),
+});
+
 const jobParamsSchema = z.object({
   jobId: z.string().min(1),
 });
@@ -287,8 +304,9 @@ export async function mediaRoutes(fastify) {
   fastify.get('/media/assets/:assetId/variants', async (request, reply) => {
     try {
       const { assetId } = assetParamsSchema.parse(request.params);
-      const variants = await listMediaVariants(assetId);
-      return reply.send({ variants });
+      const query = mediaVariantListQuerySchema.parse(request.query ?? {});
+      const result = await listMediaVariants(assetId, query);
+      return Array.isArray(result) ? reply.send({ variants: result }) : reply.send(result);
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }
@@ -297,8 +315,9 @@ export async function mediaRoutes(fastify) {
   fastify.get('/media/assets/:assetId/vision/variants', async (request, reply) => {
     try {
       const { assetId } = assetParamsSchema.parse(request.params);
-      const variants = await listMediaVariants(assetId);
-      return reply.send({ variants });
+      const query = mediaVariantListQuerySchema.parse(request.query ?? {});
+      const result = await listMediaVariants(assetId, query);
+      return Array.isArray(result) ? reply.send({ variants: result }) : reply.send(result);
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }

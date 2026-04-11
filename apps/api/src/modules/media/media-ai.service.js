@@ -2426,16 +2426,54 @@ export function getVisionPresetCatalog() {
   return listVisionPresets();
 }
 
-export async function listMediaVariants(assetId) {
+export async function listMediaVariants(
+  assetId,
+  { offset = 0, limit = 0, includeTotalCount = false } = {},
+) {
   if (mongoose.connection.readyState !== 1) {
-    return [];
+    return includeTotalCount
+      ? { variants: [], totalCount: 0, offset: 0, limit: 0, hasMore: false }
+      : [];
   }
 
-  const variants = await MediaVariantModel.find({ mediaId: assetId })
-    .find(buildActiveVariantQuery())
-    .sort({ createdAt: -1 })
-    .lean();
-  return sortVisionVariants(variants.map(serializeMediaVariant));
+  const normalizedOffset = Math.max(0, Number(offset) || 0);
+  const normalizedLimit = Math.max(0, Number(limit) || 0);
+  const baseQuery = { mediaId: assetId, ...buildActiveVariantQuery() };
+
+  let totalCount = 0;
+  if (includeTotalCount) {
+    totalCount = await MediaVariantModel.countDocuments(baseQuery);
+  }
+
+  let query = MediaVariantModel.find(baseQuery).sort({ createdAt: -1 });
+  if (normalizedOffset) {
+    query = query.skip(normalizedOffset);
+  }
+  if (normalizedLimit) {
+    query = query.limit(normalizedLimit);
+  }
+
+  const variants = await query.lean();
+  const serializedVariants = sortVisionVariants(variants.map(serializeMediaVariant));
+
+  if (!includeTotalCount && !normalizedLimit && !normalizedOffset) {
+    return serializedVariants;
+  }
+
+  const resolvedTotalCount = includeTotalCount
+    ? totalCount
+    : normalizedOffset + serializedVariants.length;
+
+  return {
+    variants: serializedVariants,
+    totalCount: resolvedTotalCount,
+    offset: normalizedOffset,
+    limit: normalizedLimit,
+    hasMore:
+      normalizedLimit > 0
+        ? normalizedOffset + serializedVariants.length < resolvedTotalCount
+        : false,
+  };
 }
 
 export async function getImageJobById(jobId) {

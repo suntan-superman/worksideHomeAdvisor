@@ -432,8 +432,19 @@ export function savePhoto(propertyId, payload) {
   });
 }
 
-export function listMediaVariants(assetId) {
-  return request(`/api/v1/media/assets/${assetId}/vision/variants`);
+export function listMediaVariants(assetId, options = {}) {
+  const params = new URLSearchParams();
+  if (typeof options.offset === 'number') {
+    params.set('offset', String(options.offset));
+  }
+  if (typeof options.limit === 'number') {
+    params.set('limit', String(options.limit));
+  }
+  if (options.includeTotalCount) {
+    params.set('includeTotalCount', 'true');
+  }
+  const query = params.toString();
+  return request(`/api/v1/media/assets/${assetId}/vision/variants${query ? `?${query}` : ''}`);
 }
 
 export function createImageEnhancementJob(assetId, payload) {

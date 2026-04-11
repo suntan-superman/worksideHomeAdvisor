@@ -70,6 +70,17 @@ const PHOTO_IMPORT_SOURCE_OPTIONS = [
   { value: 'third_party_import', label: 'Third-party import' },
 ];
 
+const PHOTO_VARIATIONS_PAGE_SIZE = 12;
+const INITIAL_PHOTO_VARIATIONS_STATE = {
+  assetId: '',
+  variants: [],
+  totalCount: 0,
+  loadedCount: 0,
+  isLoading: false,
+  hasMore: false,
+  error: '',
+};
+
 const PROPERTY_WORKSPACE_HIDDEN_WORKFLOW_STEPS = new Set([
   'account_created',
   'profile_complete',
@@ -1048,6 +1059,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [pendingDeleteProperty, setPendingDeleteProperty] = useState(null);
   const [activePhotoDetailsAsset, setActivePhotoDetailsAsset] = useState(null);
   const [activePhotoVariationsAssetId, setActivePhotoVariationsAssetId] = useState('');
+  const [photoVariationsState, setPhotoVariationsState] = useState(INITIAL_PHOTO_VARIATIONS_STATE);
   const [guidedWorkflow, setGuidedWorkflow] = useState(null);
   const [workflowPreviewStepKey, setWorkflowPreviewStepKey] = useState('');
   const [checklistSummaryMode, setChecklistSummaryMode] = useState('open');
@@ -1681,18 +1693,33 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const photoVariations = useMemo(() => {
     if (
       !activePhotoVariationsAssetId ||
-      String(selectedMediaAssetId || '') !== String(activePhotoVariationsAssetId)
+      String(photoVariationsState.assetId || '') !== String(activePhotoVariationsAssetId)
     ) {
       return [];
     }
 
-    return getNewestVisionVariants(mediaVariants);
-  }, [activePhotoVariationsAssetId, mediaVariants, selectedMediaAssetId]);
-  const isLoadingPhotoVariations = Boolean(activePhotoVariationsAssetId) && (
-    String(selectedMediaAssetId || '') !== String(activePhotoVariationsAssetId) ||
-    liveMediaVariantsQuery.isPending ||
-    liveMediaVariantsQuery.isFetching
-  );
+    return photoVariationsState.variants;
+  }, [activePhotoVariationsAssetId, photoVariationsState]);
+  const isLoadingPhotoVariations =
+    Boolean(activePhotoVariationsAssetId) &&
+    String(photoVariationsState.assetId || '') === String(activePhotoVariationsAssetId) &&
+    photoVariationsState.isLoading;
+  const photoVariationsTotalCount =
+    String(photoVariationsState.assetId || '') === String(activePhotoVariationsAssetId)
+      ? photoVariationsState.totalCount
+      : 0;
+  const photoVariationsLoadedCount =
+    String(photoVariationsState.assetId || '') === String(activePhotoVariationsAssetId)
+      ? photoVariationsState.loadedCount
+      : 0;
+  const photoVariationsError =
+    String(photoVariationsState.assetId || '') === String(activePhotoVariationsAssetId)
+      ? photoVariationsState.error
+      : '';
+  const photoVariationsProgressPercent =
+    photoVariationsTotalCount > 0
+      ? Math.min(100, Math.round((photoVariationsLoadedCount / photoVariationsTotalCount) * 100))
+      : 0;
   const activeVisionWorkflowPresetGroups = useMemo(() => {
     const presetByKey = new Map(visionPresets.map((preset) => [preset.key, preset]));
     return activeVisionWorkflowStage.groups
@@ -1779,6 +1806,98 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     () => visionPresets.find((preset) => preset.key === activeVisionPresetKey) || null,
     [activeVisionPresetKey, visionPresets],
   );
+  useEffect(() => {
+    if (!activePhotoVariationsAssetId) {
+      setPhotoVariationsState(INITIAL_PHOTO_VARIATIONS_STATE);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function loadPhotoVariationsInBatches() {
+      setPhotoVariationsState({
+        assetId: activePhotoVariationsAssetId,
+        variants: [],
+        totalCount: 0,
+        loadedCount: 0,
+        isLoading: true,
+        hasMore: false,
+        error: '',
+      });
+
+      try {
+        const firstBatch = await listMediaVariants(activePhotoVariationsAssetId, {
+          offset: 0,
+          limit: PHOTO_VARIATIONS_PAGE_SIZE,
+          includeTotalCount: true,
+        });
+        if (cancelled) {
+          return;
+        }
+
+        let loadedVariants = firstBatch.variants || [];
+        const totalCount = Number(firstBatch.totalCount || loadedVariants.length || 0);
+        let hasMore = loadedVariants.length < totalCount;
+
+        setPhotoVariationsState({
+          assetId: activePhotoVariationsAssetId,
+          variants: loadedVariants,
+          totalCount,
+          loadedCount: loadedVariants.length,
+          isLoading: hasMore,
+          hasMore,
+          error: '',
+        });
+
+        while (!cancelled && hasMore) {
+          const nextBatch = await listMediaVariants(activePhotoVariationsAssetId, {
+            offset: loadedVariants.length,
+            limit: PHOTO_VARIATIONS_PAGE_SIZE,
+          });
+          if (cancelled) {
+            return;
+          }
+
+          const nextVariants = nextBatch.variants || [];
+          if (!nextVariants.length) {
+            hasMore = false;
+          } else {
+            loadedVariants = [...loadedVariants, ...nextVariants];
+            hasMore = loadedVariants.length < totalCount;
+          }
+
+          setPhotoVariationsState({
+            assetId: activePhotoVariationsAssetId,
+            variants: loadedVariants,
+            totalCount,
+            loadedCount: loadedVariants.length,
+            isLoading: hasMore,
+            hasMore,
+            error: '',
+          });
+        }
+      } catch (requestError) {
+        if (cancelled) {
+          return;
+        }
+        setPhotoVariationsState({
+          assetId: activePhotoVariationsAssetId,
+          variants: [],
+          totalCount: 0,
+          loadedCount: 0,
+          isLoading: false,
+          hasMore: false,
+          error: requestError.message || 'Could not load photo variations.',
+        });
+      }
+    }
+
+    void loadPhotoVariationsInBatches();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activePhotoVariationsAssetId]);
   const selectedComps = useMemo(
     () => (latestPricing?.selectedComps || dashboard?.comps || []).slice(0, 8),
     [dashboard?.comps, latestPricing?.selectedComps],
@@ -2842,7 +2961,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setActivePhotoVariationsAssetId(asset.id);
     setActivePhotoDetailsAsset(null);
     setToast(null);
-    void refreshMediaVariants(asset.id).catch(() => {});
   }
 
   function handleUseVariantAsVisionBaseline(asset, variant) {
@@ -6113,9 +6231,38 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               Review every generated variation for this source photo. Use the best one as the
               baseline for Vision, or permanently delete the variations you do not need.
             </p>
-            {isLoadingPhotoVariations ? (
-              <p>Loading variations...</p>
-            ) : photoVariations.length ? (
+            {photoVariationsError ? (
+              <div className="workspace-tab-stack">
+                <p>{photoVariationsError}</p>
+                <p className="workspace-control-note">
+                  The modal did not lock up, but the variations request did not complete successfully.
+                </p>
+              </div>
+            ) : photoVariations.length || isLoadingPhotoVariations ? (
+              <div className="workspace-tab-stack">
+                <div className="vision-variation-loading-card">
+                  <div className="vision-variation-loading-header">
+                    <strong>
+                      {photoVariationsTotalCount
+                        ? `Loaded ${photoVariationsLoadedCount} of ${photoVariationsTotalCount} variations`
+                        : isLoadingPhotoVariations
+                          ? 'Loading variations'
+                          : 'Variations ready'}
+                    </strong>
+                    {photoVariationsTotalCount ? <span>{photoVariationsProgressPercent}%</span> : null}
+                  </div>
+                  <div className="vision-variation-loading-progress" aria-hidden="true">
+                    <span
+                      className="vision-variation-loading-progress-bar"
+                      style={{ width: `${photoVariationsProgressPercent || 8}%` }}
+                    />
+                  </div>
+                  <p className="workspace-control-note">
+                    {isLoadingPhotoVariations
+                      ? 'We are loading saved variations in batches so you can start reviewing them without waiting for the entire history to finish.'
+                      : 'All currently saved variations for this photo are loaded below.'}
+                  </p>
+                </div>
               <div className="vision-attempt-grid">
                 {photoVariations.map((variant) => {
                   const savedPhotoForVariant = mediaAssets.find(
@@ -6171,6 +6318,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     </article>
                   );
                 })}
+              </div>
               </div>
             ) : (
               <div className="workspace-tab-stack">
