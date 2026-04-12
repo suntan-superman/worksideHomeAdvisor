@@ -882,6 +882,12 @@ function sortVisionVariants(variants = []) {
         return leftFurnitureCoverageIncrease - rightFurnitureCoverageIncrease;
       }
 
+      const leftEdgeDelta = Number(left?.metadata?.review?.maskedEdgeDensityDelta || 0);
+      const rightEdgeDelta = Number(right?.metadata?.review?.maskedEdgeDensityDelta || 0);
+      if (leftEdgeDelta !== rightEdgeDelta) {
+        return leftEdgeDelta - rightEdgeDelta;
+      }
+
       if (leftPresetKey === 'paint_bright_white' && rightPresetKey === 'paint_bright_white') {
         const leftMaskedLuminanceDelta = Number(
           left?.metadata?.review?.maskedLuminanceDelta || 0,
@@ -2671,6 +2677,8 @@ async function buildReviewedReplicateCandidates({
   );
   let removeFurnitureEvaluationMaskBuffer = null;
   let sourceFurnitureEdgeDensity = null;
+  let paintEvaluationMaskBuffer = null;
+  let sourcePaintEdgeDensity = null;
   let sourceFurnitureComponentMaskBuffer = null;
   let sourceFurnitureComponents = [];
   let sourceFurnitureCoverageRatio = 0;
@@ -2699,6 +2707,10 @@ async function buildReviewedReplicateCandidates({
         Math.max(400, Math.round(sourceComponentBinary.width * sourceComponentBinary.height * 0.004)),
       );
     }
+  }
+  if (preset.key.startsWith('paint_')) {
+    paintEvaluationMaskBuffer = maskBuffer;
+    sourcePaintEdgeDensity = await calculateMaskedEdgeDensity(sourceBuffer, paintEvaluationMaskBuffer);
   }
   const computeFurnitureCoverageIncreaseRatio = async (candidateBuffer) => {
     if (!preset.key.startsWith('floor_')) {
@@ -2839,6 +2851,15 @@ async function buildReviewedReplicateCandidates({
         maskBuffer,
       );
       furnitureCoverageIncreaseRatio = await computeFurnitureCoverageIncreaseRatio(buffer);
+      if (preset.key.startsWith('paint_') && paintEvaluationMaskBuffer && sourcePaintEdgeDensity != null) {
+        const variantPaintEdgeDensity = await calculateMaskedEdgeDensity(
+          buffer,
+          paintEvaluationMaskBuffer,
+        );
+        maskedEdgeDensityDelta = Number(
+          (variantPaintEdgeDensity - sourcePaintEdgeDensity).toFixed(4),
+        );
+      }
     }
 
     if (
@@ -3084,6 +3105,15 @@ async function buildReviewedReplicateCandidates({
       } else if (maskedColorShiftRatio >= 0.075) {
         overallScore = Math.min(100, overallScore + 10);
       }
+      if (maskedEdgeDensityDelta > 0.003) {
+        overallScore = Math.max(0, overallScore - 34);
+        qualityWarning =
+          'Low-confidence preview: the wall update appears to add new visual features or decor instead of only changing paint.';
+        rejectionCategory = 'wall_feature_addition';
+        shouldHideByDefault = true;
+      } else if (maskedEdgeDensityDelta > 0.001) {
+        overallScore = Math.max(0, overallScore - 14);
+      }
       if (outsideMaskChangeRatio > 0.24) {
         overallScore = Math.max(0, overallScore - 18);
         qualityWarning =
@@ -3192,6 +3222,8 @@ async function buildReviewedOpenAiCandidates({
   const maskBuffer = await buildInpaintingMaskBuffer(sourceBuffer, preset.key, resolvedRoomType);
   let removeFurnitureEvaluationMaskBuffer = null;
   let sourceFurnitureEdgeDensity = null;
+  let paintEvaluationMaskBuffer = null;
+  let sourcePaintEdgeDensity = null;
   let sourceFurnitureComponentMaskBuffer = null;
   let sourceFurnitureComponents = [];
   let sourceFurnitureCoverageRatio = 0;
@@ -3220,6 +3252,10 @@ async function buildReviewedOpenAiCandidates({
         Math.max(400, Math.round(sourceComponentBinary.width * sourceComponentBinary.height * 0.004)),
       );
     }
+  }
+  if (preset.key.startsWith('paint_')) {
+    paintEvaluationMaskBuffer = maskBuffer;
+    sourcePaintEdgeDensity = await calculateMaskedEdgeDensity(sourceBuffer, paintEvaluationMaskBuffer);
   }
   const computeFurnitureCoverageIncreaseRatio = async (candidateBuffer) => {
     if (!preset.key.startsWith('floor_')) {
@@ -3347,6 +3383,15 @@ async function buildReviewedOpenAiCandidates({
         maskBuffer,
       );
       furnitureCoverageIncreaseRatio = await computeFurnitureCoverageIncreaseRatio(buffer);
+      if (preset.key.startsWith('paint_') && paintEvaluationMaskBuffer && sourcePaintEdgeDensity != null) {
+        const variantPaintEdgeDensity = await calculateMaskedEdgeDensity(
+          buffer,
+          paintEvaluationMaskBuffer,
+        );
+        maskedEdgeDensityDelta = Number(
+          (variantPaintEdgeDensity - sourcePaintEdgeDensity).toFixed(4),
+        );
+      }
     }
 
     const review = await reviewVisionVariant({
@@ -3526,6 +3571,15 @@ async function buildReviewedOpenAiCandidates({
         shouldHideByDefault = true;
       } else if (maskedColorShiftRatio >= 0.075) {
         overallScore = Math.min(100, overallScore + 10);
+      }
+      if (maskedEdgeDensityDelta > 0.003) {
+        overallScore = Math.max(0, overallScore - 34);
+        qualityWarning =
+          'Low-confidence preview: the premium fallback appears to add new wall features or decor instead of only changing paint.';
+        rejectionCategory = 'wall_feature_addition';
+        shouldHideByDefault = true;
+      } else if (maskedEdgeDensityDelta > 0.001) {
+        overallScore = Math.max(0, overallScore - 14);
       }
       if (outsideMaskChangeRatio > 0.24) {
         overallScore = Math.max(0, overallScore - 18);

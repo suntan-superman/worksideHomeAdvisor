@@ -252,6 +252,49 @@ test('remove_furniture ranking penalizes newly added furniture staging', () => {
   assert.equal(ranked[0]?.newFurnitureAdditionRatio, 0.05);
 });
 
+test('paint preset sufficiency rejects candidates that add new wall features', () => {
+  assert.equal(
+    isCandidateSufficient(
+      {
+        maskedChangeRatio: 0.16,
+        maskedColorShiftRatio: 0.08,
+        maskedLuminanceDelta: 0.04,
+        maskedEdgeDensityDelta: 0.009,
+        outsideMaskChangeRatio: 0.12,
+        furnitureCoverageIncreaseRatio: 0.004,
+      },
+      'paint_bright_white',
+    ),
+    false,
+  );
+});
+
+test('paint preset ranking prefers cleaner wall repaints over added wall detail', () => {
+  const ranked = rankCandidates(
+    [
+      {
+        overallScore: 88,
+        maskedChangeRatio: 0.18,
+        maskedColorShiftRatio: 0.09,
+        maskedEdgeDensityDelta: 0.011,
+        outsideMaskChangeRatio: 0.1,
+        furnitureCoverageIncreaseRatio: 0.004,
+      },
+      {
+        overallScore: 84,
+        maskedChangeRatio: 0.16,
+        maskedColorShiftRatio: 0.08,
+        maskedEdgeDensityDelta: 0.0004,
+        outsideMaskChangeRatio: 0.12,
+        furnitureCoverageIncreaseRatio: 0.004,
+      },
+    ],
+    'paint_bright_white',
+  );
+
+  assert.equal(ranked[0]?.maskedEdgeDensityDelta, 0.0004);
+});
+
 test('remove_furniture orchestration evaluates the full provider chain before selecting a winner', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
