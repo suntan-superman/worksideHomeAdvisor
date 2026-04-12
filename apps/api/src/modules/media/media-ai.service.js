@@ -882,6 +882,12 @@ function sortVisionVariants(variants = []) {
         return leftFurnitureCoverageIncrease - rightFurnitureCoverageIncrease;
       }
 
+      const leftTopHalfChange = Number(left?.metadata?.review?.topHalfChangeRatio || 0);
+      const rightTopHalfChange = Number(right?.metadata?.review?.topHalfChangeRatio || 0);
+      if (leftTopHalfChange !== rightTopHalfChange) {
+        return leftTopHalfChange - rightTopHalfChange;
+      }
+
       const leftEdgeDelta = Number(left?.metadata?.review?.maskedEdgeDensityDelta || 0);
       const rightEdgeDelta = Number(right?.metadata?.review?.maskedEdgeDensityDelta || 0);
       if (leftEdgeDelta !== rightEdgeDelta) {
@@ -3089,6 +3095,15 @@ async function buildReviewedReplicateCandidates({
       if (visualChangeRatio < 0.08) {
         overallScore = Math.max(0, overallScore - 14);
       }
+      if (topHalfChangeRatio > 0.1) {
+        overallScore = Math.max(0, overallScore - 26);
+        qualityWarning =
+          'Low-confidence preview: the repaint concept appears to change ceiling or upper architectural details instead of only repainting walls.';
+        rejectionCategory = 'architectural_drift';
+        shouldHideByDefault = true;
+      } else if (topHalfChangeRatio > 0.07) {
+        overallScore = Math.max(0, overallScore - 10);
+      }
       if (maskedChangeRatio < 0.1) {
         overallScore = Math.max(0, overallScore - 24);
         qualityWarning =
@@ -3555,6 +3570,15 @@ async function buildReviewedOpenAiCandidates({
     if (preset.key.startsWith('paint_')) {
       if (visualChangeRatio < 0.08) {
         overallScore = Math.max(0, overallScore - 12);
+      }
+      if (topHalfChangeRatio > 0.1) {
+        overallScore = Math.max(0, overallScore - 26);
+        qualityWarning =
+          'Low-confidence preview: the premium fallback appears to change ceiling or upper architectural details instead of only repainting walls.';
+        rejectionCategory = 'architectural_drift';
+        shouldHideByDefault = true;
+      } else if (topHalfChangeRatio > 0.07) {
+        overallScore = Math.max(0, overallScore - 10);
       }
       if (maskedChangeRatio < 0.1) {
         overallScore = Math.max(0, overallScore - 22);

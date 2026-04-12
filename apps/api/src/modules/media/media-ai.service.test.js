@@ -260,6 +260,25 @@ test('paint preset sufficiency rejects candidates that add new wall features', (
         maskedColorShiftRatio: 0.08,
         maskedLuminanceDelta: 0.04,
         maskedEdgeDensityDelta: 0.009,
+        topHalfChangeRatio: 0.04,
+        outsideMaskChangeRatio: 0.12,
+        furnitureCoverageIncreaseRatio: 0.004,
+      },
+      'paint_bright_white',
+    ),
+    false,
+  );
+});
+
+test('paint preset sufficiency rejects candidates with upper-structure drift', () => {
+  assert.equal(
+    isCandidateSufficient(
+      {
+        maskedChangeRatio: 0.16,
+        maskedColorShiftRatio: 0.08,
+        maskedLuminanceDelta: 0.04,
+        maskedEdgeDensityDelta: 0.001,
+        topHalfChangeRatio: 0.14,
         outsideMaskChangeRatio: 0.12,
         furnitureCoverageIncreaseRatio: 0.004,
       },
@@ -293,6 +312,36 @@ test('paint preset ranking prefers cleaner wall repaints over added wall detail'
   );
 
   assert.equal(ranked[0]?.maskedEdgeDensityDelta, 0.0004);
+});
+
+test('paint preset ranking prefers lower upper-structure drift over brighter but invasive repaint', () => {
+  const ranked = rankCandidates(
+    [
+      {
+        overallScore: 88,
+        maskedChangeRatio: 0.18,
+        maskedColorShiftRatio: 0.09,
+        maskedLuminanceDelta: 0.07,
+        maskedEdgeDensityDelta: 0.0006,
+        topHalfChangeRatio: 0.18,
+        outsideMaskChangeRatio: 0.11,
+        furnitureCoverageIncreaseRatio: 0.004,
+      },
+      {
+        overallScore: 84,
+        maskedChangeRatio: 0.16,
+        maskedColorShiftRatio: 0.08,
+        maskedLuminanceDelta: 0.05,
+        maskedEdgeDensityDelta: 0.0007,
+        topHalfChangeRatio: 0.03,
+        outsideMaskChangeRatio: 0.12,
+        furnitureCoverageIncreaseRatio: 0.004,
+      },
+    ],
+    'paint_bright_white',
+  );
+
+  assert.equal(ranked[0]?.topHalfChangeRatio, 0.03);
 });
 
 test('remove_furniture orchestration evaluates the full provider chain before selecting a winner', async () => {
