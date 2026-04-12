@@ -139,6 +139,17 @@ test('wall paint presets now use the local sharp provider chain', () => {
   );
 });
 
+test('floor finish presets now use the local sharp provider chain', () => {
+  assert.deepEqual(
+    buildProviderChain({
+      preset: resolveVisionPreset('floor_tile_stone'),
+      userPlan: 'premium',
+      openAiAvailable: true,
+    }),
+    ['local_sharp'],
+  );
+});
+
 test('getReplicateSettings reduces remove_furniture sample counts for faster execution', () => {
   const basicSettings = getReplicateSettings('replicate_basic', {
     key: 'remove_furniture',

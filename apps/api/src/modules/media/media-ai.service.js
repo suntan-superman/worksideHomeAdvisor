@@ -576,51 +576,163 @@ function medianChannel(values = [], fallback = 128) {
   return sorted[Math.floor(sorted.length / 2)] ?? fallback;
 }
 
+function pseudoRandom01(...values) {
+  const seed = values.reduce(
+    (sum, value, index) => sum + Number(value || 0) * (12.9898 + index * 37.719),
+    0,
+  );
+  const noise = Math.sin(seed) * 43758.5453123;
+  return noise - Math.floor(noise);
+}
+
+function smoothStep(edge0, edge1, value) {
+  if (edge0 === edge1) {
+    return value < edge0 ? 0 : 1;
+  }
+  const normalized = clamp01((value - edge0) / (edge1 - edge0));
+  return normalized * normalized * (3 - 2 * normalized);
+}
+
 function buildLocalWallPaintToneConfig(presetKey) {
   if (presetKey === 'paint_bright_white') {
     return {
       targetHue: 36 / 360,
-      targetSaturation: 0.04,
-      targetLightness: 0.978,
+      targetSaturation: 0.03,
+      targetLightness: 0.99,
       targetHueMix: 1,
       targetSaturationMix: 1,
       lightnessMix: 1,
-      additionalLift: 0.16,
-      blendMix: 0.985,
-      alphaExponent: 0.76,
-      minBlend: 0.82,
+      additionalLift: 0.22,
+      blendMix: 0.995,
+      alphaExponent: 0.68,
+      minBlend: 0.88,
       shadingRange: 0.12,
     };
   }
 
   if (presetKey === 'paint_soft_greige') {
     return {
-      targetHue: 28 / 360,
-      targetSaturation: 0.11,
-      targetLightness: 0.64,
+      targetHue: 26 / 360,
+      targetSaturation: 0.16,
+      targetLightness: 0.55,
       targetHueMix: 1,
       targetSaturationMix: 1,
       lightnessMix: 1,
       additionalLift: 0.01,
-      blendMix: 0.98,
-      alphaExponent: 0.72,
-      minBlend: 0.8,
+      blendMix: 0.992,
+      alphaExponent: 0.66,
+      minBlend: 0.86,
       shadingRange: 0.16,
     };
   }
 
   return {
-    targetHue: 34 / 360,
-    targetSaturation: 0.12,
-    targetLightness: 0.76,
+    targetHue: 30 / 360,
+    targetSaturation: 0.18,
+    targetLightness: 0.68,
     targetHueMix: 1,
     targetSaturationMix: 1,
     lightnessMix: 1,
-    additionalLift: 0.03,
-    blendMix: 0.96,
-    alphaExponent: 0.74,
-    minBlend: 0.76,
+    additionalLift: 0.035,
+    blendMix: 0.985,
+    alphaExponent: 0.68,
+    minBlend: 0.84,
     shadingRange: 0.14,
+  };
+}
+
+function buildLocalFloorToneConfig(presetKey) {
+  if (presetKey === 'floor_dark_hardwood') {
+    return {
+      kind: 'wood',
+      targetHue: 24 / 360,
+      targetSaturation: 0.48,
+      targetLightness: 0.2,
+      targetHueMix: 0.96,
+      targetSaturationMix: 0.96,
+      lightnessMix: 0.98,
+      blendMix: 0.985,
+      alphaExponent: 0.72,
+      minBlend: 0.86,
+      shadingScale: 0.6,
+      additionalLift: 0.015,
+      contrastBoost: 0.015,
+    };
+  }
+
+  if (presetKey === 'floor_medium_wood') {
+    return {
+      kind: 'wood',
+      targetHue: 28 / 360,
+      targetSaturation: 0.34,
+      targetLightness: 0.38,
+      targetHueMix: 0.94,
+      targetSaturationMix: 0.94,
+      lightnessMix: 0.94,
+      blendMix: 0.975,
+      alphaExponent: 0.74,
+      minBlend: 0.84,
+      shadingScale: 0.58,
+      additionalLift: 0.012,
+      contrastBoost: 0.012,
+    };
+  }
+
+  if (presetKey === 'floor_lvp_neutral') {
+    return {
+      kind: 'wood',
+      targetHue: 30 / 360,
+      targetSaturation: 0.12,
+      targetLightness: 0.52,
+      targetHueMix: 0.9,
+      targetSaturationMix: 0.88,
+      lightnessMix: 0.9,
+      blendMix: 0.965,
+      alphaExponent: 0.76,
+      minBlend: 0.82,
+      shadingScale: 0.56,
+      additionalLift: 0.008,
+      contrastBoost: 0.008,
+    };
+  }
+
+  if (presetKey === 'floor_tile_stone') {
+    return {
+      kind: 'tile',
+      targetHue: 35 / 360,
+      targetSaturation: 0.09,
+      targetLightness: 0.66,
+      groutHue: 36 / 360,
+      groutSaturation: 0.03,
+      groutLightness: 0.83,
+      groutWidth: 0.06,
+      groutFeather: 0.04,
+      tileAspect: 1.45,
+      topRowHeight: 5,
+      bottomRowHeight: 24,
+      blendMix: 0.97,
+      alphaExponent: 0.7,
+      minBlend: 0.84,
+      shadingScale: 0.62,
+      tileVariation: 0.06,
+      veiningStrength: 0.03,
+    };
+  }
+
+  return {
+    kind: 'wood',
+    targetHue: 34 / 360,
+    targetSaturation: 0.26,
+    targetLightness: 0.64,
+    targetHueMix: 0.92,
+    targetSaturationMix: 0.92,
+    lightnessMix: 0.92,
+    blendMix: 0.97,
+    alphaExponent: 0.74,
+    minBlend: 0.84,
+    shadingScale: 0.58,
+    additionalLift: 0.01,
+    contrastBoost: 0.01,
   };
 }
 
@@ -1641,11 +1753,190 @@ async function renderLocalWallPaintVariantBuffer(sourceBuffer, presetKey, roomTy
     .toBuffer();
 }
 
+async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) {
+  const metadata = await sharp(sourceBuffer).rotate().metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const toneConfig = buildLocalFloorToneConfig(presetKey);
+  const floorMask = await buildAdaptiveFloorMaskAtSourceSize(sourceBuffer, presetKey, roomType);
+  const [sourceRgba, maskRaw] = await Promise.all([
+    sharp(sourceBuffer).rotate().ensureAlpha().raw().toBuffer(),
+    sharp(floorMask.adaptiveMaskBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+  ]);
+
+  let floorTop = height;
+  let floorBottom = 0;
+  const maskedLightnessSamples = [];
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      const alpha = clamp01((maskRaw[index] || 0) / 255);
+      if (alpha <= 0.08) {
+        continue;
+      }
+
+      floorTop = Math.min(floorTop, y);
+      floorBottom = Math.max(floorBottom, y);
+      const offset = index * 4;
+      const { l } = rgbToHsl(sourceRgba[offset], sourceRgba[offset + 1], sourceRgba[offset + 2]);
+      maskedLightnessSamples.push(l);
+    }
+  }
+  if (floorTop >= floorBottom) {
+    floorTop = Math.round(height * 0.5);
+    floorBottom = height - 1;
+  }
+  const floorHeight = Math.max(1, floorBottom - floorTop);
+  const medianFloorLightness = medianChannel(
+    maskedLightnessSamples.map((value) => Math.round(value * 255)),
+    126,
+  ) / 255;
+
+  const transformed = Buffer.from(sourceRgba);
+  for (let y = 0; y < height; y += 1) {
+    const planeT = clamp01((y - floorTop) / floorHeight);
+    const rowHeight = mixValue(
+      toneConfig.topRowHeight || 6,
+      toneConfig.bottomRowHeight || 24,
+      Math.pow(planeT, 1.45),
+    );
+    const tileRow = Math.floor((y - floorTop) / Math.max(1, rowHeight));
+    const rowFraction = ((y - floorTop) / Math.max(1, rowHeight)) - tileRow;
+
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      const alpha = clamp01((maskRaw[index] || 0) / 255);
+      if (alpha <= 0.03) {
+        continue;
+      }
+
+      const offset = index * 4;
+      const originalRed = transformed[offset];
+      const originalGreen = transformed[offset + 1];
+      const originalBlue = transformed[offset + 2];
+      const { h, s, l } = rgbToHsl(originalRed, originalGreen, originalBlue);
+      const shadingOffset = l - medianFloorLightness;
+      const effectiveAlpha = clamp01(
+        Math.pow(alpha, Number(toneConfig.alphaExponent || 1)),
+      );
+
+      let targetRed = originalRed;
+      let targetGreen = originalGreen;
+      let targetBlue = originalBlue;
+
+      if (toneConfig.kind === 'tile') {
+        const colWidth = Math.max(
+          1,
+          rowHeight * Number(toneConfig.tileAspect || 1.5),
+        );
+        const rowParityOffset = tileRow % 2 === 0 ? 0 : colWidth * 0.5;
+        const tileCol = Math.floor((x + rowParityOffset) / colWidth);
+        const colFraction = ((x + rowParityOffset) / colWidth) - tileCol;
+        const seamDistance = Math.min(
+          rowFraction,
+          1 - rowFraction,
+          colFraction,
+          1 - colFraction,
+        );
+        const groutBlend = 1 - smoothStep(
+          Number(toneConfig.groutWidth || 0.06),
+          Number(toneConfig.groutWidth || 0.06) + Number(toneConfig.groutFeather || 0.04),
+          seamDistance,
+        );
+        const tileNoise = pseudoRandom01(tileRow, tileCol, 1);
+        const veinNoise = pseudoRandom01(
+          Math.floor(x / 22),
+          Math.floor((y - floorTop) / 18),
+          2,
+        );
+        const tileHue = clamp01(toneConfig.targetHue + (tileNoise - 0.5) * 0.012);
+        const tileSaturation = clamp01(
+          toneConfig.targetSaturation + (tileNoise - 0.5) * 0.03,
+        );
+        const tileLightness = clamp01(
+          toneConfig.targetLightness +
+            shadingOffset * Number(toneConfig.shadingScale || 0.62) +
+            (tileNoise - 0.5) * Number(toneConfig.tileVariation || 0.06) +
+            (veinNoise - 0.5) * Number(toneConfig.veiningStrength || 0.03),
+        );
+        const groutLightness = clamp01(
+          toneConfig.groutLightness + shadingOffset * 0.25,
+        );
+        const [tileRed, tileGreen, tileBlue] = hslToRgb(
+          tileHue,
+          tileSaturation,
+          tileLightness,
+        );
+        const [groutRed, groutGreen, groutBlue] = hslToRgb(
+          toneConfig.groutHue,
+          toneConfig.groutSaturation,
+          groutLightness,
+        );
+        targetRed = clampByte(mixValue(tileRed, groutRed, groutBlend));
+        targetGreen = clampByte(mixValue(tileGreen, groutGreen, groutBlend));
+        targetBlue = clampByte(mixValue(tileBlue, groutBlue, groutBlend));
+      } else {
+        const targetHue = mixHue(
+          h,
+          toneConfig.targetHue,
+          effectiveAlpha * Number(toneConfig.targetHueMix || 1),
+        );
+        const targetSaturation = mixValue(
+          s,
+          clamp01(toneConfig.targetSaturation + Math.max(0, -shadingOffset) * 0.04),
+          effectiveAlpha * Number(toneConfig.targetSaturationMix || 1),
+        );
+        const targetLightness = clamp01(
+          mixValue(
+            l,
+            clamp01(
+              toneConfig.targetLightness +
+                shadingOffset * Number(toneConfig.shadingScale || 0.58),
+            ),
+            effectiveAlpha * Number(toneConfig.lightnessMix || 1),
+          ) +
+            shadingOffset * Number(toneConfig.contrastBoost || 0) +
+            (1 - l) * Number(toneConfig.additionalLift || 0) * effectiveAlpha,
+        );
+        [targetRed, targetGreen, targetBlue] = hslToRgb(
+          targetHue,
+          targetSaturation,
+          targetLightness,
+        );
+      }
+
+      const blendMix = clamp01(
+        Math.max(
+          effectiveAlpha * Number(toneConfig.blendMix || 0.96),
+          effectiveAlpha >= 0.45 ? Number(toneConfig.minBlend || 0) : 0,
+        ),
+      );
+
+      transformed[offset] = clampByte(mixValue(originalRed, targetRed, blendMix));
+      transformed[offset + 1] = clampByte(mixValue(originalGreen, targetGreen, blendMix));
+      transformed[offset + 2] = clampByte(mixValue(originalBlue, targetBlue, blendMix));
+    }
+  }
+
+  return sharp(transformed, {
+    raw: { width, height, channels: 4 },
+  })
+    .jpeg({ quality: 92, mozjpeg: true })
+    .toBuffer();
+}
+
 async function renderVariantBuffer(buffer, presetKey, roomType) {
   const renderPlan = buildPresetRenderPlan(presetKey);
   const sourceMetadata = await sharp(buffer).rotate().metadata();
   const transformed = String(presetKey || '').startsWith('paint_')
     ? await renderLocalWallPaintVariantBuffer(buffer, presetKey, roomType)
+    : String(presetKey || '').startsWith('floor_')
+      ? await renderLocalFloorVariantBuffer(buffer, presetKey, roomType)
     : await (typeof renderPlan.transform === 'function'
         ? renderPlan
             .transform(sharp(buffer).rotate(), sourceMetadata)
@@ -2086,10 +2377,10 @@ async function buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, r
         baseMaskProbe[index] > 32 &&
         y >= Math.round(probeHeight * 0.14) &&
         y <= Math.round(probeHeight * 0.74) &&
-        saturation[index] <= 36 &&
+        saturation[index] <= 44 &&
         luminance[index] >= 58 &&
         luminance[index] <= 238 &&
-        texture[index] <= 15
+        texture[index] <= 18
       ) {
         const [red, green, blue] = getRgb(x, y);
         seedRed.push(red);
@@ -2128,11 +2419,11 @@ async function buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, r
           (blue - medianBlue) * (blue - medianBlue),
       );
       const isWallPixel =
-        sat <= Math.max(48, medianSat + 18) &&
+        sat <= Math.max(58, medianSat + 24) &&
         lum >= 50 &&
         lum <= 245 &&
-        edgeAmount <= 24 &&
-        (colorDistance <= 74 || (edgeAmount <= 16 && Math.abs(lum - medianLum) <= 46));
+        edgeAmount <= 28 &&
+        (colorDistance <= 92 || (edgeAmount <= 20 && Math.abs(lum - medianLum) <= 52));
 
       if (isWallPixel) {
         binary[index] = 1;
@@ -2199,6 +2490,209 @@ async function buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, r
   })
     .resize(width, height, { fit: 'fill' })
     .blur(1.35)
+    .png()
+    .toBuffer();
+
+  return {
+    width,
+    height,
+    adaptiveMaskBuffer,
+  };
+}
+
+async function buildAdaptiveFloorMaskAtSourceSize(sourceBuffer, presetKey, roomType) {
+  const metadata = await sharp(sourceBuffer).rotate().metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const probeWidth = Math.max(112, Math.min(224, width));
+  const probeHeight = Math.max(84, Math.round((height / Math.max(1, width)) * probeWidth));
+
+  const baseMaskBuffer = await buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType);
+  const [sourceProbe, baseMaskProbe] = await Promise.all([
+    sharp(sourceBuffer)
+      .rotate()
+      .resize(probeWidth, probeHeight, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(baseMaskBuffer)
+      .resize(probeWidth, probeHeight, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+  ]);
+
+  const luminance = new Float32Array(probeWidth * probeHeight);
+  const saturation = new Float32Array(probeWidth * probeHeight);
+  const texture = new Float32Array(probeWidth * probeHeight);
+  const seedRed = [];
+  const seedGreen = [];
+  const seedBlue = [];
+  const seedLuminance = [];
+  const seedSaturation = [];
+
+  function getRgb(x, y) {
+    const offset = (y * probeWidth + x) * 3;
+    return [sourceProbe[offset], sourceProbe[offset + 1], sourceProbe[offset + 2]];
+  }
+
+  function getLuminanceAt(x, y) {
+    return luminance[y * probeWidth + x];
+  }
+
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      const index = y * probeWidth + x;
+      const [red, green, blue] = getRgb(x, y);
+      const lum = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      const sat = Math.max(red, green, blue) - Math.min(red, green, blue);
+      luminance[index] = lum;
+      saturation[index] = sat;
+    }
+  }
+
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      const index = y * probeWidth + x;
+      const centerLum = luminance[index];
+      let diffTotal = 0;
+      let samples = 0;
+      const neighbors = [
+        [x - 1, y],
+        [x + 1, y],
+        [x, y - 1],
+        [x, y + 1],
+      ];
+      for (const [nx, ny] of neighbors) {
+        if (nx < 0 || ny < 0 || nx >= probeWidth || ny >= probeHeight) {
+          continue;
+        }
+        diffTotal += Math.abs(centerLum - getLuminanceAt(nx, ny));
+        samples += 1;
+      }
+      texture[index] = samples > 0 ? diffTotal / samples : 0;
+
+      if (
+        baseMaskProbe[index] > 32 &&
+        y >= Math.round(probeHeight * 0.62) &&
+        saturation[index] <= 80 &&
+        luminance[index] >= 18 &&
+        luminance[index] <= 240 &&
+        texture[index] <= 28
+      ) {
+        const [red, green, blue] = getRgb(x, y);
+        seedRed.push(red);
+        seedGreen.push(green);
+        seedBlue.push(blue);
+        seedLuminance.push(luminance[index]);
+        seedSaturation.push(saturation[index]);
+      }
+    }
+  }
+
+  const medianRed = medianChannel(seedRed, 118);
+  const medianGreen = medianChannel(seedGreen, 102);
+  const medianBlue = medianChannel(seedBlue, 86);
+  const medianLum = medianChannel(seedLuminance, 104);
+  const medianSat = medianChannel(seedSaturation, 24);
+  const binary = new Uint8Array(probeWidth * probeHeight);
+
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      const index = y * probeWidth + x;
+      if (baseMaskProbe[index] <= 24) {
+        continue;
+      }
+      if (y < Math.round(probeHeight * 0.42)) {
+        continue;
+      }
+
+      const [red, green, blue] = getRgb(x, y);
+      const lum = luminance[index];
+      const sat = saturation[index];
+      const edgeAmount = texture[index];
+      const colorDistance = Math.sqrt(
+        (red - medianRed) * (red - medianRed) +
+          (green - medianGreen) * (green - medianGreen) +
+          (blue - medianBlue) * (blue - medianBlue),
+      );
+      const isFloorPixel =
+        lum >= 10 &&
+        lum <= 246 &&
+        sat <= Math.max(96, medianSat + 28) &&
+        edgeAmount <= 34 &&
+        (
+          colorDistance <= 104 ||
+          Math.abs(lum - medianLum) <= 62 ||
+          (y >= Math.round(probeHeight * 0.72) && sat <= Math.max(110, medianSat + 36))
+        );
+
+      if (isFloorPixel) {
+        binary[index] = 1;
+      }
+    }
+  }
+
+  let smoothed = binary;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const next = new Uint8Array(smoothed.length);
+    for (let y = 0; y < probeHeight; y += 1) {
+      for (let x = 0; x < probeWidth; x += 1) {
+        let neighbors = 0;
+        for (let oy = -1; oy <= 1; oy += 1) {
+          for (let ox = -1; ox <= 1; ox += 1) {
+            const nx = x + ox;
+            const ny = y + oy;
+            if (nx < 0 || ny < 0 || nx >= probeWidth || ny >= probeHeight) {
+              continue;
+            }
+            neighbors += smoothed[ny * probeWidth + nx];
+          }
+        }
+        const index = y * probeWidth + x;
+        if ((smoothed[index] && neighbors >= 4) || neighbors >= 6) {
+          next[index] = 1;
+        }
+      }
+    }
+    smoothed = next;
+  }
+
+  const components = extractBinaryMaskComponents(
+    smoothed,
+    probeWidth,
+    probeHeight,
+    Math.max(80, Math.round(probeWidth * probeHeight * 0.006)),
+  );
+  const finalBinary = new Uint8Array(smoothed.length);
+  for (const component of components) {
+    if (
+      component.area >= Math.max(80, Math.round(probeWidth * probeHeight * 0.006)) &&
+      component.boxWidth >= Math.round(probeWidth * 0.18) &&
+      component.boxHeight >= Math.round(probeHeight * 0.08)
+    ) {
+      for (const pixelIndex of component.pixels) {
+        finalBinary[pixelIndex] = 1;
+      }
+    }
+  }
+
+  const rgba = Buffer.alloc(probeWidth * probeHeight * 4);
+  for (let index = 0; index < finalBinary.length; index += 1) {
+    const value = finalBinary[index] ? 255 : 0;
+    const offset = index * 4;
+    rgba[offset] = value;
+    rgba[offset + 1] = value;
+    rgba[offset + 2] = value;
+    rgba[offset + 3] = 255;
+  }
+
+  const adaptiveMaskBuffer = await sharp(rgba, {
+    raw: { width: probeWidth, height: probeHeight, channels: 4 },
+  })
+    .resize(width, height, { fit: 'fill' })
+    .blur(1.45)
     .png()
     .toBuffer();
 
@@ -3127,6 +3621,101 @@ async function buildReviewedLocalSharpCandidates({
   sourceImageBase64,
 }) {
   const rendered = await renderVariantBuffer(sourceBuffer, preset.key, resolvedRoomType);
+  const evaluationRegions = getPresetEvaluationRegions(preset.key);
+  let maskBuffer = null;
+  let visualChangeRatio = await calculateVisualChangeRatio(sourceBuffer, rendered.buffer);
+  let focusRegionChangeRatio = await calculateVisualChangeRatio(sourceBuffer, rendered.buffer, {
+    region: evaluationRegions.focusRegion,
+  });
+  let topHalfChangeRatio = await calculateVisualChangeRatio(sourceBuffer, rendered.buffer, {
+    region: evaluationRegions.structureRegion,
+  });
+  let maskedChangeRatio = 0;
+  let maskedLuminanceDelta = 0;
+  let maskedColorShiftRatio = 0;
+  let outsideMaskChangeRatio = 0;
+  let maskedEdgeDensityDelta = 0;
+  let furnitureCoverageIncreaseRatio = 0;
+  let newFurnitureAdditionRatio = 0;
+
+  if (preset.key.startsWith('paint_')) {
+    maskBuffer = (
+      await buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, preset.key, resolvedRoomType)
+    ).adaptiveMaskBuffer;
+  } else if (preset.key.startsWith('floor_')) {
+    maskBuffer = (
+      await buildAdaptiveFloorMaskAtSourceSize(sourceBuffer, preset.key, resolvedRoomType)
+    ).adaptiveMaskBuffer;
+  }
+
+  if (maskBuffer) {
+    maskedChangeRatio = await calculateMaskedVisualChangeRatio(
+      sourceBuffer,
+      rendered.buffer,
+      maskBuffer,
+    );
+    maskedLuminanceDelta = await calculateMaskedLuminanceDelta(
+      sourceBuffer,
+      rendered.buffer,
+      maskBuffer,
+    );
+    maskedColorShiftRatio = await calculateMaskedAverageColorShiftRatio(
+      sourceBuffer,
+      rendered.buffer,
+      maskBuffer,
+    );
+    outsideMaskChangeRatio = await calculateOutsideMaskVisualChangeRatio(
+      sourceBuffer,
+      rendered.buffer,
+      maskBuffer,
+    );
+
+    if (preset.key.startsWith('paint_')) {
+      const sourcePaintEdgeDensity = await calculateMaskedEdgeDensity(sourceBuffer, maskBuffer);
+      const variantPaintEdgeDensity = await calculateMaskedEdgeDensity(rendered.buffer, maskBuffer);
+      maskedEdgeDensityDelta = Number(
+        (variantPaintEdgeDensity - sourcePaintEdgeDensity).toFixed(4),
+      );
+    }
+  }
+
+  if (preset.key.startsWith('paint_') || preset.key.startsWith('floor_')) {
+    const sourceFurnitureMask = await buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer, {
+      bridgeNearbyComponents: false,
+    });
+    const sourceFurnitureCoverageRatio = await calculateMaskCoverageRatio(
+      sourceFurnitureMask.adaptiveMaskBuffer,
+    );
+    const variantFurnitureMask = await buildAdaptiveFurnitureMaskAtSourceSize(rendered.buffer, {
+      bridgeNearbyComponents: false,
+    });
+    const variantFurnitureCoverageRatio = await calculateMaskCoverageRatio(
+      variantFurnitureMask.adaptiveMaskBuffer,
+    );
+    furnitureCoverageIncreaseRatio = Number(
+      Math.max(0, variantFurnitureCoverageRatio - sourceFurnitureCoverageRatio).toFixed(4),
+    );
+
+    const sourceComponentBinary = await readBinaryMask(sourceFurnitureMask.adaptiveMaskBuffer, 40);
+    const sourceFurnitureComponents = extractBinaryMaskComponents(
+      sourceComponentBinary.binary,
+      sourceComponentBinary.width,
+      sourceComponentBinary.height,
+      Math.max(
+        400,
+        Math.round(sourceComponentBinary.width * sourceComponentBinary.height * 0.004),
+      ),
+    );
+    if (sourceFurnitureComponents.length) {
+      const persistenceMetrics = await calculateFurniturePersistenceMetrics({
+        sourceComponentMaskBuffer: sourceFurnitureMask.adaptiveMaskBuffer,
+        sourceComponents: sourceFurnitureComponents,
+        variantBuffer: rendered.buffer,
+      });
+      newFurnitureAdditionRatio = Number(persistenceMetrics.newFurnitureAdditionRatio || 0);
+    }
+  }
+
   const review = await reviewVisionVariant({
     property: null,
     roomLabel: asset.roomLabel,
@@ -3157,12 +3746,16 @@ async function buildReviewedLocalSharpCandidates({
       providerSourceUrl: null,
       review,
       overallScore,
-      visualChangeRatio: 0,
-      focusRegionChangeRatio: 0,
-      topHalfChangeRatio: 0,
-      maskedChangeRatio: 0,
-      outsideMaskChangeRatio: 0,
-      maskedEdgeDensityDelta: 0,
+      visualChangeRatio,
+      focusRegionChangeRatio,
+      topHalfChangeRatio,
+      maskedChangeRatio,
+      maskedLuminanceDelta,
+      maskedColorShiftRatio,
+      outsideMaskChangeRatio,
+      maskedEdgeDensityDelta,
+      furnitureCoverageIncreaseRatio,
+      newFurnitureAdditionRatio,
       objectRemovalScore: 0,
       shouldHideByDefault: false,
     },
