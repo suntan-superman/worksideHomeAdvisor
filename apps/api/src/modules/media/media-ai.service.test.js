@@ -307,6 +307,25 @@ test('paint preset sufficiency rejects candidates that introduce furniture-like 
   );
 });
 
+test('bright white paint sufficiency rejects candidates that do not brighten enough', () => {
+  assert.equal(
+    isCandidateSufficient(
+      {
+        maskedChangeRatio: 0.13,
+        maskedColorShiftRatio: 0.07,
+        maskedLuminanceDelta: 0.03,
+        maskedEdgeDensityDelta: 0.0005,
+        topHalfChangeRatio: 0.03,
+        outsideMaskChangeRatio: 0.12,
+        furnitureCoverageIncreaseRatio: 0.004,
+        newFurnitureAdditionRatio: 0.01,
+      },
+      'paint_bright_white',
+    ),
+    false,
+  );
+});
+
 test('paint preset ranking prefers cleaner wall repaints over added wall detail', () => {
   const ranked = rankCandidates(
     [
@@ -427,6 +446,56 @@ test('paint preset ranking penalizes introduced furniture over a stronger repain
   );
 
   assert.equal(ranked[0]?.label, 'Safe repaint');
+});
+
+test('tile or stone floor sufficiency rejects dark wood-like candidates', () => {
+  assert.equal(
+    isCandidateSufficient(
+      {
+        focusRegionChangeRatio: 0.16,
+        maskedChangeRatio: 0.19,
+        maskedColorShiftRatio: 0.05,
+        maskedLuminanceDelta: -0.09,
+        topHalfChangeRatio: 0.04,
+        outsideMaskChangeRatio: 0.1,
+        furnitureCoverageIncreaseRatio: 0.004,
+      },
+      'floor_tile_stone',
+    ),
+    false,
+  );
+});
+
+test('tile or stone floor ranking prefers truer material shift over wood-like darkening', () => {
+  const ranked = rankCandidates(
+    [
+      {
+        label: 'Dark wood-like floor',
+        overallScore: 92,
+        focusRegionChangeRatio: 0.18,
+        maskedChangeRatio: 0.22,
+        maskedColorShiftRatio: 0.06,
+        maskedLuminanceDelta: -0.09,
+        topHalfChangeRatio: 0.03,
+        outsideMaskChangeRatio: 0.1,
+        furnitureCoverageIncreaseRatio: 0,
+      },
+      {
+        label: 'Clear tile or stone shift',
+        overallScore: 88,
+        focusRegionChangeRatio: 0.17,
+        maskedChangeRatio: 0.2,
+        maskedColorShiftRatio: 0.11,
+        maskedLuminanceDelta: -0.02,
+        topHalfChangeRatio: 0.03,
+        outsideMaskChangeRatio: 0.08,
+        furnitureCoverageIncreaseRatio: 0,
+      },
+    ],
+    'floor_tile_stone',
+  );
+
+  assert.equal(ranked[0]?.label, 'Clear tile or stone shift');
 });
 
 test('remove_furniture orchestration evaluates the full provider chain before selecting a winner', async () => {

@@ -855,6 +855,34 @@ function sortVisionVariants(variants = []) {
         return leftFurnitureCoverageIncrease - rightFurnitureCoverageIncrease;
       }
 
+      if (leftPresetKey === 'floor_tile_stone' && rightPresetKey === 'floor_tile_stone') {
+        const leftOutsideMaskChange = Number(
+          left?.metadata?.review?.outsideMaskChangeRatio || 0,
+        );
+        const rightOutsideMaskChange = Number(
+          right?.metadata?.review?.outsideMaskChangeRatio || 0,
+        );
+        if (leftOutsideMaskChange !== rightOutsideMaskChange) {
+          return leftOutsideMaskChange - rightOutsideMaskChange;
+        }
+
+        const leftTopHalfChange = Number(left?.metadata?.review?.topHalfChangeRatio || 0);
+        const rightTopHalfChange = Number(right?.metadata?.review?.topHalfChangeRatio || 0);
+        if (leftTopHalfChange !== rightTopHalfChange) {
+          return leftTopHalfChange - rightTopHalfChange;
+        }
+
+        const leftMaskedColorShift = Number(
+          left?.metadata?.review?.maskedColorShiftRatio || 0,
+        );
+        const rightMaskedColorShift = Number(
+          right?.metadata?.review?.maskedColorShiftRatio || 0,
+        );
+        if (leftMaskedColorShift !== rightMaskedColorShift) {
+          return rightMaskedColorShift - leftMaskedColorShift;
+        }
+      }
+
       const leftMaskedChange = Number(left?.metadata?.review?.maskedChangeRatio || 0);
       const rightMaskedChange = Number(right?.metadata?.review?.maskedChangeRatio || 0);
       if (leftMaskedChange !== rightMaskedChange) {
@@ -907,6 +935,16 @@ function sortVisionVariants(variants = []) {
       }
 
       if (leftPresetKey === 'paint_bright_white' && rightPresetKey === 'paint_bright_white') {
+        const leftOutsideMaskChange = Number(
+          left?.metadata?.review?.outsideMaskChangeRatio || 0,
+        );
+        const rightOutsideMaskChange = Number(
+          right?.metadata?.review?.outsideMaskChangeRatio || 0,
+        );
+        if (leftOutsideMaskChange !== rightOutsideMaskChange) {
+          return leftOutsideMaskChange - rightOutsideMaskChange;
+        }
+
         const leftMaskedLuminanceDelta = Number(
           left?.metadata?.review?.maskedLuminanceDelta || 0,
         );
@@ -3097,6 +3135,26 @@ async function buildReviewedReplicateCandidates({
           overallScore = Math.min(100, overallScore + 10);
         }
       }
+      if (preset.key === 'floor_tile_stone') {
+        if (maskedColorShiftRatio < 0.08) {
+          overallScore = Math.max(0, overallScore - 28);
+          qualityWarning =
+            'Low-confidence preview: the flooring still reads too close to the original surface instead of a clear tile or stone material shift.';
+          rejectionCategory = 'insufficient_floor_change';
+          shouldHideByDefault = true;
+        } else if (maskedColorShiftRatio >= 0.12) {
+          overallScore = Math.min(100, overallScore + 10);
+        } else if (maskedColorShiftRatio >= 0.09) {
+          overallScore = Math.min(100, overallScore + 4);
+        }
+        if (maskedLuminanceDelta <= -0.07) {
+          overallScore = Math.max(0, overallScore - 20);
+          qualityWarning =
+            'Low-confidence preview: the flooring reads more like dark wood than a believable tile or stone finish.';
+          rejectionCategory = 'insufficient_floor_change';
+          shouldHideByDefault = true;
+        }
+      }
       if (furnitureCoverageIncreaseRatio >= 0.025) {
         overallScore = Math.max(0, overallScore - 36);
         qualityWarning =
@@ -3105,6 +3163,13 @@ async function buildReviewedReplicateCandidates({
         shouldHideByDefault = true;
       } else if (furnitureCoverageIncreaseRatio >= 0.012) {
         overallScore = Math.max(0, overallScore - 16);
+      }
+      if (preset.key === 'floor_tile_stone' && furnitureCoverageIncreaseRatio >= 0.015) {
+        overallScore = Math.max(0, overallScore - 18);
+        qualityWarning =
+          'Low-confidence preview: the tile or stone concept appears to introduce object-like artifacts in the room.';
+        rejectionCategory = 'furniture_restaging';
+        shouldHideByDefault = true;
       }
       if (topHalfChangeRatio > 0.14) {
         overallScore = Math.max(0, overallScore - 18);
@@ -3183,16 +3248,47 @@ async function buildReviewedReplicateCandidates({
         overallScore = Math.max(0, overallScore - 20);
       }
       if (preset.key === 'paint_bright_white') {
-        if (maskedLuminanceDelta < 0.024) {
-          overallScore = Math.max(0, overallScore - 24);
+        if (maskedChangeRatio < 0.12) {
+          overallScore = Math.max(0, overallScore - 18);
+          qualityWarning =
+            'Low-confidence preview: the walls changed too little to read as a clearly lighter repaint.';
+          rejectionCategory = 'insufficient_paint_change';
+          shouldHideByDefault = true;
+        }
+        if (maskedColorShiftRatio < 0.06) {
+          overallScore = Math.max(0, overallScore - 18);
+          qualityWarning =
+            'Low-confidence preview: the wall color shift stayed too subtle to read as a fresh bright-white repaint.';
+          rejectionCategory = 'insufficient_paint_change';
+          shouldHideByDefault = true;
+        }
+        if (outsideMaskChangeRatio > 0.2) {
+          overallScore = Math.max(0, overallScore - 16);
+        }
+        if (topHalfChangeRatio > 0.08) {
+          overallScore = Math.max(0, overallScore - 18);
+          qualityWarning =
+            'Low-confidence preview: the bright-white concept is changing upper-room details too much.';
+          rejectionCategory = 'architectural_drift';
+          shouldHideByDefault = true;
+        }
+        if (furnitureCoverageIncreaseRatio >= 0.015 || newFurnitureAdditionRatio >= 0.02) {
+          overallScore = Math.max(0, overallScore - 26);
+          qualityWarning =
+            'Low-confidence preview: the bright-white repaint appears to introduce object-like additions instead of only changing wall color.';
+          rejectionCategory = 'furniture_restaging';
+          shouldHideByDefault = true;
+        }
+        if (maskedLuminanceDelta < 0.034) {
+          overallScore = Math.max(0, overallScore - 28);
           qualityWarning =
             'Low-confidence preview: the walls did not brighten enough to read as a crisp white repaint.';
           rejectionCategory = 'insufficient_paint_change';
           shouldHideByDefault = true;
-        } else if (maskedLuminanceDelta >= 0.06) {
-          overallScore = Math.min(100, overallScore + 10);
-        } else if (maskedLuminanceDelta >= 0.04) {
-          overallScore = Math.min(100, overallScore + 5);
+        } else if (maskedLuminanceDelta >= 0.075) {
+          overallScore = Math.min(100, overallScore + 12);
+        } else if (maskedLuminanceDelta >= 0.05) {
+          overallScore = Math.min(100, overallScore + 7);
         }
       }
     }
@@ -3586,6 +3682,26 @@ async function buildReviewedOpenAiCandidates({
           overallScore = Math.min(100, overallScore + 10);
         }
       }
+      if (preset.key === 'floor_tile_stone') {
+        if (maskedColorShiftRatio < 0.08) {
+          overallScore = Math.max(0, overallScore - 28);
+          qualityWarning =
+            'Low-confidence preview: the premium fallback kept the flooring too close to the original material instead of a clear tile or stone shift.';
+          rejectionCategory = 'insufficient_floor_change';
+          shouldHideByDefault = true;
+        } else if (maskedColorShiftRatio >= 0.12) {
+          overallScore = Math.min(100, overallScore + 10);
+        } else if (maskedColorShiftRatio >= 0.09) {
+          overallScore = Math.min(100, overallScore + 4);
+        }
+        if (maskedLuminanceDelta <= -0.07) {
+          overallScore = Math.max(0, overallScore - 20);
+          qualityWarning =
+            'Low-confidence preview: the premium fallback reads more like dark wood than a believable tile or stone finish.';
+          rejectionCategory = 'insufficient_floor_change';
+          shouldHideByDefault = true;
+        }
+      }
       if (furnitureCoverageIncreaseRatio >= 0.025) {
         overallScore = Math.max(0, overallScore - 36);
         qualityWarning =
@@ -3594,6 +3710,13 @@ async function buildReviewedOpenAiCandidates({
         shouldHideByDefault = true;
       } else if (furnitureCoverageIncreaseRatio >= 0.012) {
         overallScore = Math.max(0, overallScore - 16);
+      }
+      if (preset.key === 'floor_tile_stone' && furnitureCoverageIncreaseRatio >= 0.015) {
+        overallScore = Math.max(0, overallScore - 18);
+        qualityWarning =
+          'Low-confidence preview: the premium tile or stone concept appears to introduce object-like artifacts in the room.';
+        rejectionCategory = 'furniture_restaging';
+        shouldHideByDefault = true;
       }
       if (topHalfChangeRatio > 0.16) {
         overallScore = Math.max(0, overallScore - 18);
@@ -3672,16 +3795,47 @@ async function buildReviewedOpenAiCandidates({
         overallScore = Math.max(0, overallScore - 20);
       }
       if (preset.key === 'paint_bright_white') {
-        if (maskedLuminanceDelta < 0.024) {
-          overallScore = Math.max(0, overallScore - 22);
+        if (maskedChangeRatio < 0.12) {
+          overallScore = Math.max(0, overallScore - 18);
+          qualityWarning =
+            'Low-confidence preview: the premium fallback changed the walls too little to read as a clearly lighter repaint.';
+          rejectionCategory = 'insufficient_paint_change';
+          shouldHideByDefault = true;
+        }
+        if (maskedColorShiftRatio < 0.06) {
+          overallScore = Math.max(0, overallScore - 18);
+          qualityWarning =
+            'Low-confidence preview: the premium fallback kept the wall color shift too subtle for a bright-white repaint.';
+          rejectionCategory = 'insufficient_paint_change';
+          shouldHideByDefault = true;
+        }
+        if (outsideMaskChangeRatio > 0.2) {
+          overallScore = Math.max(0, overallScore - 16);
+        }
+        if (topHalfChangeRatio > 0.08) {
+          overallScore = Math.max(0, overallScore - 18);
+          qualityWarning =
+            'Low-confidence preview: the premium bright-white concept is changing upper-room details too much.';
+          rejectionCategory = 'architectural_drift';
+          shouldHideByDefault = true;
+        }
+        if (furnitureCoverageIncreaseRatio >= 0.015 || newFurnitureAdditionRatio >= 0.02) {
+          overallScore = Math.max(0, overallScore - 26);
+          qualityWarning =
+            'Low-confidence preview: the premium bright-white repaint appears to introduce object-like additions instead of only changing wall color.';
+          rejectionCategory = 'furniture_restaging';
+          shouldHideByDefault = true;
+        }
+        if (maskedLuminanceDelta < 0.034) {
+          overallScore = Math.max(0, overallScore - 24);
           qualityWarning =
             'Low-confidence preview: the premium fallback did not brighten the walls enough to read as a crisp white repaint.';
           rejectionCategory = 'insufficient_paint_change';
           shouldHideByDefault = true;
-        } else if (maskedLuminanceDelta >= 0.06) {
-          overallScore = Math.min(100, overallScore + 10);
-        } else if (maskedLuminanceDelta >= 0.04) {
-          overallScore = Math.min(100, overallScore + 5);
+        } else if (maskedLuminanceDelta >= 0.075) {
+          overallScore = Math.min(100, overallScore + 12);
+        } else if (maskedLuminanceDelta >= 0.05) {
+          overallScore = Math.min(100, overallScore + 7);
         }
       }
     }

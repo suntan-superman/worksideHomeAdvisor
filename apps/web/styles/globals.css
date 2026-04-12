@@ -1974,6 +1974,48 @@ select {
   gap: 10px;
 }
 
+.vision-current-action-card {
+  gap: 14px;
+}
+
+.vision-status-badge-row {
+  gap: 10px;
+}
+
+.vision-status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(70, 99, 79, 0.12);
+  background: rgba(70, 99, 79, 0.08);
+  color: var(--moss);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: help;
+}
+
+.vision-current-action-buttons-primary,
+.vision-current-action-buttons-secondary {
+  width: 100%;
+}
+
+.vision-current-action-buttons-secondary {
+  justify-content: flex-start;
+}
+
+.vision-generate-button {
+  width: 100%;
+  min-height: 58px;
+  font-size: 1.02rem;
+  box-shadow: 0 14px 28px rgba(200, 116, 71, 0.18);
+}
+
+.vision-current-action-buttons-secondary .button-secondary {
+  min-height: 46px;
+}
+
 .property-media-slider-card {
   display: grid;
   gap: 12px;
@@ -2166,6 +2208,7 @@ select {
 .property-media-variant-chip.active {
   border-color: var(--clay);
   color: var(--ink);
+  box-shadow: 0 10px 20px rgba(200, 116, 71, 0.12);
 }
 
 .vision-freeform-result-card,

@@ -83,6 +83,8 @@ export function getReplicateSettings(providerKey, preset = {}) {
   const isFlooringPreset = String(preset.key || '').startsWith('floor_');
   const isWallPaintPreset = String(preset.key || '').startsWith('paint_');
   const isDarkHardwoodPreset = preset.key === 'floor_dark_hardwood';
+  const isTileStonePreset = preset.key === 'floor_tile_stone';
+  const isBrightWhitePreset = preset.key === 'paint_bright_white';
 
   if (providerKey === 'replicate_advanced') {
     const strongerRemovalPreset = new Set(['remove_furniture', 'declutter_medium']);
@@ -105,14 +107,19 @@ export function getReplicateSettings(providerKey, preset = {}) {
     if (isFlooringPreset) {
       return {
         model: preset.replicateModel,
-        outputCount: Math.max(3, baseOutputCount),
+        outputCount: Math.max(isTileStonePreset ? 4 : 3, baseOutputCount),
         guidanceScale: Math.min(
           10,
-          Number((baseGuidanceScale + (isDarkHardwoodPreset ? 0.3 : 0.2)).toFixed(2)),
+          Number(
+            (
+              baseGuidanceScale +
+              (isDarkHardwoodPreset ? 0.3 : isTileStonePreset ? 0.35 : 0.2)
+            ).toFixed(2),
+          ),
         ),
-        numInferenceSteps: baseInferenceSteps + (isDarkHardwoodPreset ? 4 : 3),
+        numInferenceSteps: baseInferenceSteps + (isDarkHardwoodPreset ? 4 : isTileStonePreset ? 5 : 3),
         strength: Number(
-          Math.min(0.98, baseStrength + (isDarkHardwoodPreset ? 0.02 : 0.01)).toFixed(2),
+          Math.min(0.98, baseStrength + (isDarkHardwoodPreset ? 0.02 : isTileStonePreset ? 0.03 : 0.01)).toFixed(2),
         ),
         scheduler: preset.scheduler,
         negativePrompt: preset.negativePrompt,
@@ -122,10 +129,15 @@ export function getReplicateSettings(providerKey, preset = {}) {
     if (isWallPaintPreset) {
       return {
         model: preset.replicateModel,
-        outputCount: Math.max(3, baseOutputCount),
-        guidanceScale: Math.min(10, Number((baseGuidanceScale + 0.45).toFixed(2))),
-        numInferenceSteps: baseInferenceSteps + 4,
-        strength: Number(Math.min(0.96, baseStrength + 0.03).toFixed(2)),
+        outputCount: Math.max(isBrightWhitePreset ? 5 : 4, baseOutputCount),
+        guidanceScale: Math.min(
+          10,
+          Number((baseGuidanceScale + (isBrightWhitePreset ? 0.55 : 0.45)).toFixed(2)),
+        ),
+        numInferenceSteps: baseInferenceSteps + (isBrightWhitePreset ? 5 : 4),
+        strength: Number(
+          Math.min(isBrightWhitePreset ? 0.97 : 0.96, baseStrength + (isBrightWhitePreset ? 0.02 : 0.03)).toFixed(2),
+        ),
         scheduler: preset.scheduler,
         negativePrompt: preset.negativePrompt,
       };
@@ -244,6 +256,17 @@ export function isCandidateSufficient(candidate, presetKey) {
   }
 
   if (String(presetKey || '').startsWith('floor_')) {
+    if (presetKey === 'floor_tile_stone') {
+      return (
+        Number(candidate.focusRegionChangeRatio || 0) >= 0.12 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.15 &&
+        Number(candidate.maskedColorShiftRatio || 0) >= 0.08 &&
+        Number(candidate.topHalfChangeRatio || 1) <= 0.08 &&
+        Number(candidate.outsideMaskChangeRatio || 1) <= 0.18 &&
+        Number(candidate.furnitureCoverageIncreaseRatio || 0) <= 0.015
+      );
+    }
+
     if (presetKey === 'floor_dark_hardwood') {
       return (
         Number(candidate.focusRegionChangeRatio || 0) >= 0.12 &&
@@ -269,14 +292,14 @@ export function isCandidateSufficient(candidate, presetKey) {
 
     if (presetKey === 'paint_bright_white') {
       return (
-        Number(candidate.maskedChangeRatio || 0) >= 0.1 &&
-        maskedColorShiftRatio >= 0.055 &&
-        maskedLuminanceDelta >= 0.024 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
+        maskedColorShiftRatio >= 0.065 &&
+        maskedLuminanceDelta >= 0.034 &&
         maskedEdgeDensityDelta <= 0.003 &&
-        Number(candidate.topHalfChangeRatio || 1) <= 0.1 &&
-        Number(candidate.outsideMaskChangeRatio || 1) <= 0.24 &&
-        furnitureCoverageIncreaseRatio <= 0.02 &&
-        newFurnitureAdditionRatio <= 0.04
+        Number(candidate.topHalfChangeRatio || 1) <= 0.08 &&
+        Number(candidate.outsideMaskChangeRatio || 1) <= 0.2 &&
+        furnitureCoverageIncreaseRatio <= 0.015 &&
+        newFurnitureAdditionRatio <= 0.02
       );
     }
 
@@ -354,6 +377,27 @@ export function rankCandidates(candidates = [], presetKey) {
           Number(right?.furnitureCoverageIncreaseRatio || 0)
         );
       }
+      if (presetKey === 'floor_tile_stone') {
+        if (
+          Number(left?.outsideMaskChangeRatio || 0) !== Number(right?.outsideMaskChangeRatio || 0)
+        ) {
+          return (
+            Number(left?.outsideMaskChangeRatio || 0) -
+            Number(right?.outsideMaskChangeRatio || 0)
+          );
+        }
+        if (Number(left?.topHalfChangeRatio || 0) !== Number(right?.topHalfChangeRatio || 0)) {
+          return Number(left?.topHalfChangeRatio || 0) - Number(right?.topHalfChangeRatio || 0);
+        }
+        if (
+          Number(left?.maskedColorShiftRatio || 0) !== Number(right?.maskedColorShiftRatio || 0)
+        ) {
+          return (
+            Number(right?.maskedColorShiftRatio || 0) -
+            Number(left?.maskedColorShiftRatio || 0)
+          );
+        }
+      }
       if (presetKey === 'floor_dark_hardwood') {
         if (
           Number(left?.maskedLuminanceDelta || 0) !== Number(right?.maskedLuminanceDelta || 0)
@@ -413,6 +457,14 @@ export function rankCandidates(candidates = [], presetKey) {
         return leftHasWallFeatureAddition ? 1 : -1;
       }
       if (presetKey === 'paint_bright_white') {
+        if (
+          Number(left?.outsideMaskChangeRatio || 0) !== Number(right?.outsideMaskChangeRatio || 0)
+        ) {
+          return (
+            Number(left?.outsideMaskChangeRatio || 0) -
+            Number(right?.outsideMaskChangeRatio || 0)
+          );
+        }
         if (
           Number(left?.maskedLuminanceDelta || 0) !== Number(right?.maskedLuminanceDelta || 0)
         ) {

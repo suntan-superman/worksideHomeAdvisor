@@ -994,6 +994,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const flyerPreviewRef = useRef(null);
   const reportPreviewRef = useRef(null);
   const visionCompareRef = useRef(null);
+  const visionCurrentActionRef = useRef(null);
   const lastVisionAssetResetRef = useRef('');
   const workspaceBodyMainRef = useRef(null);
   const providerSuggestionsRef = useRef(null);
@@ -1845,6 +1846,24 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     () => visionPresets.find((preset) => preset.key === activeVisionPresetKey) || null,
     [activeVisionPresetKey, visionPresets],
   );
+  const activeVisionPresetTooltip = useMemo(() => {
+    if (!activeVisionPreset) {
+      return '';
+    }
+
+    return [
+      activeVisionPreset.displayName,
+      activeVisionPreset.helperText,
+      activeVisionPreset.category === 'concept_preview'
+        ? 'Concept preview for planning and discussion.'
+        : 'Listing enhancement for stronger presentation.',
+      activeVisionPreset.upgradeTier === 'premium'
+        ? 'Premium workflow step.'
+        : 'Included workflow step.',
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }, [activeVisionPreset]);
   useEffect(() => {
     if (!activePhotoVariationsAssetId) {
       setPhotoVariationsState(INITIAL_PHOTO_VARIATIONS_STATE);
@@ -3554,6 +3573,18 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
   }
 
+  function handleSelectVisionPreset(presetKey) {
+    setActiveVisionPresetKey(presetKey);
+    if (typeof window !== 'undefined') {
+      window.setTimeout(() => {
+        visionCurrentActionRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
+      }, 60);
+    }
+  }
+
   async function handleGenerateFreeformVariant() {
     if (blockArchivedMutation()) {
       return;
@@ -5120,7 +5151,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                               ? 'property-media-variant-chip active'
                               : 'property-media-variant-chip'
                           }
-                          onClick={() => setActiveVisionPresetKey(preset.key)}
+                          onClick={() => handleSelectVisionPreset(preset.key)}
+                          title={[
+                            preset.displayName,
+                            preset.helperText,
+                            preset.upgradeTier === 'premium' ? 'Premium workflow step.' : 'Included workflow step.',
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
                         >
                           {preset.displayName}
                           {preset.upgradeTier === 'premium' ? ' · Premium' : ''}
@@ -5156,28 +5194,63 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               </div>
               {activeVisionWorkflowStage.key !== 'final' ? (
                 <>
-                  <div className="workspace-inner-card brochure-control-card">
+                  <div
+                    ref={visionCurrentActionRef}
+                    className="workspace-inner-card brochure-control-card vision-current-action-card"
+                  >
                     <span className="label">Current action</span>
                     <strong>{activeVisionPreset?.displayName || 'Select a preset'}</strong>
                     <p>
                       {activeVisionPreset?.helperText ||
                         'Choose the next step for this photo and keep the workspace moving forward one stage at a time.'}
                     </p>
-                    <div className="tag-row">
-                      <span>{activeVisionPreset?.category === 'concept_preview' ? 'Concept Preview' : 'Listing Enhancement'}</span>
-                      {activeVisionPreset?.upgradeTier === 'premium' ? <span>Premium upgrade candidate</span> : <span>Included workflow</span>}
+                    <div className="tag-row vision-status-badge-row">
+                      <span
+                        className="vision-status-badge"
+                        title={
+                          activeVisionPreset?.category === 'concept_preview'
+                            ? 'Concept preview: intended for planning and discussion, not as a representation of completed work.'
+                            : 'Listing enhancement: intended as a stronger presentation-oriented improvement.'
+                        }
+                      >
+                        {activeVisionPreset?.category === 'concept_preview'
+                          ? 'Concept Preview'
+                          : 'Listing Enhancement'}
+                      </span>
+                      <span
+                        className="vision-status-badge"
+                        title={
+                          activeVisionPreset?.upgradeTier === 'premium'
+                            ? 'Premium workflow step. This preset uses the premium vision path when available.'
+                            : 'Included workflow step.'
+                        }
+                      >
+                        {activeVisionPreset?.upgradeTier === 'premium'
+                          ? 'Premium workflow step'
+                          : 'Included workflow'}
+                      </span>
                     </div>
-                    <div className="vision-current-action-buttons">
+                    <div className="vision-current-action-buttons vision-current-action-buttons-primary">
                       <button
                         type="button"
-                        className={visionGenerationState ? 'button-primary button-busy' : 'button-primary'}
+                        className={
+                          visionGenerationState
+                            ? 'button-primary button-busy vision-generate-button'
+                            : 'button-primary vision-generate-button'
+                        }
                         onClick={() => handleGenerateVariant(activeVisionPresetKey)}
                         disabled={Boolean(status) || isArchivedProperty || !activeVisionPreset}
+                        title={activeVisionPresetTooltip}
                       >
                         {visionGenerationState
                           ? `Generating... ${visionGenerationElapsedSeconds}s`
                           : `Generate ${activeVisionPreset?.displayName || 'enhancement'}`}
                       </button>
+                    </div>
+                    <p className="workspace-control-note">
+                      Generate the next result here. Open attempt history only when you want to compare, keep, or permanently delete older attempts.
+                    </p>
+                    <div className="vision-current-action-buttons vision-current-action-buttons-secondary">
                       <button
                         type="button"
                         className="button-secondary"
@@ -5187,9 +5260,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         {`View attempt history (${stageScopedVisionVariants.length})`}
                       </button>
                     </div>
-                    <p className="workspace-control-note">
-                      Generate the next result here. Open attempt history only when you want to compare, keep, or permanently delete older attempts.
-                    </p>
                   </div>
                   {visionGenerationState ? (
                     <div className="vision-generation-status" role="status" aria-live="polite">
