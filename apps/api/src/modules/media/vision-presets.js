@@ -145,7 +145,7 @@ export const VISION_PRESETS = [
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'dining_room', 'office', 'unknown'],
     providerPreference: 'replicate',
     promptVersion: 5,
-    outputCount: 5,
+    outputCount: 4,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     upgradeTier: 'premium',

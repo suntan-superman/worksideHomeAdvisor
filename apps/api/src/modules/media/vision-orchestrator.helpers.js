@@ -129,7 +129,7 @@ export function getReplicateSettings(providerKey, preset = {}) {
     if (isWallPaintPreset) {
       return {
         model: preset.replicateModel,
-        outputCount: Math.max(isBrightWhitePreset ? 5 : 4, baseOutputCount),
+        outputCount: Math.min(4, Math.max(4, baseOutputCount)),
         guidanceScale: Math.min(
           10,
           Number((baseGuidanceScale + (isBrightWhitePreset ? 0.55 : 0.45)).toFixed(2)),

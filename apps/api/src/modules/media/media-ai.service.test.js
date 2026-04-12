@@ -148,6 +148,26 @@ test('getReplicateSettings reduces remove_furniture sample counts for faster exe
   assert.equal(advancedSettings.numInferenceSteps, 47);
 });
 
+test('getReplicateSettings caps bright white wall samples at four outputs', () => {
+  const basicSettings = getReplicateSettings('replicate_basic', {
+    key: 'paint_bright_white',
+    outputCount: 4,
+    guidanceScale: 9.4,
+    numInferenceSteps: 54,
+    strength: 0.95,
+  });
+  const advancedSettings = getReplicateSettings('replicate_advanced', {
+    key: 'paint_bright_white',
+    outputCount: 4,
+    guidanceScale: 9.4,
+    numInferenceSteps: 54,
+    strength: 0.95,
+  });
+
+  assert.equal(basicSettings.outputCount, 4);
+  assert.equal(advancedSettings.outputCount, 4);
+});
+
 test('remove_furniture sufficiency rejects candidates with strong persistence overlap', () => {
   assert.equal(
     isCandidateSufficient(
