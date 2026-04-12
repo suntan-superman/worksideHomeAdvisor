@@ -475,6 +475,146 @@ function applyCenterCrop(image, metadata, insetRatio = 0) {
   });
 }
 
+function clamp01(value) {
+  return Math.min(1, Math.max(0, Number(value || 0)));
+}
+
+function clampByte(value) {
+  return Math.min(255, Math.max(0, Math.round(Number(value || 0))));
+}
+
+function mixValue(source, target, ratio) {
+  return Number(source || 0) + (Number(target || 0) - Number(source || 0)) * clamp01(ratio);
+}
+
+function mixHue(sourceHue, targetHue, ratio) {
+  const source = clamp01(sourceHue);
+  const target = clamp01(targetHue);
+  const delta = ((((target - source) % 1) + 1.5) % 1) - 0.5;
+  return (source + delta * clamp01(ratio) + 1) % 1;
+}
+
+function rgbToHsl(red, green, blue) {
+  const r = clamp01(Number(red || 0) / 255);
+  const g = clamp01(Number(green || 0) / 255);
+  const b = clamp01(Number(blue || 0) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const lightness = (max + min) / 2;
+
+  if (max === min) {
+    return { h: 0, s: 0, l: lightness };
+  }
+
+  const delta = max - min;
+  const saturation =
+    lightness > 0.5 ? delta / (2 - max - min) : delta / Math.max(0.0001, max + min);
+
+  let hue = 0;
+  if (max === r) {
+    hue = (g - b) / delta + (g < b ? 6 : 0);
+  } else if (max === g) {
+    hue = (b - r) / delta + 2;
+  } else {
+    hue = (r - g) / delta + 4;
+  }
+
+  return {
+    h: (hue / 6) % 1,
+    s: saturation,
+    l: lightness,
+  };
+}
+
+function hueToRgb(channelLeft, channelCenter, channelRight) {
+  let value = channelRight;
+  if (channelRight < 0) {
+    value += 1;
+  }
+  if (channelRight > 1) {
+    value -= 1;
+  }
+
+  if (value < 1 / 6) {
+    return channelLeft + (channelCenter - channelLeft) * 6 * value;
+  }
+  if (value < 1 / 2) {
+    return channelCenter;
+  }
+  if (value < 2 / 3) {
+    return channelLeft + (channelCenter - channelLeft) * (2 / 3 - value) * 6;
+  }
+  return channelLeft;
+}
+
+function hslToRgb(hue, saturation, lightness) {
+  const h = clamp01(hue);
+  const s = clamp01(saturation);
+  const l = clamp01(lightness);
+
+  if (s === 0) {
+    const grey = clampByte(l * 255);
+    return [grey, grey, grey];
+  }
+
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+
+  return [
+    clampByte(hueToRgb(p, q, h + 1 / 3) * 255),
+    clampByte(hueToRgb(p, q, h) * 255),
+    clampByte(hueToRgb(p, q, h - 1 / 3) * 255),
+  ];
+}
+
+function medianChannel(values = [], fallback = 128) {
+  if (!values.length) {
+    return fallback;
+  }
+
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.floor(sorted.length / 2)] ?? fallback;
+}
+
+function buildLocalWallPaintToneConfig(presetKey) {
+  if (presetKey === 'paint_bright_white') {
+    return {
+      targetHue: 36 / 360,
+      targetSaturation: 0.07,
+      targetLightness: 0.95,
+      hueMix: 0.18,
+      saturationMix: 0.88,
+      lightnessMix: 0.86,
+      additionalLift: 0.11,
+      blendMix: 0.92,
+    };
+  }
+
+  if (presetKey === 'paint_soft_greige') {
+    return {
+      targetHue: 30 / 360,
+      targetSaturation: 0.14,
+      targetLightness: 0.73,
+      hueMix: 0.34,
+      saturationMix: 0.78,
+      lightnessMix: 0.68,
+      additionalLift: 0.02,
+      blendMix: 0.86,
+    };
+  }
+
+  return {
+    targetHue: 34 / 360,
+    targetSaturation: 0.16,
+    targetLightness: 0.79,
+    hueMix: 0.3,
+    saturationMix: 0.76,
+    lightnessMix: 0.64,
+    additionalLift: 0.03,
+    blendMix: 0.84,
+  };
+}
+
 function buildPresetRenderPlan(presetKey) {
   const preset = resolveVisionPreset(presetKey);
 
@@ -1399,13 +1539,71 @@ export function buildVariantStoryBlock({ asset, variant }) {
   };
 }
 
+async function renderLocalWallPaintVariantBuffer(sourceBuffer, presetKey, roomType) {
+  const metadata = await sharp(sourceBuffer).rotate().metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const toneConfig = buildLocalWallPaintToneConfig(presetKey);
+  const wallMask = await buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, roomType);
+  const [sourceRgba, maskRaw] = await Promise.all([
+    sharp(sourceBuffer).rotate().ensureAlpha().raw().toBuffer(),
+    sharp(wallMask.adaptiveMaskBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+  ]);
+
+  const painted = Buffer.from(sourceRgba);
+  for (let index = 0; index < width * height; index += 1) {
+    const alpha = clamp01((maskRaw[index] || 0) / 255);
+    if (alpha <= 0.03) {
+      continue;
+    }
+
+    const offset = index * 4;
+    const originalRed = painted[offset];
+    const originalGreen = painted[offset + 1];
+    const originalBlue = painted[offset + 2];
+    const { h, s, l } = rgbToHsl(originalRed, originalGreen, originalBlue);
+    const targetHue =
+      s < 0.03 ? toneConfig.targetHue : mixHue(h, toneConfig.targetHue, alpha * toneConfig.hueMix);
+    const targetSaturation = mixValue(s, toneConfig.targetSaturation, alpha * toneConfig.saturationMix);
+    const lightnessAfterMix = mixValue(l, toneConfig.targetLightness, alpha * toneConfig.lightnessMix);
+    const targetLightness = clamp01(
+      lightnessAfterMix + (1 - lightnessAfterMix) * toneConfig.additionalLift * alpha,
+    );
+    const [paintRed, paintGreen, paintBlue] = hslToRgb(
+      targetHue,
+      targetSaturation,
+      targetLightness,
+    );
+    const blendMix = alpha * toneConfig.blendMix;
+
+    painted[offset] = clampByte(mixValue(originalRed, paintRed, blendMix));
+    painted[offset + 1] = clampByte(mixValue(originalGreen, paintGreen, blendMix));
+    painted[offset + 2] = clampByte(mixValue(originalBlue, paintBlue, blendMix));
+  }
+
+  return sharp(painted, {
+    raw: { width, height, channels: 4 },
+  })
+    .jpeg({ quality: 92, mozjpeg: true })
+    .toBuffer();
+}
+
 async function renderVariantBuffer(buffer, presetKey, roomType) {
   const renderPlan = buildPresetRenderPlan(presetKey);
   const sourceMetadata = await sharp(buffer).rotate().metadata();
-  const transformed = await renderPlan
-    .transform(sharp(buffer).rotate(), sourceMetadata)
-    .jpeg({ quality: 88, mozjpeg: true })
-    .toBuffer();
+  const transformed = String(presetKey || '').startsWith('paint_')
+    ? await renderLocalWallPaintVariantBuffer(buffer, presetKey, roomType)
+    : await (typeof renderPlan.transform === 'function'
+        ? renderPlan
+            .transform(sharp(buffer).rotate(), sourceMetadata)
+            .jpeg({ quality: 88, mozjpeg: true })
+            .toBuffer()
+        : sharp(buffer).rotate().jpeg({ quality: 88, mozjpeg: true }).toBuffer());
   const roomPromptAddon = getRoomPromptAddon(roomType);
 
   return {
@@ -1761,6 +1959,206 @@ async function buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType) {
     .blur(1.2)
     .png()
     .toBuffer();
+}
+
+async function buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, roomType) {
+  const metadata = await sharp(sourceBuffer).rotate().metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const probeWidth = Math.max(96, Math.min(192, width));
+  const probeHeight = Math.max(72, Math.round((height / Math.max(1, width)) * probeWidth));
+
+  const baseMaskBuffer = await buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType);
+  const [sourceProbe, baseMaskProbe] = await Promise.all([
+    sharp(sourceBuffer)
+      .rotate()
+      .resize(probeWidth, probeHeight, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(baseMaskBuffer)
+      .resize(probeWidth, probeHeight, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+  ]);
+
+  const luminance = new Float32Array(probeWidth * probeHeight);
+  const saturation = new Float32Array(probeWidth * probeHeight);
+  const texture = new Float32Array(probeWidth * probeHeight);
+  const seedRed = [];
+  const seedGreen = [];
+  const seedBlue = [];
+  const seedLuminance = [];
+  const seedSaturation = [];
+
+  function getRgb(x, y) {
+    const offset = (y * probeWidth + x) * 3;
+    return [sourceProbe[offset], sourceProbe[offset + 1], sourceProbe[offset + 2]];
+  }
+
+  function getLuminanceAt(x, y) {
+    return luminance[y * probeWidth + x];
+  }
+
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      const index = y * probeWidth + x;
+      const [red, green, blue] = getRgb(x, y);
+      const lum = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      const sat = Math.max(red, green, blue) - Math.min(red, green, blue);
+      luminance[index] = lum;
+      saturation[index] = sat;
+    }
+  }
+
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      const index = y * probeWidth + x;
+      const centerLum = luminance[index];
+      let diffTotal = 0;
+      let samples = 0;
+      const neighbors = [
+        [x - 1, y],
+        [x + 1, y],
+        [x, y - 1],
+        [x, y + 1],
+      ];
+      for (const [nx, ny] of neighbors) {
+        if (nx < 0 || ny < 0 || nx >= probeWidth || ny >= probeHeight) {
+          continue;
+        }
+        diffTotal += Math.abs(centerLum - getLuminanceAt(nx, ny));
+        samples += 1;
+      }
+      texture[index] = samples > 0 ? diffTotal / samples : 0;
+
+      if (
+        baseMaskProbe[index] > 32 &&
+        y >= Math.round(probeHeight * 0.14) &&
+        y <= Math.round(probeHeight * 0.74) &&
+        saturation[index] <= 36 &&
+        luminance[index] >= 58 &&
+        luminance[index] <= 238 &&
+        texture[index] <= 15
+      ) {
+        const [red, green, blue] = getRgb(x, y);
+        seedRed.push(red);
+        seedGreen.push(green);
+        seedBlue.push(blue);
+        seedLuminance.push(luminance[index]);
+        seedSaturation.push(saturation[index]);
+      }
+    }
+  }
+
+  const medianRed = medianChannel(seedRed, 214);
+  const medianGreen = medianChannel(seedGreen, 214);
+  const medianBlue = medianChannel(seedBlue, 214);
+  const medianLum = medianChannel(seedLuminance, 214);
+  const medianSat = medianChannel(seedSaturation, 18);
+  const binary = new Uint8Array(probeWidth * probeHeight);
+
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      const index = y * probeWidth + x;
+      if (baseMaskProbe[index] <= 20) {
+        continue;
+      }
+      if (y < Math.round(probeHeight * 0.14) || y > Math.round(probeHeight * 0.76)) {
+        continue;
+      }
+
+      const [red, green, blue] = getRgb(x, y);
+      const lum = luminance[index];
+      const sat = saturation[index];
+      const edgeAmount = texture[index];
+      const colorDistance = Math.sqrt(
+        (red - medianRed) * (red - medianRed) +
+          (green - medianGreen) * (green - medianGreen) +
+          (blue - medianBlue) * (blue - medianBlue),
+      );
+      const isWallPixel =
+        sat <= Math.max(48, medianSat + 18) &&
+        lum >= 50 &&
+        lum <= 245 &&
+        edgeAmount <= 24 &&
+        (colorDistance <= 74 || (edgeAmount <= 16 && Math.abs(lum - medianLum) <= 46));
+
+      if (isWallPixel) {
+        binary[index] = 1;
+      }
+    }
+  }
+
+  let smoothed = binary;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const next = new Uint8Array(smoothed.length);
+    for (let y = 0; y < probeHeight; y += 1) {
+      for (let x = 0; x < probeWidth; x += 1) {
+        let neighbors = 0;
+        for (let oy = -1; oy <= 1; oy += 1) {
+          for (let ox = -1; ox <= 1; ox += 1) {
+            const nx = x + ox;
+            const ny = y + oy;
+            if (nx < 0 || ny < 0 || nx >= probeWidth || ny >= probeHeight) {
+              continue;
+            }
+            neighbors += smoothed[ny * probeWidth + nx];
+          }
+        }
+        const index = y * probeWidth + x;
+        if ((smoothed[index] && neighbors >= 4) || neighbors >= 6) {
+          next[index] = 1;
+        }
+      }
+    }
+    smoothed = next;
+  }
+
+  const components = extractBinaryMaskComponents(
+    smoothed,
+    probeWidth,
+    probeHeight,
+    Math.max(40, Math.round(probeWidth * probeHeight * 0.0035)),
+  );
+  const finalBinary = new Uint8Array(smoothed.length);
+  for (const component of components) {
+    if (
+      component.area >= Math.max(40, Math.round(probeWidth * probeHeight * 0.0035)) &&
+      component.boxWidth >= 3 &&
+      component.boxHeight >= 4
+    ) {
+      for (const pixelIndex of component.pixels) {
+        finalBinary[pixelIndex] = 1;
+      }
+    }
+  }
+
+  const rgba = Buffer.alloc(probeWidth * probeHeight * 4);
+  for (let index = 0; index < finalBinary.length; index += 1) {
+    const value = finalBinary[index] ? 255 : 0;
+    const offset = index * 4;
+    rgba[offset] = value;
+    rgba[offset + 1] = value;
+    rgba[offset + 2] = value;
+    rgba[offset + 3] = 255;
+  }
+
+  const adaptiveMaskBuffer = await sharp(rgba, {
+    raw: { width: probeWidth, height: probeHeight, channels: 4 },
+  })
+    .resize(width, height, { fit: 'fill' })
+    .blur(1.35)
+    .png()
+    .toBuffer();
+
+  return {
+    width,
+    height,
+    adaptiveMaskBuffer,
+  };
 }
 
 async function buildAdaptiveFurnitureMaskBuffer(sourceBuffer, options = {}) {

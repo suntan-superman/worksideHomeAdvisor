@@ -15,6 +15,7 @@ import {
   resolveVisionUserPlan,
 } from './vision-orchestrator.helpers.js';
 import { orchestrateVisionJob } from './vision-orchestrator.service.js';
+import { resolveVisionPreset } from './vision-presets.js';
 
 test('normalizeRoomType maps common room labels to canonical room types', () => {
   assert.equal(normalizeRoomType('Living Room'), 'living_room');
@@ -124,6 +125,17 @@ test('buildProviderChain includes openai_edit for premium remove_furniture when 
       openAiAvailable: true,
     }),
     ['replicate_basic', 'replicate_advanced', 'openai_edit'],
+  );
+});
+
+test('wall paint presets now use the local sharp provider chain', () => {
+  assert.deepEqual(
+    buildProviderChain({
+      preset: resolveVisionPreset('paint_bright_white'),
+      userPlan: 'premium',
+      openAiAvailable: true,
+    }),
+    ['local_sharp'],
   );
 });
 
