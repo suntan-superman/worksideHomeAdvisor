@@ -288,6 +288,25 @@ test('paint preset sufficiency rejects candidates with upper-structure drift', (
   );
 });
 
+test('paint preset sufficiency rejects candidates that introduce furniture-like additions', () => {
+  assert.equal(
+    isCandidateSufficient(
+      {
+        maskedChangeRatio: 0.18,
+        maskedColorShiftRatio: 0.08,
+        maskedLuminanceDelta: 0.04,
+        maskedEdgeDensityDelta: 0.0005,
+        topHalfChangeRatio: 0.03,
+        outsideMaskChangeRatio: 0.1,
+        furnitureCoverageIncreaseRatio: 0.006,
+        newFurnitureAdditionRatio: 0.18,
+      },
+      'paint_bright_white',
+    ),
+    false,
+  );
+});
+
 test('paint preset ranking prefers cleaner wall repaints over added wall detail', () => {
   const ranked = rankCandidates(
     [
@@ -374,6 +393,40 @@ test('paint preset ranking prefers a stronger safe white repaint over a weaker s
   );
 
   assert.equal(ranked[0]?.label, 'Clear white repaint');
+});
+
+test('paint preset ranking penalizes introduced furniture over a stronger repaint', () => {
+  const ranked = rankCandidates(
+    [
+      {
+        label: 'Furniture added',
+        overallScore: 95,
+        maskedChangeRatio: 0.22,
+        maskedColorShiftRatio: 0.095,
+        maskedLuminanceDelta: 0.058,
+        maskedEdgeDensityDelta: 0.0004,
+        topHalfChangeRatio: 0.03,
+        outsideMaskChangeRatio: 0.08,
+        furnitureCoverageIncreaseRatio: 0.005,
+        newFurnitureAdditionRatio: 0.22,
+      },
+      {
+        label: 'Safe repaint',
+        overallScore: 88,
+        maskedChangeRatio: 0.18,
+        maskedColorShiftRatio: 0.082,
+        maskedLuminanceDelta: 0.05,
+        maskedEdgeDensityDelta: 0.0005,
+        topHalfChangeRatio: 0.03,
+        outsideMaskChangeRatio: 0.08,
+        furnitureCoverageIncreaseRatio: 0.005,
+        newFurnitureAdditionRatio: 0,
+      },
+    ],
+    'paint_bright_white',
+  );
+
+  assert.equal(ranked[0]?.label, 'Safe repaint');
 });
 
 test('remove_furniture orchestration evaluates the full provider chain before selecting a winner', async () => {

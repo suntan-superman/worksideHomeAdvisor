@@ -872,6 +872,16 @@ function sortVisionVariants(variants = []) {
       String(leftPresetKey || '').startsWith('paint_') &&
       String(rightPresetKey || '').startsWith('paint_')
     ) {
+      const leftNewFurnitureAddition = Number(
+        left?.metadata?.review?.newFurnitureAdditionRatio || 0,
+      );
+      const rightNewFurnitureAddition = Number(
+        right?.metadata?.review?.newFurnitureAdditionRatio || 0,
+      );
+      if (leftNewFurnitureAddition !== rightNewFurnitureAddition) {
+        return leftNewFurnitureAddition - rightNewFurnitureAddition;
+      }
+
       const leftFurnitureCoverageIncrease = Number(
         left?.metadata?.review?.furnitureCoverageIncreaseRatio || 0,
       );
@@ -3163,6 +3173,15 @@ async function buildReviewedReplicateCandidates({
       } else if (furnitureCoverageIncreaseRatio >= 0.012) {
         overallScore = Math.max(0, overallScore - 16);
       }
+      if (newFurnitureAdditionRatio >= 0.1) {
+        overallScore = Math.max(0, overallScore - 42);
+        qualityWarning =
+          'Low-confidence preview: the wall update appears to invent a new furniture-like object instead of only changing paint.';
+        rejectionCategory = 'furniture_restaging';
+        shouldHideByDefault = true;
+      } else if (newFurnitureAdditionRatio >= 0.04) {
+        overallScore = Math.max(0, overallScore - 20);
+      }
       if (preset.key === 'paint_bright_white') {
         if (maskedLuminanceDelta < 0.024) {
           overallScore = Math.max(0, overallScore - 24);
@@ -3642,6 +3661,15 @@ async function buildReviewedOpenAiCandidates({
         shouldHideByDefault = true;
       } else if (furnitureCoverageIncreaseRatio >= 0.012) {
         overallScore = Math.max(0, overallScore - 16);
+      }
+      if (newFurnitureAdditionRatio >= 0.1) {
+        overallScore = Math.max(0, overallScore - 42);
+        qualityWarning =
+          'Low-confidence preview: the premium fallback appears to invent a new furniture-like object instead of only changing paint.';
+        rejectionCategory = 'furniture_restaging';
+        shouldHideByDefault = true;
+      } else if (newFurnitureAdditionRatio >= 0.04) {
+        overallScore = Math.max(0, overallScore - 20);
       }
       if (preset.key === 'paint_bright_white') {
         if (maskedLuminanceDelta < 0.024) {

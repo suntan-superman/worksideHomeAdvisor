@@ -264,6 +264,7 @@ export function isCandidateSufficient(candidate, presetKey) {
     const maskedColorShiftRatio = Number(candidate.maskedColorShiftRatio || 0);
     const maskedLuminanceDelta = Number(candidate.maskedLuminanceDelta || 0);
     const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
+    const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
     const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
 
     if (presetKey === 'paint_bright_white') {
@@ -274,7 +275,8 @@ export function isCandidateSufficient(candidate, presetKey) {
         maskedEdgeDensityDelta <= 0.003 &&
         Number(candidate.topHalfChangeRatio || 1) <= 0.1 &&
         Number(candidate.outsideMaskChangeRatio || 1) <= 0.24 &&
-        furnitureCoverageIncreaseRatio <= 0.02
+        furnitureCoverageIncreaseRatio <= 0.02 &&
+        newFurnitureAdditionRatio <= 0.04
       );
     }
 
@@ -284,7 +286,8 @@ export function isCandidateSufficient(candidate, presetKey) {
       maskedEdgeDensityDelta <= 0.003 &&
       Number(candidate.topHalfChangeRatio || 1) <= 0.1 &&
       Number(candidate.outsideMaskChangeRatio || 1) <= 0.24 &&
-      furnitureCoverageIncreaseRatio <= 0.02
+      furnitureCoverageIncreaseRatio <= 0.02 &&
+      newFurnitureAdditionRatio <= 0.04
     );
   }
 
@@ -383,6 +386,15 @@ export function rankCandidates(candidates = [], presetKey) {
     }
 
     if (String(presetKey || '').startsWith('paint_')) {
+      if (
+        Number(left?.newFurnitureAdditionRatio || 0) !==
+        Number(right?.newFurnitureAdditionRatio || 0)
+      ) {
+        return (
+          Number(left?.newFurnitureAdditionRatio || 0) -
+          Number(right?.newFurnitureAdditionRatio || 0)
+        );
+      }
       if (
         Number(left?.furnitureCoverageIncreaseRatio || 0) !==
         Number(right?.furnitureCoverageIncreaseRatio || 0)
