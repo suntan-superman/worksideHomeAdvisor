@@ -581,43 +581,46 @@ function buildLocalWallPaintToneConfig(presetKey) {
     return {
       targetHue: 36 / 360,
       targetSaturation: 0.04,
-      targetLightness: 0.975,
-      hueMix: 0.22,
-      saturationMix: 0.94,
-      lightnessMix: 0.92,
-      additionalLift: 0.14,
-      blendMix: 0.97,
+      targetLightness: 0.978,
+      targetHueMix: 1,
+      targetSaturationMix: 1,
+      lightnessMix: 1,
+      additionalLift: 0.16,
+      blendMix: 0.985,
       alphaExponent: 0.76,
-      minBlend: 0.78,
+      minBlend: 0.82,
+      shadingRange: 0.12,
     };
   }
 
   if (presetKey === 'paint_soft_greige') {
     return {
-      targetHue: 26 / 360,
-      targetSaturation: 0.06,
-      targetLightness: 0.69,
-      hueMix: 0.5,
-      saturationMix: 0.9,
-      lightnessMix: 0.82,
+      targetHue: 28 / 360,
+      targetSaturation: 0.11,
+      targetLightness: 0.64,
+      targetHueMix: 1,
+      targetSaturationMix: 1,
+      lightnessMix: 1,
       additionalLift: 0.01,
-      blendMix: 0.96,
-      alphaExponent: 0.78,
-      minBlend: 0.72,
+      blendMix: 0.98,
+      alphaExponent: 0.72,
+      minBlend: 0.8,
+      shadingRange: 0.16,
     };
   }
 
   return {
-    targetHue: 33 / 360,
-    targetSaturation: 0.09,
-    targetLightness: 0.82,
-    hueMix: 0.4,
-    saturationMix: 0.86,
-    lightnessMix: 0.76,
+    targetHue: 34 / 360,
+    targetSaturation: 0.12,
+    targetLightness: 0.76,
+    targetHueMix: 1,
+    targetSaturationMix: 1,
+    lightnessMix: 1,
     additionalLift: 0.03,
-    blendMix: 0.92,
-    alphaExponent: 0.8,
-    minBlend: 0.68,
+    blendMix: 0.96,
+    alphaExponent: 0.74,
+    minBlend: 0.76,
+    shadingRange: 0.14,
   };
 }
 
@@ -1561,6 +1564,22 @@ async function renderLocalWallPaintVariantBuffer(sourceBuffer, presetKey, roomTy
       .toBuffer(),
   ]);
 
+  const maskedLightnessSamples = [];
+  for (let index = 0; index < width * height; index += 1) {
+    const alpha = clamp01((maskRaw[index] || 0) / 255);
+    if (alpha <= 0.08) {
+      continue;
+    }
+
+    const offset = index * 4;
+    const { l } = rgbToHsl(sourceRgba[offset], sourceRgba[offset + 1], sourceRgba[offset + 2]);
+    maskedLightnessSamples.push(l);
+  }
+  const medianWallLightness = medianChannel(
+    maskedLightnessSamples.map((value) => Math.round(value * 255)),
+    178,
+  ) / 255;
+
   const painted = Buffer.from(sourceRgba);
   for (let index = 0; index < width * height; index += 1) {
     const alpha = clamp01((maskRaw[index] || 0) / 255);
@@ -1576,18 +1595,22 @@ async function renderLocalWallPaintVariantBuffer(sourceBuffer, presetKey, roomTy
     const originalGreen = painted[offset + 1];
     const originalBlue = painted[offset + 2];
     const { h, s, l } = rgbToHsl(originalRed, originalGreen, originalBlue);
-    const targetHue =
-      s < 0.03
-        ? toneConfig.targetHue
-        : mixHue(h, toneConfig.targetHue, effectiveAlpha * toneConfig.hueMix);
+    const lightnessOffset = Math.max(
+      -1,
+      Math.min(1, (l - medianWallLightness) / Math.max(0.08, toneConfig.shadingRange || 0.14)),
+    );
+    const targetHue = mixHue(h, toneConfig.targetHue, effectiveAlpha * toneConfig.targetHueMix);
     const targetSaturation = mixValue(
       s,
-      toneConfig.targetSaturation,
-      effectiveAlpha * toneConfig.saturationMix,
+      clamp01(toneConfig.targetSaturation + Math.max(0, -lightnessOffset) * 0.015),
+      effectiveAlpha * toneConfig.targetSaturationMix,
+    );
+    const shapedTargetLightness = clamp01(
+      toneConfig.targetLightness + lightnessOffset * (toneConfig.shadingRange || 0.14),
     );
     const lightnessAfterMix = mixValue(
       l,
-      toneConfig.targetLightness,
+      shapedTargetLightness,
       effectiveAlpha * toneConfig.lightnessMix,
     );
     const targetLightness = clamp01(
