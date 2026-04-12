@@ -2071,6 +2071,13 @@ select {
   align-content: start;
 }
 
+.vision-attempt-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
 .vision-attempt-card-timestamp {
   margin-top: -2px;
 }
@@ -2084,6 +2091,20 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.vision-attempt-select-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 24px;
+}
+
+.vision-attempt-select-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
 }
 
 .vision-variation-loading-card {
@@ -3623,7 +3644,59 @@ select {
 .photo-variations-modal-card {
   width: min(1080px, 100%);
   max-height: calc(100vh - 48px);
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.photo-variations-modal-header {
+  display: grid;
+  gap: 14px;
+}
+
+.photo-variations-modal-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.photo-variations-modal-title {
+  display: grid;
+  gap: 6px;
+}
+
+.photo-variations-modal-actions {
+  align-items: center;
+}
+
+.photo-variations-sort-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.photo-variations-sort-control {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.photo-variations-sort-control span {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.photo-variations-sort-control .select-input {
+  width: 100%;
+}
+
+.photo-variations-modal-body {
+  min-height: 0;
   overflow: auto;
+  display: grid;
+  gap: 16px;
+  padding-right: 6px;
 }
 
 .vision-history-modal-card {
