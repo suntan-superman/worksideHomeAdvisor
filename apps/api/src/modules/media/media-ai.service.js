@@ -580,38 +580,44 @@ function buildLocalWallPaintToneConfig(presetKey) {
   if (presetKey === 'paint_bright_white') {
     return {
       targetHue: 36 / 360,
-      targetSaturation: 0.07,
-      targetLightness: 0.95,
-      hueMix: 0.18,
-      saturationMix: 0.88,
-      lightnessMix: 0.86,
-      additionalLift: 0.11,
-      blendMix: 0.92,
+      targetSaturation: 0.04,
+      targetLightness: 0.975,
+      hueMix: 0.22,
+      saturationMix: 0.94,
+      lightnessMix: 0.92,
+      additionalLift: 0.14,
+      blendMix: 0.97,
+      alphaExponent: 0.76,
+      minBlend: 0.78,
     };
   }
 
   if (presetKey === 'paint_soft_greige') {
     return {
-      targetHue: 30 / 360,
-      targetSaturation: 0.14,
-      targetLightness: 0.73,
-      hueMix: 0.34,
-      saturationMix: 0.78,
-      lightnessMix: 0.68,
-      additionalLift: 0.02,
-      blendMix: 0.86,
+      targetHue: 26 / 360,
+      targetSaturation: 0.06,
+      targetLightness: 0.69,
+      hueMix: 0.5,
+      saturationMix: 0.9,
+      lightnessMix: 0.82,
+      additionalLift: 0.01,
+      blendMix: 0.96,
+      alphaExponent: 0.78,
+      minBlend: 0.72,
     };
   }
 
   return {
-    targetHue: 34 / 360,
-    targetSaturation: 0.16,
-    targetLightness: 0.79,
-    hueMix: 0.3,
-    saturationMix: 0.76,
-    lightnessMix: 0.64,
+    targetHue: 33 / 360,
+    targetSaturation: 0.09,
+    targetLightness: 0.82,
+    hueMix: 0.4,
+    saturationMix: 0.86,
+    lightnessMix: 0.76,
     additionalLift: 0.03,
-    blendMix: 0.84,
+    blendMix: 0.92,
+    alphaExponent: 0.8,
+    minBlend: 0.68,
   };
 }
 
@@ -1561,6 +1567,9 @@ async function renderLocalWallPaintVariantBuffer(sourceBuffer, presetKey, roomTy
     if (alpha <= 0.03) {
       continue;
     }
+    const effectiveAlpha = clamp01(
+      Math.pow(alpha, Number(toneConfig.alphaExponent || 1)),
+    );
 
     const offset = index * 4;
     const originalRed = painted[offset];
@@ -1568,18 +1577,34 @@ async function renderLocalWallPaintVariantBuffer(sourceBuffer, presetKey, roomTy
     const originalBlue = painted[offset + 2];
     const { h, s, l } = rgbToHsl(originalRed, originalGreen, originalBlue);
     const targetHue =
-      s < 0.03 ? toneConfig.targetHue : mixHue(h, toneConfig.targetHue, alpha * toneConfig.hueMix);
-    const targetSaturation = mixValue(s, toneConfig.targetSaturation, alpha * toneConfig.saturationMix);
-    const lightnessAfterMix = mixValue(l, toneConfig.targetLightness, alpha * toneConfig.lightnessMix);
+      s < 0.03
+        ? toneConfig.targetHue
+        : mixHue(h, toneConfig.targetHue, effectiveAlpha * toneConfig.hueMix);
+    const targetSaturation = mixValue(
+      s,
+      toneConfig.targetSaturation,
+      effectiveAlpha * toneConfig.saturationMix,
+    );
+    const lightnessAfterMix = mixValue(
+      l,
+      toneConfig.targetLightness,
+      effectiveAlpha * toneConfig.lightnessMix,
+    );
     const targetLightness = clamp01(
-      lightnessAfterMix + (1 - lightnessAfterMix) * toneConfig.additionalLift * alpha,
+      lightnessAfterMix +
+        (1 - lightnessAfterMix) * toneConfig.additionalLift * effectiveAlpha,
     );
     const [paintRed, paintGreen, paintBlue] = hslToRgb(
       targetHue,
       targetSaturation,
       targetLightness,
     );
-    const blendMix = alpha * toneConfig.blendMix;
+    const blendMix = clamp01(
+      Math.max(
+        effectiveAlpha * toneConfig.blendMix,
+        effectiveAlpha >= 0.45 ? Number(toneConfig.minBlend || 0) : 0,
+      ),
+    );
 
     painted[offset] = clampByte(mixValue(originalRed, paintRed, blendMix));
     painted[offset + 1] = clampByte(mixValue(originalGreen, paintGreen, blendMix));
