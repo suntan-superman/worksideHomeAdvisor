@@ -344,6 +344,38 @@ test('paint preset ranking prefers lower upper-structure drift over brighter but
   assert.equal(ranked[0]?.topHalfChangeRatio, 0.03);
 });
 
+test('paint preset ranking prefers a stronger safe white repaint over a weaker safe repaint', () => {
+  const ranked = rankCandidates(
+    [
+      {
+        label: 'Subtle white',
+        overallScore: 91,
+        maskedChangeRatio: 0.14,
+        maskedColorShiftRatio: 0.056,
+        maskedLuminanceDelta: 0.026,
+        maskedEdgeDensityDelta: -0.001,
+        topHalfChangeRatio: 0.03,
+        outsideMaskChangeRatio: 0.08,
+        furnitureCoverageIncreaseRatio: 0,
+      },
+      {
+        label: 'Clear white repaint',
+        overallScore: 88,
+        maskedChangeRatio: 0.19,
+        maskedColorShiftRatio: 0.082,
+        maskedLuminanceDelta: 0.052,
+        maskedEdgeDensityDelta: -0.0005,
+        topHalfChangeRatio: 0.03,
+        outsideMaskChangeRatio: 0.08,
+        furnitureCoverageIncreaseRatio: 0,
+      },
+    ],
+    'paint_bright_white',
+  );
+
+  assert.equal(ranked[0]?.label, 'Clear white repaint');
+});
+
 test('remove_furniture orchestration evaluates the full provider chain before selecting a winner', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({

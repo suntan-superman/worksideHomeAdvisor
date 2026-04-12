@@ -888,10 +888,12 @@ function sortVisionVariants(variants = []) {
         return leftTopHalfChange - rightTopHalfChange;
       }
 
-      const leftEdgeDelta = Number(left?.metadata?.review?.maskedEdgeDensityDelta || 0);
-      const rightEdgeDelta = Number(right?.metadata?.review?.maskedEdgeDensityDelta || 0);
-      if (leftEdgeDelta !== rightEdgeDelta) {
-        return leftEdgeDelta - rightEdgeDelta;
+      const leftHasWallFeatureAddition =
+        Number(left?.metadata?.review?.maskedEdgeDensityDelta || 0) > 0.003;
+      const rightHasWallFeatureAddition =
+        Number(right?.metadata?.review?.maskedEdgeDensityDelta || 0) > 0.003;
+      if (leftHasWallFeatureAddition !== rightHasWallFeatureAddition) {
+        return leftHasWallFeatureAddition ? 1 : -1;
       }
 
       if (leftPresetKey === 'paint_bright_white' && rightPresetKey === 'paint_bright_white') {
@@ -910,6 +912,18 @@ function sortVisionVariants(variants = []) {
       const rightMaskedColorShift = Number(right?.metadata?.review?.maskedColorShiftRatio || 0);
       if (leftMaskedColorShift !== rightMaskedColorShift) {
         return rightMaskedColorShift - leftMaskedColorShift;
+      }
+
+      const leftMaskedChange = Number(left?.metadata?.review?.maskedChangeRatio || 0);
+      const rightMaskedChange = Number(right?.metadata?.review?.maskedChangeRatio || 0);
+      if (leftMaskedChange !== rightMaskedChange) {
+        return rightMaskedChange - leftMaskedChange;
+      }
+
+      const leftEdgeDelta = Number(left?.metadata?.review?.maskedEdgeDensityDelta || 0);
+      const rightEdgeDelta = Number(right?.metadata?.review?.maskedEdgeDensityDelta || 0);
+      if (leftEdgeDelta !== rightEdgeDelta) {
+        return leftEdgeDelta - rightEdgeDelta;
       }
 
       const leftOutsideMaskChange = Number(
@@ -3111,14 +3125,16 @@ async function buildReviewedReplicateCandidates({
         rejectionCategory = 'insufficient_paint_change';
         shouldHideByDefault = true;
       }
-      if (maskedColorShiftRatio < 0.04) {
+      if (maskedColorShiftRatio < 0.05) {
         overallScore = Math.max(0, overallScore - 24);
         qualityWarning =
           'Low-confidence preview: the wall color stayed too close to the original room palette.';
         rejectionCategory = 'insufficient_paint_change';
         shouldHideByDefault = true;
-      } else if (maskedColorShiftRatio >= 0.075) {
-        overallScore = Math.min(100, overallScore + 10);
+      } else if (maskedColorShiftRatio >= 0.09) {
+        overallScore = Math.min(100, overallScore + 12);
+      } else if (maskedColorShiftRatio >= 0.07) {
+        overallScore = Math.min(100, overallScore + 6);
       }
       if (maskedEdgeDensityDelta > 0.003) {
         overallScore = Math.max(0, overallScore - 34);
@@ -3148,14 +3164,16 @@ async function buildReviewedReplicateCandidates({
         overallScore = Math.max(0, overallScore - 16);
       }
       if (preset.key === 'paint_bright_white') {
-        if (maskedLuminanceDelta < 0.018) {
+        if (maskedLuminanceDelta < 0.024) {
           overallScore = Math.max(0, overallScore - 24);
           qualityWarning =
             'Low-confidence preview: the walls did not brighten enough to read as a crisp white repaint.';
           rejectionCategory = 'insufficient_paint_change';
           shouldHideByDefault = true;
-        } else if (maskedLuminanceDelta >= 0.05) {
-          overallScore = Math.min(100, overallScore + 8);
+        } else if (maskedLuminanceDelta >= 0.06) {
+          overallScore = Math.min(100, overallScore + 10);
+        } else if (maskedLuminanceDelta >= 0.04) {
+          overallScore = Math.min(100, overallScore + 5);
         }
       }
     }
@@ -3587,14 +3605,16 @@ async function buildReviewedOpenAiCandidates({
         rejectionCategory = 'insufficient_paint_change';
         shouldHideByDefault = true;
       }
-      if (maskedColorShiftRatio < 0.04) {
+      if (maskedColorShiftRatio < 0.05) {
         overallScore = Math.max(0, overallScore - 22);
         qualityWarning =
           'Low-confidence preview: the premium fallback kept the wall color too close to the original palette.';
         rejectionCategory = 'insufficient_paint_change';
         shouldHideByDefault = true;
-      } else if (maskedColorShiftRatio >= 0.075) {
-        overallScore = Math.min(100, overallScore + 10);
+      } else if (maskedColorShiftRatio >= 0.09) {
+        overallScore = Math.min(100, overallScore + 12);
+      } else if (maskedColorShiftRatio >= 0.07) {
+        overallScore = Math.min(100, overallScore + 6);
       }
       if (maskedEdgeDensityDelta > 0.003) {
         overallScore = Math.max(0, overallScore - 34);
@@ -3624,14 +3644,16 @@ async function buildReviewedOpenAiCandidates({
         overallScore = Math.max(0, overallScore - 16);
       }
       if (preset.key === 'paint_bright_white') {
-        if (maskedLuminanceDelta < 0.018) {
+        if (maskedLuminanceDelta < 0.024) {
           overallScore = Math.max(0, overallScore - 22);
           qualityWarning =
             'Low-confidence preview: the premium fallback did not brighten the walls enough to read as a crisp white repaint.';
           rejectionCategory = 'insufficient_paint_change';
           shouldHideByDefault = true;
-        } else if (maskedLuminanceDelta >= 0.05) {
-          overallScore = Math.min(100, overallScore + 8);
+        } else if (maskedLuminanceDelta >= 0.06) {
+          overallScore = Math.min(100, overallScore + 10);
+        } else if (maskedLuminanceDelta >= 0.04) {
+          overallScore = Math.min(100, overallScore + 5);
         }
       }
     }

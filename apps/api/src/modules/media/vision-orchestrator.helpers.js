@@ -269,8 +269,8 @@ export function isCandidateSufficient(candidate, presetKey) {
     if (presetKey === 'paint_bright_white') {
       return (
         Number(candidate.maskedChangeRatio || 0) >= 0.1 &&
-        maskedColorShiftRatio >= 0.045 &&
-        maskedLuminanceDelta >= 0.018 &&
+        maskedColorShiftRatio >= 0.055 &&
+        maskedLuminanceDelta >= 0.024 &&
         maskedEdgeDensityDelta <= 0.003 &&
         Number(candidate.topHalfChangeRatio || 1) <= 0.1 &&
         Number(candidate.outsideMaskChangeRatio || 1) <= 0.24 &&
@@ -280,7 +280,7 @@ export function isCandidateSufficient(candidate, presetKey) {
 
     return (
       Number(candidate.maskedChangeRatio || 0) >= 0.1 &&
-      maskedColorShiftRatio >= 0.04 &&
+      maskedColorShiftRatio >= 0.05 &&
       maskedEdgeDensityDelta <= 0.003 &&
       Number(candidate.topHalfChangeRatio || 1) <= 0.1 &&
       Number(candidate.outsideMaskChangeRatio || 1) <= 0.24 &&
@@ -395,14 +395,10 @@ export function rankCandidates(candidates = [], presetKey) {
       if (Number(left?.topHalfChangeRatio || 0) !== Number(right?.topHalfChangeRatio || 0)) {
         return Number(left?.topHalfChangeRatio || 0) - Number(right?.topHalfChangeRatio || 0);
       }
-      if (
-        Number(left?.maskedEdgeDensityDelta || 0) !==
-        Number(right?.maskedEdgeDensityDelta || 0)
-      ) {
-        return (
-          Number(left?.maskedEdgeDensityDelta || 0) -
-          Number(right?.maskedEdgeDensityDelta || 0)
-        );
+      const leftHasWallFeatureAddition = Number(left?.maskedEdgeDensityDelta || 0) > 0.003;
+      const rightHasWallFeatureAddition = Number(right?.maskedEdgeDensityDelta || 0) > 0.003;
+      if (leftHasWallFeatureAddition !== rightHasWallFeatureAddition) {
+        return leftHasWallFeatureAddition ? 1 : -1;
       }
       if (presetKey === 'paint_bright_white') {
         if (
@@ -424,6 +420,15 @@ export function rankCandidates(candidates = [], presetKey) {
       }
       if (Number(left?.maskedChangeRatio || 0) !== Number(right?.maskedChangeRatio || 0)) {
         return Number(right?.maskedChangeRatio || 0) - Number(left?.maskedChangeRatio || 0);
+      }
+      if (
+        Number(left?.maskedEdgeDensityDelta || 0) !==
+        Number(right?.maskedEdgeDensityDelta || 0)
+      ) {
+        return (
+          Number(left?.maskedEdgeDensityDelta || 0) -
+          Number(right?.maskedEdgeDensityDelta || 0)
+        );
       }
       if (
         Number(left?.outsideMaskChangeRatio || 0) !== Number(right?.outsideMaskChangeRatio || 0)
