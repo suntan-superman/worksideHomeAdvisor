@@ -335,7 +335,7 @@ function getPresetPromptAddon(presetKey, roomType) {
   }
 
   if (wallColorPresetKeys.has(presetKey)) {
-    return 'Change only the wall color concept. Preserve ceilings, trim, baseboards, doors, windows, outlets, wall texture, shadows, and room geometry.';
+    return 'Change only the wall color concept. Preserve ceilings, trim, baseboards, doors, windows, outlets, wall texture, shadows, flooring, furniture, built-ins, and room geometry. Do not add or remove objects.';
   }
 
   if (presetKey === 'floor_dark_hardwood') {
@@ -865,6 +865,49 @@ function sortVisionVariants(variants = []) {
       const rightFocusChange = Number(right?.metadata?.review?.focusRegionChangeRatio || 0);
       if (leftFocusChange !== rightFocusChange) {
         return rightFocusChange - leftFocusChange;
+      }
+    }
+
+    if (
+      String(leftPresetKey || '').startsWith('paint_') &&
+      String(rightPresetKey || '').startsWith('paint_')
+    ) {
+      const leftFurnitureCoverageIncrease = Number(
+        left?.metadata?.review?.furnitureCoverageIncreaseRatio || 0,
+      );
+      const rightFurnitureCoverageIncrease = Number(
+        right?.metadata?.review?.furnitureCoverageIncreaseRatio || 0,
+      );
+      if (leftFurnitureCoverageIncrease !== rightFurnitureCoverageIncrease) {
+        return leftFurnitureCoverageIncrease - rightFurnitureCoverageIncrease;
+      }
+
+      if (leftPresetKey === 'paint_bright_white' && rightPresetKey === 'paint_bright_white') {
+        const leftMaskedLuminanceDelta = Number(
+          left?.metadata?.review?.maskedLuminanceDelta || 0,
+        );
+        const rightMaskedLuminanceDelta = Number(
+          right?.metadata?.review?.maskedLuminanceDelta || 0,
+        );
+        if (leftMaskedLuminanceDelta !== rightMaskedLuminanceDelta) {
+          return rightMaskedLuminanceDelta - leftMaskedLuminanceDelta;
+        }
+      }
+
+      const leftMaskedColorShift = Number(left?.metadata?.review?.maskedColorShiftRatio || 0);
+      const rightMaskedColorShift = Number(right?.metadata?.review?.maskedColorShiftRatio || 0);
+      if (leftMaskedColorShift !== rightMaskedColorShift) {
+        return rightMaskedColorShift - leftMaskedColorShift;
+      }
+
+      const leftOutsideMaskChange = Number(
+        left?.metadata?.review?.outsideMaskChangeRatio || 0,
+      );
+      const rightOutsideMaskChange = Number(
+        right?.metadata?.review?.outsideMaskChangeRatio || 0,
+      );
+      if (leftOutsideMaskChange !== rightOutsideMaskChange) {
+        return leftOutsideMaskChange - rightOutsideMaskChange;
       }
     }
 
@@ -2007,6 +2050,48 @@ async function calculateMaskedLuminanceDelta(sourceBuffer, variantBuffer, maskBu
   );
 }
 
+async function calculateMaskedAverageColorShiftRatio(sourceBuffer, variantBuffer, maskBuffer) {
+  const metadata = await sharp(maskBuffer).metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const [src, next, mask] = await Promise.all([
+    sharp(sourceBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(variantBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(maskBuffer)
+      .resize(width, height, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+  ]);
+
+  let maskPixels = 0;
+  let averageDeltaTotal = 0;
+  for (let i = 0; i < width * height; i += 1) {
+    if (mask[i] <= 32) {
+      continue;
+    }
+    maskPixels += 1;
+    const offset = i * 3;
+    averageDeltaTotal +=
+      (Math.abs(src[offset] - next[offset]) +
+        Math.abs(src[offset + 1] - next[offset + 1]) +
+        Math.abs(src[offset + 2] - next[offset + 2])) /
+      3;
+  }
+
+  const averageChannelDelta = averageDeltaTotal / Math.max(1, maskPixels);
+  return Number((averageChannelDelta / 255).toFixed(4));
+}
+
 async function calculateOutsideMaskVisualChangeRatio(sourceBuffer, variantBuffer, maskBuffer) {
   const metadata = await sharp(maskBuffer).metadata();
   const width = Number(metadata.width || 0);
@@ -2719,6 +2804,7 @@ async function buildReviewedReplicateCandidates({
     });
     let maskedChangeRatio = 0;
     let maskedLuminanceDelta = 0;
+    let maskedColorShiftRatio = 0;
     let outsideMaskChangeRatio = 0;
     let maskedEdgeDensityDelta = 0;
     let remainingFurnitureOverlapRatio = 0;
@@ -2739,9 +2825,14 @@ async function buildReviewedReplicateCandidates({
         totalMajorComponentCount,
       } = await computeFurnitureRemovalMetrics(buffer));
     }
-    if (preset.key.startsWith('floor_')) {
+    if (preset.key.startsWith('floor_') || preset.key.startsWith('paint_')) {
       maskedChangeRatio = await calculateMaskedVisualChangeRatio(sourceBuffer, buffer, maskBuffer);
       maskedLuminanceDelta = await calculateMaskedLuminanceDelta(sourceBuffer, buffer, maskBuffer);
+      maskedColorShiftRatio = await calculateMaskedAverageColorShiftRatio(
+        sourceBuffer,
+        buffer,
+        maskBuffer,
+      );
       outsideMaskChangeRatio = await calculateOutsideMaskVisualChangeRatio(
         sourceBuffer,
         buffer,
@@ -2973,6 +3064,57 @@ async function buildReviewedReplicateCandidates({
       }
     }
 
+    if (preset.key.startsWith('paint_')) {
+      if (visualChangeRatio < 0.08) {
+        overallScore = Math.max(0, overallScore - 14);
+      }
+      if (maskedChangeRatio < 0.1) {
+        overallScore = Math.max(0, overallScore - 24);
+        qualityWarning =
+          'Low-confidence preview: the wall region changed too little to read as a meaningful repaint concept.';
+        rejectionCategory = 'insufficient_paint_change';
+        shouldHideByDefault = true;
+      }
+      if (maskedColorShiftRatio < 0.04) {
+        overallScore = Math.max(0, overallScore - 24);
+        qualityWarning =
+          'Low-confidence preview: the wall color stayed too close to the original room palette.';
+        rejectionCategory = 'insufficient_paint_change';
+        shouldHideByDefault = true;
+      } else if (maskedColorShiftRatio >= 0.075) {
+        overallScore = Math.min(100, overallScore + 10);
+      }
+      if (outsideMaskChangeRatio > 0.24) {
+        overallScore = Math.max(0, overallScore - 18);
+        qualityWarning =
+          'Low-confidence preview: too much of the room changed outside the intended wall-paint region.';
+        rejectionCategory = 'architectural_drift';
+        shouldHideByDefault = true;
+      } else if (outsideMaskChangeRatio > 0.16) {
+        overallScore = Math.max(0, overallScore - 8);
+      }
+      if (furnitureCoverageIncreaseRatio >= 0.025) {
+        overallScore = Math.max(0, overallScore - 36);
+        qualityWarning =
+          'Low-confidence preview: the wall update appears to introduce furniture or staging that was not in the source room.';
+        rejectionCategory = 'furniture_restaging';
+        shouldHideByDefault = true;
+      } else if (furnitureCoverageIncreaseRatio >= 0.012) {
+        overallScore = Math.max(0, overallScore - 16);
+      }
+      if (preset.key === 'paint_bright_white') {
+        if (maskedLuminanceDelta < 0.018) {
+          overallScore = Math.max(0, overallScore - 24);
+          qualityWarning =
+            'Low-confidence preview: the walls did not brighten enough to read as a crisp white repaint.';
+          rejectionCategory = 'insufficient_paint_change';
+          shouldHideByDefault = true;
+        } else if (maskedLuminanceDelta >= 0.05) {
+          overallScore = Math.min(100, overallScore + 8);
+        }
+      }
+    }
+
     const objectRemovalScore =
       preset.key === 'remove_furniture'
         ? calculateObjectRemovalScore({
@@ -3015,6 +3157,7 @@ async function buildReviewedReplicateCandidates({
       topHalfChangeRatio,
       maskedChangeRatio,
       maskedLuminanceDelta,
+      maskedColorShiftRatio,
       outsideMaskChangeRatio,
       maskedEdgeDensityDelta,
       remainingFurnitureOverlapRatio,
@@ -3169,6 +3312,7 @@ async function buildReviewedOpenAiCandidates({
     });
     let maskedChangeRatio = 0;
     let maskedLuminanceDelta = 0;
+    let maskedColorShiftRatio = 0;
     let outsideMaskChangeRatio = 0;
     let maskedEdgeDensityDelta = 0;
     let remainingFurnitureOverlapRatio = 0;
@@ -3189,9 +3333,14 @@ async function buildReviewedOpenAiCandidates({
         totalMajorComponentCount,
       } = await computeFurnitureRemovalMetrics(buffer));
     }
-    if (preset.key.startsWith('floor_')) {
+    if (preset.key.startsWith('floor_') || preset.key.startsWith('paint_')) {
       maskedChangeRatio = await calculateMaskedVisualChangeRatio(sourceBuffer, buffer, maskBuffer);
       maskedLuminanceDelta = await calculateMaskedLuminanceDelta(sourceBuffer, buffer, maskBuffer);
+      maskedColorShiftRatio = await calculateMaskedAverageColorShiftRatio(
+        sourceBuffer,
+        buffer,
+        maskBuffer,
+      );
       outsideMaskChangeRatio = await calculateOutsideMaskVisualChangeRatio(
         sourceBuffer,
         buffer,
@@ -3358,6 +3507,57 @@ async function buildReviewedOpenAiCandidates({
       }
     }
 
+    if (preset.key.startsWith('paint_')) {
+      if (visualChangeRatio < 0.08) {
+        overallScore = Math.max(0, overallScore - 12);
+      }
+      if (maskedChangeRatio < 0.1) {
+        overallScore = Math.max(0, overallScore - 22);
+        qualityWarning =
+          'Low-confidence preview: the premium fallback changed too little in the wall-paint region.';
+        rejectionCategory = 'insufficient_paint_change';
+        shouldHideByDefault = true;
+      }
+      if (maskedColorShiftRatio < 0.04) {
+        overallScore = Math.max(0, overallScore - 22);
+        qualityWarning =
+          'Low-confidence preview: the premium fallback kept the wall color too close to the original palette.';
+        rejectionCategory = 'insufficient_paint_change';
+        shouldHideByDefault = true;
+      } else if (maskedColorShiftRatio >= 0.075) {
+        overallScore = Math.min(100, overallScore + 10);
+      }
+      if (outsideMaskChangeRatio > 0.24) {
+        overallScore = Math.max(0, overallScore - 18);
+        qualityWarning =
+          'Low-confidence preview: the premium fallback changed too much outside the intended wall-paint region.';
+        rejectionCategory = 'architectural_drift';
+        shouldHideByDefault = true;
+      } else if (outsideMaskChangeRatio > 0.16) {
+        overallScore = Math.max(0, overallScore - 8);
+      }
+      if (furnitureCoverageIncreaseRatio >= 0.025) {
+        overallScore = Math.max(0, overallScore - 36);
+        qualityWarning =
+          'Low-confidence preview: the premium fallback appears to introduce furniture or staging that was not in the source room.';
+        rejectionCategory = 'furniture_restaging';
+        shouldHideByDefault = true;
+      } else if (furnitureCoverageIncreaseRatio >= 0.012) {
+        overallScore = Math.max(0, overallScore - 16);
+      }
+      if (preset.key === 'paint_bright_white') {
+        if (maskedLuminanceDelta < 0.018) {
+          overallScore = Math.max(0, overallScore - 22);
+          qualityWarning =
+            'Low-confidence preview: the premium fallback did not brighten the walls enough to read as a crisp white repaint.';
+          rejectionCategory = 'insufficient_paint_change';
+          shouldHideByDefault = true;
+        } else if (maskedLuminanceDelta >= 0.05) {
+          overallScore = Math.min(100, overallScore + 8);
+        }
+      }
+    }
+
     const objectRemovalScore =
       preset.key === 'remove_furniture'
         ? calculateObjectRemovalScore({
@@ -3397,6 +3597,7 @@ async function buildReviewedOpenAiCandidates({
       topHalfChangeRatio,
       maskedChangeRatio,
       maskedLuminanceDelta,
+      maskedColorShiftRatio,
       outsideMaskChangeRatio,
       maskedEdgeDensityDelta,
       remainingFurnitureOverlapRatio,

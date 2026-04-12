@@ -81,6 +81,7 @@ export function getReplicateSettings(providerKey, preset = {}) {
   const baseOutputCount = Number(preset.outputCount || 2);
   const isRemoveFurniture = preset.key === 'remove_furniture';
   const isFlooringPreset = String(preset.key || '').startsWith('floor_');
+  const isWallPaintPreset = String(preset.key || '').startsWith('paint_');
   const isDarkHardwoodPreset = preset.key === 'floor_dark_hardwood';
 
   if (providerKey === 'replicate_advanced') {
@@ -113,6 +114,18 @@ export function getReplicateSettings(providerKey, preset = {}) {
         strength: Number(
           Math.min(0.98, baseStrength + (isDarkHardwoodPreset ? 0.02 : 0.01)).toFixed(2),
         ),
+        scheduler: preset.scheduler,
+        negativePrompt: preset.negativePrompt,
+      };
+    }
+
+    if (isWallPaintPreset) {
+      return {
+        model: preset.replicateModel,
+        outputCount: Math.max(3, baseOutputCount),
+        guidanceScale: Math.min(10, Number((baseGuidanceScale + 0.45).toFixed(2))),
+        numInferenceSteps: baseInferenceSteps + 4,
+        strength: Number(Math.min(0.96, baseStrength + 0.03).toFixed(2)),
         scheduler: preset.scheduler,
         negativePrompt: preset.negativePrompt,
       };
@@ -248,7 +261,26 @@ export function isCandidateSufficient(candidate, presetKey) {
   }
 
   if (String(presetKey || '').startsWith('paint_')) {
-    return Number(candidate.visualChangeRatio || 0) >= 0.06;
+    const maskedColorShiftRatio = Number(candidate.maskedColorShiftRatio || 0);
+    const maskedLuminanceDelta = Number(candidate.maskedLuminanceDelta || 0);
+    const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
+
+    if (presetKey === 'paint_bright_white') {
+      return (
+        Number(candidate.maskedChangeRatio || 0) >= 0.1 &&
+        maskedColorShiftRatio >= 0.045 &&
+        maskedLuminanceDelta >= 0.018 &&
+        Number(candidate.outsideMaskChangeRatio || 1) <= 0.24 &&
+        furnitureCoverageIncreaseRatio <= 0.02
+      );
+    }
+
+    return (
+      Number(candidate.maskedChangeRatio || 0) >= 0.1 &&
+      maskedColorShiftRatio >= 0.04 &&
+      Number(candidate.outsideMaskChangeRatio || 1) <= 0.24 &&
+      furnitureCoverageIncreaseRatio <= 0.02
+    );
   }
 
   return Number(candidate.overallScore || 0) >= 62;
@@ -342,6 +374,47 @@ export function rankCandidates(candidates = [], presetKey) {
       }
       if (Number(left?.topHalfChangeRatio || 0) !== Number(right?.topHalfChangeRatio || 0)) {
         return Number(left?.topHalfChangeRatio || 0) - Number(right?.topHalfChangeRatio || 0);
+      }
+    }
+
+    if (String(presetKey || '').startsWith('paint_')) {
+      if (
+        Number(left?.furnitureCoverageIncreaseRatio || 0) !==
+        Number(right?.furnitureCoverageIncreaseRatio || 0)
+      ) {
+        return (
+          Number(left?.furnitureCoverageIncreaseRatio || 0) -
+          Number(right?.furnitureCoverageIncreaseRatio || 0)
+        );
+      }
+      if (presetKey === 'paint_bright_white') {
+        if (
+          Number(left?.maskedLuminanceDelta || 0) !== Number(right?.maskedLuminanceDelta || 0)
+        ) {
+          return (
+            Number(right?.maskedLuminanceDelta || 0) -
+            Number(left?.maskedLuminanceDelta || 0)
+          );
+        }
+      }
+      if (
+        Number(left?.maskedColorShiftRatio || 0) !== Number(right?.maskedColorShiftRatio || 0)
+      ) {
+        return (
+          Number(right?.maskedColorShiftRatio || 0) -
+          Number(left?.maskedColorShiftRatio || 0)
+        );
+      }
+      if (Number(left?.maskedChangeRatio || 0) !== Number(right?.maskedChangeRatio || 0)) {
+        return Number(right?.maskedChangeRatio || 0) - Number(left?.maskedChangeRatio || 0);
+      }
+      if (
+        Number(left?.outsideMaskChangeRatio || 0) !== Number(right?.outsideMaskChangeRatio || 0)
+      ) {
+        return (
+          Number(left?.outsideMaskChangeRatio || 0) -
+          Number(right?.outsideMaskChangeRatio || 0)
+        );
       }
     }
 
