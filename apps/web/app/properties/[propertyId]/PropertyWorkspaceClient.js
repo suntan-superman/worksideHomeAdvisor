@@ -3790,6 +3790,29 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         }
       }
 
+      if (
+        String(activePhotoVariationsAssetId || '') === assetIdForDelete &&
+        String(photoVariationsState.assetId || '') === assetIdForDelete
+      ) {
+        setPhotoVariationsState((current) => {
+          const nextVariants = current.variants.filter(
+            (variant) => String(variant.id || '') !== String(variantToDelete.id || ''),
+          );
+          const deletedFromLoadedCount =
+            nextVariants.length === current.variants.length ? 0 : 1;
+          const nextLoadedCount = Math.max(0, current.loadedCount - deletedFromLoadedCount);
+          const nextTotalCount = Math.max(0, current.totalCount - deletedFromLoadedCount);
+
+          return {
+            ...current,
+            variants: nextVariants,
+            loadedCount: nextLoadedCount,
+            totalCount: nextTotalCount,
+            hasMore: nextLoadedCount < nextTotalCount,
+          };
+        });
+      }
+
       if (deletingCurrentWorkspaceVariant && selectedVariantId === variantToDelete.id) {
         requestAnimationFrame(() => {
           scrollWorkspaceSectionIntoView(visionCompareRef);
