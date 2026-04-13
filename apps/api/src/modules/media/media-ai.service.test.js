@@ -135,29 +135,29 @@ test('buildProviderChain includes openai_edit for premium remove_furniture when 
   );
 });
 
-test('wall paint presets now use replicate first with local fallback', () => {
+test('wall paint presets now use the deterministic local pipeline only', () => {
   assert.deepEqual(
     buildProviderChain({
       preset: resolveVisionPreset('paint_bright_white'),
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['replicate_basic', 'replicate_advanced', 'local_sharp'],
+    ['local_sharp'],
   );
 });
 
-test('floor finish presets now use replicate first with local fallback', () => {
+test('floor finish presets now use the deterministic local pipeline only', () => {
   assert.deepEqual(
     buildProviderChain({
       preset: resolveVisionPreset('floor_tile_stone'),
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['replicate_basic', 'replicate_advanced', 'local_sharp'],
+    ['local_sharp'],
   );
 });
 
-test('paint presets evaluate the full provider chain before selecting a winner', async () => {
+test('paint presets stay on the local deterministic pipeline', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
@@ -168,60 +168,34 @@ test('paint presets evaluate the full provider chain before selecting a winner',
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runReplicateProvider: async ({ providerKey }) => {
-        callOrder.push(providerKey);
-        if (providerKey === 'replicate_basic') {
-          return [
-            {
-              overallScore: 82,
-              maskedChangeRatio: 0.11,
-              maskedColorShiftRatio: 0.051,
-              maskedEdgeDensityDelta: 0.001,
-              topHalfChangeRatio: 0.08,
-              outsideMaskChangeRatio: 0.2,
-              furnitureCoverageIncreaseRatio: 0.004,
-              newFurnitureAdditionRatio: 0.01,
-            },
-          ];
-        }
-
-        return [
-          {
-            overallScore: 84,
-            maskedChangeRatio: 0.13,
-            maskedColorShiftRatio: 0.065,
-            maskedEdgeDensityDelta: 0.0005,
-            topHalfChangeRatio: 0.07,
-            outsideMaskChangeRatio: 0.14,
-            furnitureCoverageIncreaseRatio: 0.003,
-            newFurnitureAdditionRatio: 0.008,
-          },
-        ];
-      },
       runLocalSharp: async () => {
         callOrder.push('local_sharp');
         return [
           {
             overallScore: 80,
-            maskedChangeRatio: 0.18,
-            maskedColorShiftRatio: 0.09,
+            maskedChangeRatio: 0.11,
+            maskedColorShiftRatio: 0.06,
             maskedEdgeDensityDelta: 0,
             topHalfChangeRatio: 0.03,
-            outsideMaskChangeRatio: 0.06,
+            outsideMaskChangeRatio: 0.07,
             furnitureCoverageIncreaseRatio: 0,
             newFurnitureAdditionRatio: 0,
           },
         ];
       },
+      runReplicateProvider: async ({ providerKey }) => {
+        callOrder.push(providerKey);
+        return [];
+      },
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'local_sharp']);
+  assert.deepEqual(callOrder, ['local_sharp']);
   assert.equal(result.providerUsed, 'local_sharp');
-  assert.equal(result.providerAttemptCount, 3);
+  assert.equal(result.providerAttemptCount, 1);
 });
 
-test('floor presets evaluate the full provider chain before selecting a winner', async () => {
+test('floor presets stay on the local deterministic pipeline', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
@@ -232,54 +206,32 @@ test('floor presets evaluate the full provider chain before selecting a winner',
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runReplicateProvider: async ({ providerKey }) => {
-        callOrder.push(providerKey);
-        if (providerKey === 'replicate_basic') {
-          return [
-            {
-              overallScore: 83,
-              focusRegionChangeRatio: 0.13,
-              maskedChangeRatio: 0.16,
-              maskedColorShiftRatio: 0.081,
-              topHalfChangeRatio: 0.07,
-              outsideMaskChangeRatio: 0.17,
-              furnitureCoverageIncreaseRatio: 0.01,
-            },
-          ];
-        }
-
-        return [
-          {
-            overallScore: 85,
-            focusRegionChangeRatio: 0.18,
-            maskedChangeRatio: 0.2,
-            maskedColorShiftRatio: 0.1,
-            topHalfChangeRatio: 0.04,
-            outsideMaskChangeRatio: 0.11,
-            furnitureCoverageIncreaseRatio: 0.004,
-          },
-        ];
-      },
       runLocalSharp: async () => {
         callOrder.push('local_sharp');
         return [
           {
             overallScore: 81,
-            focusRegionChangeRatio: 0.21,
-            maskedChangeRatio: 0.24,
-            maskedColorShiftRatio: 0.135,
+            focusRegionChangeRatio: 0.08,
+            maskedChangeRatio: 0.11,
+            maskedColorShiftRatio: 0.03,
+            maskedLuminanceDelta: 0.045,
+            maskedEdgeDensityDelta: 0.01,
             topHalfChangeRatio: 0.03,
             outsideMaskChangeRatio: 0.06,
             furnitureCoverageIncreaseRatio: 0,
           },
         ];
       },
+      runReplicateProvider: async ({ providerKey }) => {
+        callOrder.push(providerKey);
+        return [];
+      },
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'local_sharp']);
+  assert.deepEqual(callOrder, ['local_sharp']);
   assert.equal(result.providerUsed, 'local_sharp');
-  assert.equal(result.providerAttemptCount, 3);
+  assert.equal(result.providerAttemptCount, 1);
 });
 
 test('paint presets prefer a stronger safe local fallback when replicate candidates stay near-original', async () => {
@@ -803,6 +755,25 @@ test('tile or stone floor sufficiency rejects dark wood-like candidates', () => 
   );
 });
 
+test('tile or stone floor sufficiency accepts clear material change via luminance and grout structure', () => {
+  assert.equal(
+    isCandidateSufficient(
+      {
+        focusRegionChangeRatio: 0.12,
+        maskedChangeRatio: 0.14,
+        maskedColorShiftRatio: 0.04,
+        maskedLuminanceDelta: 0.06,
+        maskedEdgeDensityDelta: 0.02,
+        topHalfChangeRatio: 0.03,
+        outsideMaskChangeRatio: 0.08,
+        furnitureCoverageIncreaseRatio: 0,
+      },
+      'floor_tile_stone',
+    ),
+    true,
+  );
+});
+
 test('tile or stone floor ranking prefers truer material shift over wood-like darkening', () => {
   const ranked = rankCandidates(
     [
@@ -833,6 +804,40 @@ test('tile or stone floor ranking prefers truer material shift over wood-like da
   );
 
   assert.equal(ranked[0]?.label, 'Clear tile or stone shift');
+});
+
+test('tile or stone floor ranking prefers a stronger tile-material signal over a near-original safe candidate', () => {
+  const ranked = rankCandidates(
+    [
+      {
+        label: 'Near-original safe floor',
+        overallScore: 91,
+        focusRegionChangeRatio: 0.08,
+        maskedChangeRatio: 0.11,
+        maskedColorShiftRatio: 0.035,
+        maskedLuminanceDelta: 0.02,
+        maskedEdgeDensityDelta: 0.002,
+        topHalfChangeRatio: 0.03,
+        outsideMaskChangeRatio: 0.05,
+        furnitureCoverageIncreaseRatio: 0,
+      },
+      {
+        label: 'Tile-like local floor',
+        overallScore: 78,
+        focusRegionChangeRatio: 0.12,
+        maskedChangeRatio: 0.15,
+        maskedColorShiftRatio: 0.04,
+        maskedLuminanceDelta: 0.055,
+        maskedEdgeDensityDelta: 0.018,
+        topHalfChangeRatio: 0.03,
+        outsideMaskChangeRatio: 0.07,
+        furnitureCoverageIncreaseRatio: 0,
+      },
+    ],
+    'floor_tile_stone',
+  );
+
+  assert.equal(ranked[0]?.label, 'Tile-like local floor');
 });
 
 test('remove_furniture orchestration evaluates the full provider chain before selecting a winner', async () => {

@@ -60,7 +60,7 @@ export function buildProviderChain({ preset, userPlan, openAiAvailable = false }
   }
 
   if (isPaintPreset || isFloorPreset) {
-    return ['replicate_basic', 'replicate_advanced', 'local_sharp'];
+    return ['local_sharp', 'replicate_basic', 'replicate_advanced'];
   }
 
   if (STANDARD_ONLY_PRESET_KEYS.has(key)) {
@@ -223,9 +223,15 @@ export function isHighConfidenceEarlyExitCandidate(candidate, presetKey) {
   if (normalizedPresetKey.startsWith('floor_')) {
     if (normalizedPresetKey === 'floor_tile_stone') {
       return (
-        Number(candidate.focusRegionChangeRatio || 0) >= 0.18 &&
-        Number(candidate.maskedChangeRatio || 0) >= 0.22 &&
-        Number(candidate.maskedColorShiftRatio || 0) >= 0.12 &&
+        Number(candidate.focusRegionChangeRatio || 0) >= 0.13 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.16 &&
+        (
+          Number(candidate.maskedColorShiftRatio || 0) >= 0.08 ||
+          (
+            Number(candidate.maskedLuminanceDelta || 0) >= 0.05 &&
+            Number(candidate.maskedEdgeDensityDelta || 0) >= 0.01
+          )
+        ) &&
         Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
         Number(candidate.topHalfChangeRatio || 1) <= 0.05 &&
         Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.008
@@ -325,11 +331,16 @@ export function isCandidateSufficient(candidate, presetKey) {
   if (String(presetKey || '').startsWith('floor_')) {
     if (presetKey === 'floor_tile_stone') {
       return (
-        Number(candidate.focusRegionChangeRatio || 0) >= 0.12 &&
-        Number(candidate.maskedChangeRatio || 0) >= 0.15 &&
-        Number(candidate.maskedColorShiftRatio || 0) >= 0.08 &&
+        Number(candidate.focusRegionChangeRatio || 0) >= 0.04 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.06 &&
+        (
+          Number(candidate.maskedColorShiftRatio || 0) >= 0.025 ||
+          Number(candidate.maskedLuminanceDelta || 0) >= 0.015 ||
+          Number(candidate.maskedEdgeDensityDelta || 0) >= 0.004
+        ) &&
+        Number(candidate.maskedLuminanceDelta || 0) > -0.03 &&
         Number(candidate.topHalfChangeRatio || 1) <= 0.08 &&
-        Number(candidate.outsideMaskChangeRatio || 1) <= 0.18 &&
+        Number(candidate.outsideMaskChangeRatio || 1) <= 0.24 &&
         Number(candidate.furnitureCoverageIncreaseRatio || 0) <= 0.015
       );
     }
@@ -359,10 +370,10 @@ export function isCandidateSufficient(candidate, presetKey) {
 
     if (presetKey === 'paint_bright_white') {
       return (
-        Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
-        maskedColorShiftRatio >= 0.065 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.09 &&
+        maskedColorShiftRatio >= 0.05 &&
         maskedLuminanceDelta >= 0.034 &&
-        maskedEdgeDensityDelta <= 0.003 &&
+        maskedEdgeDensityDelta <= 0.004 &&
         Number(candidate.topHalfChangeRatio || 1) <= 0.08 &&
         Number(candidate.outsideMaskChangeRatio || 1) <= 0.2 &&
         furnitureCoverageIncreaseRatio <= 0.015 &&
@@ -371,9 +382,9 @@ export function isCandidateSufficient(candidate, presetKey) {
     }
 
     return (
-      Number(candidate.maskedChangeRatio || 0) >= 0.1 &&
-      maskedColorShiftRatio >= 0.05 &&
-      maskedEdgeDensityDelta <= 0.003 &&
+      Number(candidate.maskedChangeRatio || 0) >= 0.07 &&
+      maskedColorShiftRatio >= 0.035 &&
+      maskedEdgeDensityDelta <= 0.004 &&
       Number(candidate.topHalfChangeRatio || 1) <= 0.1 &&
       Number(candidate.outsideMaskChangeRatio || 1) <= 0.24 &&
       furnitureCoverageIncreaseRatio <= 0.02 &&
@@ -438,9 +449,14 @@ function isPreferredFinishFallbackCandidate(candidate, presetKey) {
 
   if (normalizedPresetKey === 'floor_tile_stone') {
     return (
-      focusRegionChangeRatio >= 0.1 &&
-      maskedChangeRatio >= 0.12 &&
-      maskedColorShiftRatio >= 0.055
+      focusRegionChangeRatio >= 0.04 &&
+      maskedChangeRatio >= 0.06 &&
+      (
+        maskedColorShiftRatio >= 0.025 ||
+        maskedLuminanceDelta >= 0.015 ||
+        maskedEdgeDensityDelta >= 0.004
+      ) &&
+      maskedLuminanceDelta > -0.02
     );
   }
 
@@ -532,25 +548,55 @@ export function rankCandidates(candidates = [], presetKey) {
           Number(right?.furnitureCoverageIncreaseRatio || 0)
         );
       }
-      if (presetKey === 'floor_tile_stone') {
-        if (
-          Number(left?.outsideMaskChangeRatio || 0) !== Number(right?.outsideMaskChangeRatio || 0)
-        ) {
-          return (
-            Number(left?.outsideMaskChangeRatio || 0) -
+    if (presetKey === 'floor_tile_stone') {
+      const leftLikelyDarkWood =
+        Number(left?.maskedLuminanceDelta || 0) <= -0.03 &&
+        Number(left?.maskedColorShiftRatio || 0) < 0.06;
+      const rightLikelyDarkWood =
+        Number(right?.maskedLuminanceDelta || 0) <= -0.03 &&
+        Number(right?.maskedColorShiftRatio || 0) < 0.06;
+      if (leftLikelyDarkWood !== rightLikelyDarkWood) {
+        return leftLikelyDarkWood ? 1 : -1;
+      }
+      const leftMaterialSignal = Math.max(
+        Number(left?.maskedColorShiftRatio || 0),
+        Number(left?.maskedLuminanceDelta || 0),
+        Number(left?.maskedEdgeDensityDelta || 0),
+      );
+      const rightMaterialSignal = Math.max(
+        Number(right?.maskedColorShiftRatio || 0),
+        Number(right?.maskedLuminanceDelta || 0),
+        Number(right?.maskedEdgeDensityDelta || 0),
+      );
+      if (leftMaterialSignal !== rightMaterialSignal) {
+        return rightMaterialSignal - leftMaterialSignal;
+      }
+      if (
+        Number(left?.maskedColorShiftRatio || 0) !== Number(right?.maskedColorShiftRatio || 0)
+      ) {
+        return (
+          Number(right?.maskedColorShiftRatio || 0) -
+          Number(left?.maskedColorShiftRatio || 0)
+        );
+      }
+      if (
+        Number(left?.maskedLuminanceDelta || 0) !== Number(right?.maskedLuminanceDelta || 0)
+      ) {
+        return (
+          Number(right?.maskedLuminanceDelta || 0) -
+          Number(left?.maskedLuminanceDelta || 0)
+        );
+      }
+      if (
+        Number(left?.outsideMaskChangeRatio || 0) !== Number(right?.outsideMaskChangeRatio || 0)
+      ) {
+        return (
+          Number(left?.outsideMaskChangeRatio || 0) -
             Number(right?.outsideMaskChangeRatio || 0)
           );
         }
         if (Number(left?.topHalfChangeRatio || 0) !== Number(right?.topHalfChangeRatio || 0)) {
           return Number(left?.topHalfChangeRatio || 0) - Number(right?.topHalfChangeRatio || 0);
-        }
-        if (
-          Number(left?.maskedColorShiftRatio || 0) !== Number(right?.maskedColorShiftRatio || 0)
-        ) {
-          return (
-            Number(right?.maskedColorShiftRatio || 0) -
-            Number(left?.maskedColorShiftRatio || 0)
-          );
         }
       }
       if (presetKey === 'floor_dark_hardwood') {
