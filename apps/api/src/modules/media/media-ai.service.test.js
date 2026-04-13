@@ -222,14 +222,15 @@ test('floor presets can stop on a strong local deterministic candidate', async (
         return [
           {
             overallScore: 81,
-            focusRegionChangeRatio: 0.08,
-            maskedChangeRatio: 0.11,
-            maskedColorShiftRatio: 0.03,
-            maskedLuminanceDelta: 0.045,
+            focusRegionChangeRatio: 0.16,
+            maskedChangeRatio: 0.18,
+            maskedColorShiftRatio: 0.1,
+            maskedLuminanceDelta: 0.04,
             maskedEdgeDensityDelta: 0.01,
             topHalfChangeRatio: 0.03,
             outsideMaskChangeRatio: 0.06,
             furnitureCoverageIncreaseRatio: 0,
+            newFurnitureAdditionRatio: 0,
           },
         ];
       },
@@ -240,12 +241,12 @@ test('floor presets can stop on a strong local deterministic candidate', async (
     },
   });
 
-  assert.deepEqual(callOrder, ['local_sharp']);
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'local_sharp']);
   assert.equal(result.providerUsed, 'local_sharp');
-  assert.equal(result.providerAttemptCount, 1);
+  assert.equal(result.providerAttemptCount, 3);
 });
 
-test('tile or stone floors return the best available candidate instead of hard failing', async () => {
+test('tile or stone floors fail honestly when no candidate produces a real material change', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('floor_tile_stone'),
@@ -286,9 +287,9 @@ test('tile or stone floors return the best available candidate instead of hard f
     },
   });
 
-  assert.equal(result.providerUsed, 'replicate_advanced');
-  assert.equal(result.bestVariant?.providerKey, 'replicate_advanced');
-  assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
+  assert.equal(result.providerUsed, null);
+  assert.equal(result.bestVariant, null);
+  assert.equal(result.stoppedEarlyReason, 'no_usable_finish_candidate');
 });
 
 test('paint presets prefer a stronger safe local fallback when replicate candidates stay near-original', async () => {
@@ -398,9 +399,12 @@ test('floor presets prefer a stronger safe local fallback when replicate candida
           focusRegionChangeRatio: 0.13,
           maskedChangeRatio: 0.16,
           maskedColorShiftRatio: 0.08,
+          maskedLuminanceDelta: 0.03,
+          maskedEdgeDensityDelta: 0.007,
           topHalfChangeRatio: 0.03,
           outsideMaskChangeRatio: 0.06,
           furnitureCoverageIncreaseRatio: 0,
+          newFurnitureAdditionRatio: 0,
         },
       ],
     },

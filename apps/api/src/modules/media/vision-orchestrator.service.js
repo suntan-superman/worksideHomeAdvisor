@@ -34,6 +34,7 @@ export async function orchestrateVisionJob({
     normalizedPresetKey.startsWith('paint_') || normalizedPresetKey.startsWith('floor_');
   const exhaustProviderChain =
     normalizedPresetKey === 'remove_furniture' || isSurfaceFinishPreset;
+  const requiresLocalTileStoneAttempt = normalizedPresetKey === 'floor_tile_stone';
   const startedAt = Number(nowFn());
   const maxExecutionTimeMs = getVisionExecutionTimeBudgetMs(preset?.key);
   const attempts = [];
@@ -201,6 +202,7 @@ export async function orchestrateVisionJob({
       )[0];
       const shouldStopForCurrentCandidate =
         sufficient &&
+        (!requiresLocalTileStoneAttempt || providerKey === 'local_sharp') &&
         (!exhaustProviderChain || isHighConfidenceEarlyExitCandidate(sufficient, preset.key));
       if (shouldStopForCurrentCandidate) {
         return buildResponse({
@@ -251,7 +253,7 @@ export async function orchestrateVisionJob({
     allCandidates,
     preset.key,
   ).length > 0;
-  const shouldAllowBestEffortFinishCandidate = normalizedPresetKey === 'floor_tile_stone';
+  const shouldAllowBestEffortFinishCandidate = false;
   const bestVariant =
     shouldRequireRealFinishCandidate &&
     !sufficientCandidateExists &&

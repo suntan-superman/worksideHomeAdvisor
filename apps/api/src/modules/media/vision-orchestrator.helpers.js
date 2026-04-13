@@ -227,18 +227,21 @@ export function isHighConfidenceEarlyExitCandidate(candidate, presetKey) {
   if (normalizedPresetKey.startsWith('floor_')) {
     if (normalizedPresetKey === 'floor_tile_stone') {
       return (
+        candidate.providerKey === 'local_sharp' &&
         Number(candidate.focusRegionChangeRatio || 0) >= 0.13 &&
         Number(candidate.maskedChangeRatio || 0) >= 0.16 &&
         (
-          Number(candidate.maskedColorShiftRatio || 0) >= 0.08 ||
+          Number(candidate.maskedColorShiftRatio || 0) >= 0.09 ||
           (
-            Number(candidate.maskedLuminanceDelta || 0) >= 0.05 &&
-            Number(candidate.maskedEdgeDensityDelta || 0) >= 0.01
+            Number(candidate.maskedLuminanceDelta || 0) >= 0.02 &&
+            Number(candidate.maskedEdgeDensityDelta || 0) >= 0.008
           )
         ) &&
+        Number(candidate.maskedLuminanceDelta || 0) >= -0.005 &&
         Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
         Number(candidate.topHalfChangeRatio || 1) <= 0.05 &&
-        Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.008
+        Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.008 &&
+        Number(candidate.newFurnitureAdditionRatio || 0) <= 0.01
       );
     }
 
@@ -335,16 +338,18 @@ export function isCandidateSufficient(candidate, presetKey) {
   if (String(presetKey || '').startsWith('floor_')) {
     if (presetKey === 'floor_tile_stone') {
       return (
-        Number(candidate.focusRegionChangeRatio || 0) >= 0.03 &&
-        Number(candidate.maskedChangeRatio || 0) >= 0.05 &&
+        Number(candidate.focusRegionChangeRatio || 0) >= 0.08 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
         (
-          Number(candidate.maskedColorShiftRatio || 0) >= 0.02 ||
+          Number(candidate.maskedColorShiftRatio || 0) >= 0.08 ||
           Number(candidate.maskedLuminanceDelta || 0) >= 0.01 ||
-          Number(candidate.maskedEdgeDensityDelta || 0) >= 0.002
+          Number(candidate.maskedEdgeDensityDelta || 0) >= 0.006
         ) &&
-        Number(candidate.topHalfChangeRatio || 1) <= 0.12 &&
-        Number(candidate.outsideMaskChangeRatio || 1) <= 0.3 &&
-        Number(candidate.furnitureCoverageIncreaseRatio || 0) <= 0.02
+        Number(candidate.maskedLuminanceDelta || 0) >= -0.005 &&
+        Number(candidate.topHalfChangeRatio || 1) <= 0.1 &&
+        Number(candidate.outsideMaskChangeRatio || 1) <= 0.18 &&
+        Number(candidate.furnitureCoverageIncreaseRatio || 0) <= 0.012 &&
+        Number(candidate.newFurnitureAdditionRatio || 0) <= 0.02
       );
     }
 
@@ -452,13 +457,15 @@ function isPreferredFinishFallbackCandidate(candidate, presetKey) {
 
   if (normalizedPresetKey === 'floor_tile_stone') {
     return (
-      focusRegionChangeRatio >= 0.03 &&
-      maskedChangeRatio >= 0.05 &&
+      focusRegionChangeRatio >= 0.09 &&
+      maskedChangeRatio >= 0.13 &&
       (
-        maskedColorShiftRatio >= 0.02 ||
+        maskedColorShiftRatio >= 0.075 ||
         maskedLuminanceDelta >= 0.01 ||
-        maskedEdgeDensityDelta >= 0.002
-      )
+        maskedEdgeDensityDelta >= 0.006
+      ) &&
+      maskedLuminanceDelta >= -0.005 &&
+      newFurnitureAdditionRatio <= 0.02
     );
   }
 
@@ -551,15 +558,56 @@ export function rankCandidates(candidates = [], presetKey) {
         );
       }
     if (presetKey === 'floor_tile_stone') {
+      const leftLikelyNearOriginal =
+        Number(left?.maskedChangeRatio || 0) < 0.1 &&
+        Number(left?.maskedColorShiftRatio || 0) < 0.07 &&
+        Number(left?.maskedEdgeDensityDelta || 0) < 0.005;
+      const rightLikelyNearOriginal =
+        Number(right?.maskedChangeRatio || 0) < 0.1 &&
+        Number(right?.maskedColorShiftRatio || 0) < 0.07 &&
+        Number(right?.maskedEdgeDensityDelta || 0) < 0.005;
+      if (leftLikelyNearOriginal !== rightLikelyNearOriginal) {
+        return leftLikelyNearOriginal ? 1 : -1;
+      }
+
       const leftLikelyDarkWood =
-        Number(left?.maskedLuminanceDelta || 0) <= -0.03 &&
-        Number(left?.maskedColorShiftRatio || 0) < 0.06;
+        Number(left?.maskedLuminanceDelta || 0) <= -0.02 &&
+        Number(left?.maskedColorShiftRatio || 0) < 0.08 &&
+        Number(left?.maskedEdgeDensityDelta || 0) < 0.006;
       const rightLikelyDarkWood =
-        Number(right?.maskedLuminanceDelta || 0) <= -0.03 &&
-        Number(right?.maskedColorShiftRatio || 0) < 0.06;
+        Number(right?.maskedLuminanceDelta || 0) <= -0.02 &&
+        Number(right?.maskedColorShiftRatio || 0) < 0.08 &&
+        Number(right?.maskedEdgeDensityDelta || 0) < 0.006;
       if (leftLikelyDarkWood !== rightLikelyDarkWood) {
         return leftLikelyDarkWood ? 1 : -1;
       }
+
+      const leftStrongTileSignal =
+        Number(left?.maskedChangeRatio || 0) >= 0.12 &&
+        (
+          Number(left?.maskedEdgeDensityDelta || 0) >= 0.006 ||
+          Number(left?.maskedColorShiftRatio || 0) >= 0.08
+        ) &&
+        Number(left?.maskedLuminanceDelta || 0) >= -0.005;
+      const rightStrongTileSignal =
+        Number(right?.maskedChangeRatio || 0) >= 0.12 &&
+        (
+          Number(right?.maskedEdgeDensityDelta || 0) >= 0.006 ||
+          Number(right?.maskedColorShiftRatio || 0) >= 0.08
+        ) &&
+        Number(right?.maskedLuminanceDelta || 0) >= -0.005;
+      if (leftStrongTileSignal !== rightStrongTileSignal) {
+        return leftStrongTileSignal ? -1 : 1;
+      }
+
+      const leftPreferredLocal =
+        leftStrongTileSignal && left?.providerKey === 'local_sharp';
+      const rightPreferredLocal =
+        rightStrongTileSignal && right?.providerKey === 'local_sharp';
+      if (leftPreferredLocal !== rightPreferredLocal) {
+        return leftPreferredLocal ? -1 : 1;
+      }
+
       const leftMaterialSignal = Math.max(
         Number(left?.maskedColorShiftRatio || 0),
         Number(left?.maskedLuminanceDelta || 0),
