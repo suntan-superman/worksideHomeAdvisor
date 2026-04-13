@@ -288,20 +288,20 @@ export const VISION_PRESETS = [
     category: 'concept_preview',
     roomCompatibility: ['kitchen', 'bathroom', 'exterior', 'unknown'],
     providerPreference: 'replicate',
-    promptVersion: 8,
+    promptVersion: 9,
     outputCount: 1,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Create a conceptual preview of this room with the flooring changed to a clean tile or stone finish suitable for an updated residential listing. Make the surface read clearly as tile, porcelain, travertine, or stone rather than hardwood planks. Preserve cabinetry, fixtures, walls, room proportions, grout or seam perspective, and architecture. Keep the finish matte to low-sheen and realistic, with no glowing reflections or invented furniture.',
+      'Replace the existing floor completely with realistic stone or ceramic tile flooring. Remove all visible wood texture, grain, and seams. Create a clean tile layout with natural stone or ceramic tile material, visible grout lines between tiles, consistent tile spacing, and realistic lighting and shadows matching the room. The floor should clearly appear as tile or stone, not wood. Do not overlay texture. Fully transform the material. Do not modify walls, windows, shelving, or furniture.',
     helperText:
       'Preview a tile or stone floor upgrade for kitchens, baths, or exterior surfaces.',
-    strength: 0.96,
+    strength: 0.92,
     guidanceScale: 9.3,
-    numInferenceSteps: 48,
+    numInferenceSteps: 60,
     negativePrompt:
-      'hardwood planks, wood grain, glossy hardwood, mirrored reflections, glowing streaks, neon lines, carpet texture, rug pattern, smeared tile lines, warped grout lines, low quality, unrealistic geometry',
+      'wood texture, wood grain, laminate, glossy wood, fake overlay, distorted perspective, warped tiles, uneven grid, floating textures, blurry surface, inconsistent lighting',
     replicateModel: REPLICATE_INPAINT_MODEL,
   },
   {

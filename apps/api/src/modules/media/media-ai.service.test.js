@@ -157,6 +157,17 @@ test('tile or stone floors always use the local plus replicate finish chain', ()
   );
 });
 
+test('tile or stone preset uses explicit material-replacement defaults', () => {
+  const preset = resolveVisionPreset('floor_tile_stone');
+
+  assert.equal(preset.strength, 0.92);
+  assert.equal(preset.numInferenceSteps, 60);
+  assert.match(preset.basePrompt, /Remove all visible wood texture, grain, and seams/i);
+  assert.match(preset.basePrompt, /visible grout lines/i);
+  assert.match(preset.negativePrompt, /wood texture/i);
+  assert.match(preset.negativePrompt, /fake overlay/i);
+});
+
 test('paint presets stay on the local deterministic pipeline', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
