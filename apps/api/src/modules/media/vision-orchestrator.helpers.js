@@ -50,9 +50,17 @@ export function resolveVisionUserPlan({ preset, userPlan } = {}) {
 
 export function buildProviderChain({ preset, userPlan, openAiAvailable = false } = {}) {
   const key = String(preset?.key || '');
+  const isPaintPreset = key.startsWith('paint_');
+  const isFloorPreset = key.startsWith('floor_');
+  const isDeterministicOnly =
+    key === 'enhance_listing_quality' || key === 'combined_listing_refresh';
 
-  if (preset?.providerPreference === 'local_sharp') {
+  if (isDeterministicOnly || preset?.providerPreference === 'local_sharp_only') {
     return ['local_sharp'];
+  }
+
+  if (isPaintPreset || isFloorPreset) {
+    return ['replicate_basic', 'replicate_advanced', 'local_sharp'];
   }
 
   if (STANDARD_ONLY_PRESET_KEYS.has(key)) {

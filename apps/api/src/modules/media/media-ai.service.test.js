@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildFreeformEnhancementPlan,
   calculateVisionReviewOverallScore,
+  getTaskSpecificMaskStrategy,
   normalizeRoomType,
   resolveFreeformPresetKey,
 } from './media-ai.service.js';
@@ -21,6 +22,12 @@ test('normalizeRoomType maps common room labels to canonical room types', () => 
   assert.equal(normalizeRoomType('Living Room'), 'living_room');
   assert.equal(normalizeRoomType('Primary Bedroom'), 'bedroom');
   assert.equal(normalizeRoomType('Front Exterior'), 'exterior');
+});
+
+test('task specific mask strategy uses adaptive masks for wall and floor presets', () => {
+  assert.equal(getTaskSpecificMaskStrategy('paint_bright_white'), 'adaptive_wall');
+  assert.equal(getTaskSpecificMaskStrategy('floor_tile_stone'), 'adaptive_floor');
+  assert.equal(getTaskSpecificMaskStrategy('remove_furniture'), 'generic');
 });
 
 test('buildFreeformEnhancementPlan extracts floor, wall, and lighting intent', () => {
@@ -128,25 +135,25 @@ test('buildProviderChain includes openai_edit for premium remove_furniture when 
   );
 });
 
-test('wall paint presets now use the local sharp provider chain', () => {
+test('wall paint presets now use replicate first with local fallback', () => {
   assert.deepEqual(
     buildProviderChain({
       preset: resolveVisionPreset('paint_bright_white'),
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['local_sharp'],
+    ['replicate_basic', 'replicate_advanced', 'local_sharp'],
   );
 });
 
-test('floor finish presets now use the local sharp provider chain', () => {
+test('floor finish presets now use replicate first with local fallback', () => {
   assert.deepEqual(
     buildProviderChain({
       preset: resolveVisionPreset('floor_tile_stone'),
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['local_sharp'],
+    ['replicate_basic', 'replicate_advanced', 'local_sharp'],
   );
 });
 

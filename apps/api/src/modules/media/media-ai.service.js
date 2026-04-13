@@ -335,7 +335,7 @@ function getPresetPromptAddon(presetKey, roomType) {
   }
 
   if (wallColorPresetKeys.has(presetKey)) {
-    return 'Change only the wall color concept. Preserve ceilings, trim, baseboards, doors, windows, outlets, wall texture, shadows, flooring, furniture, built-ins, and room geometry. Do not add or remove objects.';
+    return 'Repaint ONLY the masked wall regions. The wall color must change clearly and visibly at first glance. Do not leave walls close to the original color. Preserve trim, baseboards, outlets, windows, doors, ceiling, shadows, flooring, furniture, built-ins, and room geometry exactly. Do not add or remove objects.';
   }
 
   if (presetKey === 'floor_dark_hardwood') {
@@ -343,7 +343,7 @@ function getPresetPromptAddon(presetKey, roomType) {
   }
 
   if (flooringPresetKeys.has(presetKey)) {
-    return 'Change only the flooring concept. Preserve baseboards, furniture perspective, transitions, reflections, shadows, and the true room geometry. Remove or neutralize area-rug appearance where possible so the floor material change is clearly visible.';
+    return 'Change ONLY the masked floor region. The flooring material and tone must read clearly differently at first glance. Preserve walls, baseboards, windows, furniture, shadows, perspective, and room geometry exactly. Do not add rugs, decor, furniture, reflections, or new architecture.';
   }
 
   if (
@@ -1746,11 +1746,18 @@ async function renderLocalWallPaintVariantBuffer(sourceBuffer, presetKey, roomTy
     painted[offset + 2] = clampByte(mixValue(originalBlue, paintBlue, blendMix));
   }
 
-  return sharp(painted, {
+  const variantBuffer = await sharp(painted, {
     raw: { width, height, channels: 4 },
   })
     .jpeg({ quality: 92, mozjpeg: true })
     .toBuffer();
+
+  return blendVariantWithSourceMask({
+    sourceBuffer,
+    variantBuffer,
+    maskBuffer: wallMask.adaptiveMaskBuffer,
+    maskBlur: 1.8,
+  });
 }
 
 async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) {
@@ -1923,11 +1930,18 @@ async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) 
     }
   }
 
-  return sharp(transformed, {
+  const variantBuffer = await sharp(transformed, {
     raw: { width, height, channels: 4 },
   })
     .jpeg({ quality: 92, mozjpeg: true })
     .toBuffer();
+
+  return blendVariantWithSourceMask({
+    sourceBuffer,
+    variantBuffer,
+    maskBuffer: floorMask.adaptiveMaskBuffer,
+    maskBlur: 1.8,
+  });
 }
 
 async function renderVariantBuffer(buffer, presetKey, roomType) {
@@ -2701,6 +2715,47 @@ async function buildAdaptiveFloorMaskAtSourceSize(sourceBuffer, presetKey, roomT
     height,
     adaptiveMaskBuffer,
   };
+}
+
+export function getTaskSpecificMaskStrategy(presetKey = '') {
+  const normalizedPresetKey = String(presetKey || '');
+  if (normalizedPresetKey.startsWith('paint_')) {
+    return 'adaptive_wall';
+  }
+  if (normalizedPresetKey.startsWith('floor_')) {
+    return 'adaptive_floor';
+  }
+
+  return 'generic';
+}
+
+async function buildTaskSpecificMaskBuffer(sourceBuffer, presetKey, roomType) {
+  const strategy = getTaskSpecificMaskStrategy(presetKey);
+  if (strategy === 'adaptive_wall') {
+    const adaptiveMask = await buildAdaptiveWallPaintMaskAtSourceSize(
+      sourceBuffer,
+      presetKey,
+      roomType,
+    );
+    const coverageRatio = await calculateMaskCoverageRatio(adaptiveMask.adaptiveMaskBuffer);
+    if (coverageRatio >= 0.08 && coverageRatio <= 0.62) {
+      return adaptiveMask.adaptiveMaskBuffer;
+    }
+  }
+
+  if (strategy === 'adaptive_floor') {
+    const adaptiveMask = await buildAdaptiveFloorMaskAtSourceSize(
+      sourceBuffer,
+      presetKey,
+      roomType,
+    );
+    const coverageRatio = await calculateMaskCoverageRatio(adaptiveMask.adaptiveMaskBuffer);
+    if (coverageRatio >= 0.12 && coverageRatio <= 0.58) {
+      return adaptiveMask.adaptiveMaskBuffer;
+    }
+  }
+
+  return buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType);
 }
 
 async function buildAdaptiveFurnitureMaskBuffer(sourceBuffer, options = {}) {
@@ -3777,7 +3832,7 @@ async function buildReviewedReplicateCandidates({
   sourceBuffer,
   sourceImageBase64,
 }) {
-  const maskBuffer = await buildInpaintingMaskBuffer(
+  const maskBuffer = await buildTaskSpecificMaskBuffer(
     sourceBuffer,
     preset.key,
     resolvedRoomType,
@@ -3898,15 +3953,26 @@ async function buildReviewedReplicateCandidates({
       ...persistenceMetrics,
     };
   };
-  const finalizeFurnitureRemovalBuffer = async (candidateBuffer) => {
-    if (preset.key !== 'remove_furniture' || !removeFurnitureEvaluationMaskBuffer) {
+  const finalizeSurfaceScopedBuffer = async (candidateBuffer) => {
+    if (
+      (preset.key !== 'remove_furniture' &&
+        !preset.key.startsWith('paint_') &&
+        !preset.key.startsWith('floor_')) ||
+      !maskBuffer
+    ) {
       return candidateBuffer;
     }
+
+    const blendMaskBuffer =
+      preset.key === 'remove_furniture' && removeFurnitureEvaluationMaskBuffer
+        ? removeFurnitureEvaluationMaskBuffer
+        : maskBuffer;
 
     return blendVariantWithSourceMask({
       sourceBuffer,
       variantBuffer: candidateBuffer,
-      maskBuffer: removeFurnitureEvaluationMaskBuffer,
+      maskBuffer: blendMaskBuffer,
+      maskBlur: preset.key === 'remove_furniture' ? 2.2 : 1.8,
     });
   };
   const maxRefinementAttempts =
@@ -3916,7 +3982,7 @@ async function buildReviewedReplicateCandidates({
   const candidates = [];
   for (let index = 0; index < providerOutputs.length; index += 1) {
     let output = providerOutputs[index];
-    let buffer = await finalizeFurnitureRemovalBuffer(await convertReplicateOutputToBuffer(output));
+    let buffer = await finalizeSurfaceScopedBuffer(await convertReplicateOutputToBuffer(output));
     let visualChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer);
     let focusRegionChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer, {
       region: evaluationRegions.focusRegion,
@@ -3995,7 +4061,7 @@ async function buildReviewedReplicateCandidates({
       });
       if (refinementOutputs.length) {
         output = refinementOutputs[0];
-        buffer = await finalizeFurnitureRemovalBuffer(
+        buffer = await finalizeSurfaceScopedBuffer(
           await convertReplicateOutputToBuffer(output),
         );
         visualChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer);
@@ -4406,7 +4472,11 @@ async function buildReviewedOpenAiCandidates({
   sourceBuffer,
   sourceImageBase64,
 }) {
-  const maskBuffer = await buildInpaintingMaskBuffer(sourceBuffer, preset.key, resolvedRoomType);
+  const maskBuffer = await buildTaskSpecificMaskBuffer(
+    sourceBuffer,
+    preset.key,
+    resolvedRoomType,
+  );
   let removeFurnitureEvaluationMaskBuffer = null;
   let sourceFurnitureEdgeDensity = null;
   let paintEvaluationMaskBuffer = null;
@@ -4511,22 +4581,33 @@ async function buildReviewedOpenAiCandidates({
       ...persistenceMetrics,
     };
   };
-  const finalizeFurnitureRemovalBuffer = async (candidateBuffer) => {
-    if (preset.key !== 'remove_furniture' || !removeFurnitureEvaluationMaskBuffer) {
+  const finalizeSurfaceScopedBuffer = async (candidateBuffer) => {
+    if (
+      (preset.key !== 'remove_furniture' &&
+        !preset.key.startsWith('paint_') &&
+        !preset.key.startsWith('floor_')) ||
+      !maskBuffer
+    ) {
       return candidateBuffer;
     }
+
+    const blendMaskBuffer =
+      preset.key === 'remove_furniture' && removeFurnitureEvaluationMaskBuffer
+        ? removeFurnitureEvaluationMaskBuffer
+        : maskBuffer;
 
     return blendVariantWithSourceMask({
       sourceBuffer,
       variantBuffer: candidateBuffer,
-      maskBuffer: removeFurnitureEvaluationMaskBuffer,
+      maskBuffer: blendMaskBuffer,
+      maskBlur: preset.key === 'remove_furniture' ? 2.2 : 1.8,
     });
   };
 
   const candidates = [];
   for (let index = 0; index < providerOutputs.length; index += 1) {
     const output = providerOutputs[index];
-    const buffer = await finalizeFurnitureRemovalBuffer(
+    const buffer = await finalizeSurfaceScopedBuffer(
       await sharp(output.outputBuffer).rotate().jpeg({ quality: 92 }).toBuffer(),
     );
     const visualChangeRatio = await calculateVisualChangeRatio(sourceBuffer, buffer);
@@ -5164,7 +5245,7 @@ export async function createImageEnhancementJob({
     promptVersion: preset.promptVersion,
     inputHash,
     attemptCount: 0,
-    maxAttempts: preset.providerPreference === 'local_sharp' ? 1 : 2,
+    maxAttempts: preset.providerPreference === 'local_sharp_only' ? 1 : 2,
     currentStage: 'initial',
     input: {
       roomLabel: asset.roomLabel,
