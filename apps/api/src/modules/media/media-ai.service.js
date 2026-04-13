@@ -3,7 +3,12 @@ import { createHash } from 'node:crypto';
 import mongoose from 'mongoose';
 import sharp from 'sharp';
 
-import { buildMediaVariantUrl, readStoredAsset, saveBinaryBuffer } from '../../services/storageService.js';
+import {
+  buildMediaVariantUrl,
+  buildTemporaryStoredAssetUrl,
+  readStoredAsset,
+  saveBinaryBuffer,
+} from '../../services/storageService.js';
 import { reviewVisionVariant } from '../../services/photoAnalysisService.js';
 import { ImageJobModel } from './image-job.model.js';
 import { MediaAssetModel } from './media.model.js';
@@ -473,6 +478,94 @@ function applyCenterCrop(image, metadata, insetRatio = 0) {
   return image.extract(region).resize(metadata.width, metadata.height, {
     fit: 'fill',
   });
+}
+
+async function buildBinaryMaskPngBuffer({
+  binaryMask,
+  inputWidth,
+  inputHeight,
+  outputWidth,
+  outputHeight,
+}) {
+  const maskValues = Buffer.alloc(binaryMask.length);
+  for (let index = 0; index < binaryMask.length; index += 1) {
+    maskValues[index] = binaryMask[index] ? 255 : 0;
+  }
+
+  return sharp(maskValues, {
+    raw: { width: inputWidth, height: inputHeight, channels: 1 },
+  })
+    .resize(outputWidth, outputHeight, {
+      fit: 'fill',
+      kernel: sharp.kernel.nearest,
+    })
+    .threshold(128, { grayscale: true })
+    .png()
+    .toBuffer();
+}
+
+async function buildTemporaryReplicateInputUrls({
+  propertyId,
+  imageBuffer,
+  maskBuffer,
+  presetKey,
+  providerKey,
+}) {
+  const imageMetadata = await sharp(imageBuffer).rotate().metadata();
+  const width = Number(imageMetadata.width || 0);
+  const height = Number(imageMetadata.height || 0);
+  const normalizedImageBuffer = await sharp(imageBuffer).rotate().png().toBuffer();
+  const normalizedMaskBuffer = await sharp(maskBuffer)
+    .rotate()
+    .resize(width, height, {
+      fit: 'fill',
+      kernel: sharp.kernel.nearest,
+    })
+    .removeAlpha()
+    .greyscale()
+    .threshold(128, { grayscale: true })
+    .png()
+    .toBuffer();
+
+  const [imageStorage, maskStorage] = await Promise.all([
+    saveBinaryBuffer({
+      propertyId,
+      mimeType: 'image/png',
+      buffer: normalizedImageBuffer,
+    }),
+    saveBinaryBuffer({
+      propertyId,
+      mimeType: 'image/png',
+      buffer: normalizedMaskBuffer,
+    }),
+  ]);
+
+  const imageUrl = buildTemporaryStoredAssetUrl({
+    storageProvider: imageStorage.storageProvider,
+    storageKey: imageStorage.storageKey,
+    mimeType: 'image/png',
+  });
+  const maskUrl = buildTemporaryStoredAssetUrl({
+    storageProvider: maskStorage.storageProvider,
+    storageKey: maskStorage.storageKey,
+    mimeType: 'image/png',
+  });
+
+  if (String(presetKey || '').startsWith('floor_') || String(presetKey || '').startsWith('paint_')) {
+    console.info('vision_replicate_finish_inputs_ready', {
+      presetKey,
+      providerKey,
+      imageUrl,
+      maskUrl,
+      width,
+      height,
+    });
+  }
+
+  return {
+    imageUrl,
+    maskUrl,
+  };
 }
 
 function clamp01(value) {
@@ -2489,23 +2582,13 @@ async function buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, r
     }
   }
 
-  const rgba = Buffer.alloc(probeWidth * probeHeight * 4);
-  for (let index = 0; index < finalBinary.length; index += 1) {
-    const value = finalBinary[index] ? 255 : 0;
-    const offset = index * 4;
-    rgba[offset] = value;
-    rgba[offset + 1] = value;
-    rgba[offset + 2] = value;
-    rgba[offset + 3] = 255;
-  }
-
-  const adaptiveMaskBuffer = await sharp(rgba, {
-    raw: { width: probeWidth, height: probeHeight, channels: 4 },
-  })
-    .resize(width, height, { fit: 'fill' })
-    .blur(1.35)
-    .png()
-    .toBuffer();
+  const adaptiveMaskBuffer = await buildBinaryMaskPngBuffer({
+    binaryMask: finalBinary,
+    inputWidth: probeWidth,
+    inputHeight: probeHeight,
+    outputWidth: width,
+    outputHeight: height,
+  });
 
   return {
     width,
@@ -2692,23 +2775,13 @@ async function buildAdaptiveFloorMaskAtSourceSize(sourceBuffer, presetKey, roomT
     }
   }
 
-  const rgba = Buffer.alloc(probeWidth * probeHeight * 4);
-  for (let index = 0; index < finalBinary.length; index += 1) {
-    const value = finalBinary[index] ? 255 : 0;
-    const offset = index * 4;
-    rgba[offset] = value;
-    rgba[offset + 1] = value;
-    rgba[offset + 2] = value;
-    rgba[offset + 3] = 255;
-  }
-
-  const adaptiveMaskBuffer = await sharp(rgba, {
-    raw: { width: probeWidth, height: probeHeight, channels: 4 },
-  })
-    .resize(width, height, { fit: 'fill' })
-    .blur(1.45)
-    .png()
-    .toBuffer();
+  const adaptiveMaskBuffer = await buildBinaryMaskPngBuffer({
+    binaryMask: finalBinary,
+    inputWidth: probeWidth,
+    inputHeight: probeHeight,
+    outputWidth: width,
+    outputHeight: height,
+  });
 
   return {
     width,
@@ -3895,9 +3968,17 @@ async function buildReviewedReplicateCandidates({
     providerKey === 'replicate_advanced'
       ? `${fullPrompt} Return the strongest usable version for this request. Prefer meaningful improvement over near-original output, but preserve the true room structure.`
       : fullPrompt;
+  const propertyId = asset.propertyId?.toString?.() || String(asset.propertyId || '');
+  const initialReplicateInputs = await buildTemporaryReplicateInputUrls({
+    propertyId,
+    imageBuffer: sourceBuffer,
+    maskBuffer,
+    presetKey: preset.key,
+    providerKey,
+  });
   const providerOutputs = await runReplicateInpainting({
-    image: sourceBuffer,
-    mask: maskBuffer,
+    image: initialReplicateInputs.imageUrl,
+    mask: initialReplicateInputs.maskUrl,
     model: settings.model,
     prompt: providerPrompt,
     strength: settings.strength,
@@ -4046,9 +4127,16 @@ async function buildReviewedReplicateCandidates({
       )
     ) {
       refinementAttempts += 1;
+      const refinementReplicateInputs = await buildTemporaryReplicateInputUrls({
+        propertyId,
+        imageBuffer: buffer,
+        maskBuffer,
+        presetKey: preset.key,
+        providerKey,
+      });
       const refinementOutputs = await runReplicateInpainting({
-        image: buffer,
-        mask: maskBuffer,
+        image: refinementReplicateInputs.imageUrl,
+        mask: refinementReplicateInputs.maskUrl,
         model: settings.model,
         prompt: `${providerPrompt} Continue removing any remaining movable furniture and clutter from the masked area. Keep architecture unchanged.`,
         strength: Math.min(0.99, Number((settings.strength || 0.9) + 0.04)),

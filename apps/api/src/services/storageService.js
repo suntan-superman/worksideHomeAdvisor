@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,27 @@ import { env } from '../config/env.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const defaultStorageDir = path.resolve(__dirname, '../../uploads/media-assets');
 let storageClient;
+const TEMP_MEDIA_TOKEN_TTL_SECONDS = 60 * 30;
+
+function toBase64Url(value) {
+  return Buffer.from(value)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function fromBase64Url(value) {
+  const normalized = String(value || '')
+    .replace(/-/g, '+')
+    .replace(/_/g, '/');
+  const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+  return Buffer.from(normalized + padding, 'base64').toString('utf8');
+}
+
+function signTemporaryMediaPayload(encodedPayload) {
+  return createHmac('sha256', env.JWT_SECRET).update(encodedPayload).digest('base64url');
+}
 
 function getStorageDir() {
   return env.STORAGE_LOCAL_DIR
@@ -239,6 +260,46 @@ export function buildMediaAssetUrl(assetId) {
 
 export function buildMediaVariantUrl(variantId) {
   return `${env.PUBLIC_API_URL}/api/v1/media/variants/${variantId}/file`;
+}
+
+export function buildTemporaryStoredAssetUrl({
+  storageProvider,
+  storageKey,
+  mimeType = 'image/png',
+  expiresInSeconds = TEMP_MEDIA_TOKEN_TTL_SECONDS,
+}) {
+  const expiresAt = Math.floor(Date.now() / 1000) + Math.max(60, Number(expiresInSeconds || 0));
+  const payload = {
+    storageProvider,
+    storageKey,
+    mimeType,
+    expiresAt,
+  };
+  const encodedPayload = toBase64Url(JSON.stringify(payload));
+  const signature = signTemporaryMediaPayload(encodedPayload);
+  return `${env.PUBLIC_API_URL}/api/v1/media/tmp/${encodedPayload}.${signature}/file`;
+}
+
+export function verifyTemporaryStoredAssetToken(token) {
+  const [encodedPayload, signature] = String(token || '').split('.');
+  if (!encodedPayload || !signature) {
+    throw new Error('Invalid temporary media token.');
+  }
+
+  const expectedSignature = signTemporaryMediaPayload(encodedPayload);
+  if (signature !== expectedSignature) {
+    throw new Error('Temporary media token signature mismatch.');
+  }
+
+  const payload = JSON.parse(fromBase64Url(encodedPayload));
+  if (!payload?.storageProvider || !payload?.storageKey) {
+    throw new Error('Temporary media token payload is incomplete.');
+  }
+  if (Number(payload.expiresAt || 0) < Math.floor(Date.now() / 1000)) {
+    throw new Error('Temporary media token has expired.');
+  }
+
+  return payload;
 }
 
 async function readStoredAssetFromLocal(storageKey) {

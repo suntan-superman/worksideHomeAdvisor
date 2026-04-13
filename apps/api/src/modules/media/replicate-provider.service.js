@@ -42,6 +42,7 @@ export async function runReplicateInpainting({
     prompt,
     num_outputs: sanitizedOutputCount,
     guidance_scale: sanitizedGuidanceScale,
+    num_inference_steps: sanitizedInferenceSteps,
     steps: sanitizedInferenceSteps,
     strength: sanitizedStrength,
     scheduler,

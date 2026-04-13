@@ -146,14 +146,14 @@ test('wall paint presets now use the deterministic local pipeline only', () => {
   );
 });
 
-test('tile or stone floors always use the local plus replicate finish chain', () => {
+test('tile or stone floors try replicate before falling back to local finish rendering', () => {
   assert.deepEqual(
     buildProviderChain({
       preset: resolveVisionPreset('floor_tile_stone'),
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['local_sharp', 'replicate_basic', 'replicate_advanced'],
+    ['replicate_basic', 'replicate_advanced', 'local_sharp'],
   );
 });
 

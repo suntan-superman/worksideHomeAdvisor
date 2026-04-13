@@ -2,7 +2,7 @@ import { photoAnalysisSchema } from '@workside/validation';
 import { z } from 'zod';
 
 import { analyzePropertyPhoto } from '../../services/photoAnalysisService.js';
-import { readStoredAsset } from '../../services/storageService.js';
+import { readStoredAsset, verifyTemporaryStoredAssetToken } from '../../services/storageService.js';
 import { assertPropertyEditableById, getPropertyById } from '../properties/property.service.js';
 import {
   createImageEnhancementJob,
@@ -511,6 +511,23 @@ export async function mediaRoutes(fastify) {
       return reply.code(404).send({ message: 'Media file not found.' });
     } catch (error) {
       return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/media/tmp/:token/file', async (request, reply) => {
+    try {
+      const token = String(request.params?.token || '');
+      const temporaryAsset = verifyTemporaryStoredAssetToken(token);
+      const stored = await readStoredAsset({
+        storageProvider: temporaryAsset.storageProvider,
+        storageKey: temporaryAsset.storageKey,
+      });
+      reply.header('Content-Type', temporaryAsset.mimeType || 'image/png');
+      reply.header('Cache-Control', 'public, max-age=900');
+      return reply.send(stored.buffer);
+    } catch (error) {
+      const statusCode = /expired|signature|invalid/i.test(String(error.message || '')) ? 403 : 400;
+      return reply.code(statusCode).send({ message: error.message });
     }
   });
 
