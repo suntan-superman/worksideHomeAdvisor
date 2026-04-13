@@ -146,14 +146,14 @@ test('wall paint presets now use the deterministic local pipeline only', () => {
   );
 });
 
-test('floor finish presets now use the deterministic local pipeline only', () => {
+test('tile or stone floors always use the local plus replicate finish chain', () => {
   assert.deepEqual(
     buildProviderChain({
       preset: resolveVisionPreset('floor_tile_stone'),
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['local_sharp'],
+    ['local_sharp', 'replicate_basic', 'replicate_advanced'],
   );
 });
 
@@ -195,7 +195,7 @@ test('paint presets stay on the local deterministic pipeline', async () => {
   assert.equal(result.providerAttemptCount, 1);
 });
 
-test('floor presets stay on the local deterministic pipeline', async () => {
+test('floor presets can stop on a strong local deterministic candidate', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
@@ -232,6 +232,52 @@ test('floor presets stay on the local deterministic pipeline', async () => {
   assert.deepEqual(callOrder, ['local_sharp']);
   assert.equal(result.providerUsed, 'local_sharp');
   assert.equal(result.providerAttemptCount, 1);
+});
+
+test('tile or stone floors return the best available candidate instead of hard failing', async () => {
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('floor_tile_stone'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runLocalSharp: async () => [
+        {
+          providerKey: 'local_sharp',
+          overallScore: 70,
+          focusRegionChangeRatio: 0.025,
+          maskedChangeRatio: 0.045,
+          maskedColorShiftRatio: 0.018,
+          maskedLuminanceDelta: 0.008,
+          maskedEdgeDensityDelta: 0.0015,
+          topHalfChangeRatio: 0.04,
+          outsideMaskChangeRatio: 0.08,
+          furnitureCoverageIncreaseRatio: 0,
+        },
+      ],
+      runReplicateProvider: async ({ providerKey }) => [
+        {
+          providerKey,
+          overallScore: providerKey === 'replicate_advanced' ? 77 : 74,
+          focusRegionChangeRatio: 0.028,
+          maskedChangeRatio: 0.048,
+          maskedColorShiftRatio: 0.019,
+          maskedLuminanceDelta: 0.009,
+          maskedEdgeDensityDelta: 0.0018,
+          topHalfChangeRatio: 0.05,
+          outsideMaskChangeRatio: 0.1,
+          furnitureCoverageIncreaseRatio: 0,
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.providerUsed, 'replicate_advanced');
+  assert.equal(result.bestVariant?.providerKey, 'replicate_advanced');
+  assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
 });
 
 test('paint presets prefer a stronger safe local fallback when replicate candidates stay near-original', async () => {

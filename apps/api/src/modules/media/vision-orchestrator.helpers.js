@@ -59,6 +59,10 @@ export function buildProviderChain({ preset, userPlan, openAiAvailable = false }
     return ['local_sharp'];
   }
 
+  if (key === 'floor_tile_stone') {
+    return ['local_sharp', 'replicate_basic', 'replicate_advanced'];
+  }
+
   if (isPaintPreset || isFloorPreset) {
     return ['local_sharp', 'replicate_basic', 'replicate_advanced'];
   }
@@ -331,17 +335,16 @@ export function isCandidateSufficient(candidate, presetKey) {
   if (String(presetKey || '').startsWith('floor_')) {
     if (presetKey === 'floor_tile_stone') {
       return (
-        Number(candidate.focusRegionChangeRatio || 0) >= 0.04 &&
-        Number(candidate.maskedChangeRatio || 0) >= 0.06 &&
+        Number(candidate.focusRegionChangeRatio || 0) >= 0.03 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.05 &&
         (
-          Number(candidate.maskedColorShiftRatio || 0) >= 0.025 ||
-          Number(candidate.maskedLuminanceDelta || 0) >= 0.015 ||
-          Number(candidate.maskedEdgeDensityDelta || 0) >= 0.004
+          Number(candidate.maskedColorShiftRatio || 0) >= 0.02 ||
+          Number(candidate.maskedLuminanceDelta || 0) >= 0.01 ||
+          Number(candidate.maskedEdgeDensityDelta || 0) >= 0.002
         ) &&
-        Number(candidate.maskedLuminanceDelta || 0) > -0.03 &&
-        Number(candidate.topHalfChangeRatio || 1) <= 0.08 &&
-        Number(candidate.outsideMaskChangeRatio || 1) <= 0.24 &&
-        Number(candidate.furnitureCoverageIncreaseRatio || 0) <= 0.015
+        Number(candidate.topHalfChangeRatio || 1) <= 0.12 &&
+        Number(candidate.outsideMaskChangeRatio || 1) <= 0.3 &&
+        Number(candidate.furnitureCoverageIncreaseRatio || 0) <= 0.02
       );
     }
 
@@ -449,14 +452,13 @@ function isPreferredFinishFallbackCandidate(candidate, presetKey) {
 
   if (normalizedPresetKey === 'floor_tile_stone') {
     return (
-      focusRegionChangeRatio >= 0.04 &&
-      maskedChangeRatio >= 0.06 &&
+      focusRegionChangeRatio >= 0.03 &&
+      maskedChangeRatio >= 0.05 &&
       (
-        maskedColorShiftRatio >= 0.025 ||
-        maskedLuminanceDelta >= 0.015 ||
-        maskedEdgeDensityDelta >= 0.004
-      ) &&
-      maskedLuminanceDelta > -0.02
+        maskedColorShiftRatio >= 0.02 ||
+        maskedLuminanceDelta >= 0.01 ||
+        maskedEdgeDensityDelta >= 0.002
+      )
     );
   }
 

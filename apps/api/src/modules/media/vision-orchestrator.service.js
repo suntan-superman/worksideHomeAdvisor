@@ -251,11 +251,14 @@ export async function orchestrateVisionJob({
     allCandidates,
     preset.key,
   ).length > 0;
+  const shouldAllowBestEffortFinishCandidate = normalizedPresetKey === 'floor_tile_stone';
   const bestVariant =
     shouldRequireRealFinishCandidate &&
     !sufficientCandidateExists &&
     !preferredFinishFallbackExists
-      ? null
+      ? shouldAllowBestEffortFinishCandidate
+        ? rankedCandidates[0] || null
+        : null
       : rankedCandidates[0] || null;
   const providerUsed = rankedCandidates[0]?.providerKey || null;
   return buildResponse({
@@ -265,7 +268,9 @@ export async function orchestrateVisionJob({
       shouldRequireRealFinishCandidate &&
       !sufficientCandidateExists &&
       !preferredFinishFallbackExists
-        ? 'no_usable_finish_candidate'
+        ? shouldAllowBestEffortFinishCandidate
+          ? 'best_effort_finish_candidate'
+          : 'no_usable_finish_candidate'
         : null,
   });
 }
