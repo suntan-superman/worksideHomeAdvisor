@@ -28,7 +28,11 @@ export async function orchestrateVisionJob({
     userPlan: effectiveUserPlan,
     openAiAvailable,
   });
-  const exhaustProviderChain = preset?.key === 'remove_furniture';
+  const normalizedPresetKey = String(preset?.key || '');
+  const isSurfaceFinishPreset =
+    normalizedPresetKey.startsWith('paint_') || normalizedPresetKey.startsWith('floor_');
+  const exhaustProviderChain =
+    normalizedPresetKey === 'remove_furniture' || isSurfaceFinishPreset;
   const startedAt = Number(nowFn());
   const maxExecutionTimeMs = getVisionExecutionTimeBudgetMs(preset?.key);
   const attempts = [];
@@ -40,16 +44,23 @@ export async function orchestrateVisionJob({
       return false;
     }
 
-    if (preset?.key !== 'remove_furniture') {
+    if (!exhaustProviderChain) {
       return true;
     }
 
-    const openAiPlanned = chain.includes('openai_edit');
-    if (openAiPlanned) {
-      return attempts.some((attempt) => attempt.providerKey === 'openai_edit');
+    if (normalizedPresetKey === 'remove_furniture') {
+      const openAiPlanned = chain.includes('openai_edit');
+      if (openAiPlanned) {
+        return attempts.some((attempt) => attempt.providerKey === 'openai_edit');
+      }
+
+      return attempts.some((attempt) => attempt.providerKey === 'replicate_advanced');
     }
 
-    return attempts.some((attempt) => attempt.providerKey === 'replicate_advanced');
+    return attempts.some(
+      (attempt) =>
+        attempt.providerKey === 'replicate_advanced' || attempt.providerKey === 'local_sharp',
+    );
   };
 
   const buildResponse = ({
@@ -176,9 +187,7 @@ export async function orchestrateVisionJob({
           providerUsed: providerKey,
           bestVariant: sufficient,
           stoppedEarlyReason:
-            exhaustProviderChain && preset?.key === 'remove_furniture'
-              ? 'high_confidence_candidate'
-              : 'sufficient_candidate',
+            exhaustProviderChain ? 'high_confidence_candidate' : 'sufficient_candidate',
         });
       }
 

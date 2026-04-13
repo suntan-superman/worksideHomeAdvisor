@@ -157,6 +157,131 @@ test('floor finish presets now use replicate first with local fallback', () => {
   );
 });
 
+test('paint presets evaluate the full provider chain before selecting a winner', async () => {
+  const callOrder = [];
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('paint_soft_greige'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async ({ providerKey }) => {
+        callOrder.push(providerKey);
+        if (providerKey === 'replicate_basic') {
+          return [
+            {
+              overallScore: 82,
+              maskedChangeRatio: 0.11,
+              maskedColorShiftRatio: 0.051,
+              maskedEdgeDensityDelta: 0.001,
+              topHalfChangeRatio: 0.08,
+              outsideMaskChangeRatio: 0.2,
+              furnitureCoverageIncreaseRatio: 0.004,
+              newFurnitureAdditionRatio: 0.01,
+            },
+          ];
+        }
+
+        return [
+          {
+            overallScore: 84,
+            maskedChangeRatio: 0.13,
+            maskedColorShiftRatio: 0.065,
+            maskedEdgeDensityDelta: 0.0005,
+            topHalfChangeRatio: 0.07,
+            outsideMaskChangeRatio: 0.14,
+            furnitureCoverageIncreaseRatio: 0.003,
+            newFurnitureAdditionRatio: 0.008,
+          },
+        ];
+      },
+      runLocalSharp: async () => {
+        callOrder.push('local_sharp');
+        return [
+          {
+            overallScore: 80,
+            maskedChangeRatio: 0.18,
+            maskedColorShiftRatio: 0.09,
+            maskedEdgeDensityDelta: 0,
+            topHalfChangeRatio: 0.03,
+            outsideMaskChangeRatio: 0.06,
+            furnitureCoverageIncreaseRatio: 0,
+            newFurnitureAdditionRatio: 0,
+          },
+        ];
+      },
+    },
+  });
+
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'local_sharp']);
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.providerAttemptCount, 3);
+});
+
+test('floor presets evaluate the full provider chain before selecting a winner', async () => {
+  const callOrder = [];
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('floor_tile_stone'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async ({ providerKey }) => {
+        callOrder.push(providerKey);
+        if (providerKey === 'replicate_basic') {
+          return [
+            {
+              overallScore: 83,
+              focusRegionChangeRatio: 0.13,
+              maskedChangeRatio: 0.16,
+              maskedColorShiftRatio: 0.081,
+              topHalfChangeRatio: 0.07,
+              outsideMaskChangeRatio: 0.17,
+              furnitureCoverageIncreaseRatio: 0.01,
+            },
+          ];
+        }
+
+        return [
+          {
+            overallScore: 85,
+            focusRegionChangeRatio: 0.18,
+            maskedChangeRatio: 0.2,
+            maskedColorShiftRatio: 0.1,
+            topHalfChangeRatio: 0.04,
+            outsideMaskChangeRatio: 0.11,
+            furnitureCoverageIncreaseRatio: 0.004,
+          },
+        ];
+      },
+      runLocalSharp: async () => {
+        callOrder.push('local_sharp');
+        return [
+          {
+            overallScore: 81,
+            focusRegionChangeRatio: 0.21,
+            maskedChangeRatio: 0.24,
+            maskedColorShiftRatio: 0.135,
+            topHalfChangeRatio: 0.03,
+            outsideMaskChangeRatio: 0.06,
+            furnitureCoverageIncreaseRatio: 0,
+          },
+        ];
+      },
+    },
+  });
+
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'local_sharp']);
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.providerAttemptCount, 3);
+});
+
 test('getReplicateSettings reduces remove_furniture sample counts for faster execution', () => {
   const basicSettings = getReplicateSettings('replicate_basic', {
     key: 'remove_furniture',

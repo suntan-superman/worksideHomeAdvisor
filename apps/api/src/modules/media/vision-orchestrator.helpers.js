@@ -218,7 +218,66 @@ export function isHighConfidenceEarlyExitCandidate(candidate, presetKey) {
     return false;
   }
 
-  if (presetKey !== 'remove_furniture') {
+  const normalizedPresetKey = String(presetKey || '');
+
+  if (normalizedPresetKey.startsWith('floor_')) {
+    if (normalizedPresetKey === 'floor_tile_stone') {
+      return (
+        Number(candidate.focusRegionChangeRatio || 0) >= 0.18 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.22 &&
+        Number(candidate.maskedColorShiftRatio || 0) >= 0.12 &&
+        Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
+        Number(candidate.topHalfChangeRatio || 1) <= 0.05 &&
+        Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.008
+      );
+    }
+
+    if (normalizedPresetKey === 'floor_dark_hardwood') {
+      return (
+        Number(candidate.focusRegionChangeRatio || 0) >= 0.16 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.18 &&
+        Number(candidate.maskedLuminanceDelta || 0) <= -0.055 &&
+        Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
+        Number(candidate.topHalfChangeRatio || 1) <= 0.05 &&
+        Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.008
+      );
+    }
+
+    return (
+      Number(candidate.focusRegionChangeRatio || 0) >= 0.15 &&
+      Number(candidate.maskedChangeRatio || 0) >= 0.16 &&
+      Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
+      Number(candidate.topHalfChangeRatio || 1) <= 0.06 &&
+      Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.01
+    );
+  }
+
+  if (normalizedPresetKey.startsWith('paint_')) {
+    if (normalizedPresetKey === 'paint_bright_white') {
+      return (
+        Number(candidate.maskedChangeRatio || 0) >= 0.16 &&
+        Number(candidate.maskedColorShiftRatio || 0) >= 0.085 &&
+        Number(candidate.maskedLuminanceDelta || 0) >= 0.05 &&
+        Number(candidate.maskedEdgeDensityDelta || 1) <= 0.001 &&
+        Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
+        Number(candidate.topHalfChangeRatio || 1) <= 0.05 &&
+        Number(candidate.newFurnitureAdditionRatio || 1) <= 0.01 &&
+        Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.008
+      );
+    }
+
+    return (
+      Number(candidate.maskedChangeRatio || 0) >= 0.14 &&
+      Number(candidate.maskedColorShiftRatio || 0) >= 0.07 &&
+      Number(candidate.maskedEdgeDensityDelta || 1) <= 0.001 &&
+      Number(candidate.outsideMaskChangeRatio || 1) <= 0.14 &&
+      Number(candidate.topHalfChangeRatio || 1) <= 0.06 &&
+      Number(candidate.newFurnitureAdditionRatio || 1) <= 0.015 &&
+      Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.01
+    );
+  }
+
+  if (normalizedPresetKey !== 'remove_furniture') {
     return true;
   }
 
