@@ -612,17 +612,17 @@ function buildLocalWallPaintToneConfig(presetKey) {
 
   if (presetKey === 'paint_soft_greige') {
     return {
-      targetHue: 26 / 360,
-      targetSaturation: 0.16,
-      targetLightness: 0.55,
+      targetHue: 24 / 360,
+      targetSaturation: 0.18,
+      targetLightness: 0.49,
       targetHueMix: 1,
       targetSaturationMix: 1,
       lightnessMix: 1,
-      additionalLift: 0.01,
-      blendMix: 0.992,
-      alphaExponent: 0.66,
-      minBlend: 0.86,
-      shadingRange: 0.16,
+      additionalLift: 0.02,
+      blendMix: 0.996,
+      alphaExponent: 0.62,
+      minBlend: 0.9,
+      shadingRange: 0.14,
     };
   }
 
@@ -699,23 +699,23 @@ function buildLocalFloorToneConfig(presetKey) {
   if (presetKey === 'floor_tile_stone') {
     return {
       kind: 'tile',
-      targetHue: 35 / 360,
-      targetSaturation: 0.09,
-      targetLightness: 0.66,
-      groutHue: 36 / 360,
-      groutSaturation: 0.03,
-      groutLightness: 0.83,
-      groutWidth: 0.06,
-      groutFeather: 0.04,
-      tileAspect: 1.45,
-      topRowHeight: 5,
-      bottomRowHeight: 24,
-      blendMix: 0.97,
-      alphaExponent: 0.7,
-      minBlend: 0.84,
-      shadingScale: 0.62,
-      tileVariation: 0.06,
-      veiningStrength: 0.03,
+      targetHue: 34 / 360,
+      targetSaturation: 0.05,
+      targetLightness: 0.74,
+      groutHue: 34 / 360,
+      groutSaturation: 0.02,
+      groutLightness: 0.9,
+      groutWidth: 0.075,
+      groutFeather: 0.05,
+      tileAspect: 1.3,
+      topRowHeight: 6,
+      bottomRowHeight: 28,
+      blendMix: 0.985,
+      alphaExponent: 0.68,
+      minBlend: 0.9,
+      shadingScale: 0.5,
+      tileVariation: 0.04,
+      veiningStrength: 0.018,
     };
   }
 

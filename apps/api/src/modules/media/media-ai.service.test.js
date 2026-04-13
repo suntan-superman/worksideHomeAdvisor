@@ -282,6 +282,168 @@ test('floor presets evaluate the full provider chain before selecting a winner',
   assert.equal(result.providerAttemptCount, 3);
 });
 
+test('paint presets prefer a stronger safe local fallback when replicate candidates stay near-original', async () => {
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('paint_soft_greige'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async ({ providerKey }) => {
+        if (providerKey === 'replicate_basic') {
+          return [
+            {
+              providerKey,
+              overallScore: 90,
+              maskedChangeRatio: 0.05,
+              maskedColorShiftRatio: 0.02,
+              maskedEdgeDensityDelta: 0.0004,
+              topHalfChangeRatio: 0.02,
+              outsideMaskChangeRatio: 0.04,
+              furnitureCoverageIncreaseRatio: 0,
+              newFurnitureAdditionRatio: 0,
+            },
+          ];
+        }
+
+        return [
+          {
+            providerKey,
+            overallScore: 88,
+            maskedChangeRatio: 0.06,
+            maskedColorShiftRatio: 0.025,
+            maskedEdgeDensityDelta: 0.0006,
+            topHalfChangeRatio: 0.03,
+            outsideMaskChangeRatio: 0.05,
+            furnitureCoverageIncreaseRatio: 0,
+            newFurnitureAdditionRatio: 0,
+          },
+        ];
+      },
+      runLocalSharp: async () => [
+        {
+          providerKey: 'local_sharp',
+          overallScore: 76,
+          maskedChangeRatio: 0.11,
+          maskedColorShiftRatio: 0.06,
+          maskedEdgeDensityDelta: 0.0003,
+          topHalfChangeRatio: 0.03,
+          outsideMaskChangeRatio: 0.07,
+          furnitureCoverageIncreaseRatio: 0,
+          newFurnitureAdditionRatio: 0,
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
+});
+
+test('floor presets prefer a stronger safe local fallback when replicate candidates stay near-original', async () => {
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('floor_tile_stone'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async ({ providerKey }) => {
+        if (providerKey === 'replicate_basic') {
+          return [
+            {
+              providerKey,
+              overallScore: 91,
+              focusRegionChangeRatio: 0.05,
+              maskedChangeRatio: 0.07,
+              maskedColorShiftRatio: 0.025,
+              topHalfChangeRatio: 0.03,
+              outsideMaskChangeRatio: 0.04,
+              furnitureCoverageIncreaseRatio: 0,
+            },
+          ];
+        }
+
+        return [
+          {
+            providerKey,
+            overallScore: 89,
+            focusRegionChangeRatio: 0.07,
+            maskedChangeRatio: 0.09,
+            maskedColorShiftRatio: 0.03,
+            topHalfChangeRatio: 0.03,
+            outsideMaskChangeRatio: 0.05,
+            furnitureCoverageIncreaseRatio: 0,
+          },
+        ];
+      },
+      runLocalSharp: async () => [
+        {
+          providerKey: 'local_sharp',
+          overallScore: 78,
+          focusRegionChangeRatio: 0.13,
+          maskedChangeRatio: 0.16,
+          maskedColorShiftRatio: 0.08,
+          topHalfChangeRatio: 0.03,
+          outsideMaskChangeRatio: 0.06,
+          furnitureCoverageIncreaseRatio: 0,
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
+});
+
+test('finish presets fail instead of returning a no-op candidate when nothing usable was produced', async () => {
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('paint_soft_greige'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async () => [
+        {
+          overallScore: 92,
+          maskedChangeRatio: 0.03,
+          maskedColorShiftRatio: 0.01,
+          maskedEdgeDensityDelta: 0.0002,
+          topHalfChangeRatio: 0.02,
+          outsideMaskChangeRatio: 0.02,
+          furnitureCoverageIncreaseRatio: 0,
+          newFurnitureAdditionRatio: 0,
+        },
+      ],
+      runLocalSharp: async () => [
+        {
+          providerKey: 'local_sharp',
+          overallScore: 73,
+          maskedChangeRatio: 0.04,
+          maskedColorShiftRatio: 0.015,
+          maskedEdgeDensityDelta: 0.0001,
+          topHalfChangeRatio: 0.02,
+          outsideMaskChangeRatio: 0.03,
+          furnitureCoverageIncreaseRatio: 0,
+          newFurnitureAdditionRatio: 0,
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.providerUsed, null);
+  assert.equal(result.bestVariant, null);
+  assert.equal(result.stoppedEarlyReason, 'no_usable_finish_candidate');
+});
+
 test('getReplicateSettings reduces remove_furniture sample counts for faster execution', () => {
   const basicSettings = getReplicateSettings('replicate_basic', {
     key: 'remove_furniture',

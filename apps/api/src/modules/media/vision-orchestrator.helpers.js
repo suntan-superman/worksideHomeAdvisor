@@ -384,6 +384,94 @@ export function isCandidateSufficient(candidate, presetKey) {
   return Number(candidate.overallScore || 0) >= 62;
 }
 
+function isPreferredFinishFallbackCandidate(candidate, presetKey) {
+  if (!candidate) {
+    return false;
+  }
+
+  const normalizedPresetKey = String(presetKey || '');
+  const isPaintPreset = normalizedPresetKey.startsWith('paint_');
+  const isFloorPreset = normalizedPresetKey.startsWith('floor_');
+  if ((!isPaintPreset && !isFloorPreset) || candidate.providerKey !== 'local_sharp') {
+    return false;
+  }
+
+  const maskedChangeRatio = Number(candidate.maskedChangeRatio || 0);
+  const maskedColorShiftRatio = Number(candidate.maskedColorShiftRatio || 0);
+  const maskedLuminanceDelta = Number(candidate.maskedLuminanceDelta || 0);
+  const topHalfChangeRatio = Number(candidate.topHalfChangeRatio || 1);
+  const outsideMaskChangeRatio = Number(candidate.outsideMaskChangeRatio || 1);
+  const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
+  const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
+  const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
+  const focusRegionChangeRatio = Number(candidate.focusRegionChangeRatio || 0);
+
+  if (isPaintPreset) {
+    if (
+      topHalfChangeRatio > 0.08 ||
+      outsideMaskChangeRatio > 0.2 ||
+      furnitureCoverageIncreaseRatio > 0.015 ||
+      newFurnitureAdditionRatio > 0.02 ||
+      maskedEdgeDensityDelta > 0.004
+    ) {
+      return false;
+    }
+
+    if (normalizedPresetKey === 'paint_bright_white') {
+      return (
+        maskedChangeRatio >= 0.09 &&
+        maskedColorShiftRatio >= 0.05 &&
+        maskedLuminanceDelta >= 0.025
+      );
+    }
+
+    return maskedChangeRatio >= 0.085 && maskedColorShiftRatio >= 0.045;
+  }
+
+  if (
+    topHalfChangeRatio > 0.08 ||
+    outsideMaskChangeRatio > 0.16 ||
+    furnitureCoverageIncreaseRatio > 0.015
+  ) {
+    return false;
+  }
+
+  if (normalizedPresetKey === 'floor_tile_stone') {
+    return (
+      focusRegionChangeRatio >= 0.1 &&
+      maskedChangeRatio >= 0.12 &&
+      maskedColorShiftRatio >= 0.055
+    );
+  }
+
+  if (normalizedPresetKey === 'floor_dark_hardwood') {
+    return (
+      focusRegionChangeRatio >= 0.1 &&
+      maskedChangeRatio >= 0.12 &&
+      maskedLuminanceDelta <= -0.03
+    );
+  }
+
+  return focusRegionChangeRatio >= 0.1 && maskedChangeRatio >= 0.12;
+}
+
+export function getPreferredFinishFallbackCandidates(candidates = [], presetKey) {
+  const normalizedPresetKey = String(presetKey || '');
+  if (
+    !normalizedPresetKey.startsWith('paint_') &&
+    !normalizedPresetKey.startsWith('floor_')
+  ) {
+    return [];
+  }
+
+  return rankCandidates(
+    candidates.filter((candidate) =>
+      isPreferredFinishFallbackCandidate(candidate, normalizedPresetKey),
+    ),
+    normalizedPresetKey,
+  );
+}
+
 export function rankCandidates(candidates = [], presetKey) {
   return [...candidates].sort((left, right) => {
     if (presetKey === 'remove_furniture') {

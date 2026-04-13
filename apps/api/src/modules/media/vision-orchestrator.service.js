@@ -1,5 +1,6 @@
 import {
   buildProviderChain,
+  getPreferredFinishFallbackCandidates,
   getVisionExecutionTimeBudgetMs,
   isHighConfidenceEarlyExitCandidate,
   isCandidateSufficient,
@@ -38,6 +39,25 @@ export async function orchestrateVisionJob({
   const attempts = [];
   const allCandidates = [];
   const allSufficientCandidates = [];
+  const selectBestCandidates = (candidates = allCandidates) => {
+    const sufficientCandidates = rankCandidates(
+      candidates.filter((candidate) => candidate.isSufficient),
+      preset.key,
+    );
+    if (sufficientCandidates.length) {
+      return sufficientCandidates;
+    }
+
+    const preferredFinishFallbackCandidates = getPreferredFinishFallbackCandidates(
+      candidates,
+      preset.key,
+    );
+    if (preferredFinishFallbackCandidates.length) {
+      return preferredFinishFallbackCandidates;
+    }
+
+    return rankCandidates(candidates, preset.key);
+  };
 
   const canStopForTimeBudget = () => {
     if (!allSufficientCandidates.length) {
@@ -73,7 +93,7 @@ export async function orchestrateVisionJob({
     providerAttemptCount: attempts.length,
     fallbackApplied: providerUsed ? chain.indexOf(providerUsed) > 0 : false,
     bestVariant,
-    allCandidates: rankCandidates(allCandidates, preset.key),
+    allCandidates: selectBestCandidates(allCandidates),
     orchestration: { chain, attempts },
     userPlan: effectiveUserPlan,
     stoppedEarlyReason,
@@ -85,7 +105,7 @@ export async function orchestrateVisionJob({
   for (const [providerIndex, providerKey] of chain.entries()) {
     const elapsedBeforeProvider = Math.max(0, Number(nowFn()) - startedAt);
     if (elapsedBeforeProvider >= maxExecutionTimeMs && allCandidates.length && canStopForTimeBudget()) {
-      const rankedCandidates = rankCandidates(allCandidates, preset.key);
+      const rankedCandidates = selectBestCandidates(allCandidates);
       const providerUsed = rankedCandidates[0]?.providerKey || null;
       return buildResponse({
         providerUsed,
@@ -198,7 +218,7 @@ export async function orchestrateVisionJob({
         allCandidates.length &&
         canStopForTimeBudget()
       ) {
-        const rankedCandidates = rankCandidates(allCandidates, preset.key);
+        const rankedCandidates = selectBestCandidates(allCandidates);
         const providerUsed = rankedCandidates[0]?.providerKey || null;
         return buildResponse({
           providerUsed,
@@ -223,10 +243,29 @@ export async function orchestrateVisionJob({
     }
   }
 
-  const rankedCandidates = rankCandidates(allCandidates, preset.key);
+  const rankedCandidates = selectBestCandidates(allCandidates);
+  const shouldRequireRealFinishCandidate =
+    normalizedPresetKey.startsWith('paint_') || normalizedPresetKey.startsWith('floor_');
+  const sufficientCandidateExists = allCandidates.some((candidate) => candidate.isSufficient);
+  const preferredFinishFallbackExists = getPreferredFinishFallbackCandidates(
+    allCandidates,
+    preset.key,
+  ).length > 0;
+  const bestVariant =
+    shouldRequireRealFinishCandidate &&
+    !sufficientCandidateExists &&
+    !preferredFinishFallbackExists
+      ? null
+      : rankedCandidates[0] || null;
   const providerUsed = rankedCandidates[0]?.providerKey || null;
   return buildResponse({
-    providerUsed,
-    bestVariant: rankedCandidates[0] || null,
+    providerUsed: bestVariant ? providerUsed : null,
+    bestVariant,
+    stoppedEarlyReason:
+      shouldRequireRealFinishCandidate &&
+      !sufficientCandidateExists &&
+      !preferredFinishFallbackExists
+        ? 'no_usable_finish_candidate'
+        : null,
   });
 }
