@@ -275,7 +275,12 @@ function getRoomPromptAddon(roomType) {
   return '';
 }
 
-function getUniversalRealismGuardrails() {
+function getUniversalRealismGuardrails(presetKey = '') {
+  const normalizedPresetKey = String(presetKey || '');
+  if (normalizedPresetKey.startsWith('paint_') || normalizedPresetKey.startsWith('floor_')) {
+    return 'Keep the result realistic, natural, and suitable for residential real estate marketing. Preserve room structure, layout, perspective, windows, trim, ceilings, shelving, and permanent fixtures. Only change the specifically requested finish surface, and do not invent furniture, decor, architecture, or unrelated upgrades.';
+  }
+
   return 'Keep the result realistic, natural, and suitable for residential real estate marketing. Do not distort walls, windows, doors, ceilings, floors, trim, or permanent fixtures. Do not invent architecture or major finishes that are not already present.';
 }
 
@@ -5374,7 +5379,7 @@ export async function createImageEnhancementJob({
       freeformPlanPromptAddon,
       roomPromptAddon,
       presetPromptAddon,
-      getUniversalRealismGuardrails(),
+      getUniversalRealismGuardrails(preset.key),
     ]
       .filter(Boolean)
       .join(' ');
