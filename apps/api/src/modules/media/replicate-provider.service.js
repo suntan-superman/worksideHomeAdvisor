@@ -53,6 +53,11 @@ export async function runReplicateInpainting({
   }
 
   const replicate = getReplicateClient();
+  console.log({
+    image,
+    mask,
+    promptLength: prompt?.length,
+  });
   const output = await replicate.run(model, {
     input,
   });
