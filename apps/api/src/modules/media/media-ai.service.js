@@ -2060,37 +2060,59 @@ async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) 
     }
   }
 
+  const preblendBuffer = await sharp(transformed, {
+    raw: { width, height, channels: 4 },
+  })
+    .png()
+    .toBuffer();
+
   const variantBuffer = await sharp(transformed, {
     raw: { width, height, channels: 4 },
   })
     .jpeg({ quality: 92, mozjpeg: true })
     .toBuffer();
 
-  return blendVariantWithSourceMask({
+  const compositedBuffer = await blendVariantWithSourceMask({
     sourceBuffer,
     variantBuffer,
     maskBuffer: floorMask.adaptiveMaskBuffer,
     maskBlur: toneConfig.kind === 'tile' ? 0.7 : 1.8,
   });
+
+  return {
+    buffer: compositedBuffer,
+    debug:
+      presetKey === 'floor_tile_stone'
+        ? {
+            floorMaskBuffer: floorMask.adaptiveMaskBuffer,
+            preblendBuffer,
+            maskCoverageRatio: await calculateMaskCoverageRatio(floorMask.adaptiveMaskBuffer),
+          }
+        : null,
+  };
 }
 
 async function renderVariantBuffer(buffer, presetKey, roomType) {
   const renderPlan = buildPresetRenderPlan(presetKey);
   const sourceMetadata = await sharp(buffer).rotate().metadata();
-  const transformed = String(presetKey || '').startsWith('paint_')
+  const transformedResult = String(presetKey || '').startsWith('paint_')
     ? await renderLocalWallPaintVariantBuffer(buffer, presetKey, roomType)
     : String(presetKey || '').startsWith('floor_')
       ? await renderLocalFloorVariantBuffer(buffer, presetKey, roomType)
-    : await (typeof renderPlan.transform === 'function'
+      : await (typeof renderPlan.transform === 'function'
         ? renderPlan
             .transform(sharp(buffer).rotate(), sourceMetadata)
             .jpeg({ quality: 88, mozjpeg: true })
             .toBuffer()
         : sharp(buffer).rotate().jpeg({ quality: 88, mozjpeg: true }).toBuffer());
+  const transformed =
+    Buffer.isBuffer(transformedResult) ? transformedResult : transformedResult.buffer;
+  const debug = Buffer.isBuffer(transformedResult) ? null : transformedResult.debug || null;
   const roomPromptAddon = getRoomPromptAddon(roomType);
 
   return {
     buffer: transformed,
+    debug,
     label: renderPlan.label,
     warning: renderPlan.warning,
     summary: renderPlan.summary,
@@ -3786,6 +3808,36 @@ async function buildReviewedLocalSharpCandidates({
   sourceImageBase64,
 }) {
   const rendered = await renderVariantBuffer(sourceBuffer, preset.key, resolvedRoomType);
+  if (preset.key === 'floor_tile_stone' && rendered.debug?.floorMaskBuffer && asset?.propertyId) {
+    const propertyId = asset.propertyId?.toString?.() || String(asset.propertyId);
+    const [maskStorage, preblendStorage] = await Promise.all([
+      saveBinaryBuffer({
+        propertyId,
+        mimeType: 'image/png',
+        buffer: rendered.debug.floorMaskBuffer,
+      }),
+      saveBinaryBuffer({
+        propertyId,
+        mimeType: 'image/png',
+        buffer: rendered.debug.preblendBuffer,
+      }),
+    ]);
+    console.info('vision_local_finish_debug', {
+      presetKey: preset.key,
+      roomType: resolvedRoomType,
+      maskCoverageRatio: rendered.debug.maskCoverageRatio,
+      floorMaskUrl: buildTemporaryStoredAssetUrl({
+        storageProvider: maskStorage.storageProvider,
+        storageKey: maskStorage.storageKey,
+        mimeType: 'image/png',
+      }),
+      floorPreviewUrl: buildTemporaryStoredAssetUrl({
+        storageProvider: preblendStorage.storageProvider,
+        storageKey: preblendStorage.storageKey,
+        mimeType: 'image/png',
+      }),
+    });
+  }
   const evaluationRegions = getPresetEvaluationRegions(preset.key);
   let maskBuffer = null;
   let visualChangeRatio = await calculateVisualChangeRatio(sourceBuffer, rendered.buffer);
