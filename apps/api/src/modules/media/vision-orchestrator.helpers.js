@@ -64,7 +64,9 @@ export function buildProviderChain({ preset, userPlan, openAiAvailable = false }
   }
 
   if (isPaintPreset) {
-    return ['replicate_basic', 'replicate_advanced'];
+    return openAiAvailable
+      ? ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp']
+      : ['replicate_basic', 'replicate_advanced', 'local_sharp'];
   }
 
   if (preset?.providerPreference === 'local_sharp_only') {

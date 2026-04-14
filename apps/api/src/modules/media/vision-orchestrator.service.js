@@ -35,7 +35,8 @@ export async function orchestrateVisionJob({
   const exhaustProviderChain =
     normalizedPresetKey === 'remove_furniture' || isSurfaceFinishPreset;
   const requiresLocalTileStoneAttempt = normalizedPresetKey === 'floor_tile_stone';
-  const allowBestEffortFinishCandidate = normalizedPresetKey.startsWith('floor_');
+  const allowBestEffortFinishCandidate =
+    normalizedPresetKey.startsWith('floor_') || normalizedPresetKey.startsWith('paint_');
   const startedAt = Number(nowFn());
   const maxExecutionTimeMs = getVisionExecutionTimeBudgetMs(preset?.key);
   const attempts = [];
@@ -280,6 +281,13 @@ export async function orchestrateVisionJob({
         });
       }
     } catch (error) {
+      if (isSurfaceFinishPreset) {
+        console.log('Surface finish provider failure', {
+          presetKey: preset?.key,
+          providerKey,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       attempts.push({
         providerKey,
         candidateCount: 0,

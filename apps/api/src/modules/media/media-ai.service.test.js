@@ -142,7 +142,7 @@ test('wall paint presets now use the replicate paint pipeline', () => {
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['replicate_basic', 'replicate_advanced'],
+    ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp'],
   );
 });
 
@@ -228,9 +228,9 @@ test('paint presets use the replicate paint chain before selecting a winner', as
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced']);
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'local_sharp']);
   assert.equal(result.providerUsed, 'replicate_advanced');
-  assert.equal(result.providerAttemptCount, 2);
+  assert.equal(result.providerAttemptCount, 3);
 });
 
 test('floor presets use the replicate chain when tile or stone is requested', async () => {
@@ -341,6 +341,92 @@ test('paint presets keep a subtle but real replicate wall repaint instead of fai
   assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
 });
 
+test('paint presets fall through to openai_edit when replicate returns nothing usable', async () => {
+  const callOrder = [];
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('paint_bright_white'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async ({ providerKey }) => {
+        callOrder.push(providerKey);
+        return [];
+      },
+      runOpenAiEdit: async () => {
+        callOrder.push('openai_edit');
+        return [
+          {
+            providerKey: 'openai_edit',
+            overallScore: 70,
+            maskedChangeRatio: 0.05,
+            maskedColorShiftRatio: 0.02,
+            maskedLuminanceDelta: 0.02,
+            maskedEdgeDensityDelta: 0.001,
+            topHalfChangeRatio: 0.05,
+            outsideMaskChangeRatio: 0.12,
+            furnitureCoverageIncreaseRatio: 0,
+            newFurnitureAdditionRatio: 0,
+          },
+        ];
+      },
+    },
+  });
+
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit']);
+  assert.equal(result.providerUsed, 'openai_edit');
+  assert.equal(result.bestVariant?.providerKey, 'openai_edit');
+  assert.equal(result.stoppedEarlyReason, null);
+});
+
+test('paint presets fall through to local_sharp when ai providers return nothing usable', async () => {
+  const callOrder = [];
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('paint_bright_white'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async ({ providerKey }) => {
+        callOrder.push(providerKey);
+        return [];
+      },
+      runOpenAiEdit: async () => {
+        callOrder.push('openai_edit');
+        return [];
+      },
+      runLocalSharp: async () => {
+        callOrder.push('local_sharp');
+        return [
+          {
+            providerKey: 'local_sharp',
+            overallScore: 67,
+            maskedChangeRatio: 0.05,
+            maskedColorShiftRatio: 0.018,
+            maskedLuminanceDelta: 0.02,
+            maskedEdgeDensityDelta: 0.001,
+            topHalfChangeRatio: 0.04,
+            outsideMaskChangeRatio: 0.1,
+            furnitureCoverageIncreaseRatio: 0,
+            newFurnitureAdditionRatio: 0,
+          },
+        ];
+      },
+    },
+  });
+
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp']);
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
+  assert.equal(result.stoppedEarlyReason, null);
+});
+
 test('floor presets surface the best-effort finish outcome when tile providers return nothing usable', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
@@ -425,7 +511,7 @@ test('floor presets keep even extremely subtle raw candidates instead of filteri
   assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
 });
 
-test('finish presets fail instead of returning a no-op candidate when nothing usable was produced', async () => {
+test('finish presets now keep a safe local fallback candidate instead of hard-failing', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('paint_soft_greige'),
@@ -463,9 +549,9 @@ test('finish presets fail instead of returning a no-op candidate when nothing us
     },
   });
 
-  assert.equal(result.providerUsed, null);
-  assert.equal(result.bestVariant, null);
-  assert.equal(result.stoppedEarlyReason, 'no_usable_finish_candidate');
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
+  assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
 });
 
 test('getReplicateSettings reduces remove_furniture sample counts for faster execution', () => {
@@ -668,7 +754,7 @@ test('paint preset sufficiency rejects candidates that introduce furniture-like 
   );
 });
 
-test('bright white paint sufficiency rejects candidates that do not brighten enough', () => {
+test('bright white paint sufficiency accepts a subtle but safe brighten-wall candidate', () => {
   assert.equal(
     isCandidateSufficient(
       {
@@ -683,7 +769,7 @@ test('bright white paint sufficiency rejects candidates that do not brighten eno
       },
       'paint_bright_white',
     ),
-    false,
+    true,
   );
 });
 
