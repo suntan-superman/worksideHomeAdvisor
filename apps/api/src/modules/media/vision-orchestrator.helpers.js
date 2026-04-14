@@ -59,8 +59,7 @@ export function buildProviderChain({ preset, userPlan, openAiAvailable = false }
     return ['local_sharp'];
   }
 
-  // TEMP FIX: Local floor transformations are unreliable -> force replicate
-  if (isFloorPreset) {
+  if (key === 'floor_tile_stone') {
     return ['replicate_basic', 'replicate_advanced'];
   }
 

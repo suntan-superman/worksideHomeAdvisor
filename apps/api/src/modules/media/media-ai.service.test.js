@@ -146,6 +146,17 @@ test('wall paint presets now use the deterministic local pipeline only', () => {
   );
 });
 
+test('floor tone presets stay on the deterministic local pipeline', () => {
+  assert.deepEqual(
+    buildProviderChain({
+      preset: resolveVisionPreset('floor_light_wood'),
+      userPlan: 'premium',
+      openAiAvailable: true,
+    }),
+    ['local_sharp'],
+  );
+});
+
 test('tile or stone floors now use the realism-first replicate finish pipeline', () => {
   assert.deepEqual(
     buildProviderChain({

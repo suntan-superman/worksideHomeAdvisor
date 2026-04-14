@@ -741,6 +741,24 @@ function buildLocalWallPaintToneConfig(presetKey) {
 }
 
 function buildLocalFloorToneConfig(presetKey) {
+  if (presetKey === 'floor_light_wood') {
+    return {
+      kind: 'wood',
+      targetHue: 36 / 360,
+      targetSaturation: 0.22,
+      targetLightness: 0.72,
+      targetHueMix: 0.94,
+      targetSaturationMix: 0.9,
+      lightnessMix: 0.98,
+      blendMix: 0.985,
+      alphaExponent: 0.7,
+      minBlend: 0.88,
+      shadingScale: 0.5,
+      additionalLift: 0.035,
+      contrastBoost: 0.008,
+    };
+  }
+
   if (presetKey === 'floor_dark_hardwood') {
     return {
       kind: 'wood',
@@ -825,15 +843,15 @@ function buildLocalFloorToneConfig(presetKey) {
     kind: 'wood',
     targetHue: 34 / 360,
     targetSaturation: 0.26,
-    targetLightness: 0.64,
+    targetLightness: 0.66,
     targetHueMix: 0.92,
     targetSaturationMix: 0.92,
-    lightnessMix: 0.92,
-    blendMix: 0.97,
+    lightnessMix: 0.94,
+    blendMix: 0.975,
     alphaExponent: 0.74,
-    minBlend: 0.84,
-    shadingScale: 0.58,
-    additionalLift: 0.01,
+    minBlend: 0.86,
+    shadingScale: 0.56,
+    additionalLift: 0.014,
     contrastBoost: 0.01,
   };
 }
