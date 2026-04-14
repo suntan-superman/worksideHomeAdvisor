@@ -192,20 +192,20 @@ export const VISION_PRESETS = [
       category: 'concept_preview',
       roomCompatibility: ['living_room', 'bedroom', 'dining_room', 'office', 'unknown'],
       providerPreference: 'replicate',
-      promptVersion: 8,
+      promptVersion: 9,
     outputCount: 1,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Create a conceptual preview of this room with the flooring shifted lighter for a brighter, cleaner buyer-facing presentation. Preserve room proportions, baseboards, walls, architecture, and flooring perspective lines. Keep the output realistic and clearly a planning concept, not an exact material replacement.',
+      'Create a realistic preview where ONLY the existing hardwood flooring is lightened to a natural light oak or blonde wood tone. Maintain the exact same plank layout, seams, spacing, and direction. Preserve natural wood grain texture and keep the same floorboards sharp and aligned with the room perspective. Do NOT introduce carpet, tile, stone, rugs, or any new flooring material. Do NOT blur or smear plank edges. Preserve walls, baseboards, lighting, shadows, shelving, windows, and room geometry exactly. This must look like the SAME floor, just refinished lighter.',
     helperText:
       'Preview a lighter floor direction to brighten the room.',
     strength: 0.95,
     guidanceScale: 9,
     numInferenceSteps: 44,
     negativePrompt:
-      'carpet texture, rug pattern, patchy flooring, smeared wood grain, warped floor lines, low quality, unrealistic geometry',
+      'carpet texture, rug, tile, stone, pattern overlay, blurry wood grain, smeared wood grain, warped planks, distorted lines, uneven flooring, patchy floor, patchy flooring, fake material replacement, low quality, unrealistic geometry',
     replicateModel: REPLICATE_INPAINT_MODEL,
   },
     {

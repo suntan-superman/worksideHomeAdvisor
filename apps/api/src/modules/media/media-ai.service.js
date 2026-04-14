@@ -2485,7 +2485,7 @@ async function buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType) {
 
   return sharp(Buffer.from(svg))
     .resize(width, height, { fit: 'fill' })
-    .blur(1.2)
+    .blur(0.6)
     .png()
     .toBuffer();
 }
