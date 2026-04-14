@@ -59,6 +59,10 @@ export function buildProviderChain({ preset, userPlan, openAiAvailable = false }
     return ['local_sharp'];
   }
 
+  if (key === 'floor_tile_stone') {
+    return ['replicate_basic', 'replicate_advanced'];
+  }
+
   if (isPaintPreset || isFloorPreset) {
     return ['local_sharp', 'replicate_basic', 'replicate_advanced'];
   }
@@ -113,6 +117,17 @@ export function getReplicateSettings(providerKey, preset = {}) {
     }
 
     if (isFlooringPreset) {
+      if (isTileStonePreset) {
+        return {
+          model: preset.replicateModel,
+          outputCount: Math.max(2, baseOutputCount),
+          guidanceScale: Math.min(10, Number((baseGuidanceScale + 0.15).toFixed(2))),
+          numInferenceSteps: baseInferenceSteps + 4,
+          strength: Number(Math.min(0.72, baseStrength + 0.03).toFixed(2)),
+          scheduler: preset.scheduler,
+          negativePrompt: preset.negativePrompt,
+        };
+      }
       return {
         model: preset.replicateModel,
         outputCount: Math.max(isTileStonePreset ? 4 : 3, baseOutputCount),
@@ -164,7 +179,12 @@ export function getReplicateSettings(providerKey, preset = {}) {
 
   return {
     model: preset.replicateModel,
-    outputCount: isRemoveFurniture ? Math.min(3, Math.max(2, baseOutputCount)) : baseOutputCount,
+    outputCount:
+      isRemoveFurniture
+        ? Math.min(3, Math.max(2, baseOutputCount))
+        : isTileStonePreset
+          ? Math.max(2, baseOutputCount)
+          : baseOutputCount,
     guidanceScale: baseGuidanceScale,
     numInferenceSteps: baseInferenceSteps,
     strength: baseStrength,

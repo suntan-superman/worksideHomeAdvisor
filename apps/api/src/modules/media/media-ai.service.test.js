@@ -146,26 +146,26 @@ test('wall paint presets now use the deterministic local pipeline only', () => {
   );
 });
 
-test('tile or stone floors now stay on the deterministic local finish pipeline', () => {
+test('tile or stone floors now use the realism-first replicate finish pipeline', () => {
   assert.deepEqual(
     buildProviderChain({
       preset: resolveVisionPreset('floor_tile_stone'),
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['local_sharp'],
+    ['replicate_basic', 'replicate_advanced'],
   );
 });
 
 test('tile or stone preset uses explicit material-replacement defaults', () => {
   const preset = resolveVisionPreset('floor_tile_stone');
 
-  assert.equal(preset.strength, 0.92);
+  assert.equal(preset.strength, 0.65);
   assert.equal(preset.numInferenceSteps, 60);
-  assert.match(preset.basePrompt, /Remove all visible wood texture, grain, and seams/i);
+  assert.match(preset.basePrompt, /Completely replace the floor material/i);
   assert.match(preset.basePrompt, /visible grout lines/i);
   assert.match(preset.negativePrompt, /wood texture/i);
-  assert.match(preset.negativePrompt, /fake overlay/i);
+  assert.match(preset.negativePrompt, /overlay texture/i);
 });
 
 test('paint presets stay on the local deterministic pipeline', async () => {
@@ -206,7 +206,7 @@ test('paint presets stay on the local deterministic pipeline', async () => {
   assert.equal(result.providerAttemptCount, 1);
 });
 
-test('floor presets can stop on a strong local deterministic candidate', async () => {
+test('floor presets use the replicate chain when tile or stone is requested', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
@@ -217,11 +217,12 @@ test('floor presets can stop on a strong local deterministic candidate', async (
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runLocalSharp: async () => {
-        callOrder.push('local_sharp');
+      runReplicateProvider: async ({ providerKey }) => {
+        callOrder.push(providerKey);
         return [
           {
-            overallScore: 81,
+            providerKey,
+            overallScore: providerKey === 'replicate_advanced' ? 81 : 78,
             focusRegionChangeRatio: 0.14,
             maskedChangeRatio: 0.16,
             maskedColorShiftRatio: 0.09,
@@ -234,19 +235,19 @@ test('floor presets can stop on a strong local deterministic candidate', async (
           },
         ];
       },
-      runReplicateProvider: async ({ providerKey }) => {
-        callOrder.push(providerKey);
+      runLocalSharp: async () => {
+        callOrder.push('local_sharp');
         return [];
       },
     },
   });
 
-  assert.deepEqual(callOrder, ['local_sharp']);
-  assert.equal(result.providerUsed, 'local_sharp');
-  assert.equal(result.providerAttemptCount, 1);
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced']);
+  assert.equal(result.providerUsed, 'replicate_advanced');
+  assert.equal(result.providerAttemptCount, 2);
 });
 
-test('tile or stone floors keep the best safe local candidate when strict thresholds are missed', async () => {
+test('tile or stone floors keep the best safe replicate candidate when strict thresholds are missed', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('floor_tile_stone'),
@@ -256,20 +257,6 @@ test('tile or stone floors keep the best safe local candidate when strict thresh
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runLocalSharp: async () => [
-        {
-          providerKey: 'local_sharp',
-          overallScore: 70,
-          focusRegionChangeRatio: 0.025,
-          maskedChangeRatio: 0.045,
-          maskedColorShiftRatio: 0.018,
-          maskedLuminanceDelta: 0.008,
-          maskedEdgeDensityDelta: 0.0015,
-          topHalfChangeRatio: 0.04,
-          outsideMaskChangeRatio: 0.08,
-          furnitureCoverageIncreaseRatio: 0,
-        },
-      ],
       runReplicateProvider: async ({ providerKey }) => [
         {
           providerKey,
@@ -284,11 +271,12 @@ test('tile or stone floors keep the best safe local candidate when strict thresh
           furnitureCoverageIncreaseRatio: 0,
         },
       ],
+      runLocalSharp: async () => [],
     },
   });
 
-  assert.equal(result.providerUsed, 'local_sharp');
-  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
+  assert.equal(result.providerUsed, 'replicate_advanced');
+  assert.equal(result.bestVariant?.providerKey, 'replicate_advanced');
   assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
 });
 
@@ -353,7 +341,7 @@ test('paint presets prefer a stronger safe local fallback when replicate candida
   assert.equal(result.bestVariant?.providerKey, 'local_sharp');
 });
 
-test('floor presets prefer the deterministic local tile candidate', async () => {
+test('floor presets surface the best-effort finish outcome when tile providers return nothing usable', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('floor_tile_stone'),
@@ -363,26 +351,14 @@ test('floor presets prefer the deterministic local tile candidate', async () => 
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runLocalSharp: async () => [
-        {
-          providerKey: 'local_sharp',
-          overallScore: 78,
-          focusRegionChangeRatio: 0.11,
-          maskedChangeRatio: 0.14,
-          maskedColorShiftRatio: 0.075,
-          maskedLuminanceDelta: 0.03,
-          maskedEdgeDensityDelta: 0.011,
-          topHalfChangeRatio: 0.03,
-          outsideMaskChangeRatio: 0.06,
-          furnitureCoverageIncreaseRatio: 0,
-          newFurnitureAdditionRatio: 0,
-        },
-      ],
+      runReplicateProvider: async () => [],
+      runLocalSharp: async () => [],
     },
   });
 
-  assert.equal(result.providerUsed, 'local_sharp');
-  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
+  assert.equal(result.providerUsed, null);
+  assert.equal(result.bestVariant?.providerKey || null, null);
+  assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
 });
 
 test('finish presets fail instead of returning a no-op candidate when nothing usable was produced', async () => {

@@ -529,6 +529,7 @@ async function buildTemporaryReplicateInputUrls({
     .removeAlpha()
     .greyscale()
     .threshold(128, { grayscale: true })
+    .blur(String(presetKey || '') === 'floor_tile_stone' ? 10 : 0)
     .png()
     .toBuffer();
 
