@@ -2072,12 +2072,15 @@ async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) 
     .jpeg({ quality: 92, mozjpeg: true })
     .toBuffer();
 
-  const compositedBuffer = await blendVariantWithSourceMask({
-    sourceBuffer,
-    variantBuffer,
-    maskBuffer: floorMask.adaptiveMaskBuffer,
-    maskBlur: toneConfig.kind === 'tile' ? 0.7 : 1.8,
-  });
+  const compositedBuffer =
+    toneConfig.kind === 'tile'
+      ? variantBuffer
+      : await blendVariantWithSourceMask({
+          sourceBuffer,
+          variantBuffer,
+          maskBuffer: floorMask.adaptiveMaskBuffer,
+          maskBlur: 1.8,
+        });
 
   return {
     buffer: compositedBuffer,
