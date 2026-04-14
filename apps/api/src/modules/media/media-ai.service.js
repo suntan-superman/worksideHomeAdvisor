@@ -744,18 +744,18 @@ function buildLocalFloorToneConfig(presetKey) {
   if (presetKey === 'floor_light_wood') {
     return {
       kind: 'wood',
-      targetHue: 36 / 360,
-      targetSaturation: 0.22,
-      targetLightness: 0.72,
-      targetHueMix: 0.94,
-      targetSaturationMix: 0.9,
-      lightnessMix: 0.98,
-      blendMix: 0.985,
-      alphaExponent: 0.7,
-      minBlend: 0.88,
-      shadingScale: 0.5,
-      additionalLift: 0.035,
-      contrastBoost: 0.008,
+      targetHue: 38 / 360,
+      targetSaturation: 0.18,
+      targetLightness: 0.82,
+      targetHueMix: 0.98,
+      targetSaturationMix: 0.94,
+      lightnessMix: 1,
+      blendMix: 0.997,
+      alphaExponent: 0.62,
+      minBlend: 0.93,
+      shadingScale: 0.36,
+      additionalLift: 0.11,
+      contrastBoost: 0.004,
     };
   }
 
