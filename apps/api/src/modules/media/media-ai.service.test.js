@@ -146,14 +146,14 @@ test('wall paint presets now use the deterministic local pipeline only', () => {
   );
 });
 
-test('tile or stone floors try replicate before falling back to local finish rendering', () => {
+test('tile or stone floors now stay on the deterministic local finish pipeline', () => {
   assert.deepEqual(
     buildProviderChain({
       preset: resolveVisionPreset('floor_tile_stone'),
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['replicate_basic', 'replicate_advanced', 'local_sharp'],
+    ['local_sharp'],
   );
 });
 
@@ -222,11 +222,11 @@ test('floor presets can stop on a strong local deterministic candidate', async (
         return [
           {
             overallScore: 81,
-            focusRegionChangeRatio: 0.16,
-            maskedChangeRatio: 0.18,
-            maskedColorShiftRatio: 0.1,
-            maskedLuminanceDelta: 0.04,
-            maskedEdgeDensityDelta: 0.01,
+            focusRegionChangeRatio: 0.14,
+            maskedChangeRatio: 0.16,
+            maskedColorShiftRatio: 0.09,
+            maskedLuminanceDelta: 0.03,
+            maskedEdgeDensityDelta: 0.012,
             topHalfChangeRatio: 0.03,
             outsideMaskChangeRatio: 0.06,
             furnitureCoverageIncreaseRatio: 0,
@@ -241,9 +241,9 @@ test('floor presets can stop on a strong local deterministic candidate', async (
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'local_sharp']);
+  assert.deepEqual(callOrder, ['local_sharp']);
   assert.equal(result.providerUsed, 'local_sharp');
-  assert.equal(result.providerAttemptCount, 3);
+  assert.equal(result.providerAttemptCount, 1);
 });
 
 test('tile or stone floors fail honestly when no candidate produces a real material change', async () => {
@@ -353,7 +353,7 @@ test('paint presets prefer a stronger safe local fallback when replicate candida
   assert.equal(result.bestVariant?.providerKey, 'local_sharp');
 });
 
-test('floor presets prefer a stronger safe local fallback when replicate candidates stay near-original', async () => {
+test('floor presets prefer the deterministic local tile candidate', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('floor_tile_stone'),
@@ -363,44 +363,15 @@ test('floor presets prefer a stronger safe local fallback when replicate candida
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runReplicateProvider: async ({ providerKey }) => {
-        if (providerKey === 'replicate_basic') {
-          return [
-            {
-              providerKey,
-              overallScore: 91,
-              focusRegionChangeRatio: 0.05,
-              maskedChangeRatio: 0.07,
-              maskedColorShiftRatio: 0.025,
-              topHalfChangeRatio: 0.03,
-              outsideMaskChangeRatio: 0.04,
-              furnitureCoverageIncreaseRatio: 0,
-            },
-          ];
-        }
-
-        return [
-          {
-            providerKey,
-            overallScore: 89,
-            focusRegionChangeRatio: 0.07,
-            maskedChangeRatio: 0.09,
-            maskedColorShiftRatio: 0.03,
-            topHalfChangeRatio: 0.03,
-            outsideMaskChangeRatio: 0.05,
-            furnitureCoverageIncreaseRatio: 0,
-          },
-        ];
-      },
       runLocalSharp: async () => [
         {
           providerKey: 'local_sharp',
           overallScore: 78,
-          focusRegionChangeRatio: 0.13,
-          maskedChangeRatio: 0.16,
-          maskedColorShiftRatio: 0.08,
+          focusRegionChangeRatio: 0.11,
+          maskedChangeRatio: 0.14,
+          maskedColorShiftRatio: 0.075,
           maskedLuminanceDelta: 0.03,
-          maskedEdgeDensityDelta: 0.007,
+          maskedEdgeDensityDelta: 0.011,
           topHalfChangeRatio: 0.03,
           outsideMaskChangeRatio: 0.06,
           furnitureCoverageIncreaseRatio: 0,

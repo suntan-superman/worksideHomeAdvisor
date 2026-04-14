@@ -59,10 +59,6 @@ export function buildProviderChain({ preset, userPlan, openAiAvailable = false }
     return ['local_sharp'];
   }
 
-  if (key === 'floor_tile_stone') {
-    return ['replicate_basic', 'replicate_advanced', 'local_sharp'];
-  }
-
   if (isPaintPreset || isFloorPreset) {
     return ['local_sharp', 'replicate_basic', 'replicate_advanced'];
   }
@@ -228,20 +224,20 @@ export function isHighConfidenceEarlyExitCandidate(candidate, presetKey) {
     if (normalizedPresetKey === 'floor_tile_stone') {
       return (
         candidate.providerKey === 'local_sharp' &&
-        Number(candidate.focusRegionChangeRatio || 0) >= 0.13 &&
-        Number(candidate.maskedChangeRatio || 0) >= 0.16 &&
+        Number(candidate.focusRegionChangeRatio || 0) >= 0.1 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.14 &&
         (
-          Number(candidate.maskedColorShiftRatio || 0) >= 0.09 ||
+          Number(candidate.maskedColorShiftRatio || 0) >= 0.08 ||
           (
-            Number(candidate.maskedLuminanceDelta || 0) >= 0.02 &&
-            Number(candidate.maskedEdgeDensityDelta || 0) >= 0.008
+            Number(candidate.maskedLuminanceDelta || 0) >= 0.018 &&
+            Number(candidate.maskedEdgeDensityDelta || 0) >= 0.01
           )
         ) &&
         Number(candidate.maskedLuminanceDelta || 0) >= -0.005 &&
-        Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
+        Number(candidate.outsideMaskChangeRatio || 1) <= 0.1 &&
         Number(candidate.topHalfChangeRatio || 1) <= 0.05 &&
-        Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.008 &&
-        Number(candidate.newFurnitureAdditionRatio || 0) <= 0.01
+        Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.004 &&
+        Number(candidate.newFurnitureAdditionRatio || 0) <= 0.006
       );
     }
 
@@ -338,18 +334,18 @@ export function isCandidateSufficient(candidate, presetKey) {
   if (String(presetKey || '').startsWith('floor_')) {
     if (presetKey === 'floor_tile_stone') {
       return (
-        Number(candidate.focusRegionChangeRatio || 0) >= 0.08 &&
-        Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
+        Number(candidate.focusRegionChangeRatio || 0) >= 0.07 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.1 &&
         (
-          Number(candidate.maskedColorShiftRatio || 0) >= 0.08 ||
-          Number(candidate.maskedLuminanceDelta || 0) >= 0.01 ||
-          Number(candidate.maskedEdgeDensityDelta || 0) >= 0.006
+          Number(candidate.maskedColorShiftRatio || 0) >= 0.065 ||
+          Number(candidate.maskedLuminanceDelta || 0) >= 0.015 ||
+          Number(candidate.maskedEdgeDensityDelta || 0) >= 0.01
         ) &&
         Number(candidate.maskedLuminanceDelta || 0) >= -0.005 &&
-        Number(candidate.topHalfChangeRatio || 1) <= 0.1 &&
-        Number(candidate.outsideMaskChangeRatio || 1) <= 0.18 &&
-        Number(candidate.furnitureCoverageIncreaseRatio || 0) <= 0.012 &&
-        Number(candidate.newFurnitureAdditionRatio || 0) <= 0.02
+        Number(candidate.topHalfChangeRatio || 1) <= 0.07 &&
+        Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
+        Number(candidate.furnitureCoverageIncreaseRatio || 0) <= 0.006 &&
+        Number(candidate.newFurnitureAdditionRatio || 0) <= 0.01
       );
     }
 
@@ -457,15 +453,18 @@ function isPreferredFinishFallbackCandidate(candidate, presetKey) {
 
   if (normalizedPresetKey === 'floor_tile_stone') {
     return (
-      focusRegionChangeRatio >= 0.09 &&
-      maskedChangeRatio >= 0.13 &&
+      focusRegionChangeRatio >= 0.07 &&
+      maskedChangeRatio >= 0.1 &&
       (
-        maskedColorShiftRatio >= 0.075 ||
-        maskedLuminanceDelta >= 0.01 ||
-        maskedEdgeDensityDelta >= 0.006
+        maskedColorShiftRatio >= 0.065 ||
+        maskedLuminanceDelta >= 0.015 ||
+        maskedEdgeDensityDelta >= 0.01
       ) &&
       maskedLuminanceDelta >= -0.005 &&
-      newFurnitureAdditionRatio <= 0.02
+      outsideMaskChangeRatio <= 0.12 &&
+      topHalfChangeRatio <= 0.07 &&
+      furnitureCoverageIncreaseRatio <= 0.006 &&
+      newFurnitureAdditionRatio <= 0.01
     );
   }
 
