@@ -277,7 +277,8 @@ export function buildTemporaryStoredAssetUrl({
   };
   const encodedPayload = toBase64Url(JSON.stringify(payload));
   const signature = signTemporaryMediaPayload(encodedPayload);
-  return `${env.PUBLIC_API_URL}/api/v1/media/tmp/${encodedPayload}.${signature}/file`;
+  const token = `${encodedPayload}.${signature}`;
+  return `${env.PUBLIC_API_URL}/api/v1/media/tmp/file?token=${encodeURIComponent(token)}`;
 }
 
 export function verifyTemporaryStoredAssetToken(token) {

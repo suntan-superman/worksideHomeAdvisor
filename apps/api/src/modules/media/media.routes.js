@@ -132,7 +132,22 @@ const saveVariantToPhotosSchema = z.object({
   listingCandidate: z.boolean().optional(),
 });
 
+const temporaryMediaTokenQuerySchema = z.object({
+  token: z.string().min(1),
+});
+
 export async function mediaRoutes(fastify) {
+  const serveTemporaryMedia = async (token, reply) => {
+    const temporaryAsset = verifyTemporaryStoredAssetToken(token);
+    const stored = await readStoredAsset({
+      storageProvider: temporaryAsset.storageProvider,
+      storageKey: temporaryAsset.storageKey,
+    });
+    reply.header('Content-Type', temporaryAsset.mimeType || 'image/png');
+    reply.header('Cache-Control', 'public, max-age=900');
+    return reply.send(stored.buffer);
+  };
+
   fastify.get('/vision/presets', async (_request, reply) => {
     return reply.send({ presets: getVisionPresetCatalog() });
   });
@@ -514,17 +529,20 @@ export async function mediaRoutes(fastify) {
     }
   });
 
+  fastify.get('/media/tmp/file', async (request, reply) => {
+    try {
+      const { token } = temporaryMediaTokenQuerySchema.parse(request.query ?? {});
+      return await serveTemporaryMedia(token, reply);
+    } catch (error) {
+      const statusCode = /expired|signature|invalid/i.test(String(error.message || '')) ? 403 : 400;
+      return reply.code(statusCode).send({ message: error.message });
+    }
+  });
+
   fastify.get('/media/tmp/:token/file', async (request, reply) => {
     try {
       const token = String(request.params?.token || '');
-      const temporaryAsset = verifyTemporaryStoredAssetToken(token);
-      const stored = await readStoredAsset({
-        storageProvider: temporaryAsset.storageProvider,
-        storageKey: temporaryAsset.storageKey,
-      });
-      reply.header('Content-Type', temporaryAsset.mimeType || 'image/png');
-      reply.header('Cache-Control', 'public, max-age=900');
-      return reply.send(stored.buffer);
+      return await serveTemporaryMedia(token, reply);
     } catch (error) {
       const statusCode = /expired|signature|invalid/i.test(String(error.message || '')) ? 403 : 400;
       return reply.code(statusCode).send({ message: error.message });
