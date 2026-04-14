@@ -2834,6 +2834,27 @@ async function buildAdaptiveFloorMaskAtSourceSize(sourceBuffer, presetKey, roomT
     }
   }
 
+  if (presetKey === 'floor_tile_stone') {
+    const fallbackTop = Math.round(probeHeight * 0.5);
+    const fallbackBottom = probeHeight - 1;
+    for (let y = fallbackTop; y <= fallbackBottom; y += 1) {
+      const t =
+        fallbackBottom === fallbackTop ? 1 : (y - fallbackTop) / (fallbackBottom - fallbackTop);
+      const leftBound = Math.round((0.28 - t * 0.23) * probeWidth);
+      const rightBound = Math.round((0.72 + t * 0.23) * probeWidth);
+      for (
+        let x = Math.max(0, leftBound);
+        x <= Math.min(probeWidth - 1, rightBound);
+        x += 1
+      ) {
+        const index = y * probeWidth + x;
+        if (baseMaskProbe[index] > 12) {
+          finalBinary[index] = 1;
+        }
+      }
+    }
+  }
+
   const adaptiveMaskBuffer = await buildBinaryMaskPngBuffer({
     binaryMask: finalBinary,
     inputWidth: probeWidth,
