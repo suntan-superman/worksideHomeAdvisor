@@ -797,26 +797,26 @@ function buildLocalFloorToneConfig(presetKey) {
   if (presetKey === 'floor_tile_stone') {
     return {
       kind: 'tile',
-      targetHue: 34 / 360,
-      targetSaturation: 0.045,
-      targetLightness: 0.76,
+      targetHue: 36 / 360,
+      targetSaturation: 0.1,
+      targetLightness: 0.7,
       groutHue: 34 / 360,
-      groutSaturation: 0.03,
-      groutLightness: 0.62,
-      groutWidth: 0.34,
-      groutFeather: 0.04,
-      tileAspect: 1.02,
-      topRowHeight: 20,
-      bottomRowHeight: 86,
+      groutSaturation: 0.045,
+      groutLightness: 0.82,
+      groutWidth: 0.18,
+      groutFeather: 0.03,
+      tileAspect: 1.45,
+      topRowHeight: 24,
+      bottomRowHeight: 96,
       blendMix: 1,
       alphaExponent: 0.18,
       minBlend: 1,
-      shadingScale: 0.1,
-      tileVariation: 0.06,
-      veiningStrength: 0.055,
-      planeGradientStrength: 0.03,
-      sourceShadingRetention: 0.04,
-      macroNoiseStrength: 0.05,
+      shadingScale: 0.08,
+      tileVariation: 0.03,
+      veiningStrength: 0.022,
+      planeGradientStrength: 0.025,
+      sourceShadingRetention: 0.02,
+      macroNoiseStrength: 0.025,
     };
   }
 
@@ -1942,7 +1942,7 @@ async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) 
           1,
           rowHeight * Number(toneConfig.tileAspect || 1.5),
         );
-        const rowParityOffset = tileRow % 2 === 0 ? 0 : colWidth * 0.5;
+        const rowParityOffset = 0;
         const tileCol = Math.floor((x + rowParityOffset) / colWidth);
         const colFraction = ((x + rowParityOffset) / colWidth) - tileCol;
         const seamDistance = Math.min(
@@ -1981,8 +1981,8 @@ async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) 
         const tileHue = clamp01(toneConfig.targetHue + (tileNoise - 0.5) * 0.018);
         const tileSaturation = clamp01(
           toneConfig.targetSaturation +
-            (tileNoise - 0.5) * 0.024 +
-            (macroNoise - 0.5) * 0.01,
+            (tileNoise - 0.5) * 0.018 +
+            (macroNoise - 0.5) * 0.006,
         );
         const tileLightness = clamp01(
           toneConfig.targetLightness +
@@ -1991,7 +1991,7 @@ async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) 
             (tileNoise - 0.5) * Number(toneConfig.tileVariation || 0.06) +
             (veinNoise - 0.5) * Number(toneConfig.veiningStrength || 0.03) +
             (macroNoise - 0.5) * Number(toneConfig.macroNoiseStrength || 0.02) +
-            (microNoise - 0.5) * 0.018,
+            (microNoise - 0.5) * 0.008,
         );
         const groutLightness = clamp01(
           toneConfig.groutLightness + subduedSourceShading * 0.06,
