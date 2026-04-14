@@ -153,7 +153,7 @@ test('tile or stone floors now use the realism-first replicate finish pipeline',
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['replicate_basic', 'replicate_advanced'],
+    ['replicate_basic', 'replicate_advanced', 'local_sharp'],
   );
 });
 
@@ -242,9 +242,9 @@ test('floor presets use the replicate chain when tile or stone is requested', as
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced']);
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'local_sharp']);
   assert.equal(result.providerUsed, 'replicate_advanced');
-  assert.equal(result.providerAttemptCount, 2);
+  assert.equal(result.providerAttemptCount, 3);
 });
 
 test('tile or stone floors keep the best safe replicate candidate when strict thresholds are missed', async () => {

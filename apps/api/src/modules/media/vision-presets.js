@@ -115,8 +115,8 @@ export const VISION_PRESETS = [
   {
     key: 'paint_warm_neutral',
     legacyKeys: [],
-    displayName: 'Warm Neutral Walls',
-    shortLabel: 'Warm Paint',
+    displayName: 'Warm Walls',
+    shortLabel: 'Warm Walls',
     category: 'concept_preview',
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'dining_room', 'office', 'unknown'],
     providerPreference: 'local_sharp_only',
@@ -126,9 +126,9 @@ export const VISION_PRESETS = [
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Create a conceptual preview of this room with the walls clearly repainted in a warm neutral tone suitable for broad buyer appeal. Make the wall repaint obvious at first glance while preserving trim, ceilings, windows, built-ins, flooring, furniture, and layout. Keep the image realistic and suitable for showing a paint concept only.',
+      'Create a conceptual preview of this room with the walls shifted toward a warmer neutral direction that feels inviting and buyer-friendly. Make the wall change obvious at first glance while preserving trim, ceilings, windows, built-ins, flooring, furniture, and layout. Keep the image realistic and suitable for showing a paint-direction concept only.',
     helperText:
-      'Preview a buyer-friendly wall repaint without changing the true room structure.',
+      'Preview a warmer wall direction without changing the room structure.',
     strength: 0.96,
     guidanceScale: 9,
     numInferenceSteps: 48,
@@ -139,8 +139,8 @@ export const VISION_PRESETS = [
   {
     key: 'paint_bright_white',
     legacyKeys: [],
-    displayName: 'Bright White Walls',
-    shortLabel: 'White Paint',
+    displayName: 'Brighten Walls',
+    shortLabel: 'Brighten Walls',
     category: 'concept_preview',
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'dining_room', 'office', 'unknown'],
     providerPreference: 'local_sharp_only',
@@ -150,9 +150,9 @@ export const VISION_PRESETS = [
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Create a conceptual preview of this room with the walls repainted a noticeably brighter crisp white tone for a clean and airy listing presentation. The wall color should read clearly lighter than the source at first glance, without adding trim, paneling, wall art, ceiling features, staging, or new furnishings. Preserve architecture, trim, shadows, flooring, built-ins, shelving, furniture, and layout exactly as they are. Keep the result realistic and clearly a concept preview.',
+      'Create a conceptual preview of this room with the walls shifted noticeably brighter for a cleaner, airier listing presentation. The wall color should read clearly lighter than the source at first glance, without adding trim, paneling, wall art, ceiling features, staging, or new furnishings. Preserve architecture, trim, shadows, flooring, built-ins, shelving, furniture, and layout exactly as they are. Keep the result realistic and clearly a concept preview.',
     helperText:
-      'Show a brighter white-wall concept for a clean, airy feel.',
+      'Show a brighter wall direction for a cleaner, airier feel.',
     strength: 0.98,
     guidanceScale: 9.4,
     numInferenceSteps: 54,
@@ -176,7 +176,7 @@ export const VISION_PRESETS = [
     basePrompt:
       'Create a conceptual preview of this room with the walls changed to a soft greige tone that feels modern and buyer-friendly. Make the wall-tone shift clearly visible and unmistakable while preserving the room’s true structure, trim, flooring, furniture, and layout. Keep the output realistic and suitable for listing-planning visualization.',
     helperText:
-      'Preview a softer designer-neutral wall palette.',
+      'Preview a softer designer-neutral wall direction.',
     strength: 0.96,
     guidanceScale: 9,
     numInferenceSteps: 48,
@@ -187,8 +187,8 @@ export const VISION_PRESETS = [
   {
     key: 'floor_light_wood',
     legacyKeys: [],
-    displayName: 'Light Wood Floors',
-    shortLabel: 'Light Wood',
+    displayName: 'Lighten Floors',
+    shortLabel: 'Lighten Floors',
     category: 'concept_preview',
     roomCompatibility: ['living_room', 'bedroom', 'dining_room', 'office', 'unknown'],
     providerPreference: 'local_sharp_only',
@@ -198,9 +198,9 @@ export const VISION_PRESETS = [
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Create a conceptual preview of this room with the flooring changed to a light wood look suitable for a modern residential listing. Preserve room proportions, baseboards, walls, architecture, and flooring perspective lines. Keep the output realistic and clearly a planning concept.',
+      'Create a conceptual preview of this room with the flooring shifted lighter for a brighter, cleaner buyer-facing presentation. Preserve room proportions, baseboards, walls, architecture, and flooring perspective lines. Keep the output realistic and clearly a planning concept, not an exact material replacement.',
     helperText:
-      'Preview a lighter wood floor finish to modernize the room.',
+      'Preview a lighter floor direction to brighten the room.',
     strength: 0.95,
     guidanceScale: 9,
     numInferenceSteps: 44,
@@ -211,8 +211,8 @@ export const VISION_PRESETS = [
   {
     key: 'floor_medium_wood',
     legacyKeys: [],
-    displayName: 'Medium Wood Floors',
-    shortLabel: 'Medium Wood',
+    displayName: 'Warm Floors',
+    shortLabel: 'Warm Floors',
     category: 'concept_preview',
     roomCompatibility: ['living_room', 'bedroom', 'dining_room', 'office', 'unknown'],
     providerPreference: 'local_sharp_only',
@@ -222,9 +222,9 @@ export const VISION_PRESETS = [
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Create a conceptual preview of this room with the flooring changed to a medium-tone wood finish that feels warm, modern, and buyer-friendly. Preserve the room structure, layout, baseboards, and perspective. Keep the output realistic and appropriate for planning visualization.',
+      'Create a conceptual preview of this room with the flooring shifted toward a warmer medium-tone direction that feels inviting, modern, and buyer-friendly. Preserve the room structure, layout, baseboards, and perspective. Keep the output realistic and appropriate for planning visualization rather than exact material simulation.',
     helperText:
-      'Preview a richer medium-tone wood floor concept.',
+      'Preview a warmer floor direction for a more inviting feel.',
     strength: 0.95,
     guidanceScale: 9,
     numInferenceSteps: 44,
@@ -235,8 +235,8 @@ export const VISION_PRESETS = [
   {
     key: 'floor_dark_hardwood',
     legacyKeys: [],
-    displayName: 'Dark Hardwood Floors',
-    shortLabel: 'Dark Wood',
+    displayName: 'Darken Floors',
+    shortLabel: 'Darken Floors',
     category: 'concept_preview',
     roomCompatibility: ['living_room', 'bedroom', 'dining_room', 'office', 'unknown'],
     providerPreference: 'local_sharp_only',
@@ -246,9 +246,9 @@ export const VISION_PRESETS = [
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Create a conceptual preview of this room with the flooring changed to a clearly darker rich hardwood finish, such as walnut or espresso-toned planks, so the floor reads noticeably deeper and more upscale than the source image. Preserve room proportions, baseboards, walls, furniture perspective, reflections, and architecture. Keep the output realistic and clearly a planning concept.',
+      'Create a conceptual preview of this room with the flooring shifted to a clearly darker, richer direction so the floor reads noticeably deeper and more upscale than the source image. Preserve room proportions, baseboards, walls, furniture perspective, reflections, and architecture. Keep the output realistic and clearly a planning concept, not an exact install preview.',
     helperText:
-      'Preview a richer dark-hardwood floor direction.',
+      'Preview a darker floor direction with more contrast and richness.',
     strength: 0.97,
     guidanceScale: 9.6,
     numInferenceSteps: 50,
@@ -259,8 +259,8 @@ export const VISION_PRESETS = [
   {
     key: 'floor_lvp_neutral',
     legacyKeys: [],
-    displayName: 'Neutral LVP Floors',
-    shortLabel: 'Neutral LVP',
+    displayName: 'Neutralize Floors',
+    shortLabel: 'Neutralize Floors',
     category: 'concept_preview',
     roomCompatibility: ['living_room', 'bedroom', 'dining_room', 'office', 'kitchen', 'unknown'],
     providerPreference: 'local_sharp_only',
@@ -270,9 +270,9 @@ export const VISION_PRESETS = [
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Create a conceptual preview of this room with the flooring changed to a neutral luxury vinyl plank look suitable for a practical, updated residential listing. Preserve architecture, cabinetry, appliances, room proportions, and floor perspective. Keep the image realistic and suitable as a concept only.',
+      'Create a conceptual preview of this room with the flooring shifted toward a more neutral, broadly buyer-friendly finish direction. Preserve architecture, cabinetry, appliances, room proportions, and floor perspective. Keep the image realistic and suitable as a concept only, not an exact material match.',
     helperText:
-      'Preview a neutral LVP upgrade with a durable, updated feel.',
+      'Preview a more neutral floor direction for broader buyer appeal.',
     strength: 0.95,
     guidanceScale: 9,
     numInferenceSteps: 44,
@@ -285,6 +285,7 @@ export const VISION_PRESETS = [
     legacyKeys: [],
     displayName: 'Tile / Stone Floors',
     shortLabel: 'Tile / Stone',
+    hiddenFromCatalog: true,
     category: 'concept_preview',
     roomCompatibility: ['kitchen', 'bathroom', 'living_room', 'dining_room', 'exterior', 'unknown'],
     providerPreference: 'replicate',

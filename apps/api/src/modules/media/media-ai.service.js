@@ -798,26 +798,26 @@ function buildLocalFloorToneConfig(presetKey) {
   if (presetKey === 'floor_tile_stone') {
     return {
       kind: 'tile',
-      targetHue: 36 / 360,
-      targetSaturation: 0.1,
-      targetLightness: 0.7,
+      targetHue: 34 / 360,
+      targetSaturation: 0.075,
+      targetLightness: 0.78,
       groutHue: 34 / 360,
-      groutSaturation: 0.045,
-      groutLightness: 0.82,
-      groutWidth: 0.18,
-      groutFeather: 0.03,
-      tileAspect: 1.45,
-      topRowHeight: 24,
-      bottomRowHeight: 96,
+      groutSaturation: 0.025,
+      groutLightness: 0.9,
+      groutWidth: 0.085,
+      groutFeather: 0.02,
+      tileAspect: 1.08,
+      topRowHeight: 16,
+      bottomRowHeight: 56,
       blendMix: 1,
-      alphaExponent: 0.18,
+      alphaExponent: 0.22,
       minBlend: 1,
-      shadingScale: 0.08,
-      tileVariation: 0.03,
-      veiningStrength: 0.022,
-      planeGradientStrength: 0.025,
-      sourceShadingRetention: 0.02,
-      macroNoiseStrength: 0.025,
+      shadingScale: 0.16,
+      tileVariation: 0.015,
+      veiningStrength: 0.004,
+      planeGradientStrength: 0.018,
+      sourceShadingRetention: 0.08,
+      macroNoiseStrength: 0.012,
     };
   }
 
@@ -1958,20 +1958,20 @@ async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) 
           seamDistance,
         );
         const tileNoise = pseudoRandom01(tileRow, tileCol, 1);
-        const veinNoise = pseudoRandom01(
-          Math.floor(x / 22),
-          Math.floor((y - floorTop) / 18),
-          2,
-        );
         const macroNoise = pseudoRandom01(
           Math.floor(x / 64),
           Math.floor((y - floorTop) / 56),
           3,
         );
-        const microNoise = pseudoRandom01(
-          Math.floor(x / 10),
-          Math.floor((y - floorTop) / 10),
+        const blotchNoiseA = pseudoRandom01(
+          Math.floor(x / 28),
+          Math.floor((y - floorTop) / 24),
           4,
+        );
+        const blotchNoiseB = pseudoRandom01(
+          Math.floor(x / 44),
+          Math.floor((y - floorTop) / 38),
+          5,
         );
         const sourceShadingRetention = Number(toneConfig.sourceShadingRetention || 0.18);
         const subduedSourceShading =
@@ -1979,20 +1979,22 @@ async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) 
         const planeGradient =
           (0.5 - Math.abs(planeT - 0.52)) * Number(toneConfig.planeGradientStrength || 0.04) -
           Number(toneConfig.planeGradientStrength || 0.04) * 0.5;
+        const stoneMottle =
+          (blotchNoiseA - 0.5) * 0.018 +
+          (blotchNoiseB - 0.5) * 0.014 +
+          (macroNoise - 0.5) * Number(toneConfig.macroNoiseStrength || 0.02);
         const tileHue = clamp01(toneConfig.targetHue + (tileNoise - 0.5) * 0.018);
         const tileSaturation = clamp01(
           toneConfig.targetSaturation +
-            (tileNoise - 0.5) * 0.018 +
-            (macroNoise - 0.5) * 0.006,
+            (tileNoise - 0.5) * 0.012 +
+            stoneMottle * 0.35,
         );
         const tileLightness = clamp01(
           toneConfig.targetLightness +
             subduedSourceShading * Number(toneConfig.shadingScale || 0.62) +
             planeGradient +
             (tileNoise - 0.5) * Number(toneConfig.tileVariation || 0.06) +
-            (veinNoise - 0.5) * Number(toneConfig.veiningStrength || 0.03) +
-            (macroNoise - 0.5) * Number(toneConfig.macroNoiseStrength || 0.02) +
-            (microNoise - 0.5) * 0.008,
+            stoneMottle,
         );
         const groutLightness = clamp01(
           toneConfig.groutLightness + subduedSourceShading * 0.06,

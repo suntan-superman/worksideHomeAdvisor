@@ -126,25 +126,20 @@ const VISION_WORKFLOW_STAGES = [
   {
     key: 'finish',
     label: '2. Finishes',
-    title: 'Finish updates',
-    description: 'Apply flooring, wall-color, cabinetry, and countertop concepts to the cleaned room.',
+    title: 'Buyer Appeal Previews',
+    description:
+      'Preview simple buyer-friendly finish directions like brighter walls and lighter, warmer, darker, or more neutral floors.',
     nextKey: 'style',
     groups: [
       {
         key: 'wall_color',
-        label: 'Wall color concepts',
+        label: 'Wall color previews',
         items: ['paint_warm_neutral', 'paint_bright_white', 'paint_soft_greige'],
       },
       {
         key: 'flooring',
-        label: 'Flooring concepts',
-        items: [
-          'floor_light_wood',
-          'floor_medium_wood',
-          'floor_dark_hardwood',
-          'floor_lvp_neutral',
-          'floor_tile_stone',
-        ],
+        label: 'Floor tone previews',
+        items: ['floor_light_wood', 'floor_medium_wood', 'floor_dark_hardwood', 'floor_lvp_neutral'],
       },
       {
         key: 'kitchen_upgrade',
@@ -6519,7 +6514,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     {resolvedActivePhotoDetailsAsset.generationStage === 'clean_room'
                       ? 'Clean room'
                       : resolvedActivePhotoDetailsAsset.generationStage === 'finishes'
-                      ? 'Finish updates'
+                      ? 'Buyer appeal previews'
                       : resolvedActivePhotoDetailsAsset.generationStage === 'style'
                       ? 'Style concept'
                       : 'Saved image version'}

@@ -60,7 +60,7 @@ export function buildProviderChain({ preset, userPlan, openAiAvailable = false }
   }
 
   if (key === 'floor_tile_stone') {
-    return ['replicate_basic', 'replicate_advanced'];
+    return ['replicate_basic', 'replicate_advanced', 'local_sharp'];
   }
 
   if (isPaintPreset || isFloorPreset) {
