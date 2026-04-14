@@ -163,8 +163,22 @@ export async function orchestrateVisionJob({
         });
       }
 
+      // Filter out true no-op results before ranking so silent failures do not look usable.
+      const filteredCandidates = (providerCandidates || []).filter((candidate) => {
+        const maskedChange = Number(candidate?.maskedChangeRatio || 0);
+        const luminance = Math.abs(Number(candidate?.maskedLuminanceDelta || 0));
+        const colorShift = Number(candidate?.maskedColorShiftRatio || 0);
+
+        const isNoOp =
+          maskedChange < 0.01 &&
+          luminance < 0.01 &&
+          colorShift < 0.01;
+
+        return !isNoOp;
+      });
+
       const normalizedCandidates = rankCandidates(
-        (providerCandidates || []).map((candidate, index) => ({
+        filteredCandidates.map((candidate, index) => ({
           ...candidate,
           providerKey,
           providerAttemptIndex: attempts.length,
@@ -275,9 +289,15 @@ export async function orchestrateVisionJob({
     allCandidates,
     preset.key,
   ).length > 0;
+  const hasRealChange = allCandidates.some(
+    (candidate) =>
+      Number(candidate.maskedChangeRatio || 0) > 0.02 ||
+      Math.abs(Number(candidate.maskedLuminanceDelta || 0)) > 0.02 ||
+      Number(candidate.maskedColorShiftRatio || 0) > 0.02,
+  );
   const bestVariant =
     shouldRequireRealFinishCandidate &&
-    !sufficientCandidateExists &&
+    (!sufficientCandidateExists || !hasRealChange) &&
     !preferredFinishFallbackExists
       ? allowBestEffortFinishCandidate
         ? rankedCandidates[0] || null
@@ -289,7 +309,7 @@ export async function orchestrateVisionJob({
     bestVariant,
     stoppedEarlyReason:
       shouldRequireRealFinishCandidate &&
-      !sufficientCandidateExists &&
+      (!sufficientCandidateExists || !hasRealChange) &&
       !preferredFinishFallbackExists
         ? allowBestEffortFinishCandidate
           ? 'best_effort_finish_candidate'

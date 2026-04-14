@@ -55,15 +55,20 @@ export function buildProviderChain({ preset, userPlan, openAiAvailable = false }
   const isDeterministicOnly =
     key === 'enhance_listing_quality' || key === 'combined_listing_refresh';
 
-  if (isDeterministicOnly || preset?.providerPreference === 'local_sharp_only') {
+  if (isDeterministicOnly) {
     return ['local_sharp'];
   }
 
-  if (key === 'floor_tile_stone') {
-    return ['replicate_basic', 'replicate_advanced', 'local_sharp'];
+  // TEMP FIX: Local floor transformations are unreliable -> force replicate
+  if (isFloorPreset) {
+    return ['replicate_basic', 'replicate_advanced'];
   }
 
-  if (isPaintPreset || isFloorPreset) {
+  if (preset?.providerPreference === 'local_sharp_only') {
+    return ['local_sharp'];
+  }
+
+  if (isPaintPreset) {
     return ['local_sharp', 'replicate_basic', 'replicate_advanced'];
   }
 
@@ -378,9 +383,10 @@ export function isCandidateSufficient(candidate, presetKey) {
       );
     }
 
+    // Relaxed thresholds for subtle floor tone changes
     return (
-      Number(candidate.focusRegionChangeRatio || 0) >= 0.1 &&
-      Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
+      Number(candidate.focusRegionChangeRatio || 0) >= 0.05 &&
+      Number(candidate.maskedChangeRatio || 0) >= 0.06 &&
       Number(candidate.furnitureCoverageIncreaseRatio || 0) <= 0.02
     );
   }
