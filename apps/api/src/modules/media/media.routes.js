@@ -71,10 +71,12 @@ const updateMediaAssetSchema = z.object({
   listingNote: z.string().max(280).optional(),
 });
 
+const nonEmptyTrimmedString = z.string().trim().min(1);
+
 const imageJobRequestSchema = z.object({
-  jobType: z.string().optional(),
-  presetKey: z.string().optional(),
-  sourceVariantId: z.string().min(1).optional(),
+  jobType: nonEmptyTrimmedString.optional(),
+  presetKey: nonEmptyTrimmedString.optional(),
+  sourceVariantId: nonEmptyTrimmedString.optional(),
   roomType: z.string().max(80).optional(),
   workflowStageKey: z.string().max(80).optional(),
   mode: z.enum(['preset', 'freeform']).optional(),
@@ -109,9 +111,9 @@ const mediaCreateSchema = photoAnalysisSchema.extend({
 
 const photoEnhanceSchema = z.object({
   assetId: z.string().min(1),
-  presetKey: z.string().optional(),
-  jobType: z.string().optional(),
-  sourceVariantId: z.string().min(1).optional(),
+  presetKey: nonEmptyTrimmedString.optional(),
+  jobType: nonEmptyTrimmedString.optional(),
+  sourceVariantId: nonEmptyTrimmedString.optional(),
   roomType: z.string().max(80).optional(),
   workflowStageKey: z.string().max(80).optional(),
   mode: z.enum(['preset', 'freeform']).optional(),
@@ -286,7 +288,21 @@ export async function mediaRoutes(fastify) {
       return reply.code(201).send(result);
     } catch (error) {
       const statusCode = error.message === 'Media asset not found.' ? 404 : 400;
-      return reply.code(statusCode).send({ message: error.message });
+      const isValidationError = error instanceof z.ZodError;
+      if (statusCode === 400) {
+        console.error('vision_enhance_error', {
+          message: error.message,
+          issues: isValidationError ? error.issues : undefined,
+          presetKey: request?.body?.presetKey,
+          jobType: request?.body?.jobType,
+          mode: request?.body?.mode,
+          workflowStageKey: request?.body?.workflowStageKey,
+        });
+      }
+      return reply.code(statusCode).send({
+        message: isValidationError ? 'Invalid vision request.' : error.message,
+        issues: isValidationError ? error.issues : undefined,
+      });
     }
   });
 
@@ -312,7 +328,22 @@ export async function mediaRoutes(fastify) {
       });
       return reply.code(201).send(result);
     } catch (error) {
-      return reply.code(error.message === 'Media asset not found.' ? 404 : 400).send({ message: error.message });
+      const statusCode = error.message === 'Media asset not found.' ? 404 : 400;
+      const isValidationError = error instanceof z.ZodError;
+      if (statusCode === 400) {
+        console.error('photo_enhance_error', {
+          message: error.message,
+          issues: isValidationError ? error.issues : undefined,
+          presetKey: request?.body?.presetKey,
+          jobType: request?.body?.jobType,
+          mode: request?.body?.mode,
+          workflowStageKey: request?.body?.workflowStageKey,
+        });
+      }
+      return reply.code(statusCode).send({
+        message: isValidationError ? 'Invalid photo enhancement request.' : error.message,
+        issues: isValidationError ? error.issues : undefined,
+      });
     }
   });
 
