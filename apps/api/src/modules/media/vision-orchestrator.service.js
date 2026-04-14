@@ -166,19 +166,12 @@ export async function orchestrateVisionJob({
       const isFloorPreset = String(preset?.key || '').startsWith('floor_');
 
       // Filter out true no-op results before ranking so silent failures do not look usable.
-      const filteredCandidates = (providerCandidates || []).filter((candidate) => {
+      const filteredCandidates = isFloorPreset
+        ? [...(providerCandidates || [])]
+        : (providerCandidates || []).filter((candidate) => {
         const maskedChange = Number(candidate?.maskedChangeRatio || 0);
         const luminance = Math.abs(Number(candidate?.maskedLuminanceDelta || 0));
         const colorShift = Number(candidate?.maskedColorShiftRatio || 0);
-
-        if (isFloorPreset) {
-          const isNoOp =
-            maskedChange < 0.005 &&
-            luminance < 0.005 &&
-            colorShift < 0.005;
-
-          return !isNoOp;
-        }
 
         const isNoOp =
           maskedChange < 0.01 &&

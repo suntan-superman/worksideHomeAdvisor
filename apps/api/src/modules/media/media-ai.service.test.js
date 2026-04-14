@@ -404,6 +404,38 @@ test('floor presets keep a subtle candidate instead of dropping everything as a 
   assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
 });
 
+test('floor presets keep even extremely subtle raw candidates instead of filtering them out', async () => {
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('floor_light_wood'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runLocalSharp: async () => [
+        {
+          providerKey: 'local_sharp',
+          overallScore: 68,
+          focusRegionChangeRatio: 0.03,
+          maskedChangeRatio: 0,
+          maskedColorShiftRatio: 0,
+          maskedLuminanceDelta: 0,
+          outsideMaskChangeRatio: 0.01,
+          topHalfChangeRatio: 0,
+          furnitureCoverageIncreaseRatio: 0,
+        },
+      ],
+      runReplicateProvider: async () => [],
+    },
+  });
+
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
+  assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
+});
+
 test('finish presets fail instead of returning a no-op candidate when nothing usable was produced', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
