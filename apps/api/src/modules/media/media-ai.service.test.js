@@ -146,14 +146,14 @@ test('wall paint presets now use the deterministic local pipeline only', () => {
   );
 });
 
-test('floor tone presets stay on the deterministic local pipeline', () => {
+test('floor tone presets now use the replicate finish pipeline', () => {
   assert.deepEqual(
     buildProviderChain({
       preset: resolveVisionPreset('floor_light_wood'),
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['local_sharp'],
+    ['replicate_basic', 'replicate_advanced', 'openai_edit'],
   );
 });
 
@@ -382,9 +382,10 @@ test('floor presets keep a subtle candidate instead of dropping everything as a 
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runLocalSharp: async () => [
+      runLocalSharp: async () => [],
+      runReplicateProvider: async () => [
         {
-          providerKey: 'local_sharp',
+          providerKey: 'replicate_basic',
           overallScore: 71,
           focusRegionChangeRatio: 0.052,
           maskedChangeRatio: 0.007,
@@ -395,12 +396,11 @@ test('floor presets keep a subtle candidate instead of dropping everything as a 
           furnitureCoverageIncreaseRatio: 0,
         },
       ],
-      runReplicateProvider: async () => [],
     },
   });
 
-  assert.equal(result.providerUsed, 'local_sharp');
-  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
+  assert.equal(result.providerUsed, 'replicate_basic');
+  assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
   assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
 });
 
@@ -414,9 +414,10 @@ test('floor presets keep even extremely subtle raw candidates instead of filteri
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runLocalSharp: async () => [
+      runLocalSharp: async () => [],
+      runReplicateProvider: async () => [
         {
-          providerKey: 'local_sharp',
+          providerKey: 'replicate_basic',
           overallScore: 68,
           focusRegionChangeRatio: 0.03,
           maskedChangeRatio: 0,
@@ -427,12 +428,11 @@ test('floor presets keep even extremely subtle raw candidates instead of filteri
           furnitureCoverageIncreaseRatio: 0,
         },
       ],
-      runReplicateProvider: async () => [],
     },
   });
 
-  assert.equal(result.providerUsed, 'local_sharp');
-  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
+  assert.equal(result.providerUsed, 'replicate_basic');
+  assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
   assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
 });
 
