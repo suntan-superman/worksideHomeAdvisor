@@ -63,12 +63,12 @@ export function buildProviderChain({ preset, userPlan, openAiAvailable = false }
     return ['replicate_basic', 'replicate_advanced'];
   }
 
-  if (preset?.providerPreference === 'local_sharp_only') {
-    return ['local_sharp'];
+  if (isPaintPreset) {
+    return ['replicate_basic', 'replicate_advanced'];
   }
 
-  if (isPaintPreset) {
-    return ['local_sharp', 'replicate_basic', 'replicate_advanced'];
+  if (preset?.providerPreference === 'local_sharp_only') {
+    return ['local_sharp'];
   }
 
   if (STANDARD_ONLY_PRESET_KEYS.has(key)) {
@@ -399,12 +399,11 @@ export function isCandidateSufficient(candidate, presetKey) {
 
     if (presetKey === 'paint_bright_white') {
       return (
-        Number(candidate.maskedChangeRatio || 0) >= 0.09 &&
-        maskedColorShiftRatio >= 0.05 &&
-        maskedLuminanceDelta >= 0.034 &&
-        maskedEdgeDensityDelta <= 0.004 &&
-        Number(candidate.topHalfChangeRatio || 1) <= 0.08 &&
-        Number(candidate.outsideMaskChangeRatio || 1) <= 0.2 &&
+        Number(candidate.maskedLuminanceDelta || 0) >= 0.015 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.04 &&
+        Number(candidate.outsideMaskChangeRatio || 1) <= 0.25 &&
+        maskedEdgeDensityDelta <= 0.006 &&
+        Number(candidate.topHalfChangeRatio || 1) <= 0.1 &&
         furnitureCoverageIncreaseRatio <= 0.015 &&
         newFurnitureAdditionRatio <= 0.02
       );

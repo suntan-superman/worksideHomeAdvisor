@@ -164,9 +164,10 @@ export async function orchestrateVisionJob({
       }
 
       const isFloorPreset = String(preset?.key || '').startsWith('floor_');
+      const isWallPreset = String(preset?.key || '').startsWith('paint_');
 
       // Filter out true no-op results before ranking so silent failures do not look usable.
-      const filteredCandidates = isFloorPreset
+      const filteredCandidates = isFloorPreset || isWallPreset
         ? [...(providerCandidates || [])]
         : (providerCandidates || []).filter((candidate) => {
         const maskedChange = Number(candidate?.maskedChangeRatio || 0);

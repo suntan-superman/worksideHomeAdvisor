@@ -135,14 +135,14 @@ test('buildProviderChain includes openai_edit for premium remove_furniture when 
   );
 });
 
-test('wall paint presets now use the deterministic local pipeline only', () => {
+test('wall paint presets now use the replicate paint pipeline', () => {
   assert.deepEqual(
     buildProviderChain({
       preset: resolveVisionPreset('paint_bright_white'),
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['local_sharp'],
+    ['replicate_basic', 'replicate_advanced'],
   );
 });
 
@@ -179,7 +179,7 @@ test('tile or stone preset uses explicit material-replacement defaults', () => {
   assert.match(preset.negativePrompt, /overlay texture/i);
 });
 
-test('paint presets stay on the local deterministic pipeline', async () => {
+test('paint presets use the replicate paint chain before selecting a winner', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
@@ -207,14 +207,30 @@ test('paint presets stay on the local deterministic pipeline', async () => {
       },
       runReplicateProvider: async ({ providerKey }) => {
         callOrder.push(providerKey);
-        return [];
+        if (providerKey === 'replicate_basic') {
+          return [];
+        }
+
+        return [
+          {
+            overallScore: 80,
+            maskedChangeRatio: 0.11,
+            maskedColorShiftRatio: 0.06,
+            maskedLuminanceDelta: 0.03,
+            maskedEdgeDensityDelta: 0,
+            topHalfChangeRatio: 0.03,
+            outsideMaskChangeRatio: 0.07,
+            furnitureCoverageIncreaseRatio: 0,
+            newFurnitureAdditionRatio: 0,
+          },
+        ];
       },
     },
   });
 
-  assert.deepEqual(callOrder, ['local_sharp']);
-  assert.equal(result.providerUsed, 'local_sharp');
-  assert.equal(result.providerAttemptCount, 1);
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced']);
+  assert.equal(result.providerUsed, 'replicate_advanced');
+  assert.equal(result.providerAttemptCount, 2);
 });
 
 test('floor presets use the replicate chain when tile or stone is requested', async () => {
@@ -291,7 +307,7 @@ test('tile or stone floors keep the best safe replicate candidate when strict th
   assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
 });
 
-test('paint presets prefer a stronger safe local fallback when replicate candidates stay near-original', async () => {
+test('paint presets keep a subtle but real replicate wall repaint instead of failing outright', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('paint_soft_greige'),
@@ -302,54 +318,27 @@ test('paint presets prefer a stronger safe local fallback when replicate candida
     sourceImageBase64: 'source',
     providerRunners: {
       runReplicateProvider: async ({ providerKey }) => {
-        if (providerKey === 'replicate_basic') {
-          return [
-            {
-              providerKey,
-              overallScore: 90,
-              maskedChangeRatio: 0.05,
-              maskedColorShiftRatio: 0.02,
-              maskedEdgeDensityDelta: 0.0004,
-              topHalfChangeRatio: 0.02,
-              outsideMaskChangeRatio: 0.04,
-              furnitureCoverageIncreaseRatio: 0,
-              newFurnitureAdditionRatio: 0,
-            },
-          ];
-        }
-
         return [
           {
             providerKey,
             overallScore: 88,
-            maskedChangeRatio: 0.06,
-            maskedColorShiftRatio: 0.025,
+            maskedChangeRatio: 0.045,
+            maskedColorShiftRatio: 0.02,
+            maskedLuminanceDelta: 0.02,
             maskedEdgeDensityDelta: 0.0006,
             topHalfChangeRatio: 0.03,
-            outsideMaskChangeRatio: 0.05,
+            outsideMaskChangeRatio: 0.09,
             furnitureCoverageIncreaseRatio: 0,
             newFurnitureAdditionRatio: 0,
           },
         ];
       },
-      runLocalSharp: async () => [
-        {
-          providerKey: 'local_sharp',
-          overallScore: 76,
-          maskedChangeRatio: 0.11,
-          maskedColorShiftRatio: 0.06,
-          maskedEdgeDensityDelta: 0.0003,
-          topHalfChangeRatio: 0.03,
-          outsideMaskChangeRatio: 0.07,
-          furnitureCoverageIncreaseRatio: 0,
-          newFurnitureAdditionRatio: 0,
-        },
-      ],
+      runLocalSharp: async () => [],
     },
   });
 
-  assert.equal(result.providerUsed, 'local_sharp');
-  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
+  assert.equal(result.providerUsed, 'replicate_basic');
+  assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
 });
 
 test('floor presets surface the best-effort finish outcome when tile providers return nothing usable', async () => {
