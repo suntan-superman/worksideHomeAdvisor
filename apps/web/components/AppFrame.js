@@ -5,7 +5,12 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import { BRANDING } from '@workside/branding';
-import { clearStoredSession, getStoredSession } from '../lib/session';
+import {
+  clearStoredSession,
+  getStoredSession,
+  getStoredSessionLastActivityAt,
+  touchStoredSessionActivity,
+} from '../lib/session';
 import { clearStoredProviderSession, getStoredProviderSession } from '../lib/provider-session';
 import { clearStoredAuthOnboardingState } from '../lib/onboarding-state';
 
@@ -20,6 +25,16 @@ export function AppFrame({ children, busy = false }) {
   const router = useRouter();
   const [session, setSession] = useState(null);
   const [providerSession, setProviderSession] = useState(null);
+
+  function handleForcedSignOut() {
+    clearStoredSession();
+    clearStoredProviderSession();
+    clearStoredAuthOnboardingState();
+    setSession(null);
+    setProviderSession(null);
+    router.replace('/auth?timedOut=1');
+    router.refresh();
+  }
 
   useEffect(() => {
     setSession(getStoredSession());
@@ -45,30 +60,50 @@ export function AppFrame({ children, busy = false }) {
 
     let timeoutId = null;
 
-    function handleIdleTimeout() {
-      clearStoredSession();
-      clearStoredProviderSession();
-      clearStoredAuthOnboardingState();
-      setSession(null);
-      setProviderSession(null);
-      router.replace('/auth?timedOut=1');
-      router.refresh();
+    function isSessionIdle() {
+      const lastActivityAt = getStoredSessionLastActivityAt();
+      if (!lastActivityAt) {
+        return false;
+      }
+
+      return Date.now() - lastActivityAt >= WEB_IDLE_TIMEOUT_MS;
     }
 
     function resetTimer() {
+      if (isSessionIdle()) {
+        handleForcedSignOut();
+        return;
+      }
+
       if (timeoutId) {
         window.clearTimeout(timeoutId);
       }
 
-      timeoutId = window.setTimeout(handleIdleTimeout, WEB_IDLE_TIMEOUT_MS);
+      touchStoredSessionActivity();
+      timeoutId = window.setTimeout(handleForcedSignOut, WEB_IDLE_TIMEOUT_MS);
     }
 
-    const events = ['mousedown', 'keydown', 'touchstart', 'scroll', 'focus'];
+    function handleVisibilityOrFocus() {
+      if (isSessionIdle()) {
+        handleForcedSignOut();
+        return;
+      }
+
+      resetTimer();
+    }
+
+    const events = ['mousedown', 'keydown', 'touchstart', 'scroll'];
     events.forEach((eventName) => {
       window.addEventListener(eventName, resetTimer);
     });
+    window.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
 
-    resetTimer();
+    if (getStoredSessionLastActivityAt() == null) {
+      touchStoredSessionActivity();
+    }
+
+    handleVisibilityOrFocus();
 
     return () => {
       if (timeoutId) {
@@ -78,6 +113,8 @@ export function AppFrame({ children, busy = false }) {
       events.forEach((eventName) => {
         window.removeEventListener(eventName, resetTimer);
       });
+      window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
     };
   }, [providerSession?.token, router, session?.token]);
 
