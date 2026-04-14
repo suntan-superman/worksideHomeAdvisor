@@ -288,7 +288,7 @@ export const VISION_PRESETS = [
     category: 'concept_preview',
     roomCompatibility: ['kitchen', 'bathroom', 'exterior', 'unknown'],
     providerPreference: 'local_sharp_only',
-    promptVersion: 10,
+    promptVersion: 11,
     outputCount: 1,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],

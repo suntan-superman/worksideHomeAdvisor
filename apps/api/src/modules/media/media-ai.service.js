@@ -798,25 +798,25 @@ function buildLocalFloorToneConfig(presetKey) {
     return {
       kind: 'tile',
       targetHue: 34 / 360,
-      targetSaturation: 0.08,
-      targetLightness: 0.8,
-      groutHue: 32 / 360,
-      groutSaturation: 0.025,
-      groutLightness: 0.94,
-      groutWidth: 0.26,
-      groutFeather: 0.08,
-      tileAspect: 1.35,
-      topRowHeight: 18,
-      bottomRowHeight: 70,
+      targetSaturation: 0.045,
+      targetLightness: 0.76,
+      groutHue: 34 / 360,
+      groutSaturation: 0.03,
+      groutLightness: 0.62,
+      groutWidth: 0.34,
+      groutFeather: 0.04,
+      tileAspect: 1.02,
+      topRowHeight: 20,
+      bottomRowHeight: 86,
       blendMix: 1,
-      alphaExponent: 0.28,
-      minBlend: 0.995,
-      shadingScale: 0.06,
-      tileVariation: 0.018,
-      veiningStrength: 0.022,
-      planeGradientStrength: 0.045,
-      sourceShadingRetention: 0.18,
-      macroNoiseStrength: 0.02,
+      alphaExponent: 0.18,
+      minBlend: 1,
+      shadingScale: 0.1,
+      tileVariation: 0.06,
+      veiningStrength: 0.055,
+      planeGradientStrength: 0.03,
+      sourceShadingRetention: 0.04,
+      macroNoiseStrength: 0.05,
     };
   }
 
@@ -1967,15 +1967,22 @@ async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) 
           Math.floor((y - floorTop) / 56),
           3,
         );
+        const microNoise = pseudoRandom01(
+          Math.floor(x / 10),
+          Math.floor((y - floorTop) / 10),
+          4,
+        );
         const sourceShadingRetention = Number(toneConfig.sourceShadingRetention || 0.18);
         const subduedSourceShading =
           Math.max(-0.03, Math.min(0.03, shadingOffset)) * sourceShadingRetention;
         const planeGradient =
           (0.5 - Math.abs(planeT - 0.52)) * Number(toneConfig.planeGradientStrength || 0.04) -
           Number(toneConfig.planeGradientStrength || 0.04) * 0.5;
-        const tileHue = clamp01(toneConfig.targetHue + (tileNoise - 0.5) * 0.012);
+        const tileHue = clamp01(toneConfig.targetHue + (tileNoise - 0.5) * 0.018);
         const tileSaturation = clamp01(
-          toneConfig.targetSaturation + (tileNoise - 0.5) * 0.018,
+          toneConfig.targetSaturation +
+            (tileNoise - 0.5) * 0.024 +
+            (macroNoise - 0.5) * 0.01,
         );
         const tileLightness = clamp01(
           toneConfig.targetLightness +
@@ -1983,10 +1990,11 @@ async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) 
             planeGradient +
             (tileNoise - 0.5) * Number(toneConfig.tileVariation || 0.06) +
             (veinNoise - 0.5) * Number(toneConfig.veiningStrength || 0.03) +
-            (macroNoise - 0.5) * Number(toneConfig.macroNoiseStrength || 0.02),
+            (macroNoise - 0.5) * Number(toneConfig.macroNoiseStrength || 0.02) +
+            (microNoise - 0.5) * 0.018,
         );
         const groutLightness = clamp01(
-          toneConfig.groutLightness + subduedSourceShading * 0.12,
+          toneConfig.groutLightness + subduedSourceShading * 0.06,
         );
         const [tileRed, tileGreen, tileBlue] = hslToRgb(
           tileHue,
@@ -2031,12 +2039,20 @@ async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) 
         );
       }
 
-      const blendMix = clamp01(
-        Math.max(
-          effectiveAlpha * Number(toneConfig.blendMix || 0.96),
-          effectiveAlpha >= 0.45 ? Number(toneConfig.minBlend || 0) : 0,
-        ),
-      );
+      const blendMix =
+        toneConfig.kind === 'tile'
+          ? clamp01(
+              Math.max(
+                effectiveAlpha >= 0.2 ? Number(toneConfig.minBlend || 1) : 0,
+                effectiveAlpha * Number(toneConfig.blendMix || 1),
+              ),
+            )
+          : clamp01(
+              Math.max(
+                effectiveAlpha * Number(toneConfig.blendMix || 0.96),
+                effectiveAlpha >= 0.45 ? Number(toneConfig.minBlend || 0) : 0,
+              ),
+            );
 
       transformed[offset] = clampByte(mixValue(originalRed, targetRed, blendMix));
       transformed[offset + 1] = clampByte(mixValue(originalGreen, targetGreen, blendMix));
@@ -2054,7 +2070,7 @@ async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) 
     sourceBuffer,
     variantBuffer,
     maskBuffer: floorMask.adaptiveMaskBuffer,
-    maskBlur: 1.8,
+    maskBlur: toneConfig.kind === 'tile' ? 0.7 : 1.8,
   });
 }
 
