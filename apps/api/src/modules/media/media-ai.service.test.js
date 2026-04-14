@@ -246,7 +246,7 @@ test('floor presets can stop on a strong local deterministic candidate', async (
   assert.equal(result.providerAttemptCount, 1);
 });
 
-test('tile or stone floors fail honestly when no candidate produces a real material change', async () => {
+test('tile or stone floors keep the best safe local candidate when strict thresholds are missed', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('floor_tile_stone'),
@@ -287,9 +287,9 @@ test('tile or stone floors fail honestly when no candidate produces a real mater
     },
   });
 
-  assert.equal(result.providerUsed, null);
-  assert.equal(result.bestVariant, null);
-  assert.equal(result.stoppedEarlyReason, 'no_usable_finish_candidate');
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
+  assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
 });
 
 test('paint presets prefer a stronger safe local fallback when replicate candidates stay near-original', async () => {

@@ -297,6 +297,9 @@ export async function mediaRoutes(fastify) {
           jobType: request?.body?.jobType,
           mode: request?.body?.mode,
           workflowStageKey: request?.body?.workflowStageKey,
+          sourceVariantId: request?.body?.sourceVariantId,
+          assetId: request?.params?.assetId,
+          stack: isValidationError ? undefined : error?.stack,
         });
       }
       return reply.code(statusCode).send({
@@ -338,6 +341,9 @@ export async function mediaRoutes(fastify) {
           jobType: request?.body?.jobType,
           mode: request?.body?.mode,
           workflowStageKey: request?.body?.workflowStageKey,
+          sourceVariantId: request?.body?.sourceVariantId,
+          assetId: request?.body?.assetId,
+          stack: isValidationError ? undefined : error?.stack,
         });
       }
       return reply.code(statusCode).send({

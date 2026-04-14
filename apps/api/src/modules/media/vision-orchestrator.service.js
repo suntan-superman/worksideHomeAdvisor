@@ -35,6 +35,7 @@ export async function orchestrateVisionJob({
   const exhaustProviderChain =
     normalizedPresetKey === 'remove_furniture' || isSurfaceFinishPreset;
   const requiresLocalTileStoneAttempt = normalizedPresetKey === 'floor_tile_stone';
+  const allowBestEffortFinishCandidate = normalizedPresetKey.startsWith('floor_');
   const startedAt = Number(nowFn());
   const maxExecutionTimeMs = getVisionExecutionTimeBudgetMs(preset?.key);
   const attempts = [];
@@ -173,6 +174,27 @@ export async function orchestrateVisionJob({
         preset.key,
       );
 
+      if (isSurfaceFinishPreset && normalizedCandidates.length) {
+        normalizedCandidates.forEach((candidate) => {
+          console.log('Candidate evaluation', {
+            presetKey: preset.key,
+            providerKey,
+            overallScore: Number(candidate.overallScore || 0),
+            maskedChangeRatio: Number(candidate.maskedChangeRatio || 0),
+            focusRegionChangeRatio: Number(candidate.focusRegionChangeRatio || 0),
+            outsideMaskChangeRatio: Number(candidate.outsideMaskChangeRatio || 0),
+            maskedColorShiftRatio: Number(candidate.maskedColorShiftRatio || 0),
+            maskedLuminanceDelta: Number(candidate.maskedLuminanceDelta || 0),
+            maskedEdgeDensityDelta: Number(candidate.maskedEdgeDensityDelta || 0),
+            newFurnitureAdditionRatio: Number(candidate.newFurnitureAdditionRatio || 0),
+            furnitureCoverageIncreaseRatio: Number(
+              candidate.furnitureCoverageIncreaseRatio || 0,
+            ),
+            isSufficient: Boolean(candidate.isSufficient),
+          });
+        });
+      }
+
       attempts.push({
         providerKey,
         candidateCount: normalizedCandidates.length,
@@ -253,12 +275,11 @@ export async function orchestrateVisionJob({
     allCandidates,
     preset.key,
   ).length > 0;
-  const shouldAllowBestEffortFinishCandidate = false;
   const bestVariant =
     shouldRequireRealFinishCandidate &&
     !sufficientCandidateExists &&
     !preferredFinishFallbackExists
-      ? shouldAllowBestEffortFinishCandidate
+      ? allowBestEffortFinishCandidate
         ? rankedCandidates[0] || null
         : null
       : rankedCandidates[0] || null;
@@ -270,7 +291,7 @@ export async function orchestrateVisionJob({
       shouldRequireRealFinishCandidate &&
       !sufficientCandidateExists &&
       !preferredFinishFallbackExists
-        ? shouldAllowBestEffortFinishCandidate
+        ? allowBestEffortFinishCandidate
           ? 'best_effort_finish_candidate'
           : 'no_usable_finish_candidate'
         : null,
