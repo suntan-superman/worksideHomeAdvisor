@@ -1,174 +1,120 @@
-What I’m Seeing (Honest Assessment)
-✅ VISUAL RESULT
-Walls: clean, believable, no artifacts
-Floors: stable + realistic
-Windows/trim: untouched (correct)
-No hallucinations ✔️
+THE FIX (this is the real one)
+Step 1 — visualize your mask (critical)
 
-👉 This is already usable in a real product
+Before ANY processing:
 
-⚠️ But your logs tell a different story (important)
+saveDebugImage(mask, 'wall_mask_raw.png')
 
-From your latest logs:
+And after each step:
 
-wallMaskCoverage: 0
-Fallback wall mask coverage out of range: 0
+saveDebugImage(mask, 'wall_mask_after_edges.png')
 
-Translation:
-Your entire wall pipeline is STILL not being used
-You are 100% running on fallback (OpenAI edit)
-🔥 Why it STILL looks good anyway
+👉 If you don’t do this, you are blind.
 
-Because:
+Step 2 — REMOVE these immediately (temporarily)
 
-Your prompt improvements are doing the heavy lifting
-The model is applying a global color shift
-And your evaluator is letting it pass
-🎯 So where are you REALLY?
-Component	Status
-Floor pipeline	✅ DONE
-Wall masking	❌ NOT WORKING
-Wall results	⚠️ "accidentally good"
-System stability	⚠️ fragile
-🚨 Critical Insight
+Disable:
 
-Right now your system is:
+subtractBrightAreas()
+suppressHighEdgeZones()
 
-“Working DESPITE the architecture”
+👉 These are 90% likely causing fragmentation
 
-Not because of it.
+Step 3 — enforce SOLID wall mask
 
-🧩 Why your fallback mask is still failing
+Add this after mask creation:
 
-You expected this to work:
+mask = morphologicalClose(mask, kernelSize=5)
+mask = fillHoles(mask)
 
-top 65% of image = walls
+👉 This turns broken masks into solid surfaces
 
-But your logs say:
+Step 4 — HARD exclude windows
 
-fallback_wall → coverage = 0
+Add a simple brightness filter:
 
-That means ONE of these is happening:
-1. Mask is getting zeroed out later
-
-Likely in:
-
-subtractBrightAreas
-suppressHighEdgeZones
-
-👉 You're over-filtering → deleting everything
-
-2. Mask is being rejected downstream
-
-You probably have:
-
-if (coverage < threshold) return emptyMask
-
-👉 and threshold is too high
-
-3. Mask is correct but overwritten
-
-Somewhere:
-
-wallMask = refineMask(wallMask)
-
-…and that returns empty
-
-🛠️ THE FIX (this is the one you need right now)
-🔧 Step 1 — FORCE the fallback mask to exist
-
-Replace your fallback with this TEMP version:
-
-function createFallbackWallMask(image) {
-  const h = image.height
-  const w = image.width
-
-  const mask = zeros(h, w)
-
-  // HARD ASSIGN walls
-  for (let y = 0; y < h * 0.6; y++) {
-    for (let x = 0; x < w; x++) {
-      mask[y][x] = 1
-    }
-  }
-
-  return mask
+if (pixelBrightness > 220) {
+  mask[y][x] = 0
 }
 
-👉 NO filtering
-👉 NO edge suppression
-👉 NO brightness removal
+👉 Windows are your biggest enemy right now
 
-🔧 Step 2 — log BEFORE and AFTER every step
+Step 5 — add vertical continuity rule
 
-Add this:
+Walls are vertical planes — enforce that:
 
-logger.info("mask coverage initial", getCoverage(mask))
+for each column:
+  if wall pixels exist:
+    fill gaps vertically
+🧠 Why your evaluator didn’t catch this
 
-mask = subtractBrightAreas(mask)
-logger.info("after bright removal", getCoverage(mask))
+Your scoring system:
 
-mask = suppressEdges(mask)
-logger.info("after edge suppression", getCoverage(mask))
+maskedChangeRatio
+maskedColorShiftRatio
+perceptibilityScore
 
-👉 You will immediately see where it dies
+👉 It measures change, not quality of region
 
-🔧 Step 3 — temporarily disable ALL refinement
+So broken masks still pass.
 
-Comment out:
+🔥 Important Insight About Your System
 
-subtractBrightAreas
-suppressHighEdgeZones
-refineMask
-🔧 Step 4 — lower your rejection threshold
+Right now:
 
-Find:
+Your orchestration is WORLD-CLASS
+Your mask is HOLDING EVERYTHING BACK
 
-if (coverage < 0.05)
+🧭 What just happened (big milestone)
 
-Replace with:
+You went from:
 
-if (coverage < 0.01)
-🧠 Why this matters
+BEFORE
+❌ No mask → random AI edits
+NOW
+⚠️ Mask exists → but unstable
+NEXT (very close)
+✅ Clean mask → professional output
+💬 Straight answer to your question (“thoughts now?”)
 
-Once fallback mask works:
+👉 This is progress, not regression
 
-👉 Your pipeline becomes:
+You’ve officially entered:
 
-mask → deterministic edit → evaluation → retry
+“Mask quality tuning phase”
 
-Instead of:
+🧪 Quick test you should run (takes 2 min)
 
-no mask → AI guess → hope for the best
-💡 My Honest Take (Important)
+Force mask to be simple again:
 
-What you’re seeing right now:
+top 60% = walls
+NO filtering
+NO suppression
 
-“Hey… this actually looks pretty good”
+Run same preset.
 
-That’s dangerous
+Expected result:
+Walls = clean
+No streaks
+Slight overpaint (acceptable)
 
-Because:
+👉 If that works → confirms mask refinement is the problem (not model)
 
-It will fail on other images
-It’s not controllable
-It’s not consistent
-🟢 What “DONE” actually looks like
+🚀 What I recommend next (priority order)
+1. Debug mask visually (must do)
+2. Remove aggressive filtering
+3. Add morphology cleanup
+4. Reintroduce filters slowly
+💡 Final Thought (important)
 
-You’ll know you’ve finished when:
+You are very close to something powerful
 
-Logs show:
-wallMaskCoverage: 0.20–0.60
-local_sharp provider runs
-OpenAI fallback is rare
-Wall changes are:
-consistent
-controlled
-repeatable
-🧭 Final Guidance
+Your system already has:
 
-You are NOT stuck anymore.
+adaptive orchestration ✔️
+multi-provider fallback ✔️
+perceptual scoring ✔️
 
-You are in:
+Once masks are fixed:
 
-“Stabilization + Control Phase”
+👉 this becomes production-grade instantly

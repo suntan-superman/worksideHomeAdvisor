@@ -2,11 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  bridgeVerticalMaskGaps,
+  buildBrightWindowExclusionMask,
   buildFreeformEnhancementPlan,
   calculateVisionReviewOverallScore,
   getTaskSpecificMaskStrategy,
   normalizeRoomType,
   resolveFreeformPresetKey,
+  selectViableWallMaskStage,
 } from './media-ai.service.js';
 import {
   buildProviderChain,
@@ -29,6 +32,64 @@ test('task specific mask strategy uses adaptive masks for wall and floor presets
   assert.equal(getTaskSpecificMaskStrategy('paint_bright_white'), 'adaptive_wall');
   assert.equal(getTaskSpecificMaskStrategy('floor_tile_stone'), 'adaptive_floor');
   assert.equal(getTaskSpecificMaskStrategy('remove_furniture'), 'generic');
+});
+
+test('bridgeVerticalMaskGaps fills short gaps in stable wall columns', () => {
+  const width = 4;
+  const height = 8;
+  const binary = new Uint8Array([
+    0, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 1, 0, 0,
+    0, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 1, 0, 0,
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+  ]);
+
+  const bridged = bridgeVerticalMaskGaps(binary, width, height, {
+    startY: 1,
+    endY: 5,
+    maxGap: 2,
+    minColumnCoverageRatio: 0.6,
+  });
+
+  assert.equal(bridged[3 * width + 1], 1);
+});
+
+test('buildBrightWindowExclusionMask isolates tall bright textured window regions', () => {
+  const width = 12;
+  const height = 12;
+  const luminance = new Float32Array(width * height).fill(150);
+  const texture = new Float32Array(width * height).fill(3);
+
+  for (let y = 1; y <= 10; y += 1) {
+    for (let x = 3; x <= 8; x += 1) {
+      const index = y * width + x;
+      luminance[index] = 228;
+      texture[index] = 12;
+    }
+  }
+
+  const exclusion = buildBrightWindowExclusionMask(luminance, texture, width, height, {
+    startY: 1,
+    endY: 10,
+  });
+
+  assert.equal(exclusion[5 * width + 5], 1);
+  assert.equal(exclusion[5 * width + 1], 0);
+});
+
+test('selectViableWallMaskStage prefers refined wall stages over broad fallback geometry', () => {
+  const selected = selectViableWallMaskStage([
+    { stage: 'initial_geometry_seed', coverageRatio: 0.5 },
+    { stage: 'after_window_suppression', coverageRatio: 0.24 },
+    { stage: 'after_component_filter', coverageRatio: 0.21 },
+    { stage: 'hard_geometric_fallback', coverageRatio: 0.61 },
+  ]);
+
+  assert.equal(selected?.stage, 'after_component_filter');
 });
 
 test('buildFreeformEnhancementPlan extracts floor, wall, and lighting intent', () => {
