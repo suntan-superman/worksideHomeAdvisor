@@ -529,7 +529,7 @@ async function buildTemporaryReplicateInputUrls({
     .removeAlpha()
     .greyscale()
     .threshold(128, { grayscale: true })
-    .blur(String(presetKey || '') === 'floor_tile_stone' ? 10 : 0)
+    .blur(getFinishMaskBlurRadius(presetKey))
     .png()
     .toBuffer();
 
@@ -580,6 +580,24 @@ function clamp01(value) {
 
 function clampByte(value) {
   return Math.min(255, Math.max(0, Math.round(Number(value || 0))));
+}
+
+function isWallPreset(presetKey = '') {
+  return String(presetKey || '').startsWith('paint_');
+}
+
+function isFloorPreset(presetKey = '') {
+  return String(presetKey || '').startsWith('floor_');
+}
+
+function getFinishMaskBlurRadius(presetKey = '') {
+  if (isWallPreset(presetKey)) {
+    return 0.6;
+  }
+  if (isFloorPreset(presetKey)) {
+    return 0.8;
+  }
+  return 1.2;
 }
 
 function mixValue(source, target, ratio) {
@@ -1876,7 +1894,7 @@ async function renderLocalWallPaintVariantBuffer(sourceBuffer, presetKey, roomTy
     sourceBuffer,
     variantBuffer,
     maskBuffer: wallMask.adaptiveMaskBuffer,
-    maskBlur: 1.8,
+    maskBlur: getFinishMaskBlurRadius(presetKey),
   });
 }
 
@@ -2100,7 +2118,7 @@ async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) 
           sourceBuffer,
           variantBuffer,
           maskBuffer: floorMask.adaptiveMaskBuffer,
-          maskBlur: 1.8,
+          maskBlur: getFinishMaskBlurRadius(presetKey),
         });
 
   return {
@@ -2621,6 +2639,9 @@ async function buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, r
     }
   }
 
+  suppressLikelyWindows(binary, luminance, texture, probeWidth, probeHeight);
+  suppressWallDangerZones(binary, probeWidth, probeHeight);
+
   let smoothed = binary;
   for (let pass = 0; pass < 2; pass += 1) {
     const next = new Uint8Array(smoothed.length);
@@ -2678,6 +2699,55 @@ async function buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, r
     height,
     adaptiveMaskBuffer,
   };
+}
+
+function suppressWallDangerZones(binaryMask, width, height) {
+  const topDeadZone = Math.max(1, Math.round(height * 0.06));
+  const bottomDeadZone = Math.max(1, Math.round(height * 0.08));
+  const sideInset = Math.max(1, Math.round(width * 0.015));
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const idx = y * width + x;
+      if (y < topDeadZone || y >= height - bottomDeadZone) {
+        binaryMask[idx] = 0;
+        continue;
+      }
+      if (x < sideInset || x >= width - sideInset) {
+        binaryMask[idx] = 0;
+      }
+    }
+  }
+}
+
+function suppressLikelyWindows(binaryMask, luminance, texture, width, height) {
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const idx = y * width + x;
+      const lum = Number(luminance[idx] || 0);
+      const tex = Number(texture[idx] || 0);
+      if (lum > 215 && tex > 18) {
+        binaryMask[idx] = 0;
+      }
+    }
+  }
+}
+
+function suppressFloorDangerZones(binaryMask, width, height) {
+  const sideInset = Math.max(1, Math.round(width * 0.01));
+  const bottomInset = Math.max(1, Math.round(height * 0.02));
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const idx = y * width + x;
+      if (x < sideInset || x >= width - sideInset) {
+        binaryMask[idx] = 0;
+      }
+      if (y >= height - bottomInset) {
+        binaryMask[idx] = 0;
+      }
+    }
+  }
 }
 
 async function buildAdaptiveFloorMaskAtSourceSize(sourceBuffer, presetKey, roomType) {
@@ -2879,6 +2949,8 @@ async function buildAdaptiveFloorMaskAtSourceSize(sourceBuffer, presetKey, roomT
     }
   }
 
+  suppressFloorDangerZones(finalBinary, probeWidth, probeHeight);
+
   const adaptiveMaskBuffer = await buildBinaryMaskPngBuffer({
     binaryMask: finalBinary,
     inputWidth: probeWidth,
@@ -2896,43 +2968,65 @@ async function buildAdaptiveFloorMaskAtSourceSize(sourceBuffer, presetKey, roomT
 
 export function getTaskSpecificMaskStrategy(presetKey = '') {
   const normalizedPresetKey = String(presetKey || '');
-  if (normalizedPresetKey.startsWith('paint_')) {
+  if (isWallPreset(normalizedPresetKey)) {
     return 'adaptive_wall';
   }
-  if (normalizedPresetKey.startsWith('floor_')) {
+  if (isFloorPreset(normalizedPresetKey)) {
     return 'adaptive_floor';
   }
 
   return 'generic';
 }
 
+function validateMaskCoverage({ presetKey, coverageRatio }) {
+  if (isWallPreset(presetKey) && (coverageRatio < 0.08 || coverageRatio > 0.62)) {
+    throw new Error(`Wall mask coverage out of range: ${coverageRatio}`);
+  }
+
+  if (isFloorPreset(presetKey) && (coverageRatio < 0.1 || coverageRatio > 0.58)) {
+    throw new Error(`Floor mask coverage out of range: ${coverageRatio}`);
+  }
+}
+
+async function resolveSurfaceMaskAtSourceSize(sourceBuffer, presetKey, roomType) {
+  if (isWallPreset(presetKey)) {
+    const wall = await buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, roomType);
+    const coverageRatio = await calculateMaskCoverageRatio(wall.adaptiveMaskBuffer);
+    validateMaskCoverage({ presetKey, coverageRatio });
+    return {
+      maskBuffer: wall.adaptiveMaskBuffer,
+      debug: { strategy: 'adaptive_wall', maskCoverageRatio: coverageRatio },
+    };
+  }
+
+  if (isFloorPreset(presetKey)) {
+    const floor = await buildAdaptiveFloorMaskAtSourceSize(sourceBuffer, presetKey, roomType);
+    const coverageRatio = await calculateMaskCoverageRatio(floor.adaptiveMaskBuffer);
+    validateMaskCoverage({ presetKey, coverageRatio });
+    return {
+      maskBuffer: floor.adaptiveMaskBuffer,
+      debug: { strategy: 'adaptive_floor', maskCoverageRatio: coverageRatio },
+    };
+  }
+
+  return {
+    maskBuffer: await buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType),
+    debug: { strategy: 'geometric_fallback', maskCoverageRatio: null },
+  };
+}
+
 async function buildTaskSpecificMaskBuffer(sourceBuffer, presetKey, roomType) {
-  const strategy = getTaskSpecificMaskStrategy(presetKey);
-  if (strategy === 'adaptive_wall') {
-    const adaptiveMask = await buildAdaptiveWallPaintMaskAtSourceSize(
-      sourceBuffer,
+  try {
+    const resolvedMask = await resolveSurfaceMaskAtSourceSize(sourceBuffer, presetKey, roomType);
+    return resolvedMask.maskBuffer;
+  } catch (error) {
+    console.warn('Surface mask fallback triggered', {
       presetKey,
       roomType,
-    );
-    const coverageRatio = await calculateMaskCoverageRatio(adaptiveMask.adaptiveMaskBuffer);
-    if (coverageRatio >= 0.08 && coverageRatio <= 0.62) {
-      return adaptiveMask.adaptiveMaskBuffer;
-    }
+      message: error?.message || String(error),
+    });
+    return buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType);
   }
-
-  if (strategy === 'adaptive_floor') {
-    const adaptiveMask = await buildAdaptiveFloorMaskAtSourceSize(
-      sourceBuffer,
-      presetKey,
-      roomType,
-    );
-    const coverageRatio = await calculateMaskCoverageRatio(adaptiveMask.adaptiveMaskBuffer);
-    if (coverageRatio >= 0.12 && coverageRatio <= 0.58) {
-      return adaptiveMask.adaptiveMaskBuffer;
-    }
-  }
-
-  return buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType);
 }
 
 async function buildAdaptiveFurnitureMaskBuffer(sourceBuffer, options = {}) {
@@ -3199,7 +3293,7 @@ async function calculateMaskCoverageRatio(maskBuffer) {
     .toBuffer();
   let whitePixels = 0;
   for (let i = 0; i < raw.length; i += 1) {
-    if (raw[i] > 32) {
+    if ((raw[i] || 0) >= 128) {
       whitePixels += 1;
     }
   }
@@ -3900,14 +3994,10 @@ async function buildReviewedLocalSharpCandidates({
   let furnitureCoverageIncreaseRatio = 0;
   let newFurnitureAdditionRatio = 0;
 
-  if (preset.key.startsWith('paint_')) {
+  if (isWallPreset(preset.key) || isFloorPreset(preset.key)) {
     maskBuffer = (
-      await buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, preset.key, resolvedRoomType)
-    ).adaptiveMaskBuffer;
-  } else if (preset.key.startsWith('floor_')) {
-    maskBuffer = (
-      await buildAdaptiveFloorMaskAtSourceSize(sourceBuffer, preset.key, resolvedRoomType)
-    ).adaptiveMaskBuffer;
+      await resolveSurfaceMaskAtSourceSize(sourceBuffer, preset.key, resolvedRoomType)
+    ).maskBuffer;
   }
 
   if (maskBuffer) {
@@ -4039,11 +4129,22 @@ async function buildReviewedReplicateCandidates({
   sourceBuffer,
   sourceImageBase64,
 }) {
-  const maskBuffer = await buildTaskSpecificMaskBuffer(
+  const resolvedMask = await resolveSurfaceMaskAtSourceSize(
     sourceBuffer,
     preset.key,
     resolvedRoomType,
-  );
+  ).catch(async (error) => {
+    console.warn('Surface mask fallback triggered', {
+      presetKey: preset.key,
+      roomType: resolvedRoomType,
+      message: error?.message || String(error),
+    });
+    return {
+      maskBuffer: await buildInpaintingMaskBuffer(sourceBuffer, preset.key, resolvedRoomType),
+      debug: { strategy: 'geometric_fallback', maskCoverageRatio: null },
+    };
+  });
+  const maskBuffer = resolvedMask.maskBuffer;
   let removeFurnitureEvaluationMaskBuffer = null;
   let sourceFurnitureEdgeDensity = null;
   let paintEvaluationMaskBuffer = null;
@@ -4110,6 +4211,14 @@ async function buildReviewedReplicateCandidates({
     presetKey: preset.key,
     providerKey,
   });
+  if (isWallPreset(preset.key) || isFloorPreset(preset.key)) {
+    console.info('vision_surface_mask_debug', {
+      presetKey: preset.key,
+      providerKey,
+      strategy: resolvedMask.debug?.strategy || null,
+      maskCoverageRatio: resolvedMask.debug?.maskCoverageRatio ?? null,
+    });
+  }
   const providerOutputs = await runReplicateInpainting({
     image: initialReplicateInputs.imageUrl,
     mask: initialReplicateInputs.maskUrl,
