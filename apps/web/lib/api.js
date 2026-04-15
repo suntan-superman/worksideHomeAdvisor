@@ -493,6 +493,12 @@ export function getImageEnhancementJob(jobId) {
   return request(`/api/v1/vision/jobs/${jobId}`);
 }
 
+export function cancelImageEnhancementJob(jobId) {
+  return request(`/api/v1/vision/jobs/${jobId}/cancel`, {
+    method: 'PATCH',
+  });
+}
+
 export function listVisionPresets() {
   return request('/api/v1/vision/presets');
 }

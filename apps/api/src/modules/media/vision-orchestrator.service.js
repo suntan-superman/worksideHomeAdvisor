@@ -6,10 +6,6 @@ import {
   getVisionExecutionTimeBudgetMs,
   isHighConfidenceEarlyExitCandidate,
   isCandidateSufficient,
-  PAINT_STRENGTH_MIN_ACCEPTABLE_SCORE,
-  PAINT_STRENGTH_MIN_COLOR_SHIFT,
-  PAINT_STRENGTH_MIN_LUMINANCE_DELTA,
-  PAINT_STRENGTH_MIN_PERCEPTIBILITY,
   rankCandidates,
   resolveVisionUserPlan,
 } from './vision-orchestrator.helpers.js';
@@ -31,6 +27,7 @@ export async function orchestrateVisionJob({
   existingJob = null,
   providerRunners = {},
   nowFn = Date.now,
+  shouldCancel = async () => false,
 }) {
   const effectiveUserPlan = resolveVisionUserPlan({ preset, userPlan });
   const openAiAvailable = typeof providerRunners.runOpenAiEdit === 'function';
@@ -104,6 +101,7 @@ export async function orchestrateVisionJob({
     bestVariant = null,
     stoppedEarlyReason = null,
     timeBudgetReached = false,
+    cancelled = false,
   } = {}) => ({
     providerUsed,
     providerAttemptCount: attempts.length,
@@ -114,9 +112,22 @@ export async function orchestrateVisionJob({
     userPlan: effectiveUserPlan,
     stoppedEarlyReason,
     timeBudgetReached,
+    cancelled,
     elapsedTimeMs: Math.max(0, Number(nowFn()) - startedAt),
     maxExecutionTimeMs,
   });
+
+  const cancellationRequested = async () => {
+    try {
+      return Boolean(await shouldCancel());
+    } catch (error) {
+      console.warn('vision_cancel_check_failed', {
+        jobId: existingJob?._id?.toString?.() || existingJob?.id || null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  };
 
   const isStrongEnoughFinishCandidate = (candidate) => {
     if (!candidate) {
@@ -124,14 +135,13 @@ export async function orchestrateVisionJob({
     }
 
     if (isPaintPreset) {
-      const paintStrength = evaluatePaintStrength(candidate);
+      const paintStrength = evaluatePaintStrength(candidate, normalizedPresetKey);
       return (
         Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
-        Number(candidate.maskedColorShiftRatio || 0) >= PAINT_STRENGTH_MIN_COLOR_SHIFT &&
-        Math.abs(Number(candidate.maskedLuminanceDelta || 0)) >=
-          PAINT_STRENGTH_MIN_LUMINANCE_DELTA &&
+        Number(candidate.maskedColorShiftRatio || 0) >= paintStrength.minColorShift &&
+        Math.abs(Number(candidate.maskedLuminanceDelta || 0)) >= paintStrength.minLuminanceDelta &&
         Number(candidate.newFurnitureAdditionRatio || 0) <= 0.01 &&
-        paintStrength.perceptibilityScore >= PAINT_STRENGTH_MIN_PERCEPTIBILITY &&
+        paintStrength.perceptibilityScore >= paintStrength.minPerceptibility &&
         paintStrength.passes
       );
     }
@@ -153,7 +163,7 @@ export async function orchestrateVisionJob({
     }
 
     if (isPaintPreset) {
-      const paintStrength = evaluatePaintStrength(best);
+      const paintStrength = evaluatePaintStrength(best, normalizedPresetKey);
       if (
         Number(best.newFurnitureAdditionRatio || 0) > 0.01 ||
         Number(best.maskedEdgeDensityDelta || 0) > 0.01 ||
@@ -165,19 +175,18 @@ export async function orchestrateVisionJob({
       if (Number(best.maskedChangeRatio || 0) < 0.08) {
         return { shouldRetry: true, type: 'too_subtle', action: 'increase_strength', best };
       }
-      if (Number(best.maskedColorShiftRatio || 0) < PAINT_STRENGTH_MIN_COLOR_SHIFT) {
+      if (Number(best.maskedColorShiftRatio || 0) < paintStrength.minColorShift) {
         return { shouldRetry: true, type: 'color_not_distinct', action: 'increase_color_shift', best };
       }
       if (
-        Math.abs(Number(best.maskedLuminanceDelta || 0)) <
-        PAINT_STRENGTH_MIN_LUMINANCE_DELTA
+        Math.abs(Number(best.maskedLuminanceDelta || 0)) < paintStrength.minLuminanceDelta
       ) {
         return { shouldRetry: true, type: 'not_bright_enough', action: 'increase_brightness', best };
       }
-      if (paintStrength.perceptibilityScore < PAINT_STRENGTH_MIN_PERCEPTIBILITY) {
+      if (paintStrength.perceptibilityScore < paintStrength.minPerceptibility) {
         return { shouldRetry: true, type: 'low_perceptibility', action: 'increase_strength', best };
       }
-      if (paintStrength.finalScore < PAINT_STRENGTH_MIN_ACCEPTABLE_SCORE) {
+      if (paintStrength.finalScore < paintStrength.minAcceptableScore) {
         return { shouldRetry: true, type: 'score_too_low', action: 'increase_strength', best };
       }
     }
@@ -246,7 +255,7 @@ export async function orchestrateVisionJob({
             maskedLuminanceDelta: Number(adjustment.best.maskedLuminanceDelta || 0),
             newFurnitureAdditionRatio: Number(adjustment.best.newFurnitureAdditionRatio || 0),
             perceptibilityScore: calculatePerceptibilityScore(adjustment.best),
-            paintStrength: evaluatePaintStrength(adjustment.best),
+            paintStrength: evaluatePaintStrength(adjustment.best, normalizedPresetKey),
           }
         : null,
       nextSettings: {
@@ -261,9 +270,23 @@ export async function orchestrateVisionJob({
   };
 
   for (let iteration = 0; iteration < maxAdaptiveIterations; iteration += 1) {
+    if (await cancellationRequested()) {
+      return buildResponse({
+        stoppedEarlyReason: 'cancelled',
+        cancelled: true,
+      });
+    }
+
     const iterationCandidates = [];
 
     for (const [providerIndex, providerKey] of chain.entries()) {
+      if (await cancellationRequested()) {
+        return buildResponse({
+          stoppedEarlyReason: 'cancelled',
+          cancelled: true,
+        });
+      }
+
       const elapsedBeforeProvider = Math.max(0, Number(nowFn()) - startedAt);
       if (
         elapsedBeforeProvider >= maxExecutionTimeMs &&
@@ -350,9 +373,17 @@ export async function orchestrateVisionJob({
           });
         }
 
+        if (await cancellationRequested()) {
+          return buildResponse({
+            stoppedEarlyReason: 'cancelled',
+            cancelled: true,
+          });
+        }
+
         const normalizedCandidates = rankCandidates(
           filteredCandidates.map((candidate, index) => {
-            const paintStrength = isPaintPreset ? evaluatePaintStrength(candidate) : null;
+            const paintStrength =
+              isPaintPreset ? evaluatePaintStrength(candidate, activePreset.key) : null;
 
             return {
               ...candidate,
@@ -369,7 +400,7 @@ export async function orchestrateVisionJob({
         if (isSurfaceFinishPreset && normalizedCandidates.length) {
           normalizedCandidates.forEach((candidate) => {
             const paintStrength = isPaintPreset
-              ? candidate.paintStrength || evaluatePaintStrength(candidate)
+              ? candidate.paintStrength || evaluatePaintStrength(candidate, activePreset.key)
               : null;
             console.log('Candidate evaluation', {
               presetKey: activePreset.key,

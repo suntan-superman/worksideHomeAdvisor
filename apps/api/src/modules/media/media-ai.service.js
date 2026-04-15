@@ -73,6 +73,7 @@ function serializeImageJob(document, variants = []) {
     currentStage: document.currentStage || 'initial',
     fallbackMode: document.fallbackMode || null,
     failureReason: document.failureReason || '',
+    cancelledAt: document.cancelledAt || null,
     outputUrls: variants.map((variant) => variant.imageUrl).filter(Boolean),
     variants,
     createdAt: document.createdAt,
@@ -5179,6 +5180,31 @@ export async function getImageJobById(jobId) {
   return serializeImageJob(job, variants);
 }
 
+export async function cancelImageJob(jobId) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to cancel image jobs.');
+  }
+
+  const job = await ImageJobModel.findById(jobId);
+  if (!job) {
+    return null;
+  }
+
+  if (job.status !== 'completed' && job.status !== 'failed' && job.status !== 'cancelled') {
+    job.status = 'cancelled';
+    job.currentStage = 'cancelled';
+    job.failureReason = 'cancelled_by_user';
+    job.fallbackMode = null;
+    job.warning = 'Vision generation was cancelled before a new result was selected.';
+    job.message = 'Vision generation cancelled.';
+    job.cancelledAt = new Date();
+    await job.save();
+  }
+
+  const variants = await loadJobVariants(job._id);
+  return serializeImageJob(job.toObject(), variants);
+}
+
 export async function listImageJobsForAsset(assetId, options = {}) {
   if (mongoose.connection.readyState !== 1) {
     return [];
@@ -6905,6 +6931,7 @@ export async function createImageEnhancementJob({
     attemptCount: 0,
     maxAttempts: preset.providerPreference === 'local_sharp_only' ? 1 : 2,
     currentStage: 'initial',
+    cancelledAt: null,
     input: {
       roomLabel: asset.roomLabel,
       roomType: resolvedRoomType,
@@ -6968,6 +6995,10 @@ export async function createImageEnhancementJob({
       sourceBuffer: stored.buffer,
       sourceImageBase64,
       existingJob: job.toObject(),
+      shouldCancel: async () => {
+        const latestJob = await ImageJobModel.findById(job._id).select('status').lean();
+        return latestJob?.status === 'cancelled';
+      },
       providerRunners: {
         runLocalSharp: async () =>
           buildReviewedLocalSharpCandidates({
@@ -7016,6 +7047,30 @@ export async function createImageEnhancementJob({
           : undefined,
       },
     });
+
+    const latestJobState = await ImageJobModel.findById(job._id).select('status').lean();
+    if (orchestrationResult.cancelled || latestJobState?.status === 'cancelled') {
+      const cancelledJob = await ImageJobModel.findById(job._id);
+      if (cancelledJob) {
+        cancelledJob.status = 'cancelled';
+        cancelledJob.currentStage = 'cancelled';
+        cancelledJob.failureReason = 'cancelled_by_user';
+        cancelledJob.warning =
+          cancelledJob.warning || 'Vision generation was cancelled before a new result was selected.';
+        cancelledJob.message = 'Vision generation cancelled.';
+        cancelledJob.cancelledAt = cancelledJob.cancelledAt || new Date();
+        await cancelledJob.save();
+        return {
+          cached: false,
+          preset,
+          job: serializeImageJob(cancelledJob.toObject(), []),
+          variants: [],
+          variant: null,
+        };
+      }
+
+      throw new Error('Vision generation was cancelled.');
+    }
 
     if (!orchestrationResult.bestVariant) {
       throw new Error('No provider produced a usable output.');
@@ -7077,6 +7132,21 @@ export async function createImageEnhancementJob({
       variant: createdVariants[0] || null,
     };
   } catch (error) {
+    const latestJobState = await ImageJobModel.findById(job._id).select('status').lean();
+    if (latestJobState?.status === 'cancelled') {
+      const cancelledJob = await ImageJobModel.findById(job._id);
+      if (cancelledJob) {
+        const cancelledVariants = await loadJobVariants(cancelledJob._id);
+        return {
+          cached: false,
+          preset,
+          job: serializeImageJob(cancelledJob.toObject(), cancelledVariants),
+          variants: cancelledVariants,
+          variant: null,
+        };
+      }
+    }
+
     job.status = 'failed';
     job.currentStage = 'failed';
     job.failureReason = 'orchestration_failed';

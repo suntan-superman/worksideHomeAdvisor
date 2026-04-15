@@ -29,7 +29,7 @@ const imageJobSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['queued', 'processing', 'completed', 'failed'],
+      enum: ['queued', 'processing', 'completed', 'failed', 'cancelled'],
       default: 'processing',
     },
     provider: { type: String, default: 'local_sharp' },
@@ -64,6 +64,7 @@ const imageJobSchema = new mongoose.Schema(
     currentStage: { type: String, default: 'initial' },
     fallbackMode: { type: String, default: null },
     failureReason: { type: String, default: '' },
+    cancelledAt: { type: Date, default: null },
   },
   {
     timestamps: true,

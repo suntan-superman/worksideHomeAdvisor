@@ -5,6 +5,7 @@ import { analyzePropertyPhoto } from '../../services/photoAnalysisService.js';
 import { readStoredAsset, verifyTemporaryStoredAssetToken } from '../../services/storageService.js';
 import { assertPropertyEditableById, getPropertyById } from '../properties/property.service.js';
 import {
+  cancelImageJob,
   createImageEnhancementJob,
   getVisionPresetCatalog,
   getImageJobById,
@@ -512,6 +513,21 @@ export async function mediaRoutes(fastify) {
     try {
       const { jobId } = jobParamsSchema.parse(request.params);
       const job = await getImageJobById(jobId);
+
+      if (!job) {
+        return reply.code(404).send({ message: 'Image job not found.' });
+      }
+
+      return reply.send({ job });
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.patch('/vision/jobs/:jobId/cancel', async (request, reply) => {
+    try {
+      const { jobId } = jobParamsSchema.parse(request.params);
+      const job = await cancelImageJob(jobId);
 
       if (!job) {
         return reply.code(404).send({ message: 'Image job not found.' });

@@ -14,6 +14,8 @@
     "dev:api": "npm run dev --workspace=@workside/api",
     "dev:admin": "npm run dev --workspace=@workside/admin-web",
     "dev:ai": "npm run dev --workspace=@workside/ai-orchestrator",
+    "cleanup:variants-before-date": "node apps/api/scripts/delete-photo-variants-before-date.js",
+    "cleanup:pricing-analyses": "node apps/api/scripts/cleanup-pricing-analyses.js",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",

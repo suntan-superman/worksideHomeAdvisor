@@ -35,6 +35,24 @@ export const PAINT_STRENGTH_MIN_LUMINANCE_DELTA = 0.18;
 export const PAINT_STRENGTH_MIN_PERCEPTIBILITY = 0.65;
 export const PAINT_STRENGTH_MIN_ACCEPTABLE_SCORE = 7.5;
 
+function resolvePaintStrengthThresholds(presetKey) {
+  if (presetKey === 'paint_warm_neutral') {
+    return {
+      minColorShift: PAINT_STRENGTH_MIN_COLOR_SHIFT,
+      minLuminanceDelta: PAINT_STRENGTH_MIN_LUMINANCE_DELTA,
+      minPerceptibility: 0.62,
+      minAcceptableScore: 7,
+    };
+  }
+
+  return {
+    minColorShift: PAINT_STRENGTH_MIN_COLOR_SHIFT,
+    minLuminanceDelta: PAINT_STRENGTH_MIN_LUMINANCE_DELTA,
+    minPerceptibility: PAINT_STRENGTH_MIN_PERCEPTIBILITY,
+    minAcceptableScore: PAINT_STRENGTH_MIN_ACCEPTABLE_SCORE,
+  };
+}
+
 export function resolveVisionUserPlan({ preset, userPlan } = {}) {
   const normalizedUserPlan = String(userPlan || '').trim().toLowerCase();
   if (VISION_PLAN_VALUES.includes(normalizedUserPlan)) {
@@ -254,21 +272,22 @@ export function normalizeVisionCandidateScore(candidate = {}) {
   return Number((overallScore > 10 ? overallScore / 10 : overallScore).toFixed(2));
 }
 
-export function evaluatePaintStrength(candidate = {}) {
+export function evaluatePaintStrength(candidate = {}, presetKey = '') {
   const maskedColorShiftRatio = Number(candidate.maskedColorShiftRatio || 0);
   const maskedLuminanceDelta = Math.abs(Number(candidate.maskedLuminanceDelta || 0));
   const perceptibilityScore = calculatePerceptibilityScore(candidate);
+  const thresholds = resolvePaintStrengthThresholds(presetKey);
   let penalties = 0;
 
-  if (maskedColorShiftRatio < PAINT_STRENGTH_MIN_COLOR_SHIFT) {
+  if (maskedColorShiftRatio < thresholds.minColorShift) {
     penalties += 3;
   }
 
-  if (maskedLuminanceDelta < PAINT_STRENGTH_MIN_LUMINANCE_DELTA) {
+  if (maskedLuminanceDelta < thresholds.minLuminanceDelta) {
     penalties += 2;
   }
 
-  if (perceptibilityScore < PAINT_STRENGTH_MIN_PERCEPTIBILITY) {
+  if (perceptibilityScore < thresholds.minPerceptibility) {
     penalties += 2;
   }
 
@@ -282,7 +301,11 @@ export function evaluatePaintStrength(candidate = {}) {
     maskedColorShiftRatio,
     maskedLuminanceDelta,
     perceptibilityScore,
-    passes: finalScore >= PAINT_STRENGTH_MIN_ACCEPTABLE_SCORE,
+    minColorShift: thresholds.minColorShift,
+    minLuminanceDelta: thresholds.minLuminanceDelta,
+    minPerceptibility: thresholds.minPerceptibility,
+    minAcceptableScore: thresholds.minAcceptableScore,
+    passes: finalScore >= thresholds.minAcceptableScore,
   };
 }
 
@@ -315,9 +338,9 @@ export function isHighConfidenceEarlyExitCandidate(candidate, presetKey) {
           )
         ) &&
         Number(candidate.maskedLuminanceDelta || 0) >= -0.005 &&
-        Number(candidate.outsideMaskChangeRatio || 1) <= 0.1 &&
-        Number(candidate.topHalfChangeRatio || 1) <= 0.05 &&
-        Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.004 &&
+        Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.1 &&
+        Number(candidate.topHalfChangeRatio ?? 1) <= 0.05 &&
+        Number(candidate.furnitureCoverageIncreaseRatio ?? 1) <= 0.004 &&
         Number(candidate.newFurnitureAdditionRatio || 0) <= 0.006
       );
     }
@@ -327,49 +350,48 @@ export function isHighConfidenceEarlyExitCandidate(candidate, presetKey) {
         Number(candidate.focusRegionChangeRatio || 0) >= 0.16 &&
         Number(candidate.maskedChangeRatio || 0) >= 0.18 &&
         Number(candidate.maskedLuminanceDelta || 0) <= -0.055 &&
-        Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
-        Number(candidate.topHalfChangeRatio || 1) <= 0.05 &&
-        Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.008
+        Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.12 &&
+        Number(candidate.topHalfChangeRatio ?? 1) <= 0.05 &&
+        Number(candidate.furnitureCoverageIncreaseRatio ?? 1) <= 0.008
       );
     }
 
     return (
       Number(candidate.focusRegionChangeRatio || 0) >= 0.15 &&
       Number(candidate.maskedChangeRatio || 0) >= 0.16 &&
-      Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
-      Number(candidate.topHalfChangeRatio || 1) <= 0.06 &&
-      Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.01
+      Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.12 &&
+      Number(candidate.topHalfChangeRatio ?? 1) <= 0.06 &&
+      Number(candidate.furnitureCoverageIncreaseRatio ?? 1) <= 0.01
     );
   }
 
   if (normalizedPresetKey.startsWith('paint_')) {
-    const paintStrength = evaluatePaintStrength(candidate);
+    const paintStrength = evaluatePaintStrength(candidate, normalizedPresetKey);
 
     if (normalizedPresetKey === 'paint_bright_white') {
       return (
         Number(candidate.maskedChangeRatio || 0) >= 0.16 &&
         paintStrength.passes &&
-        Number(candidate.maskedColorShiftRatio || 0) >= PAINT_STRENGTH_MIN_COLOR_SHIFT &&
-        Number(candidate.maskedLuminanceDelta || 0) >= PAINT_STRENGTH_MIN_LUMINANCE_DELTA &&
-        Number(candidate.maskedEdgeDensityDelta || 1) <= 0.001 &&
-        Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
-        Number(candidate.topHalfChangeRatio || 1) <= 0.05 &&
-        Number(candidate.newFurnitureAdditionRatio || 1) <= 0.01 &&
-        Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.008
+        Number(candidate.maskedColorShiftRatio || 0) >= paintStrength.minColorShift &&
+        Number(candidate.maskedLuminanceDelta || 0) >= paintStrength.minLuminanceDelta &&
+        Number(candidate.maskedEdgeDensityDelta ?? 1) <= 0.001 &&
+        Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.12 &&
+        Number(candidate.topHalfChangeRatio ?? 1) <= 0.05 &&
+        Number(candidate.newFurnitureAdditionRatio ?? 1) <= 0.01 &&
+        Number(candidate.furnitureCoverageIncreaseRatio ?? 1) <= 0.008
       );
     }
 
     return (
       Number(candidate.maskedChangeRatio || 0) >= 0.14 &&
       paintStrength.passes &&
-      Number(candidate.maskedColorShiftRatio || 0) >= PAINT_STRENGTH_MIN_COLOR_SHIFT &&
-      Math.abs(Number(candidate.maskedLuminanceDelta || 0)) >=
-        PAINT_STRENGTH_MIN_LUMINANCE_DELTA &&
-      Number(candidate.maskedEdgeDensityDelta || 1) <= 0.001 &&
-      Number(candidate.outsideMaskChangeRatio || 1) <= 0.14 &&
-      Number(candidate.topHalfChangeRatio || 1) <= 0.06 &&
-      Number(candidate.newFurnitureAdditionRatio || 1) <= 0.015 &&
-      Number(candidate.furnitureCoverageIncreaseRatio || 1) <= 0.01
+      Number(candidate.maskedColorShiftRatio || 0) >= paintStrength.minColorShift &&
+      Math.abs(Number(candidate.maskedLuminanceDelta || 0)) >= paintStrength.minLuminanceDelta &&
+      Number(candidate.maskedEdgeDensityDelta ?? 1) <= 0.001 &&
+      Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.14 &&
+      Number(candidate.topHalfChangeRatio ?? 1) <= 0.06 &&
+      Number(candidate.newFurnitureAdditionRatio ?? 1) <= 0.015 &&
+      Number(candidate.furnitureCoverageIncreaseRatio ?? 1) <= 0.01
     );
   }
 
@@ -386,8 +408,8 @@ export function isHighConfidenceEarlyExitCandidate(candidate, presetKey) {
     Number(candidate.objectRemovalScore || 0) >= 0.34 &&
     Number(candidate.focusRegionChangeRatio || 0) >= 0.2 &&
     Number(candidate.maskedChangeRatio || 0) >= 0.3 &&
-    Number(candidate.topHalfChangeRatio || 1) <= 0.1 &&
-    Number(candidate.outsideMaskChangeRatio || 1) <= 0.2 &&
+    Number(candidate.topHalfChangeRatio ?? 1) <= 0.1 &&
+    Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.2 &&
     Number(candidate.remainingFurnitureOverlapRatio ?? 1) <= 0.1 &&
     Number(candidate.largestComponentPersistenceRatio ?? 1) <= 0.18 &&
     Number(candidate.newFurnitureAdditionRatio ?? 1) <= 0.05 &&
@@ -429,8 +451,8 @@ export function isCandidateSufficient(candidate, presetKey) {
           Number(candidate.maskedEdgeDensityDelta || 0) >= 0.01
         ) &&
         Number(candidate.maskedLuminanceDelta || 0) >= -0.005 &&
-        Number(candidate.topHalfChangeRatio || 1) <= 0.07 &&
-        Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
+        Number(candidate.topHalfChangeRatio ?? 1) <= 0.07 &&
+        Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.12 &&
         Number(candidate.furnitureCoverageIncreaseRatio || 0) <= 0.006 &&
         Number(candidate.newFurnitureAdditionRatio || 0) <= 0.01
       );
@@ -459,18 +481,18 @@ export function isCandidateSufficient(candidate, presetKey) {
     const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
     const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
     const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
-    const paintStrength = evaluatePaintStrength(candidate);
+    const paintStrength = evaluatePaintStrength(candidate, presetKey);
 
     if (presetKey === 'paint_bright_white') {
       return (
         Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
-        maskedColorShiftRatio >= PAINT_STRENGTH_MIN_COLOR_SHIFT &&
-        maskedLuminanceDelta >= PAINT_STRENGTH_MIN_LUMINANCE_DELTA &&
-        paintStrength.perceptibilityScore >= PAINT_STRENGTH_MIN_PERCEPTIBILITY &&
+        maskedColorShiftRatio >= paintStrength.minColorShift &&
+        maskedLuminanceDelta >= paintStrength.minLuminanceDelta &&
+        paintStrength.perceptibilityScore >= paintStrength.minPerceptibility &&
         paintStrength.passes &&
         maskedEdgeDensityDelta <= 0.0025 &&
-        Number(candidate.topHalfChangeRatio || 1) <= 0.08 &&
-        Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
+        Number(candidate.topHalfChangeRatio ?? 1) <= 0.08 &&
+        Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.12 &&
         furnitureCoverageIncreaseRatio <= 0.01 &&
         newFurnitureAdditionRatio <= 0.01
       );
@@ -478,13 +500,13 @@ export function isCandidateSufficient(candidate, presetKey) {
 
     return (
       Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
-      maskedColorShiftRatio >= PAINT_STRENGTH_MIN_COLOR_SHIFT &&
-      Math.abs(maskedLuminanceDelta) >= PAINT_STRENGTH_MIN_LUMINANCE_DELTA &&
-      paintStrength.perceptibilityScore >= PAINT_STRENGTH_MIN_PERCEPTIBILITY &&
+      maskedColorShiftRatio >= paintStrength.minColorShift &&
+      Math.abs(maskedLuminanceDelta) >= paintStrength.minLuminanceDelta &&
+      paintStrength.perceptibilityScore >= paintStrength.minPerceptibility &&
       paintStrength.passes &&
       maskedEdgeDensityDelta <= 0.0025 &&
-      Number(candidate.topHalfChangeRatio || 1) <= 0.08 &&
-      Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
+      Number(candidate.topHalfChangeRatio ?? 1) <= 0.08 &&
+      Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.12 &&
       furnitureCoverageIncreaseRatio <= 0.01 &&
       newFurnitureAdditionRatio <= 0.01
     );
@@ -508,13 +530,13 @@ function isPreferredFinishFallbackCandidate(candidate, presetKey) {
   const maskedChangeRatio = Number(candidate.maskedChangeRatio || 0);
   const maskedColorShiftRatio = Number(candidate.maskedColorShiftRatio || 0);
   const maskedLuminanceDelta = Number(candidate.maskedLuminanceDelta || 0);
-  const topHalfChangeRatio = Number(candidate.topHalfChangeRatio || 1);
-  const outsideMaskChangeRatio = Number(candidate.outsideMaskChangeRatio || 1);
+  const topHalfChangeRatio = Number(candidate.topHalfChangeRatio ?? 1);
+  const outsideMaskChangeRatio = Number(candidate.outsideMaskChangeRatio ?? 1);
   const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
   const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
   const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
   const focusRegionChangeRatio = Number(candidate.focusRegionChangeRatio || 0);
-  const paintStrength = evaluatePaintStrength(candidate);
+  const paintStrength = evaluatePaintStrength(candidate, normalizedPresetKey);
 
   if (isPaintPreset) {
     if (
@@ -530,18 +552,18 @@ function isPreferredFinishFallbackCandidate(candidate, presetKey) {
     if (normalizedPresetKey === 'paint_bright_white') {
       return (
         maskedChangeRatio >= 0.1 &&
-        maskedColorShiftRatio >= PAINT_STRENGTH_MIN_COLOR_SHIFT &&
-        maskedLuminanceDelta >= PAINT_STRENGTH_MIN_LUMINANCE_DELTA &&
-        paintStrength.perceptibilityScore >= PAINT_STRENGTH_MIN_PERCEPTIBILITY &&
+        maskedColorShiftRatio >= paintStrength.minColorShift &&
+        maskedLuminanceDelta >= paintStrength.minLuminanceDelta &&
+        paintStrength.perceptibilityScore >= paintStrength.minPerceptibility &&
         paintStrength.passes
       );
     }
 
     return (
       maskedChangeRatio >= 0.1 &&
-      maskedColorShiftRatio >= PAINT_STRENGTH_MIN_COLOR_SHIFT &&
-      Math.abs(maskedLuminanceDelta) >= PAINT_STRENGTH_MIN_LUMINANCE_DELTA &&
-      paintStrength.perceptibilityScore >= PAINT_STRENGTH_MIN_PERCEPTIBILITY &&
+      maskedColorShiftRatio >= paintStrength.minColorShift &&
+      Math.abs(maskedLuminanceDelta) >= paintStrength.minLuminanceDelta &&
+      paintStrength.perceptibilityScore >= paintStrength.minPerceptibility &&
       paintStrength.passes
     );
   }
@@ -785,8 +807,8 @@ export function rankCandidates(candidates = [], presetKey) {
     if (String(presetKey || '').startsWith('paint_')) {
       const leftPerceptibilityScore = calculatePerceptibilityScore(left);
       const rightPerceptibilityScore = calculatePerceptibilityScore(right);
-      const leftPaintStrength = evaluatePaintStrength(left);
-      const rightPaintStrength = evaluatePaintStrength(right);
+      const leftPaintStrength = evaluatePaintStrength(left, presetKey);
+      const rightPaintStrength = evaluatePaintStrength(right, presetKey);
       if (
         Number(left?.newFurnitureAdditionRatio || 0) !==
         Number(right?.newFurnitureAdditionRatio || 0)

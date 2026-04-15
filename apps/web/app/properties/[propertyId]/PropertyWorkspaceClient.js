@@ -12,6 +12,7 @@ import { PropertyLocationMap, ProviderResultsMap } from '../../../components/Pro
 import { Toast } from '../../../components/Toast';
 import {
   analyzePricing,
+  cancelImageEnhancementJob,
   createBillingCheckoutSession,
   createChecklistItem,
   createImageEnhancementJob,
@@ -1102,6 +1103,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [visionGenerationState, setVisionGenerationState] = useState(null);
   const [visionGenerationElapsedSeconds, setVisionGenerationElapsedSeconds] = useState(0);
   const [visionRecoveryState, setVisionRecoveryState] = useState(null);
+  const [visionCancellationPending, setVisionCancellationPending] = useState(false);
   const viewerRole = useMemo(() => {
     const session = getStoredSession();
     return session?.user?.role === 'agent' ? 'agent' : 'seller';
@@ -1221,7 +1223,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             continue;
           }
 
-          if (latestJob.status !== 'completed' && latestJob.status !== 'failed') {
+          if (
+            latestJob.status !== 'completed' &&
+            latestJob.status !== 'failed' &&
+            latestJob.status !== 'cancelled'
+          ) {
             continue;
           }
 
@@ -1284,6 +1290,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             if (!cancelled) {
               setVisionRecoveryState(null);
               setVisionGenerationState(null);
+              setVisionCancellationPending(false);
               setStatus('');
             }
           }
@@ -1310,6 +1317,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         });
         setVisionRecoveryState(null);
         setVisionGenerationState(null);
+        setVisionCancellationPending(false);
         setStatus('');
       }
     }
@@ -1345,6 +1353,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setLatestGeneratedVariantId('');
     setVisionRecoveryState(null);
     setVisionGenerationState(null);
+    setVisionCancellationPending(false);
   }, [mediaAssets, selectedMediaAssetId]);
 
   useEffect(() => {
@@ -1488,6 +1497,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       throw new Error(failureMessage);
     }
 
+    if (job.status === 'cancelled') {
+      throw new Error(job.message || 'The vision job was cancelled before a new preview was saved.');
+    }
+
     throw new Error(
       'The request disconnected before the vision job finished. Please retry once the current generation has cleared.',
     );
@@ -1575,6 +1588,38 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         'The browser connection dropped, but the server job is still running. This workspace will update as soon as the result is ready.',
       autoDismissMs: 9000,
     });
+  }
+
+  async function handleCancelVisionGeneration() {
+    const activeJobId = visionRecoveryState?.jobId;
+    if (!activeJobId || visionCancellationPending) {
+      return;
+    }
+
+    setVisionCancellationPending(true);
+    try {
+      const response = await cancelImageEnhancementJob(activeJobId);
+      setVisionRecoveryState(null);
+      setVisionGenerationState(null);
+      setStatus('');
+      setToast({
+        tone: 'warning',
+        title: 'Generation cancelled',
+        message:
+          response.job?.message ||
+          'The background vision job was cancelled before a new preview was selected.',
+        autoDismissMs: 7000,
+      });
+    } catch (error) {
+      setToast({
+        tone: 'error',
+        title: 'Cancel failed',
+        message: error.message || 'We could not cancel the running vision job.',
+        autoDismissMs: 0,
+      });
+    } finally {
+      setVisionCancellationPending(false);
+    }
   }
 
   const propertyFullQuery = useQuery({
@@ -3539,6 +3584,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     const isFurnitureRemovalPreset = presetKey === 'remove_furniture';
     const isCleanupPreset = presetKey === 'cleanup_empty_room';
     setVisionRecoveryState(null);
+    setVisionCancellationPending(false);
     setStatus(
       isFurnitureRemovalPreset
         ? 'Generating furniture-removal preview...'
@@ -3684,6 +3730,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     } finally {
       if (!keepVisionGenerationState) {
         setVisionGenerationState(null);
+        setVisionCancellationPending(false);
         setStatus('');
       }
     }
@@ -3719,6 +3766,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     const generationStartedAt = Date.now();
     let keepVisionGenerationState = false;
     setVisionRecoveryState(null);
+    setVisionCancellationPending(false);
     setStatus('Generating custom enhancement preview...');
     setVisionGenerationState({
       kind: 'freeform',
@@ -3846,6 +3894,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     } finally {
       if (!keepVisionGenerationState) {
         setVisionGenerationState(null);
+        setVisionCancellationPending(false);
         setStatus('');
       }
     }
@@ -5393,6 +5442,18 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       <p className="workspace-control-note">
                         Timing varies by preset and whether the job needs a stronger AI fallback, so this indicator tracks elapsed time rather than pretending to know an exact percent complete. A short chime will play when longer runs finish.
                       </p>
+                      {visionRecoveryState?.jobId ? (
+                        <div className="workspace-action-row">
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            onClick={handleCancelVisionGeneration}
+                            disabled={visionCancellationPending}
+                          >
+                            {visionCancellationPending ? 'Cancelling...' : 'Cancel generation'}
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                   {activeVisionWorkflowStage.allowFreeform ? (

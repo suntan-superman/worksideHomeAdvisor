@@ -444,6 +444,44 @@ test('evaluatePaintStrength accepts a clearly repainted wall candidate', () => {
   assert.equal(strength.passes, true);
 });
 
+test('evaluatePaintStrength gives paint_warm_neutral a slightly softer near-pass floor', () => {
+  const strength = evaluatePaintStrength(
+    {
+      overallScore: 7,
+      maskedChangeRatio: 0.9902,
+      maskedColorShiftRatio: 0.2584,
+      maskedLuminanceDelta: 0.2556,
+    },
+    'paint_warm_neutral',
+  );
+
+  assert.equal(strength.minPerceptibility, 0.62);
+  assert.equal(strength.minAcceptableScore, 7);
+  assert.equal(strength.penalties, 0);
+  assert.equal(strength.finalScore, 7);
+  assert.equal(strength.passes, true);
+});
+
+test('paint_warm_neutral sufficiency preserves zero spill metrics instead of coercing them to failure', () => {
+  assert.equal(
+    isCandidateSufficient(
+      {
+        overallScore: 7,
+        maskedChangeRatio: 0.9902,
+        maskedColorShiftRatio: 0.2584,
+        maskedLuminanceDelta: 0.2556,
+        maskedEdgeDensityDelta: 0,
+        topHalfChangeRatio: 0,
+        outsideMaskChangeRatio: 0,
+        furnitureCoverageIncreaseRatio: 0,
+        newFurnitureAdditionRatio: 0,
+      },
+      'paint_warm_neutral',
+    ),
+    true,
+  );
+});
+
 test('floor tone presets now use the replicate finish pipeline', () => {
   assert.deepEqual(
     buildProviderChain({
@@ -699,7 +737,7 @@ test('paint presets fall through to openai_edit when replicate returns nothing u
   assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit']);
   assert.equal(result.providerUsed, 'openai_edit');
   assert.equal(result.bestVariant?.providerKey, 'openai_edit');
-  assert.equal(result.stoppedEarlyReason, null);
+  assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
 });
 
 test('paint presets fall through to local_sharp when ai providers return nothing usable', async () => {
@@ -744,7 +782,7 @@ test('paint presets fall through to local_sharp when ai providers return nothing
   assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp']);
   assert.equal(result.providerUsed, 'local_sharp');
   assert.equal(result.bestVariant?.providerKey, 'local_sharp');
-  assert.equal(result.stoppedEarlyReason, null);
+  assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
 });
 
 test('paint presets retry with stronger settings when first pass is too subtle', async () => {
@@ -934,7 +972,7 @@ test('paint presets accept a strong local candidate after weak ai outputs', asyn
 
   assert.equal(result.providerUsed, 'local_sharp');
   assert.equal(result.bestVariant?.providerKey, 'local_sharp');
-  assert.equal(result.stoppedEarlyReason, null);
+  assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
 });
 
 test('getReplicateSettings reduces remove_furniture sample counts for faster execution', () => {
@@ -1152,6 +1190,26 @@ test('bright white paint sufficiency accepts a clearly repainted and safe wall c
         newFurnitureAdditionRatio: 0.01,
       },
       'paint_bright_white',
+    ),
+    true,
+  );
+});
+
+test('warm neutral paint sufficiency accepts a near-pass but clearly repainted wall candidate', () => {
+  assert.equal(
+    isCandidateSufficient(
+      {
+        overallScore: 7,
+        maskedChangeRatio: 0.9902,
+        maskedColorShiftRatio: 0.2584,
+        maskedLuminanceDelta: 0.2556,
+        maskedEdgeDensityDelta: -0.0468,
+        topHalfChangeRatio: 0.04,
+        outsideMaskChangeRatio: 0,
+        furnitureCoverageIncreaseRatio: 0,
+        newFurnitureAdditionRatio: 0,
+      },
+      'paint_warm_neutral',
     ),
     true,
   );
@@ -1580,4 +1638,50 @@ test('remove_furniture orchestration does not stop at the time budget before str
   assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit']);
   assert.equal(result.providerUsed, 'openai_edit');
   assert.equal(result.timeBudgetReached, false);
+});
+
+test('vision orchestration stops after cancellation is requested between providers', async () => {
+  const callOrder = [];
+  let shouldCancelChecks = 0;
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('paint_soft_greige'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    shouldCancel: async () => {
+      shouldCancelChecks += 1;
+      return shouldCancelChecks >= 3;
+    },
+    providerRunners: {
+      runReplicateProvider: async ({ providerKey }) => {
+        callOrder.push(providerKey);
+        return [
+          {
+            providerKey,
+            overallScore: 80,
+            maskedChangeRatio: 1,
+            maskedColorShiftRatio: 0.3,
+            maskedLuminanceDelta: 0.3,
+            maskedEdgeDensityDelta: 0.002,
+            topHalfChangeRatio: 0.03,
+            outsideMaskChangeRatio: 0.07,
+            furnitureCoverageIncreaseRatio: 0,
+            newFurnitureAdditionRatio: 0,
+          },
+        ];
+      },
+      runLocalSharp: async () => {
+        callOrder.push('local_sharp');
+        return [];
+      },
+    },
+  });
+
+  assert.deepEqual(callOrder, ['replicate_basic']);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.stoppedEarlyReason, 'cancelled');
+  assert.equal(result.bestVariant, null);
 });
