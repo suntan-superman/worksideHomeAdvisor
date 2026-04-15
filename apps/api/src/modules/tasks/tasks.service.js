@@ -148,6 +148,38 @@ function buildFallbackChecklist(propertyId) {
   };
 }
 
+function isDuplicateChecklistKeyError(error) {
+  return (
+    error?.name === 'MongoServerError' &&
+    Number(error?.code) === 11000 &&
+    String(error?.message || '').includes('propertyChecklists')
+  );
+}
+
+async function ensureChecklistDocument(propertyId, items = []) {
+  try {
+    return await ChecklistModel.findOneAndUpdate(
+      { propertyId },
+      {
+        $setOnInsert: {
+          propertyId,
+          items,
+        },
+      },
+      {
+        new: true,
+        upsert: true,
+      },
+    );
+  } catch (error) {
+    if (isDuplicateChecklistKeyError(error)) {
+      return ChecklistModel.findOne({ propertyId });
+    }
+
+    throw error;
+  }
+}
+
 async function buildSuggestedChecklistItems(propertyId) {
   const [property, pricing, mediaAssets, latestFlyer, latestReport] = await Promise.all([
     getPropertyById(propertyId),
@@ -383,21 +415,18 @@ export async function getOrCreatePropertyChecklist(propertyId) {
     throw new Error('Property not found.');
   }
 
-  let document = await ChecklistModel.findOne({ propertyId });
   const suggestedItems = await buildSuggestedChecklistItems(propertyId);
+  const seededItems = suggestedItems.map((item) => ({
+    ...item,
+    note: '',
+    updatedByUser: false,
+    completedAt: item.status === 'done' ? new Date() : null,
+  }));
+
+  const document = await ensureChecklistDocument(propertyId, seededItems);
 
   if (!document) {
-    document = await ChecklistModel.create({
-      propertyId,
-      items: suggestedItems.map((item) => ({
-        ...item,
-        note: '',
-        updatedByUser: false,
-        completedAt: item.status === 'done' ? new Date() : null,
-      })),
-    });
-    await persistChecklistReadiness(propertyId, document.items);
-    return serializeChecklist(document.toObject());
+    throw new Error('Unable to initialize checklist.');
   }
 
   return syncChecklistDocument(document, suggestedItems);
@@ -413,7 +442,12 @@ export async function createChecklistItem(propertyId, payload) {
     throw new Error('Property not found.');
   }
 
-  const checklist = (await ChecklistModel.findOne({ propertyId })) || (await ChecklistModel.create({ propertyId, items: [] }));
+  const checklist = await ensureChecklistDocument(propertyId, []);
+
+  if (!checklist) {
+    throw new Error('Unable to initialize checklist.');
+  }
+
   const nextSortOrder =
     checklist.items.reduce((max, item) => Math.max(max, Number(item.sortOrder || 0)), -1) + 1;
 
