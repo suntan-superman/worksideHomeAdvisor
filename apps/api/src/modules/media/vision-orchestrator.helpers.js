@@ -263,6 +263,45 @@ export function calculatePerceptibilityScore(candidate = {}) {
   );
 }
 
+export function scorePaintCandidate(candidate = {}, presetKey = '') {
+  const normalizedPresetKey = String(presetKey || '');
+  const perceptibilityScore = calculatePerceptibilityScore(candidate);
+  const outsideMaskChangeRatio = Number(candidate.outsideMaskChangeRatio || 0);
+  const penalties = Number(candidate.paintStrength?.penalties ?? 0);
+  const strengthBoost =
+    normalizedPresetKey === 'paint_bright_white'
+      ? 1.08
+      : normalizedPresetKey === 'paint_warm_neutral'
+        ? 1.04
+        : 1;
+  const visualImpact = Number((perceptibilityScore * strengthBoost).toFixed(4));
+  const spillPenalty = Math.max(0, outsideMaskChangeRatio - 0.15);
+  const penaltyMultiplier = Math.max(0.4, 1 - penalties * 0.08);
+  const finalScore = Number(
+    Math.max(0, visualImpact * penaltyMultiplier - spillPenalty).toFixed(4),
+  );
+
+  let classification = 'no-op';
+  if (visualImpact >= 0.35 && perceptibilityScore >= 0.25) {
+    classification = 'strong';
+  } else if (visualImpact >= 0.2 && finalScore >= 0.06) {
+    classification = 'weak';
+  }
+
+  return {
+    visualImpact,
+    spillPenalty: Number(spillPenalty.toFixed(4)),
+    penaltyMultiplier: Number(penaltyMultiplier.toFixed(2)),
+    finalScore,
+    classification,
+    shouldUse:
+      classification === 'strong' ||
+      (classification === 'weak' &&
+        finalScore >= 0.08 &&
+        outsideMaskChangeRatio <= 0.22),
+  };
+}
+
 export function normalizeVisionCandidateScore(candidate = {}) {
   const overallScore = Number(candidate.overallScore || 0);
   if (!Number.isFinite(overallScore) || overallScore <= 0) {
@@ -809,6 +848,14 @@ export function rankCandidates(candidates = [], presetKey) {
       const rightPerceptibilityScore = calculatePerceptibilityScore(right);
       const leftPaintStrength = evaluatePaintStrength(left, presetKey);
       const rightPaintStrength = evaluatePaintStrength(right, presetKey);
+      const leftPaintScore = scorePaintCandidate(
+        { ...left, paintStrength: leftPaintStrength },
+        presetKey,
+      );
+      const rightPaintScore = scorePaintCandidate(
+        { ...right, paintStrength: rightPaintStrength },
+        presetKey,
+      );
       if (
         Number(left?.newFurnitureAdditionRatio || 0) !==
         Number(right?.newFurnitureAdditionRatio || 0)
@@ -834,6 +881,32 @@ export function rankCandidates(candidates = [], presetKey) {
       const rightHasWallFeatureAddition = Number(right?.maskedEdgeDensityDelta || 0) > 0.003;
       if (leftHasWallFeatureAddition !== rightHasWallFeatureAddition) {
         return leftHasWallFeatureAddition ? 1 : -1;
+      }
+      const leftClassificationRank =
+        leftPaintScore.classification === 'strong'
+          ? 2
+          : leftPaintScore.classification === 'weak'
+            ? 1
+            : 0;
+      const rightClassificationRank =
+        rightPaintScore.classification === 'strong'
+          ? 2
+          : rightPaintScore.classification === 'weak'
+            ? 1
+            : 0;
+      if (leftClassificationRank !== rightClassificationRank) {
+        return rightClassificationRank - leftClassificationRank;
+      }
+      if (leftPaintScore.finalScore !== rightPaintScore.finalScore) {
+        return rightPaintScore.finalScore - leftPaintScore.finalScore;
+      }
+      if (
+        Number(left?.outsideMaskChangeRatio || 0) !== Number(right?.outsideMaskChangeRatio || 0)
+      ) {
+        return (
+          Number(left?.outsideMaskChangeRatio || 0) -
+          Number(right?.outsideMaskChangeRatio || 0)
+        );
       }
       if (leftPaintStrength.finalScore !== rightPaintStrength.finalScore) {
         return rightPaintStrength.finalScore - leftPaintStrength.finalScore;

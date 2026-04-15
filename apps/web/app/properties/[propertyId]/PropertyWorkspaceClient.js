@@ -1257,17 +1257,21 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               );
             }
 
-            setToast({
-              tone: settledJob?.warning ? 'warning' : 'success',
-              title: settledJob?.warning
-                ? 'Preview ready with warning'
-                : visionRecoveryState.successTitle,
-              message: settledJob?.warning || visionRecoveryState.successMessage,
-              autoDismissMs: settledJob?.warning ? 0 : 9000,
+            const completionToast = buildVisionCompletionToast({
+              job: settledJob,
+              successTitle: visionRecoveryState.successTitle,
+              successMessage: visionRecoveryState.successMessage,
+              warningTitle: 'Preview ready with warning',
             });
-            requestAnimationFrame(() => {
-              visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            });
+            setToast(completionToast);
+            if (completionToast.nextVariantId) {
+              setLatestGeneratedVariantId(completionToast.nextVariantId);
+            }
+            if (completionToast.shouldScroll) {
+              requestAnimationFrame(() => {
+                visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              });
+            }
             void playVisionCompletionSound({
               tone: 'success',
               elapsedSeconds: getVisionGenerationDurationSeconds(visionRecoveryState.startedAt),
@@ -1476,6 +1480,44 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     return matchingJob;
   }
 
+  function resolveVisionResultVariantId(job, variant = null) {
+    return variant?.id || job?.selectedVariantId || job?.variants?.[0]?.id || '';
+  }
+
+  function buildVisionCompletionToast({
+    job,
+    variant = null,
+    successTitle,
+    successMessage,
+    warningTitle = 'Preview ready with warning',
+  }) {
+    const nextVariantId = resolveVisionResultVariantId(job, variant);
+    const isAdvisorOnly = job?.fallbackMode === 'advisor_only' || !nextVariantId;
+
+    if (isAdvisorOnly) {
+      return {
+        tone: 'warning',
+        title: 'No strong visual change detected',
+        message:
+          job?.warning ||
+          job?.message ||
+          'The room may already present well, or the requested change was too subtle to preview reliably.',
+        autoDismissMs: 0,
+        shouldScroll: false,
+        nextVariantId: '',
+      };
+    }
+
+    return {
+      tone: job?.warning ? 'warning' : 'success',
+      title: job?.warning ? warningTitle : successTitle,
+      message: job?.warning || successMessage,
+      autoDismissMs: job?.warning ? 0 : 9000,
+      shouldScroll: true,
+      nextVariantId,
+    };
+  }
+
   async function reconcileRecoveredVisionJob(job, fallbackAssetId) {
     if (!job) {
       return null;
@@ -1488,7 +1530,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         refreshMediaVariants(nextAssetId),
         refreshWorkflow(),
       ]);
-      setSelectedVariantId(job.selectedVariantId || job.variants?.[0]?.id || '');
+      const nextVariantId = resolveVisionResultVariantId(job);
+      if (nextVariantId) {
+        setSelectedVariantId(nextVariantId);
+      }
       return job;
     }
 
@@ -3629,27 +3674,29 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         workflowStageKey: stageKey,
       });
       await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id), refreshWorkflow()]);
-      setLatestGeneratedVariantId(response.variant?.id || '');
-      setSelectedVariantId(response.variant?.id || '');
-      setToast({
-        tone: response.job?.warning ? 'warning' : 'success',
-        title: response.job?.warning
-          ? 'Preview ready with warning'
-          : isFurnitureRemovalPreset
+      const completionToast = buildVisionCompletionToast({
+        job: response.job,
+        variant: response.variant,
+        successTitle: isFurnitureRemovalPreset
           ? 'Furniture removal preview ready'
           : isCleanupPreset
           ? 'Cleanup pass ready'
           : isDeclutterPreset
           ? 'Declutter variant ready'
           : 'Enhanced photo ready',
-        message:
-          response.job?.warning ||
+        successMessage:
           'The new image is now shown in the Vision compare area and the Generated options panel.',
-        autoDismissMs: response.job?.warning ? 0 : undefined,
       });
-      requestAnimationFrame(() => {
-        visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
+      if (completionToast.nextVariantId) {
+        setLatestGeneratedVariantId(completionToast.nextVariantId);
+        setSelectedVariantId(completionToast.nextVariantId);
+      }
+      setToast(completionToast);
+      if (completionToast.shouldScroll) {
+        requestAnimationFrame(() => {
+          visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
       void playVisionCompletionSound({
         tone: 'success',
         elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
@@ -3667,19 +3714,17 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           if (recoveredJob) {
             if (recoveredJob.status === 'completed' || recoveredJob.status === 'failed') {
               const settledJob = await reconcileRecoveredVisionJob(recoveredJob, selectedMediaAsset.id);
-              setToast({
-                tone: settledJob?.warning ? 'warning' : 'success',
-                title: settledJob?.warning
-                  ? 'Recovered with warning'
-                  : 'Vision job recovered',
-                message:
-                  settledJob?.warning ||
+              const completionToast = buildVisionCompletionToast({
+                job: settledJob,
+                successTitle: 'Vision job recovered',
+                successMessage:
                   'The browser lost the original request, but the vision job finished and the generated variant has been recovered.',
-                autoDismissMs: settledJob?.warning ? 0 : 9000,
+                warningTitle: 'Recovered with warning',
               });
-              setLatestGeneratedVariantId(
-                settledJob?.selectedVariantId || settledJob?.variants?.[0]?.id || '',
-              );
+              setToast(completionToast);
+              if (completionToast.nextVariantId) {
+                setLatestGeneratedVariantId(completionToast.nextVariantId);
+              }
               void playVisionCompletionSound({
                 tone: 'success',
                 elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
@@ -3791,25 +3836,30 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         refreshWorkflow(),
       ]);
       setShowMoreVisionVariants(true);
-      setLatestGeneratedVariantId(response.variant?.id || '');
       setActiveVisionPresetKey(
         response.job?.presetKey ||
           response.variant?.metadata?.presetKey ||
           response.variant?.variantType ||
           'combined_listing_refresh',
       );
-      setSelectedVariantId(response.variant?.id || '');
-      setToast({
-        tone: response.job?.warning ? 'warning' : 'success',
-        title: response.job?.warning ? 'Custom enhancement ready with warning' : 'Custom enhancement ready',
-        message:
-          response.job?.warning ||
+      const completionToast = buildVisionCompletionToast({
+        job: response.job,
+        variant: response.variant,
+        successTitle: 'Custom enhancement ready',
+        successMessage:
           'Your freeform enhancement request was processed and the generated result is now selected in the Vision compare area.',
-        autoDismissMs: response.job?.warning ? 0 : undefined,
+        warningTitle: 'Custom enhancement ready with warning',
       });
-      requestAnimationFrame(() => {
-        visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
+      if (completionToast.nextVariantId) {
+        setLatestGeneratedVariantId(completionToast.nextVariantId);
+        setSelectedVariantId(completionToast.nextVariantId);
+      }
+      setToast(completionToast);
+      if (completionToast.shouldScroll) {
+        requestAnimationFrame(() => {
+          visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
       void playVisionCompletionSound({
         tone: 'success',
         elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),
@@ -3833,19 +3883,17 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   settledJob?.variants?.[0]?.variantType ||
                   'combined_listing_refresh',
               );
-              setToast({
-                tone: settledJob?.warning ? 'warning' : 'success',
-                title: settledJob?.warning
-                  ? 'Custom enhancement recovered with warning'
-                  : 'Custom enhancement recovered',
-                message:
-                  settledJob?.warning ||
+              const completionToast = buildVisionCompletionToast({
+                job: settledJob,
+                successTitle: 'Custom enhancement recovered',
+                successMessage:
                   'The browser lost the original request, but the custom enhancement finished and the generated variant has been recovered.',
-                autoDismissMs: settledJob?.warning ? 0 : 9000,
+                warningTitle: 'Custom enhancement recovered with warning',
               });
-              setLatestGeneratedVariantId(
-                settledJob?.selectedVariantId || settledJob?.variants?.[0]?.id || '',
-              );
+              setToast(completionToast);
+              if (completionToast.nextVariantId) {
+                setLatestGeneratedVariantId(completionToast.nextVariantId);
+              }
               void playVisionCompletionSound({
                 tone: 'success',
                 elapsedSeconds: getVisionGenerationDurationSeconds(generationStartedAt),

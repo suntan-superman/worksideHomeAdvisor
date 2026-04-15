@@ -152,6 +152,132 @@ export function normalizeRoomType(value) {
   return normalized || 'unknown';
 }
 
+async function extractPaintRoomMetrics(sourceBuffer, presetKey, roomType) {
+  if (!isWallPreset(presetKey)) {
+    return null;
+  }
+
+  const probeWidth = 96;
+  const probeHeight = 96;
+  const resolvedWallMask = await resolveSurfaceMaskAtSourceSize(sourceBuffer, presetKey, roomType);
+  const [sourceProbe, maskProbe] = await Promise.all([
+    sharp(sourceBuffer)
+      .rotate()
+      .resize(probeWidth, probeHeight, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(resolvedWallMask.maskBuffer)
+      .resize(probeWidth, probeHeight, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+  ]);
+
+  let maskedPixelCount = 0;
+  let luminanceSum = 0;
+  let luminanceSquaredSum = 0;
+  let saturationSum = 0;
+  let redSum = 0;
+  let greenSum = 0;
+  let blueSum = 0;
+  let redSquaredSum = 0;
+  let greenSquaredSum = 0;
+  let blueSquaredSum = 0;
+
+  for (let index = 0; index < probeWidth * probeHeight; index += 1) {
+    if ((maskProbe[index] || 0) <= 48) {
+      continue;
+    }
+
+    const offset = index * 3;
+    const red = sourceProbe[offset];
+    const green = sourceProbe[offset + 1];
+    const blue = sourceProbe[offset + 2];
+    const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
+
+    maskedPixelCount += 1;
+    luminanceSum += luminance;
+    luminanceSquaredSum += luminance * luminance;
+    saturationSum += saturation;
+    redSum += red;
+    greenSum += green;
+    blueSum += blue;
+    redSquaredSum += red * red;
+    greenSquaredSum += green * green;
+    blueSquaredSum += blue * blue;
+  }
+
+  if (maskedPixelCount < 250) {
+    return null;
+  }
+
+  const coverageRatio = maskedPixelCount / (probeWidth * probeHeight);
+  const meanLuminance = luminanceSum / maskedPixelCount;
+  const meanSaturation = saturationSum / maskedPixelCount;
+  const meanRed = redSum / maskedPixelCount;
+  const meanGreen = greenSum / maskedPixelCount;
+  const meanBlue = blueSum / maskedPixelCount;
+  const luminanceVariance = Math.max(
+    0,
+    luminanceSquaredSum / maskedPixelCount - meanLuminance * meanLuminance,
+  );
+  const redVariance = Math.max(0, redSquaredSum / maskedPixelCount - meanRed * meanRed);
+  const greenVariance = Math.max(0, greenSquaredSum / maskedPixelCount - meanGreen * meanGreen);
+  const blueVariance = Math.max(0, blueSquaredSum / maskedPixelCount - meanBlue * meanBlue);
+
+  return {
+    coverageRatio: Number(coverageRatio.toFixed(4)),
+    maskedPixelCount,
+    meanLuminance: Number((meanLuminance / 255).toFixed(4)),
+    meanSaturation: Number((meanSaturation / 255).toFixed(4)),
+    luminanceVariance: Number((Math.sqrt(luminanceVariance) / 255).toFixed(4)),
+    colorVariance: Number(
+      (
+        Math.sqrt((redVariance + greenVariance + blueVariance) / 3) / 255
+      ).toFixed(4),
+    ),
+    maskStrategy: resolvedWallMask?.debug?.strategy || 'unknown',
+  };
+}
+
+export function shouldSkipPaintGeneration({
+  presetKey = '',
+  assetAnalysis = {},
+  roomMetrics = {},
+} = {}) {
+  if (!String(presetKey || '').startsWith('paint_')) {
+    return { skip: false, reason: '' };
+  }
+
+  const overallQualityScore = Number(assetAnalysis?.overallQualityScore || 0);
+  const lightingScore = Number(assetAnalysis?.lightingScore || 0);
+  const retakeRecommended = Boolean(assetAnalysis?.retakeRecommended);
+  const coverageRatio = Number(roomMetrics?.coverageRatio || 0);
+  const meanLuminance = Number(roomMetrics?.meanLuminance || 0);
+  const meanSaturation = Number(roomMetrics?.meanSaturation || 1);
+  const colorVariance = Number(roomMetrics?.colorVariance || 1);
+  const luminanceVariance = Number(roomMetrics?.luminanceVariance || 1);
+  const luminanceFloor = presetKey === 'paint_bright_white' ? 0.7 : 0.58;
+
+  const skip =
+    overallQualityScore >= 72 &&
+    lightingScore >= 65 &&
+    !retakeRecommended &&
+    coverageRatio >= 0.08 &&
+    meanLuminance >= luminanceFloor &&
+    meanSaturation <= 0.18 &&
+    colorVariance <= 0.12 &&
+    luminanceVariance <= 0.12;
+
+  return {
+    skip,
+    reason: skip ? 'room_already_neutral' : '',
+  };
+}
+
 function extractRequestedPhrase(text, expression) {
   const match = String(text || '').match(expression);
   if (!match?.[1]) {
@@ -6989,6 +7115,50 @@ export async function createImageEnhancementJob({
       storageProvider: sourceRecord.storageProvider,
       storageKey: sourceRecord.storageKey,
     });
+    const paintRoomMetrics = isWallPreset(preset.key)
+      ? await extractPaintRoomMetrics(stored.buffer, preset.key, resolvedRoomType)
+      : null;
+    const paintSkipDecision = shouldSkipPaintGeneration({
+      presetKey: preset.key,
+      assetAnalysis: asset.analysis,
+      roomMetrics: paintRoomMetrics,
+    });
+    if (paintSkipDecision.skip) {
+      console.log('vision_paint_skip_decision', {
+        presetKey: preset.key,
+        roomType: resolvedRoomType,
+        reason: paintSkipDecision.reason,
+        overallQualityScore: asset.analysis?.overallQualityScore ?? null,
+        lightingScore: asset.analysis?.lightingScore ?? null,
+        roomMetrics: paintRoomMetrics,
+      });
+      job.status = 'completed';
+      job.provider = 'vision_orchestrator';
+      job.attemptCount = 0;
+      job.currentStage = 'completed';
+      job.fallbackMode = 'advisor_only';
+      job.failureReason = '';
+      job.outputVariantIds = [];
+      job.selectedVariantId = null;
+      job.input = {
+        ...(job.input || {}),
+        paintRoomMetrics,
+        orchestrationStoppedEarlyReason: paintSkipDecision.reason,
+        orchestrationDeliveryMode: 'advisor_only',
+      };
+      job.message = 'This room already presents well.';
+      job.warning =
+        'No strong paint preview was generated because the room already appears bright and neutral.';
+      await job.save();
+
+      return {
+        cached: false,
+        preset,
+        job: serializeImageJob(job.toObject(), []),
+        variants: [],
+        variant: null,
+      };
+    }
     const sourceImageBase64 = stored.buffer.toString('base64');
     const orchestrationResult = await orchestrateVisionJob({
       asset,

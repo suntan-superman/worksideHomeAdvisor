@@ -15,6 +15,7 @@ import {
   resolveFreeformPresetKey,
   segmentWallPlanesAtSourceSize,
   selectViableWallMaskStage,
+  shouldSkipPaintGeneration,
 } from './media-ai.service.js';
 import {
   buildProviderChain,
@@ -24,6 +25,7 @@ import {
   isCandidateSufficient,
   rankCandidates,
   resolveVisionUserPlan,
+  scorePaintCandidate,
 } from './vision-orchestrator.helpers.js';
 import { orchestrateVisionJob } from './vision-orchestrator.service.js';
 import { resolveVisionPreset } from './vision-presets.js';
@@ -418,6 +420,40 @@ test('calculatePerceptibilityScore weights visible wall change signals', () => {
   assert.equal(score, 0.14);
 });
 
+test('scorePaintCandidate keeps a visibly different wall repaint when spill stays controlled', () => {
+  const score = scorePaintCandidate(
+    {
+      maskedChangeRatio: 0.45,
+      maskedColorShiftRatio: 0.12,
+      maskedLuminanceDelta: 0.08,
+      outsideMaskChangeRatio: 0.18,
+      paintStrength: { penalties: 2 },
+    },
+    'paint_warm_neutral',
+  );
+
+  assert.equal(score.classification, 'weak');
+  assert.equal(score.shouldUse, true);
+  assert.ok(score.finalScore > 0.2);
+});
+
+test('scorePaintCandidate rejects heavy-penalty no-op wall previews', () => {
+  const score = scorePaintCandidate(
+    {
+      maskedChangeRatio: 0.4079,
+      maskedColorShiftRatio: 0.0822,
+      maskedLuminanceDelta: 0.0403,
+      outsideMaskChangeRatio: 0.2653,
+      paintStrength: { penalties: 7 },
+    },
+    'paint_warm_neutral',
+  );
+
+  assert.equal(score.classification, 'no-op');
+  assert.equal(score.shouldUse, false);
+  assert.equal(score.finalScore, 0);
+});
+
 test('evaluatePaintStrength penalizes weak repaint candidates using normalized review scores', () => {
   const strength = evaluatePaintStrength({
     overallScore: 86,
@@ -480,6 +516,47 @@ test('paint_warm_neutral sufficiency preserves zero spill metrics instead of coe
     ),
     true,
   );
+});
+
+test('shouldSkipPaintGeneration skips bright neutral rooms that already present well', () => {
+  const decision = shouldSkipPaintGeneration({
+    presetKey: 'paint_warm_neutral',
+    assetAnalysis: {
+      overallQualityScore: 82,
+      lightingScore: 78,
+      retakeRecommended: false,
+    },
+    roomMetrics: {
+      coverageRatio: 0.26,
+      meanLuminance: 0.71,
+      meanSaturation: 0.08,
+      colorVariance: 0.06,
+      luminanceVariance: 0.07,
+    },
+  });
+
+  assert.equal(decision.skip, true);
+  assert.equal(decision.reason, 'room_already_neutral');
+});
+
+test('shouldSkipPaintGeneration keeps paint generation enabled for moodier or varied rooms', () => {
+  const decision = shouldSkipPaintGeneration({
+    presetKey: 'paint_warm_neutral',
+    assetAnalysis: {
+      overallQualityScore: 82,
+      lightingScore: 78,
+      retakeRecommended: false,
+    },
+    roomMetrics: {
+      coverageRatio: 0.24,
+      meanLuminance: 0.44,
+      meanSaturation: 0.24,
+      colorVariance: 0.16,
+      luminanceVariance: 0.19,
+    },
+  });
+
+  assert.equal(decision.skip, false);
 });
 
 test('floor tone presets now use the replicate finish pipeline', () => {
@@ -723,10 +800,10 @@ test('paint presets return best available advisory candidate when the time budge
           {
             providerKey,
             overallScore: 6,
-            maskedChangeRatio: 0.11,
-            focusRegionChangeRatio: 0.09,
-            maskedColorShiftRatio: 0.08,
-            maskedLuminanceDelta: 0.06,
+            maskedChangeRatio: 0.35,
+            focusRegionChangeRatio: 0.21,
+            maskedColorShiftRatio: 0.12,
+            maskedLuminanceDelta: 0.08,
             maskedEdgeDensityDelta: 0.001,
             topHalfChangeRatio: 0.05,
             outsideMaskChangeRatio: 0.08,

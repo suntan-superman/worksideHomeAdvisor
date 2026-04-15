@@ -8,6 +8,7 @@ import {
   isCandidateSufficient,
   rankCandidates,
   resolveVisionUserPlan,
+  scorePaintCandidate,
 } from './vision-orchestrator.helpers.js';
 
 const MAX_PAINT_RETRIES = 3;
@@ -219,12 +220,18 @@ export async function orchestrateVisionJob({
     const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
 
     if (isPaintPreset) {
+      const paintStrength = evaluatePaintStrength(candidate, normalizedPresetKey);
+      const paintScore = scorePaintCandidate(
+        { ...candidate, paintStrength },
+        normalizedPresetKey,
+      );
       return (
+        paintScore.shouldUse &&
         Number(candidate.maskedChangeRatio || 0) >= 0.03 &&
         Number(candidate.maskedColorShiftRatio || 0) >= 0.05 &&
         Math.abs(Number(candidate.maskedLuminanceDelta || 0)) >= 0.04 &&
         (!Number.isFinite(topHalfChangeRatio) || topHalfChangeRatio <= 0.12) &&
-        (!Number.isFinite(outsideMaskChangeRatio) || outsideMaskChangeRatio <= 0.16) &&
+        (!Number.isFinite(outsideMaskChangeRatio) || outsideMaskChangeRatio <= 0.22) &&
         newFurnitureAdditionRatio <= 0.01 &&
         furnitureCoverageIncreaseRatio <= 0.01 &&
         maskedEdgeDensityDelta <= 0.008
