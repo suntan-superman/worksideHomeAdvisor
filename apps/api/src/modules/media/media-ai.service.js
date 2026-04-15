@@ -6772,9 +6772,9 @@ async function persistOrchestratedVisionCandidates({
         },
         fallbackApplied:
           Boolean(orchestrationResult?.fallbackApplied) ||
-          orchestrationResult?.stoppedEarlyReason === 'advisory_finish_fallback',
+          orchestrationResult?.stoppedEarlyReason === 'advisory_fallback',
         fallbackReason:
-          orchestrationResult?.stoppedEarlyReason === 'advisory_finish_fallback'
+          orchestrationResult?.stoppedEarlyReason === 'advisory_fallback'
             ? 'no_strong_visual_change_detected'
             : '',
         orchestrationAttempts: orchestrationResult?.orchestration?.attempts || [],
@@ -7079,7 +7079,38 @@ export async function createImageEnhancementJob({
     }
 
     if (!orchestrationResult.bestVariant) {
-      throw new Error('No provider produced a usable output.');
+      job.status = 'completed';
+      job.provider = orchestrationResult.providerUsed || 'vision_orchestrator';
+      job.attemptCount = Number(orchestrationResult.providerAttemptCount || 0);
+      job.maxAttempts = Number(orchestrationResult.orchestration?.chain?.length || 1);
+      job.currentStage = 'completed';
+      job.fallbackMode = 'advisor_only';
+      job.failureReason = '';
+      job.outputVariantIds = [];
+      job.selectedVariantId = null;
+      job.input = {
+        ...(job.input || {}),
+        userPlan: orchestrationResult.userPlan,
+        orchestrationChain: orchestrationResult.orchestration?.chain || [],
+        orchestrationAttempts: orchestrationResult.orchestration?.attempts || [],
+        orchestrationElapsedMs: Number(orchestrationResult.elapsedTimeMs || 0),
+        orchestrationTimeBudgetMs: Number(orchestrationResult.maxExecutionTimeMs || 0),
+        orchestrationStoppedEarlyReason: orchestrationResult.stoppedEarlyReason || '',
+        orchestrationTimeBudgetReached: Boolean(orchestrationResult.timeBudgetReached),
+        orchestrationDeliveryMode: orchestrationResult.deliveryMode || 'advisor_only',
+      };
+      job.message = 'No strong visual change detected for this image.';
+      job.warning =
+        'The room may already present well, or the requested change was too subtle to preview reliably.';
+      await job.save();
+
+      return {
+        cached: false,
+        preset,
+        job: serializeImageJob(job.toObject(), []),
+        variants: [],
+        variant: null,
+      };
     }
 
     let createdVariants = await persistOrchestratedVisionCandidates({
@@ -7104,7 +7135,7 @@ export async function createImageEnhancementJob({
     job.attemptCount = Number(orchestrationResult.providerAttemptCount || 0);
     job.maxAttempts = Number(orchestrationResult.orchestration?.chain?.length || 1);
     const usedAdvisoryFinishFallback =
-      orchestrationResult.stoppedEarlyReason === 'advisory_finish_fallback';
+      orchestrationResult.stoppedEarlyReason === 'advisory_fallback';
     const usedFallbackVariant =
       Boolean(orchestrationResult.fallbackApplied) ||
       usedAdvisoryFinishFallback ||
@@ -7127,6 +7158,7 @@ export async function createImageEnhancementJob({
       orchestrationTimeBudgetMs: Number(orchestrationResult.maxExecutionTimeMs || 0),
       orchestrationStoppedEarlyReason: orchestrationResult.stoppedEarlyReason || '',
       orchestrationTimeBudgetReached: Boolean(orchestrationResult.timeBudgetReached),
+      orchestrationDeliveryMode: orchestrationResult.deliveryMode || 'none',
     };
     job.warning = usedAdvisoryFinishFallback
       ? 'No strong visual change detected, so the best available preview was selected instead of failing the job.'

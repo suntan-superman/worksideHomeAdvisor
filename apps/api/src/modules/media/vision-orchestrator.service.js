@@ -102,6 +102,7 @@ export async function orchestrateVisionJob({
     stoppedEarlyReason = null,
     timeBudgetReached = false,
     cancelled = false,
+    deliveryMode = 'none',
   } = {}) => ({
     providerUsed,
     providerAttemptCount: attempts.length,
@@ -113,6 +114,7 @@ export async function orchestrateVisionJob({
     stoppedEarlyReason,
     timeBudgetReached,
     cancelled,
+    deliveryMode,
     elapsedTimeMs: Math.max(0, Number(nowFn()) - startedAt),
     maxExecutionTimeMs,
   });
@@ -203,6 +205,117 @@ export async function orchestrateVisionJob({
     }
 
     return false;
+  };
+
+  const isSafeBestEffortCandidate = (candidate) => {
+    if (!candidate || !isSurfaceFinishPreset) {
+      return false;
+    }
+
+    const topHalfChangeRatio = Number(candidate.topHalfChangeRatio);
+    const outsideMaskChangeRatio = Number(candidate.outsideMaskChangeRatio);
+    const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
+    const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
+    const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
+
+    if (isPaintPreset) {
+      return (
+        Number(candidate.maskedChangeRatio || 0) >= 0.03 &&
+        Number(candidate.maskedColorShiftRatio || 0) >= 0.05 &&
+        Math.abs(Number(candidate.maskedLuminanceDelta || 0)) >= 0.04 &&
+        (!Number.isFinite(topHalfChangeRatio) || topHalfChangeRatio <= 0.12) &&
+        (!Number.isFinite(outsideMaskChangeRatio) || outsideMaskChangeRatio <= 0.16) &&
+        newFurnitureAdditionRatio <= 0.01 &&
+        furnitureCoverageIncreaseRatio <= 0.01 &&
+        maskedEdgeDensityDelta <= 0.008
+      );
+    }
+
+    if (isFloorPreset) {
+      return (
+        Number(candidate.focusRegionChangeRatio || 0) >= 0.03 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.04 &&
+        (!Number.isFinite(topHalfChangeRatio) || topHalfChangeRatio <= 0.12) &&
+        (!Number.isFinite(outsideMaskChangeRatio) || outsideMaskChangeRatio <= 0.18) &&
+        furnitureCoverageIncreaseRatio <= 0.02 &&
+        newFurnitureAdditionRatio <= 0.01
+      );
+    }
+
+    return Number(candidate.overallScore || 0) >= 6.5;
+  };
+
+  const classifyCandidateQuality = (candidate) => {
+    if (!candidate) {
+      return 'unusable';
+    }
+
+    if (isHighConfidenceEarlyExitCandidate(candidate, activePreset.key)) {
+      return 'high_confidence';
+    }
+
+    if (candidate.isSufficient) {
+      return 'acceptable';
+    }
+
+    if (
+      isAcceptableFinishFallbackCandidate(candidate) ||
+      isSafeBestEffortCandidate(candidate)
+    ) {
+      return 'advisory_fallback';
+    }
+
+    return 'unusable';
+  };
+
+  const selectReturnCandidate = (candidates = allCandidates) => {
+    const ranked = rankCandidates(candidates, activePreset.key);
+    const highConfidence = ranked.find(
+      (candidate) => classifyCandidateQuality(candidate) === 'high_confidence',
+    );
+    if (highConfidence) {
+      return {
+        variant: highConfidence,
+        stoppedEarlyReason: 'high_confidence_candidate',
+        deliveryMode: 'high_confidence',
+      };
+    }
+
+    const acceptable = ranked.find(
+      (candidate) => classifyCandidateQuality(candidate) === 'acceptable',
+    );
+    if (acceptable) {
+      return {
+        variant: acceptable,
+        stoppedEarlyReason: 'acceptable_candidate',
+        deliveryMode: 'acceptable',
+      };
+    }
+
+    const advisory = ranked.find(
+      (candidate) => classifyCandidateQuality(candidate) === 'advisory_fallback',
+    );
+    if (advisory) {
+      return {
+        variant: advisory,
+        stoppedEarlyReason: 'advisory_fallback',
+        deliveryMode: 'advisory_fallback',
+      };
+    }
+
+    if (allowBestEffortFinishCandidate) {
+      return {
+        variant: ranked[0] || null,
+        stoppedEarlyReason: 'best_effort_finish_candidate',
+        deliveryMode: ranked[0] ? 'acceptable' : 'none',
+      };
+    }
+
+    return {
+      variant: null,
+      stoppedEarlyReason: 'no_candidate_generated',
+      deliveryMode: 'none',
+    };
   };
 
   const diagnoseFinishFailure = (candidates = []) => {
@@ -340,15 +453,17 @@ export async function orchestrateVisionJob({
       if (
         elapsedBeforeProvider >= maxExecutionTimeMs &&
         allCandidates.length &&
-        canStopForTimeBudget()
+        (isSurfaceFinishPreset || canStopForTimeBudget())
       ) {
-        const rankedCandidates = selectBestCandidates(allCandidates);
-        const providerUsed = rankedCandidates[0]?.providerKey || null;
+        const selection = selectReturnCandidate(allCandidates);
         return buildResponse({
-          providerUsed,
-          bestVariant: rankedCandidates[0] || null,
-          stoppedEarlyReason: 'time_budget',
+          providerUsed: selection.variant?.providerKey || null,
+          bestVariant: selection.variant || null,
+          stoppedEarlyReason: selection.variant
+            ? 'time_budget_best_available'
+            : 'time_budget_no_candidate',
           timeBudgetReached: true,
+          deliveryMode: selection.variant ? selection.deliveryMode : 'none',
         });
       }
 
@@ -529,18 +644,20 @@ export async function orchestrateVisionJob({
             bestVariant: sufficient,
             stoppedEarlyReason:
               exhaustProviderChain ? 'high_confidence_candidate' : 'sufficient_candidate',
+            deliveryMode: exhaustProviderChain ? 'high_confidence' : 'acceptable',
           });
         }
 
-        const acceptableFinishFallback = normalizedCandidates.find((candidate) =>
-          isAcceptableFinishFallbackCandidate(candidate),
+        const advisoryFallback = normalizedCandidates.find(
+          (candidate) => classifyCandidateQuality(candidate) === 'advisory_fallback',
         );
         const isFinalProviderInIteration = providerIndex >= chain.length - 1;
-        if (acceptableFinishFallback && isFinalProviderInIteration) {
+        if (advisoryFallback && isFinalProviderInIteration) {
           return buildResponse({
             providerUsed: providerKey,
-            bestVariant: acceptableFinishFallback,
-            stoppedEarlyReason: 'advisory_finish_fallback',
+            bestVariant: advisoryFallback,
+            stoppedEarlyReason: 'advisory_fallback',
+            deliveryMode: 'advisory_fallback',
           });
         }
 
@@ -549,15 +666,17 @@ export async function orchestrateVisionJob({
           providerIndex < chain.length - 1 &&
           elapsedAfterProvider >= maxExecutionTimeMs &&
           allCandidates.length &&
-          canStopForTimeBudget()
+          (isSurfaceFinishPreset || canStopForTimeBudget())
         ) {
-          const rankedCandidates = selectBestCandidates(allCandidates);
-          const providerUsed = rankedCandidates[0]?.providerKey || null;
+          const selection = selectReturnCandidate(allCandidates);
           return buildResponse({
-            providerUsed,
-            bestVariant: rankedCandidates[0] || null,
-            stoppedEarlyReason: 'time_budget',
+            providerUsed: selection.variant?.providerKey || null,
+            bestVariant: selection.variant || null,
+            stoppedEarlyReason: selection.variant
+              ? 'time_budget_best_available'
+              : 'time_budget_no_candidate',
             timeBudgetReached: true,
+            deliveryMode: selection.variant ? selection.deliveryMode : 'none',
           });
         }
       } catch (error) {
@@ -602,46 +721,11 @@ export async function orchestrateVisionJob({
     activePreset = applyAdaptiveAdjustment(activePreset, adjustment, iteration + 1);
   }
 
-  const rankedCandidates = selectBestCandidates(allCandidates);
-  const shouldRequireRealFinishCandidate =
-    normalizedPresetKey.startsWith('paint_') || normalizedPresetKey.startsWith('floor_');
-  const sufficientCandidateExists = allCandidates.some((candidate) => candidate.isSufficient);
-  const preferredFinishFallbackExists = getPreferredFinishFallbackCandidates(
-    allCandidates,
-    preset.key,
-  ).length > 0;
-  const acceptableFinishFallback = rankedCandidates.find((candidate) =>
-    isAcceptableFinishFallbackCandidate(candidate),
-  );
-  const hasRealChange = allCandidates.some(
-    (candidate) =>
-      Number(candidate.maskedChangeRatio || 0) > 0.02 ||
-      Math.abs(Number(candidate.maskedLuminanceDelta || 0)) > 0.02 ||
-      Number(candidate.maskedColorShiftRatio || 0) > 0.02,
-  );
-  const bestVariant =
-    shouldRequireRealFinishCandidate &&
-    (!sufficientCandidateExists || !hasRealChange) &&
-    !preferredFinishFallbackExists
-      ? acceptableFinishFallback
-        ? acceptableFinishFallback
-        : allowBestEffortFinishCandidate
-        ? rankedCandidates[0] || allCandidates[0] || null
-        : null
-      : rankedCandidates[0] || allCandidates[0] || null;
-  const providerUsed = rankedCandidates[0]?.providerKey || null;
+  const selection = selectReturnCandidate(allCandidates);
   return buildResponse({
-    providerUsed: bestVariant ? providerUsed : null,
-    bestVariant,
-    stoppedEarlyReason:
-      shouldRequireRealFinishCandidate &&
-      (!sufficientCandidateExists || !hasRealChange) &&
-      !preferredFinishFallbackExists
-        ? acceptableFinishFallback
-          ? 'advisory_finish_fallback'
-          : allowBestEffortFinishCandidate
-          ? 'best_effort_finish_candidate'
-          : 'no_usable_finish_candidate'
-        : null,
+    providerUsed: selection.variant?.providerKey || null,
+    bestVariant: selection.variant || null,
+    stoppedEarlyReason: selection.stoppedEarlyReason,
+    deliveryMode: selection.deliveryMode,
   });
 }

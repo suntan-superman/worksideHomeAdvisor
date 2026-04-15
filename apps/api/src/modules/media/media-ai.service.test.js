@@ -664,7 +664,8 @@ test('paint presets reject a subtle replicate wall repaint that misses strength 
 
   assert.equal(result.providerUsed, null);
   assert.equal(result.bestVariant?.providerKey || null, null);
-  assert.equal(result.stoppedEarlyReason, 'no_usable_finish_candidate');
+  assert.equal(result.stoppedEarlyReason, 'no_candidate_generated');
+  assert.equal(result.deliveryMode, 'none');
 });
 
 test('paint presets keep a strong local fallback preview when strict review fields are missing', async () => {
@@ -682,7 +683,7 @@ test('paint presets keep a strong local fallback preview when strict review fiel
       runLocalSharp: async () => [
         {
           providerKey: 'local_sharp',
-          overallScore: 8,
+          overallScore: 6,
           maskedChangeRatio: 0.9902,
           focusRegionChangeRatio: 0.3469,
           outsideMaskChangeRatio: 0,
@@ -698,7 +699,59 @@ test('paint presets keep a strong local fallback preview when strict review fiel
 
   assert.equal(result.providerUsed, 'local_sharp');
   assert.equal(result.bestVariant?.providerKey, 'local_sharp');
-  assert.equal(result.stoppedEarlyReason, 'advisory_finish_fallback');
+  assert.equal(result.stoppedEarlyReason, 'advisory_fallback');
+  assert.equal(result.deliveryMode, 'advisory_fallback');
+});
+
+test('paint presets return best available advisory candidate when the time budget is reached', async () => {
+  let now = 0;
+  const callOrder = [];
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('paint_warm_neutral'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    nowFn: () => now,
+    providerRunners: {
+      runReplicateProvider: async ({ providerKey }) => {
+        callOrder.push(providerKey);
+        now = 121_000;
+        return [
+          {
+            providerKey,
+            overallScore: 6,
+            maskedChangeRatio: 0.11,
+            focusRegionChangeRatio: 0.09,
+            maskedColorShiftRatio: 0.08,
+            maskedLuminanceDelta: 0.06,
+            maskedEdgeDensityDelta: 0.001,
+            topHalfChangeRatio: 0.05,
+            outsideMaskChangeRatio: 0.08,
+            furnitureCoverageIncreaseRatio: 0,
+            newFurnitureAdditionRatio: 0,
+          },
+        ];
+      },
+      runOpenAiEdit: async () => {
+        callOrder.push('openai_edit');
+        return [];
+      },
+      runLocalSharp: async () => {
+        callOrder.push('local_sharp');
+        return [];
+      },
+    },
+  });
+
+  assert.deepEqual(callOrder, ['replicate_basic']);
+  assert.equal(result.providerUsed, 'replicate_basic');
+  assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
+  assert.equal(result.stoppedEarlyReason, 'time_budget_best_available');
+  assert.equal(result.deliveryMode, 'advisory_fallback');
+  assert.equal(result.timeBudgetReached, true);
 });
 
 test('paint ranking prefers clearer visible repaint over safer but barely changed result', () => {
