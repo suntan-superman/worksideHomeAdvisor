@@ -120,20 +120,20 @@ export const VISION_PRESETS = [
     category: 'concept_preview',
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'dining_room', 'office', 'unknown'],
     providerPreference: 'replicate',
-    promptVersion: 10,
+    promptVersion: 11,
     outputCount: 1,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Create a conceptual preview of this room with the walls shifted toward a warmer neutral direction that feels inviting and buyer-friendly. Make the wall change obvious at first glance while preserving trim, ceilings, windows, built-ins, flooring, furniture, and layout. Keep the image realistic and suitable for showing a paint-direction concept only.',
+      'Change the wall color to a clearly warmer beige, cream, or soft taupe tone. The difference must be immediately noticeable at first glance. Avoid subtle or barely visible changes. Ensure the wall color shift is visually obvious without needing comparison. Only modify painted wall surfaces. Do NOT add any new objects, fixtures, radiators, vents, framed art, sconces, or architectural elements. Preserve trim, ceilings, windows, built-ins, flooring, furniture, layout, shadows, and natural lighting. Keep the image realistic and suitable for showing a paint-direction concept only.',
     helperText:
       'Preview a warmer wall direction without changing the room structure.',
     strength: 0.96,
     guidanceScale: 9,
     numInferenceSteps: 48,
     negativePrompt:
-      'added furniture, new staging, changed flooring, changed trim color, changed ceiling color, altered windows, altered built-ins, unrealistic geometry, warped walls, low quality',
+      'added furniture, new staging, radiator, heater, vent cover, wall art, framed art, picture frames, decor, wall sconces, fixtures, paneling, molding, changed flooring, changed trim color, changed ceiling color, altered windows, altered built-ins, unrealistic geometry, warped walls, low quality',
     replicateModel: REPLICATE_INPAINT_MODEL,
   },
   {
@@ -144,20 +144,20 @@ export const VISION_PRESETS = [
     category: 'concept_preview',
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'dining_room', 'office', 'unknown'],
     providerPreference: 'replicate',
-    promptVersion: 11,
+    promptVersion: 12,
     outputCount: 1,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Brighten the painted walls to a clean, bright white tone suitable for real estate listing photos. CRITICAL: only modify painted wall surfaces. Do NOT change flooring, windows, trim, shelving, or furniture. Preserve all shadows and natural lighting direction. Maintain wall texture and edges without smoothing or blurring. Do NOT alter window brightness or outdoor scenery. This must look like the SAME walls freshly painted bright white, not edited or artificial.',
+      'Brighten the painted walls to a clean, bright white tone suitable for real estate listing photos. The change must be immediately noticeable at first glance. Ensure the wall color shift is visually obvious without needing comparison. CRITICAL: only modify painted wall surfaces. Do NOT add any new objects, fixtures, radiators, vents, framed art, sconces, or architectural elements. Do NOT change flooring, windows, trim, shelving, or furniture. Preserve all shadows, natural lighting direction, wall texture, and sharp edges without smoothing or blurring. Do NOT alter window brightness or outdoor scenery. This must look like the SAME walls freshly painted bright white, not edited or artificial.',
     helperText:
       'Show a brighter wall direction for a cleaner, airier feel.',
     strength: 0.98,
     guidanceScale: 9.4,
     numInferenceSteps: 54,
     negativePrompt:
-      'added furniture, new staging, bed, bench, sofa, chair, chandelier, pendant light, wall art, wall paneling, wainscoting, changed flooring, changed trim color, changed ceiling color, altered windows, altered built-ins, unrealistic geometry, warped walls, blurry paint edges, blurred wall texture, changed window brightness, altered outdoor scenery, low quality',
+      'added furniture, new staging, bed, bench, sofa, chair, chandelier, pendant light, wall art, framed art, picture frames, radiator, heater, vent cover, wall sconces, wall paneling, wainscoting, changed flooring, changed trim color, changed ceiling color, altered windows, altered built-ins, unrealistic geometry, warped walls, blurry paint edges, blurred wall texture, changed window brightness, altered outdoor scenery, low quality',
     replicateModel: REPLICATE_INPAINT_MODEL,
   },
   {
@@ -168,13 +168,13 @@ export const VISION_PRESETS = [
     category: 'concept_preview',
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'dining_room', 'office', 'unknown'],
     providerPreference: 'replicate',
-    promptVersion: 10,
+    promptVersion: 11,
     outputCount: 1,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Create a conceptual preview of this room with the walls changed to a soft greige tone that feels modern and buyer-friendly. Make the wall-tone shift clearly visible and unmistakable while preserving the room’s true structure, trim, flooring, furniture, and layout. Keep the output realistic and suitable for listing-planning visualization.',
+      'Change the wall color to a clearly visible soft greige tone that feels modern and buyer-friendly. The difference must be immediately noticeable at first glance. Avoid subtle or barely visible changes. Ensure the wall color shift is visually obvious without needing comparison. Only modify painted wall surfaces. Do NOT add any new objects, fixtures, radiators, vents, framed art, sconces, or architectural elements. Preserve the room’s true structure, trim, flooring, furniture, layout, shadows, and natural lighting. Keep the output realistic and suitable for listing-planning visualization.',
     helperText:
       'Preview a softer designer-neutral wall direction.',
     strength: 0.96,

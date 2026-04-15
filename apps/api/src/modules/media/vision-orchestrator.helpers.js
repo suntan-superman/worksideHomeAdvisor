@@ -231,6 +231,16 @@ export function calculateObjectRemovalScore({
   );
 }
 
+export function calculatePerceptibilityScore(candidate = {}) {
+  return Number(
+    (
+      Number(candidate.maskedChangeRatio || 0) * 0.5 +
+      Number(candidate.maskedColorShiftRatio || 0) * 0.3 +
+      Math.abs(Number(candidate.maskedLuminanceDelta || 0)) * 0.2
+    ).toFixed(4),
+  );
+}
+
 export function getVisionExecutionTimeBudgetMs(presetKey) {
   if (presetKey === 'remove_furniture') {
     return REMOVE_FURNITURE_MAX_EXECUTION_TIME_MS;
@@ -398,27 +408,32 @@ export function isCandidateSufficient(candidate, presetKey) {
     const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
     const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
     const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
+    const perceptibilityScore = calculatePerceptibilityScore(candidate);
 
     if (presetKey === 'paint_bright_white') {
       return (
-        Number(candidate.maskedLuminanceDelta || 0) >= 0.015 &&
-        Number(candidate.maskedChangeRatio || 0) >= 0.04 &&
-        Number(candidate.outsideMaskChangeRatio || 1) <= 0.25 &&
-        maskedEdgeDensityDelta <= 0.006 &&
-        Number(candidate.topHalfChangeRatio || 1) <= 0.1 &&
-        furnitureCoverageIncreaseRatio <= 0.015 &&
-        newFurnitureAdditionRatio <= 0.02
+        Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
+        maskedColorShiftRatio >= 0.055 &&
+        maskedLuminanceDelta >= 0.02 &&
+        perceptibilityScore >= 0.08 &&
+        maskedEdgeDensityDelta <= 0.0025 &&
+        Number(candidate.topHalfChangeRatio || 1) <= 0.08 &&
+        Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
+        furnitureCoverageIncreaseRatio <= 0.01 &&
+        newFurnitureAdditionRatio <= 0.01
       );
     }
 
     return (
-      Number(candidate.maskedChangeRatio || 0) >= 0.07 &&
-      maskedColorShiftRatio >= 0.035 &&
-      maskedEdgeDensityDelta <= 0.004 &&
-      Number(candidate.topHalfChangeRatio || 1) <= 0.1 &&
-      Number(candidate.outsideMaskChangeRatio || 1) <= 0.24 &&
-      furnitureCoverageIncreaseRatio <= 0.02 &&
-      newFurnitureAdditionRatio <= 0.04
+      Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
+      maskedColorShiftRatio >= 0.06 &&
+      Math.abs(maskedLuminanceDelta) >= 0.02 &&
+      perceptibilityScore >= 0.08 &&
+      maskedEdgeDensityDelta <= 0.0025 &&
+      Number(candidate.topHalfChangeRatio || 1) <= 0.08 &&
+      Number(candidate.outsideMaskChangeRatio || 1) <= 0.12 &&
+      furnitureCoverageIncreaseRatio <= 0.01 &&
+      newFurnitureAdditionRatio <= 0.01
     );
   }
 
@@ -446,27 +461,34 @@ function isPreferredFinishFallbackCandidate(candidate, presetKey) {
   const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
   const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
   const focusRegionChangeRatio = Number(candidate.focusRegionChangeRatio || 0);
+  const perceptibilityScore = calculatePerceptibilityScore(candidate);
 
   if (isPaintPreset) {
     if (
       topHalfChangeRatio > 0.08 ||
-      outsideMaskChangeRatio > 0.2 ||
-      furnitureCoverageIncreaseRatio > 0.015 ||
-      newFurnitureAdditionRatio > 0.02 ||
-      maskedEdgeDensityDelta > 0.004
+      outsideMaskChangeRatio > 0.12 ||
+      furnitureCoverageIncreaseRatio > 0.01 ||
+      newFurnitureAdditionRatio > 0.01 ||
+      maskedEdgeDensityDelta > 0.003
     ) {
       return false;
     }
 
     if (normalizedPresetKey === 'paint_bright_white') {
       return (
-        maskedChangeRatio >= 0.09 &&
+        maskedChangeRatio >= 0.1 &&
         maskedColorShiftRatio >= 0.05 &&
-        maskedLuminanceDelta >= 0.025
+        maskedLuminanceDelta >= 0.018 &&
+        perceptibilityScore >= 0.075
       );
     }
 
-    return maskedChangeRatio >= 0.085 && maskedColorShiftRatio >= 0.045;
+    return (
+      maskedChangeRatio >= 0.1 &&
+      maskedColorShiftRatio >= 0.05 &&
+      Math.abs(maskedLuminanceDelta) >= 0.015 &&
+      perceptibilityScore >= 0.075
+    );
   }
 
   if (
@@ -706,6 +728,8 @@ export function rankCandidates(candidates = [], presetKey) {
     }
 
     if (String(presetKey || '').startsWith('paint_')) {
+      const leftPerceptibilityScore = calculatePerceptibilityScore(left);
+      const rightPerceptibilityScore = calculatePerceptibilityScore(right);
       if (
         Number(left?.newFurnitureAdditionRatio || 0) !==
         Number(right?.newFurnitureAdditionRatio || 0)
@@ -731,6 +755,9 @@ export function rankCandidates(candidates = [], presetKey) {
       const rightHasWallFeatureAddition = Number(right?.maskedEdgeDensityDelta || 0) > 0.003;
       if (leftHasWallFeatureAddition !== rightHasWallFeatureAddition) {
         return leftHasWallFeatureAddition ? 1 : -1;
+      }
+      if (leftPerceptibilityScore !== rightPerceptibilityScore) {
+        return rightPerceptibilityScore - leftPerceptibilityScore;
       }
       if (presetKey === 'paint_bright_white') {
         if (

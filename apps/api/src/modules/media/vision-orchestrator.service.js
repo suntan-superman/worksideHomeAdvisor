@@ -1,5 +1,6 @@
 import {
   buildProviderChain,
+  calculatePerceptibilityScore,
   getPreferredFinishFallbackCandidates,
   getVisionExecutionTimeBudgetMs,
   isHighConfidenceEarlyExitCandidate,
@@ -24,14 +25,16 @@ export async function orchestrateVisionJob({
 }) {
   const effectiveUserPlan = resolveVisionUserPlan({ preset, userPlan });
   const openAiAvailable = typeof providerRunners.runOpenAiEdit === 'function';
+  const normalizedPresetKey = String(preset?.key || '');
   const chain = buildProviderChain({
     preset,
     userPlan: effectiveUserPlan,
     openAiAvailable,
   });
-  const normalizedPresetKey = String(preset?.key || '');
   const isSurfaceFinishPreset =
     normalizedPresetKey.startsWith('paint_') || normalizedPresetKey.startsWith('floor_');
+  const isPaintPreset = normalizedPresetKey.startsWith('paint_');
+  const isFloorPreset = normalizedPresetKey.startsWith('floor_');
   const exhaustProviderChain =
     normalizedPresetKey === 'remove_furniture' || isSurfaceFinishPreset;
   const requiresLocalTileStoneAttempt = normalizedPresetKey === 'floor_tile_stone';
@@ -42,6 +45,8 @@ export async function orchestrateVisionJob({
   const attempts = [];
   const allCandidates = [];
   const allSufficientCandidates = [];
+  const maxAdaptiveIterations = isPaintPreset ? 2 : 1;
+  let activePreset = { ...preset };
   const selectBestCandidates = (candidates = allCandidates) => {
     const sufficientCandidates = rankCandidates(
       candidates.filter((candidate) => candidate.isSufficient),
@@ -105,169 +110,128 @@ export async function orchestrateVisionJob({
     maxExecutionTimeMs,
   });
 
-  for (const [providerIndex, providerKey] of chain.entries()) {
-    const elapsedBeforeProvider = Math.max(0, Number(nowFn()) - startedAt);
-    if (elapsedBeforeProvider >= maxExecutionTimeMs && allCandidates.length && canStopForTimeBudget()) {
-      const rankedCandidates = selectBestCandidates(allCandidates);
-      const providerUsed = rankedCandidates[0]?.providerKey || null;
-      return buildResponse({
-        providerUsed,
-        bestVariant: rankedCandidates[0] || null,
-        stoppedEarlyReason: 'time_budget',
-        timeBudgetReached: true,
-      });
+  const isStrongEnoughFinishCandidate = (candidate) => {
+    if (!candidate) {
+      return false;
     }
 
-    try {
-      let providerCandidates = [];
-
-      if (providerKey === 'local_sharp') {
-        providerCandidates = await providerRunners.runLocalSharp?.({
-          asset,
-          preset,
-          roomType,
-          instructions,
-          normalizedPlan,
-          requestedMode,
-          userPlan: effectiveUserPlan,
-          sourceBuffer,
-          sourceImageBase64,
-          existingJob,
-        });
-      } else if (providerKey === 'replicate_basic' || providerKey === 'replicate_advanced') {
-        providerCandidates = await providerRunners.runReplicateProvider?.({
-          providerKey,
-          asset,
-          preset,
-          roomType,
-          instructions,
-          normalizedPlan,
-          requestedMode,
-          userPlan: effectiveUserPlan,
-          sourceBuffer,
-          sourceImageBase64,
-          existingJob,
-        });
-      } else if (providerKey === 'openai_edit') {
-        providerCandidates = await providerRunners.runOpenAiEdit?.({
-          providerKey,
-          asset,
-          preset,
-          roomType,
-          instructions,
-          normalizedPlan,
-          requestedMode,
-          userPlan: effectiveUserPlan,
-          sourceBuffer,
-          sourceImageBase64,
-          existingJob,
-        });
-      }
-
-      const isFloorPreset = String(preset?.key || '').startsWith('floor_');
-      const isWallPreset = String(preset?.key || '').startsWith('paint_');
-
-      // Filter out true no-op results before ranking so silent failures do not look usable.
-      const filteredCandidates = isFloorPreset || isWallPreset
-        ? [...(providerCandidates || [])]
-        : (providerCandidates || []).filter((candidate) => {
-        const maskedChange = Number(candidate?.maskedChangeRatio || 0);
-        const luminance = Math.abs(Number(candidate?.maskedLuminanceDelta || 0));
-        const colorShift = Number(candidate?.maskedColorShiftRatio || 0);
-
-        const isNoOp =
-          maskedChange < 0.01 &&
-          luminance < 0.01 &&
-          colorShift < 0.01;
-
-        return !isNoOp;
-      });
-
-      if (isSurfaceFinishPreset) {
-        console.log('Provider raw vs filtered', {
-          presetKey: preset?.key,
-          providerKey,
-          rawCount: (providerCandidates || []).length,
-          filteredCount: filteredCandidates.length,
-        });
-      }
-
-      const normalizedCandidates = rankCandidates(
-        filteredCandidates.map((candidate, index) => ({
-          ...candidate,
-          providerKey,
-          providerAttemptIndex: attempts.length,
-          providerCandidateIndex: index,
-          isSufficient: isCandidateSufficient(candidate, preset.key),
-        })),
-        preset.key,
+    if (isPaintPreset) {
+      return (
+        Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
+        Number(candidate.maskedColorShiftRatio || 0) >= 0.06 &&
+        Math.abs(Number(candidate.maskedLuminanceDelta || 0)) >= 0.02 &&
+        Number(candidate.newFurnitureAdditionRatio || 0) <= 0.01 &&
+        calculatePerceptibilityScore(candidate) >= 0.08
       );
+    }
 
-      if (isSurfaceFinishPreset && normalizedCandidates.length) {
-        normalizedCandidates.forEach((candidate) => {
-          console.log('Candidate evaluation', {
-            presetKey: preset.key,
-            providerKey,
-            overallScore: Number(candidate.overallScore || 0),
-            maskedChangeRatio: Number(candidate.maskedChangeRatio || 0),
-            focusRegionChangeRatio: Number(candidate.focusRegionChangeRatio || 0),
-            outsideMaskChangeRatio: Number(candidate.outsideMaskChangeRatio || 0),
-            maskedColorShiftRatio: Number(candidate.maskedColorShiftRatio || 0),
-            maskedLuminanceDelta: Number(candidate.maskedLuminanceDelta || 0),
-            maskedEdgeDensityDelta: Number(candidate.maskedEdgeDensityDelta || 0),
-            newFurnitureAdditionRatio: Number(candidate.newFurnitureAdditionRatio || 0),
-            furnitureCoverageIncreaseRatio: Number(
-              candidate.furnitureCoverageIncreaseRatio || 0,
-            ),
-            isSufficient: Boolean(candidate.isSufficient),
-          });
-        });
-      }
-
-      attempts.push({
-        providerKey,
-        candidateCount: normalizedCandidates.length,
-        sufficientCount: normalizedCandidates.filter((candidate) => candidate.isSufficient).length,
-        elapsedMs: Math.max(0, Number(nowFn()) - startedAt),
-        topOverallScore: Number(normalizedCandidates[0]?.overallScore || 0),
-        topObjectRemovalScore: Number(normalizedCandidates[0]?.objectRemovalScore || 0),
-        topRemainingFurnitureOverlapRatio: Number(
-          normalizedCandidates[0]?.remainingFurnitureOverlapRatio || 0,
-        ),
-        topLargestComponentPersistenceRatio: Number(
-          normalizedCandidates[0]?.largestComponentPersistenceRatio || 0,
-        ),
-        topNewFurnitureAdditionRatio: Number(
-          normalizedCandidates[0]?.newFurnitureAdditionRatio || 0,
-        ),
-      });
-
-      allCandidates.push(...normalizedCandidates);
-      allSufficientCandidates.push(
-        ...normalizedCandidates.filter((candidate) => candidate.isSufficient),
+    if (isFloorPreset) {
+      return (
+        Number(candidate.focusRegionChangeRatio || 0) >= 0.12 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.14
       );
+    }
 
-      const sufficient = rankCandidates(
-        normalizedCandidates.filter((candidate) => candidate.isSufficient),
-        preset.key,
-      )[0];
-      const shouldStopForCurrentCandidate =
-        sufficient &&
-        (!requiresLocalTileStoneAttempt || providerKey === 'local_sharp') &&
-        (!exhaustProviderChain || isHighConfidenceEarlyExitCandidate(sufficient, preset.key));
-      if (shouldStopForCurrentCandidate) {
-        return buildResponse({
-          providerUsed: providerKey,
-          bestVariant: sufficient,
-          stoppedEarlyReason:
-            exhaustProviderChain ? 'high_confidence_candidate' : 'sufficient_candidate',
-        });
-      }
+    return Boolean(candidate.isSufficient);
+  };
 
-      const elapsedAfterProvider = Math.max(0, Number(nowFn()) - startedAt);
+  const diagnoseFinishFailure = (candidates = []) => {
+    const best = rankCandidates(candidates, normalizedPresetKey)[0];
+    if (!best) {
+      return { shouldRetry: false };
+    }
+
+    if (isPaintPreset) {
       if (
-        providerIndex < chain.length - 1 &&
-        elapsedAfterProvider >= maxExecutionTimeMs &&
+        Number(best.newFurnitureAdditionRatio || 0) > 0.01 ||
+        Number(best.maskedEdgeDensityDelta || 0) > 0.01 ||
+        Number(best.topHalfChangeRatio || 0) > 0.08 ||
+        Number(best.outsideMaskChangeRatio || 0) > 0.12
+      ) {
+        return { shouldRetry: true, type: 'hallucination', action: 'tighten_negative_prompt', best };
+      }
+      if (Number(best.maskedChangeRatio || 0) < 0.08) {
+        return { shouldRetry: true, type: 'too_subtle', action: 'increase_strength', best };
+      }
+      if (Number(best.maskedColorShiftRatio || 0) < 0.04) {
+        return { shouldRetry: true, type: 'color_not_distinct', action: 'increase_color_shift', best };
+      }
+      if (Math.abs(Number(best.maskedLuminanceDelta || 0)) < 0.015) {
+        return { shouldRetry: true, type: 'not_bright_enough', action: 'increase_brightness', best };
+      }
+    }
+
+    if (isFloorPreset) {
+      if (Number(best.focusRegionChangeRatio || 0) < 0.08) {
+        return { shouldRetry: true, type: 'floor_not_changed', action: 'increase_strength', best };
+      }
+      if (Number(best.maskedEdgeDensityDelta || 0) < 0.005) {
+        return { shouldRetry: true, type: 'no_texture', action: 'increase_detail', best };
+      }
+    }
+
+    return { shouldRetry: false, best };
+  };
+
+  const applyAdaptiveAdjustment = (currentPreset, adjustment, iteration) => {
+    if (!adjustment?.shouldRetry) {
+      return currentPreset;
+    }
+
+    const updatedPreset = {
+      ...currentPreset,
+      strength: Number(
+        Math.min(0.98, Number(currentPreset.strength || 0.7) + 0.05).toFixed(2),
+      ),
+      guidanceScale: Number(
+        Math.min(10, Number(currentPreset.guidanceScale || 7.5) + 0.5).toFixed(2),
+      ),
+      numInferenceSteps: Math.min(70, Number(currentPreset.numInferenceSteps || 35) + 6),
+    };
+
+    if (adjustment.action === 'increase_brightness') {
+      updatedPreset.basePrompt = `${currentPreset.basePrompt} Make the change clearly brighter and more visible.`;
+    }
+
+    if (adjustment.action === 'increase_color_shift') {
+      updatedPreset.basePrompt = `${currentPreset.basePrompt} The wall color difference must be immediately noticeable at first glance.`;
+    }
+
+    if (adjustment.action === 'tighten_negative_prompt') {
+      updatedPreset.negativePrompt = `${currentPreset.negativePrompt}, added furniture, decor, fixtures, radiator, heater, vent cover, framed art, picture frames, wall sconces`;
+    }
+
+    console.log('vision_finish_iteration_adjustment', {
+      presetKey: currentPreset.key,
+      iteration,
+      failureType: adjustment.type,
+      action: adjustment.action,
+      previousScore: adjustment.best
+        ? {
+            maskedChangeRatio: Number(adjustment.best.maskedChangeRatio || 0),
+            maskedColorShiftRatio: Number(adjustment.best.maskedColorShiftRatio || 0),
+            maskedLuminanceDelta: Number(adjustment.best.maskedLuminanceDelta || 0),
+            newFurnitureAdditionRatio: Number(adjustment.best.newFurnitureAdditionRatio || 0),
+            perceptibilityScore: calculatePerceptibilityScore(adjustment.best),
+          }
+        : null,
+      nextSettings: {
+        strength: updatedPreset.strength,
+        guidanceScale: updatedPreset.guidanceScale,
+        numInferenceSteps: updatedPreset.numInferenceSteps,
+      },
+    });
+
+    return updatedPreset;
+  };
+
+  for (let iteration = 0; iteration < maxAdaptiveIterations; iteration += 1) {
+    const iterationCandidates = [];
+
+    for (const [providerIndex, providerKey] of chain.entries()) {
+      const elapsedBeforeProvider = Math.max(0, Number(nowFn()) - startedAt);
+      if (
+        elapsedBeforeProvider >= maxExecutionTimeMs &&
         allCandidates.length &&
         canStopForTimeBudget()
       ) {
@@ -280,27 +244,210 @@ export async function orchestrateVisionJob({
           timeBudgetReached: true,
         });
       }
-    } catch (error) {
-      if (isSurfaceFinishPreset) {
-        console.log('Surface finish provider failure', {
-          presetKey: preset?.key,
+
+      try {
+        let providerCandidates = [];
+
+        if (providerKey === 'local_sharp') {
+          providerCandidates = await providerRunners.runLocalSharp?.({
+            asset,
+            preset: activePreset,
+            roomType,
+            instructions,
+            normalizedPlan,
+            requestedMode,
+            userPlan: effectiveUserPlan,
+            sourceBuffer,
+            sourceImageBase64,
+            existingJob,
+          });
+        } else if (providerKey === 'replicate_basic' || providerKey === 'replicate_advanced') {
+          providerCandidates = await providerRunners.runReplicateProvider?.({
+            providerKey,
+            asset,
+            preset: activePreset,
+            roomType,
+            instructions,
+            normalizedPlan,
+            requestedMode,
+            userPlan: effectiveUserPlan,
+            sourceBuffer,
+            sourceImageBase64,
+            existingJob,
+          });
+        } else if (providerKey === 'openai_edit') {
+          providerCandidates = await providerRunners.runOpenAiEdit?.({
+            providerKey,
+            asset,
+            preset: activePreset,
+            roomType,
+            instructions,
+            normalizedPlan,
+            requestedMode,
+            userPlan: effectiveUserPlan,
+            sourceBuffer,
+            sourceImageBase64,
+            existingJob,
+          });
+        }
+
+        const filteredCandidates =
+          isFloorPreset || isPaintPreset
+            ? [...(providerCandidates || [])]
+            : (providerCandidates || []).filter((candidate) => {
+                const maskedChange = Number(candidate?.maskedChangeRatio || 0);
+                const luminance = Math.abs(Number(candidate?.maskedLuminanceDelta || 0));
+                const colorShift = Number(candidate?.maskedColorShiftRatio || 0);
+
+                const isNoOp =
+                  maskedChange < 0.01 && luminance < 0.01 && colorShift < 0.01;
+
+                return !isNoOp;
+              });
+
+        if (isSurfaceFinishPreset) {
+          console.log('Provider raw vs filtered', {
+            presetKey: activePreset?.key,
+            providerKey,
+            iteration,
+            rawCount: (providerCandidates || []).length,
+            filteredCount: filteredCandidates.length,
+          });
+        }
+
+        const normalizedCandidates = rankCandidates(
+          filteredCandidates.map((candidate, index) => ({
+            ...candidate,
+            providerKey,
+            providerAttemptIndex: attempts.length,
+            providerCandidateIndex: index,
+            isSufficient: isCandidateSufficient(candidate, activePreset.key),
+          })),
+          activePreset.key,
+        );
+
+        if (isSurfaceFinishPreset && normalizedCandidates.length) {
+          normalizedCandidates.forEach((candidate) => {
+            console.log('Candidate evaluation', {
+              presetKey: activePreset.key,
+              providerKey,
+              iteration,
+              overallScore: Number(candidate.overallScore || 0),
+              maskedChangeRatio: Number(candidate.maskedChangeRatio || 0),
+              focusRegionChangeRatio: Number(candidate.focusRegionChangeRatio || 0),
+              outsideMaskChangeRatio: Number(candidate.outsideMaskChangeRatio || 0),
+              maskedColorShiftRatio: Number(candidate.maskedColorShiftRatio || 0),
+              maskedLuminanceDelta: Number(candidate.maskedLuminanceDelta || 0),
+              maskedEdgeDensityDelta: Number(candidate.maskedEdgeDensityDelta || 0),
+              newFurnitureAdditionRatio: Number(candidate.newFurnitureAdditionRatio || 0),
+              furnitureCoverageIncreaseRatio: Number(
+                candidate.furnitureCoverageIncreaseRatio || 0,
+              ),
+              perceptibilityScore: calculatePerceptibilityScore(candidate),
+              isSufficient: Boolean(candidate.isSufficient),
+            });
+          });
+        }
+
+        attempts.push({
           providerKey,
+          iteration,
+          candidateCount: normalizedCandidates.length,
+          sufficientCount: normalizedCandidates.filter((candidate) => candidate.isSufficient).length,
+          elapsedMs: Math.max(0, Number(nowFn()) - startedAt),
+          topOverallScore: Number(normalizedCandidates[0]?.overallScore || 0),
+          topObjectRemovalScore: Number(normalizedCandidates[0]?.objectRemovalScore || 0),
+          topRemainingFurnitureOverlapRatio: Number(
+            normalizedCandidates[0]?.remainingFurnitureOverlapRatio || 0,
+          ),
+          topLargestComponentPersistenceRatio: Number(
+            normalizedCandidates[0]?.largestComponentPersistenceRatio || 0,
+          ),
+          topNewFurnitureAdditionRatio: Number(
+            normalizedCandidates[0]?.newFurnitureAdditionRatio || 0,
+          ),
+        });
+
+        iterationCandidates.push(...normalizedCandidates);
+        allCandidates.push(...normalizedCandidates);
+        allSufficientCandidates.push(
+          ...normalizedCandidates.filter((candidate) => candidate.isSufficient),
+        );
+
+        const sufficient = rankCandidates(
+          normalizedCandidates.filter((candidate) => candidate.isSufficient),
+          activePreset.key,
+        )[0];
+        const shouldStopForCurrentCandidate =
+          sufficient &&
+          (!requiresLocalTileStoneAttempt || providerKey === 'local_sharp') &&
+          (!exhaustProviderChain ||
+            isHighConfidenceEarlyExitCandidate(sufficient, activePreset.key));
+        if (shouldStopForCurrentCandidate) {
+          return buildResponse({
+            providerUsed: providerKey,
+            bestVariant: sufficient,
+            stoppedEarlyReason:
+              exhaustProviderChain ? 'high_confidence_candidate' : 'sufficient_candidate',
+          });
+        }
+
+        const elapsedAfterProvider = Math.max(0, Number(nowFn()) - startedAt);
+        if (
+          providerIndex < chain.length - 1 &&
+          elapsedAfterProvider >= maxExecutionTimeMs &&
+          allCandidates.length &&
+          canStopForTimeBudget()
+        ) {
+          const rankedCandidates = selectBestCandidates(allCandidates);
+          const providerUsed = rankedCandidates[0]?.providerKey || null;
+          return buildResponse({
+            providerUsed,
+            bestVariant: rankedCandidates[0] || null,
+            stoppedEarlyReason: 'time_budget',
+            timeBudgetReached: true,
+          });
+        }
+      } catch (error) {
+        if (isSurfaceFinishPreset) {
+          console.log('Surface finish provider failure', {
+            presetKey: activePreset?.key,
+            providerKey,
+            iteration,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        attempts.push({
+          providerKey,
+          iteration,
+          candidateCount: 0,
+          sufficientCount: 0,
+          elapsedMs: Math.max(0, Number(nowFn()) - startedAt),
+          topOverallScore: 0,
+          topObjectRemovalScore: 0,
+          topRemainingFurnitureOverlapRatio: 0,
+          topLargestComponentPersistenceRatio: 0,
+          topNewFurnitureAdditionRatio: 0,
           error: error instanceof Error ? error.message : String(error),
         });
       }
-      attempts.push({
-        providerKey,
-        candidateCount: 0,
-        sufficientCount: 0,
-        elapsedMs: Math.max(0, Number(nowFn()) - startedAt),
-        topOverallScore: 0,
-        topObjectRemovalScore: 0,
-        topRemainingFurnitureOverlapRatio: 0,
-        topLargestComponentPersistenceRatio: 0,
-        topNewFurnitureAdditionRatio: 0,
-        error: error instanceof Error ? error.message : String(error),
-      });
     }
+
+    if (!isPaintPreset || iteration >= maxAdaptiveIterations - 1) {
+      break;
+    }
+
+    const bestCurrentIterationCandidate = selectBestCandidates(iterationCandidates)[0];
+    if (isStrongEnoughFinishCandidate(bestCurrentIterationCandidate)) {
+      break;
+    }
+
+    const adjustment = diagnoseFinishFailure(iterationCandidates);
+    if (!adjustment.shouldRetry) {
+      break;
+    }
+
+    activePreset = applyAdaptiveAdjustment(activePreset, adjustment, iteration + 1);
   }
 
   const rankedCandidates = selectBestCandidates(allCandidates);

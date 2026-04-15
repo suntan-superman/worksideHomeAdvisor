@@ -10,6 +10,7 @@ import {
 } from './media-ai.service.js';
 import {
   buildProviderChain,
+  calculatePerceptibilityScore,
   getReplicateSettings,
   isCandidateSufficient,
   rankCandidates,
@@ -144,6 +145,16 @@ test('wall paint presets now use the replicate paint pipeline', () => {
     }),
     ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp'],
   );
+});
+
+test('calculatePerceptibilityScore weights visible wall change signals', () => {
+  const score = calculatePerceptibilityScore({
+    maskedChangeRatio: 0.2,
+    maskedColorShiftRatio: 0.1,
+    maskedLuminanceDelta: 0.05,
+  });
+
+  assert.equal(score, 0.14);
 });
 
 test('floor tone presets now use the replicate finish pipeline', () => {
@@ -341,6 +352,38 @@ test('paint presets keep a subtle but real replicate wall repaint instead of fai
   assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
 });
 
+test('paint ranking prefers clearer visible repaint over safer but barely changed result', () => {
+  const ranked = rankCandidates(
+    [
+      {
+        providerKey: 'replicate_basic',
+        maskedChangeRatio: 0.08,
+        maskedColorShiftRatio: 0.03,
+        maskedLuminanceDelta: 0.01,
+        maskedEdgeDensityDelta: 0.0004,
+        outsideMaskChangeRatio: 0.03,
+        topHalfChangeRatio: 0.01,
+        furnitureCoverageIncreaseRatio: 0,
+        newFurnitureAdditionRatio: 0,
+      },
+      {
+        providerKey: 'replicate_advanced',
+        maskedChangeRatio: 0.16,
+        maskedColorShiftRatio: 0.08,
+        maskedLuminanceDelta: 0.03,
+        maskedEdgeDensityDelta: 0.001,
+        outsideMaskChangeRatio: 0.04,
+        topHalfChangeRatio: 0.01,
+        furnitureCoverageIncreaseRatio: 0,
+        newFurnitureAdditionRatio: 0,
+      },
+    ],
+    'paint_warm_neutral',
+  );
+
+  assert.equal(ranked[0]?.providerKey, 'replicate_advanced');
+});
+
 test('paint presets fall through to openai_edit when replicate returns nothing usable', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
@@ -376,10 +419,17 @@ test('paint presets fall through to openai_edit when replicate returns nothing u
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit']);
+  assert.deepEqual(callOrder, [
+    'replicate_basic',
+    'replicate_advanced',
+    'openai_edit',
+    'replicate_basic',
+    'replicate_advanced',
+    'openai_edit',
+  ]);
   assert.equal(result.providerUsed, 'openai_edit');
   assert.equal(result.bestVariant?.providerKey, 'openai_edit');
-  assert.equal(result.stoppedEarlyReason, null);
+  assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
 });
 
 test('paint presets fall through to local_sharp when ai providers return nothing usable', async () => {
@@ -421,10 +471,81 @@ test('paint presets fall through to local_sharp when ai providers return nothing
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp']);
+  assert.deepEqual(callOrder, [
+    'replicate_basic',
+    'replicate_advanced',
+    'openai_edit',
+    'local_sharp',
+    'replicate_basic',
+    'replicate_advanced',
+    'openai_edit',
+    'local_sharp',
+  ]);
   assert.equal(result.providerUsed, 'local_sharp');
   assert.equal(result.bestVariant?.providerKey, 'local_sharp');
-  assert.equal(result.stoppedEarlyReason, null);
+  assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
+});
+
+test('paint presets retry with stronger settings when first pass is too subtle', async () => {
+  const seenStrengths = [];
+  let replicateCallCount = 0;
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('paint_warm_neutral'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async ({ providerKey, preset }) => {
+        if (providerKey !== 'replicate_basic') {
+          return [];
+        }
+
+        replicateCallCount += 1;
+        seenStrengths.push(preset.strength);
+
+        if (replicateCallCount === 1) {
+          return [
+            {
+              providerKey,
+              overallScore: 86,
+              maskedChangeRatio: 0.06,
+              maskedColorShiftRatio: 0.03,
+              maskedLuminanceDelta: 0.01,
+              maskedEdgeDensityDelta: 0.0008,
+              topHalfChangeRatio: 0.02,
+              outsideMaskChangeRatio: 0.05,
+              furnitureCoverageIncreaseRatio: 0,
+              newFurnitureAdditionRatio: 0,
+            },
+          ];
+        }
+
+        return [
+          {
+            providerKey,
+            overallScore: 90,
+            maskedChangeRatio: 0.15,
+            maskedColorShiftRatio: 0.08,
+            maskedLuminanceDelta: 0.03,
+            maskedEdgeDensityDelta: 0.001,
+            topHalfChangeRatio: 0.02,
+            outsideMaskChangeRatio: 0.04,
+            furnitureCoverageIncreaseRatio: 0,
+            newFurnitureAdditionRatio: 0,
+          },
+        ];
+      },
+      runOpenAiEdit: async () => [],
+      runLocalSharp: async () => [],
+    },
+  });
+
+  assert.equal(replicateCallCount, 2);
+  assert.ok(seenStrengths[1] > seenStrengths[0]);
+  assert.equal(result.providerUsed, 'replicate_basic');
 });
 
 test('floor presets surface the best-effort finish outcome when tile providers return nothing usable', async () => {
