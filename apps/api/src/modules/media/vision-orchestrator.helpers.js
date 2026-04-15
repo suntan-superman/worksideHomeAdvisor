@@ -30,18 +30,20 @@ const PREMIUM_PRESET_KEYS = new Set([
 
 export const VISION_PLAN_VALUES = ['standard', 'pro', 'premium'];
 const REMOVE_FURNITURE_MAX_EXECUTION_TIME_MS = 150_000;
-export const PAINT_STRENGTH_MIN_COLOR_SHIFT = 0.22;
-export const PAINT_STRENGTH_MIN_LUMINANCE_DELTA = 0.18;
-export const PAINT_STRENGTH_MIN_PERCEPTIBILITY = 0.65;
-export const PAINT_STRENGTH_MIN_ACCEPTABLE_SCORE = 7.5;
+export const PAINT_STRENGTH_MIN_COLOR_SHIFT = 0.12;
+export const PAINT_STRENGTH_MIN_LUMINANCE_DELTA = 0.08;
+export const PAINT_STRENGTH_MIN_PERCEPTIBILITY = 0.35;
+export const PAINT_STRENGTH_MIN_ACCEPTABLE_SCORE = 5.5;
+export const PAINT_STRENGTH_MIN_USABLE_SCORE = 4;
+export const PAINT_STRENGTH_MIN_USABLE_PERCEPTIBILITY = 0.25;
 
 function resolvePaintStrengthThresholds(presetKey) {
   if (presetKey === 'paint_warm_neutral') {
     return {
       minColorShift: PAINT_STRENGTH_MIN_COLOR_SHIFT,
       minLuminanceDelta: PAINT_STRENGTH_MIN_LUMINANCE_DELTA,
-      minPerceptibility: 0.62,
-      minAcceptableScore: 7,
+      minPerceptibility: PAINT_STRENGTH_MIN_USABLE_PERCEPTIBILITY,
+      minAcceptableScore: 5,
     };
   }
 
@@ -305,7 +307,16 @@ export function scorePaintCandidate(candidate = {}, presetKey = '') {
 export function normalizeVisionCandidateScore(candidate = {}) {
   const overallScore = Number(candidate.overallScore || 0);
   if (!Number.isFinite(overallScore) || overallScore <= 0) {
-    return 0;
+    const perceptibilityScore = calculatePerceptibilityScore(candidate);
+    const maskedChangeRatio = Number(candidate.maskedChangeRatio || 0);
+    const focusRegionChangeRatio = Number(candidate.focusRegionChangeRatio || 0);
+    const outsideMaskChangeRatio = Number(candidate.outsideMaskChangeRatio || 0);
+    const derivedScore =
+      perceptibilityScore * 14 +
+      maskedChangeRatio * 3 +
+      focusRegionChangeRatio * 1.5 -
+      Math.max(0, outsideMaskChangeRatio - 0.12) * 4;
+    return Number(Math.max(0, Math.min(10, derivedScore)).toFixed(2));
   }
 
   return Number((overallScore > 10 ? overallScore / 10 : overallScore).toFixed(2));
@@ -346,6 +357,13 @@ export function evaluatePaintStrength(candidate = {}, presetKey = '') {
     minAcceptableScore: thresholds.minAcceptableScore,
     passes: finalScore >= thresholds.minAcceptableScore,
   };
+}
+
+export function isUsablePaintStrength(paintStrength = {}) {
+  return (
+    Number(paintStrength.finalScore || 0) >= PAINT_STRENGTH_MIN_USABLE_SCORE &&
+    Number(paintStrength.perceptibilityScore || 0) >= PAINT_STRENGTH_MIN_USABLE_PERCEPTIBILITY
+  );
 }
 
 export function getVisionExecutionTimeBudgetMs(presetKey) {
@@ -405,6 +423,16 @@ export function isHighConfidenceEarlyExitCandidate(candidate, presetKey) {
   }
 
   if (normalizedPresetKey.startsWith('paint_')) {
+    if (normalizedPresetKey === 'paint_dark_charcoal_test') {
+      return (
+        Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
+        Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.16 &&
+        Number(candidate.topHalfChangeRatio ?? 1) <= 0.08 &&
+        Number(candidate.newFurnitureAdditionRatio ?? 1) <= 0.01 &&
+        Number(candidate.furnitureCoverageIncreaseRatio ?? 1) <= 0.01
+      );
+    }
+
     const paintStrength = evaluatePaintStrength(candidate, normalizedPresetKey);
 
     if (normalizedPresetKey === 'paint_bright_white') {
@@ -520,6 +548,20 @@ export function isCandidateSufficient(candidate, presetKey) {
     const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
     const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
     const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
+
+    if (presetKey === 'paint_dark_charcoal_test') {
+      return (
+        Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
+        maskedColorShiftRatio >= 0.08 &&
+        Math.abs(maskedLuminanceDelta) >= 0.06 &&
+        maskedEdgeDensityDelta <= 0.003 &&
+        Number(candidate.topHalfChangeRatio ?? 1) <= 0.08 &&
+        Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.16 &&
+        furnitureCoverageIncreaseRatio <= 0.01 &&
+        newFurnitureAdditionRatio <= 0.01
+      );
+    }
+
     const paintStrength = evaluatePaintStrength(candidate, presetKey);
 
     if (presetKey === 'paint_bright_white') {
@@ -527,8 +569,8 @@ export function isCandidateSufficient(candidate, presetKey) {
         Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
         maskedColorShiftRatio >= paintStrength.minColorShift &&
         maskedLuminanceDelta >= paintStrength.minLuminanceDelta &&
-        paintStrength.perceptibilityScore >= paintStrength.minPerceptibility &&
-        paintStrength.passes &&
+        paintStrength.perceptibilityScore >= PAINT_STRENGTH_MIN_USABLE_PERCEPTIBILITY &&
+        isUsablePaintStrength(paintStrength) &&
         maskedEdgeDensityDelta <= 0.0025 &&
         Number(candidate.topHalfChangeRatio ?? 1) <= 0.08 &&
         Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.12 &&
@@ -541,8 +583,8 @@ export function isCandidateSufficient(candidate, presetKey) {
       Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
       maskedColorShiftRatio >= paintStrength.minColorShift &&
       Math.abs(maskedLuminanceDelta) >= paintStrength.minLuminanceDelta &&
-      paintStrength.perceptibilityScore >= paintStrength.minPerceptibility &&
-      paintStrength.passes &&
+      paintStrength.perceptibilityScore >= PAINT_STRENGTH_MIN_USABLE_PERCEPTIBILITY &&
+      isUsablePaintStrength(paintStrength) &&
       maskedEdgeDensityDelta <= 0.0025 &&
       Number(candidate.topHalfChangeRatio ?? 1) <= 0.08 &&
       Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.12 &&
@@ -593,8 +635,16 @@ function isPreferredFinishFallbackCandidate(candidate, presetKey) {
         maskedChangeRatio >= 0.1 &&
         maskedColorShiftRatio >= paintStrength.minColorShift &&
         maskedLuminanceDelta >= paintStrength.minLuminanceDelta &&
-        paintStrength.perceptibilityScore >= paintStrength.minPerceptibility &&
-        paintStrength.passes
+        paintStrength.perceptibilityScore >= PAINT_STRENGTH_MIN_USABLE_PERCEPTIBILITY &&
+        isUsablePaintStrength(paintStrength)
+      );
+    }
+
+    if (normalizedPresetKey === 'paint_dark_charcoal_test') {
+      return (
+        maskedChangeRatio >= 0.1 &&
+        maskedColorShiftRatio >= 0.08 &&
+        Math.abs(maskedLuminanceDelta) >= 0.06
       );
     }
 
@@ -602,8 +652,8 @@ function isPreferredFinishFallbackCandidate(candidate, presetKey) {
       maskedChangeRatio >= 0.1 &&
       maskedColorShiftRatio >= paintStrength.minColorShift &&
       Math.abs(maskedLuminanceDelta) >= paintStrength.minLuminanceDelta &&
-      paintStrength.perceptibilityScore >= paintStrength.minPerceptibility &&
-      paintStrength.passes
+      paintStrength.perceptibilityScore >= PAINT_STRENGTH_MIN_USABLE_PERCEPTIBILITY &&
+      isUsablePaintStrength(paintStrength)
     );
   }
 

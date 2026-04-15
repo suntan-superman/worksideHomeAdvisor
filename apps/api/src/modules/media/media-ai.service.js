@@ -252,6 +252,10 @@ export function shouldSkipPaintGeneration({
     return { skip: false, reason: '' };
   }
 
+  if (presetKey === 'paint_dark_charcoal_test') {
+    return { skip: false, reason: '' };
+  }
+
   const overallQualityScore = Number(assetAnalysis?.overallQualityScore || 0);
   const lightingScore = Number(assetAnalysis?.lightingScore || 0);
   const retakeRecommended = Boolean(assetAnalysis?.retakeRecommended);

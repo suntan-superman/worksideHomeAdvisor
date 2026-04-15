@@ -6,6 +6,7 @@ import {
   getVisionExecutionTimeBudgetMs,
   isHighConfidenceEarlyExitCandidate,
   isCandidateSufficient,
+  isUsablePaintStrength,
   rankCandidates,
   resolveVisionUserPlan,
   scorePaintCandidate,
@@ -138,14 +139,24 @@ export async function orchestrateVisionJob({
     }
 
     if (isPaintPreset) {
+      if (normalizedPresetKey === 'paint_dark_charcoal_test') {
+        return (
+          Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
+          Number(candidate.maskedColorShiftRatio || 0) >= 0.08 &&
+          Math.abs(Number(candidate.maskedLuminanceDelta || 0)) >= 0.06 &&
+          Number(candidate.newFurnitureAdditionRatio || 0) <= 0.01 &&
+          Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.16
+        );
+      }
+
       const paintStrength = evaluatePaintStrength(candidate, normalizedPresetKey);
       return (
         Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
         Number(candidate.maskedColorShiftRatio || 0) >= paintStrength.minColorShift &&
         Math.abs(Number(candidate.maskedLuminanceDelta || 0)) >= paintStrength.minLuminanceDelta &&
         Number(candidate.newFurnitureAdditionRatio || 0) <= 0.01 &&
-        paintStrength.perceptibilityScore >= paintStrength.minPerceptibility &&
-        paintStrength.passes
+        paintStrength.perceptibilityScore >= 0.25 &&
+        isUsablePaintStrength(paintStrength)
       );
     }
 
@@ -355,7 +366,7 @@ export async function orchestrateVisionJob({
       if (paintStrength.perceptibilityScore < paintStrength.minPerceptibility) {
         return { shouldRetry: true, type: 'low_perceptibility', action: 'increase_strength', best };
       }
-      if (paintStrength.finalScore < paintStrength.minAcceptableScore) {
+      if (paintStrength.finalScore < 4) {
         return { shouldRetry: true, type: 'score_too_low', action: 'increase_strength', best };
       }
     }

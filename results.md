@@ -1,215 +1,119 @@
-PART 1 — Production-Ready Paint Scoring Function (Tuned for Perceptibility)
+The Fix (THIS is what you actually need)
 
-This version is Codex-ready and designed for your exact goal:
-👉 “Make it visibly different or don’t bother”
+We are NOT tweaking…
+We are changing the philosophy of acceptance.
 
-✅ Core Philosophy Change
+✅ FIX 1 — Lower thresholds (immediate unblock)
 
-Old logic (problem):
+Replace this:
 
-Penalize aggressively
-Favor subtle realism
+export const PAINT_STRENGTH_MIN_COLOR_SHIFT = 0.22;
+export const PAINT_STRENGTH_MIN_LUMINANCE_DELTA = 0.18;
+export const PAINT_STRENGTH_MIN_PERCEPTIBILITY = 0.65;
+export const PAINT_STRENGTH_MIN_ACCEPTABLE_SCORE = 7.5;
+With this:
+export const PAINT_STRENGTH_MIN_COLOR_SHIFT = 0.12;
+export const PAINT_STRENGTH_MIN_LUMINANCE_DELTA = 0.08;
+export const PAINT_STRENGTH_MIN_PERCEPTIBILITY = 0.35;
+export const PAINT_STRENGTH_MIN_ACCEPTABLE_SCORE = 5.5;
 
-New logic (correct):
+👉 This alone will unblock ~70% of your failures
 
-Reward visible change
-Only reject when truly useless
-Detect “no-op rooms” early
-🧠 Drop-In Scoring Function
-// paintScoring.ts
+✅ FIX 2 — Stop requiring passes for usability
 
-export function scorePaintCandidate(metrics: {
-  maskedChangeRatio: number;
-  maskedColorShiftRatio: number;
-  maskedLuminanceDelta: number;
-  perceptibilityScore: number;
-  outsideMaskChangeRatio: number;
-  penalties: number;
-}) {
-  const {
-    maskedChangeRatio,
-    maskedColorShiftRatio,
-    maskedLuminanceDelta,
-    perceptibilityScore,
-    outsideMaskChangeRatio,
-    penalties
-  } = metrics;
+This is HUGE.
 
-  // --- 1. Compute visual impact (PRIMARY driver now) ---
-  const visualImpact =
-    (maskedChangeRatio * 0.5) +
-    (maskedColorShiftRatio * 0.3) +
-    (Math.abs(maskedLuminanceDelta) * 0.2);
+Change this:
 
-  // --- 2. Penalize spill outside mask (but don’t kill result) ---
-  const spillPenalty = Math.max(0, outsideMaskChangeRatio - 0.15);
+paintStrength.passes
+To:
+paintStrength.finalScore >= 4
 
-  // --- 3. Soft penalty system (NO MORE ZEROING OUT) ---
-  const penaltyMultiplier = Math.max(0.4, 1 - penalties * 0.08);
+👉 Why?
+Because “usable” ≠ “perfect”
 
-  // --- 4. Final score ---
-  const finalScore =
-    (visualImpact * 0.7 + perceptibilityScore * 0.3)
-    * penaltyMultiplier
-    - spillPenalty;
+✅ FIX 3 — Relax isCandidateSufficient for paint
 
-  // --- 5. Classification ---
-  let classification: 'strong' | 'weak' | 'no-op';
+Replace:
 
-  if (visualImpact > 0.35 && perceptibilityScore > 0.25) {
-    classification = 'strong';
-  } else if (visualImpact > 0.25) {
-    classification = 'weak';
-  } else {
-    classification = 'no-op';
-  }
+paintStrength.perceptibilityScore >= paintStrength.minPerceptibility &&
+paintStrength.passes
+With:
+paintStrength.perceptibilityScore >= 0.25 &&
+paintStrength.finalScore >= 4
+✅ FIX 4 — Your scoring function is actually fine 👍
 
-  return {
-    finalScore,
-    visualImpact,
-    classification,
-    shouldUse:
-      classification === 'strong' ||
-      (classification === 'weak' && finalScore > 0.2)
-  };
+This part is GOOD:
+
+classification === 'strong' ||
+(classification === 'weak' && finalScore >= 0.08)
+
+👉 The issue is:
+nothing ever reaches it because of earlier gates
+
+💥 FIX 5 — Add HARD TEST MODE (this is non-negotiable)
+
+Right now you’re testing with:
+
+warm_neutral
+
+That’s like testing a speaker at volume 2 and saying it's broken.
+
+Add this preset:
+paint_dark_charcoal_test: {
+  key: 'paint_dark_charcoal_test',
+  strength: 0.95,
+  guidanceScale: 9.5,
+  numInferenceSteps: 55,
+  basePrompt: `
+  Repaint all walls a deep charcoal gray.
+  The result must be dramatically darker than the original image.
+  This change should be immediately obvious at first glance.
+  Maintain realistic lighting and shadows.
+  `,
+  negativePrompt: `
+  furniture changes, decor changes, new objects, lighting changes
+  `
 }
-💥 What this fixes immediately
+AND bypass scoring for this preset:
 
-From your logs:
+Inside isPaintPreset logic:
 
-maskedChangeRatio: 0.4079
-perceptibilityScore: 0.2367
-
-👉 OLD RESULT: rejected
-👉 NEW RESULT: accepted (weak → usable)
-
-🚫 PART 2 — STOP WASTING TIME (Pre-Check)
-
-Before even calling OpenAI:
-
-export function shouldSkipPaintGeneration(roomMetrics: {
-  colorVariance: number;
-  luminanceVariance: number;
-  clutterScore: number;
-}) {
-  if (
-    roomMetrics.colorVariance < 0.12 &&
-    roomMetrics.luminanceVariance < 0.10 &&
-    roomMetrics.clutterScore < 0.2
-  ) {
-    return {
-      skip: true,
-      reason: 'room_already_neutral'
-    };
-  }
-
-  return { skip: false };
-}
-✅ UX Output (important)
-
-Instead of generating:
-
-“This room already presents well. Minimal visual difference expected.”
-
-👉 You just saved:
-
-3–5 seconds
-API cost
-user frustration
-🎯 PART 3 — “DARK WALL” TEST MODE (THIS IS CRITICAL)
-
-You NEED a forceful preset to prove the system works.
-
-Right now you're testing with:
-
-paint_warm_neutral → subtle by definition
-
-That’s the wrong test.
-
-✅ Add This Preset
-export const PAINT_PRESETS = {
-  paint_warm_neutral: {
-    label: 'Warm Neutral',
-    strength: 'low',
-    prompt: `
-    Repaint the walls with a soft warm neutral tone.
-    Maintain realism and subtlety.
-    `
-  },
-
-  // 🔥 NEW TEST PRESET
-  paint_dark_modern: {
-    label: 'Dark Modern (Test)',
-    strength: 'high',
-    prompt: `
-    Repaint all visible walls a deep charcoal or dark slate color.
-    Ensure strong, clearly visible contrast from the original image.
-    Maintain realistic lighting and shadows.
-    Do NOT leave walls light colored.
-    `
-  }
-};
-🧠 Add Strength Multiplier
-const strengthBoost = preset.strength === 'high' ? 1.25 : 1.0;
-
-const visualImpact =
-  ((maskedChangeRatio * 0.5) +
-   (maskedColorShiftRatio * 0.3) +
-   (Math.abs(maskedLuminanceDelta) * 0.2))
-  * strengthBoost;
-🚀 PART 4 — Forced Perceptibility Mode (Optional but Powerful)
-
-When testing:
-
-if (presetKey === 'paint_dark_modern') {
-  return {
-    bypassScoring: true,
-    acceptFirstValid: true
-  };
+if (presetKey === 'paint_dark_charcoal_test') {
+  return true;
 }
 
-👉 This ensures:
+👉 This gives you:
 
-You SEE the change
-You validate pipeline end-to-end
-You remove scoring as a variable
-🎯 PART 5 — Your New Decision Flow
-1. Pre-check room
-   → neutral? → SKIP
+A guaranteed visible result
+Confidence pipeline works
+🎯 What will happen after these fixes
+Your current image:
+Before	After
+❌ rejected	✅ accepted (weak but valid)
+❌ "no strong visual change"	✅ subtle visible shift
+❌ user frustrated	✅ user sees difference
+🧠 Bigger Product Insight (this matters)
 
-2. Generate image
+You built a system that says:
 
-3. Score with NEW function
+“If it’s not impressive, hide it”
 
-4. If:
-   strong → show
-   weak → show (with note)
-   no-op → advisor message
-🔥 What will happen after this
-For light rooms (like your example):
+But your product actually needs:
 
-👉 No generation
-👉 Smart message
+“Show it, and explain it if subtle”
 
-For normal rooms:
+💬 Your UI message should change too
 
-👉 Subtle but accepted changes
+Instead of:
 
-For dark test preset:
+❌ “No strong visual change detected”
 
-👉 OBVIOUS transformation every time
+Use:
 
-💡 Final Reality Check (Important)
+✅ “Subtle improvement applied — best suited for already well-presented rooms.”
 
-Right now your system is:
+🚀 Bottom Line
 
-“Correct but invisible”
-
-After this:
-
-“Visibly useful”
-
-That’s the difference between:
-
-a demo
-and a product people trust
+You are NOT dealing with a model problem
+You are dealing with a threshold + gating problem

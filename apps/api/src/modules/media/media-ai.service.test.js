@@ -23,6 +23,8 @@ import {
   evaluatePaintStrength,
   getReplicateSettings,
   isCandidateSufficient,
+  isUsablePaintStrength,
+  PAINT_STRENGTH_MIN_USABLE_PERCEPTIBILITY,
   rankCandidates,
   resolveVisionUserPlan,
   scorePaintCandidate,
@@ -457,9 +459,9 @@ test('scorePaintCandidate rejects heavy-penalty no-op wall previews', () => {
 test('evaluatePaintStrength penalizes weak repaint candidates using normalized review scores', () => {
   const strength = evaluatePaintStrength({
     overallScore: 86,
-    maskedChangeRatio: 0.92,
-    maskedColorShiftRatio: 0.14,
-    maskedLuminanceDelta: 0.13,
+    maskedChangeRatio: 0.08,
+    maskedColorShiftRatio: 0.04,
+    maskedLuminanceDelta: 0.03,
   });
 
   assert.equal(strength.penalties, 7);
@@ -491,10 +493,38 @@ test('evaluatePaintStrength gives paint_warm_neutral a slightly softer near-pass
     'paint_warm_neutral',
   );
 
-  assert.equal(strength.minPerceptibility, 0.62);
-  assert.equal(strength.minAcceptableScore, 7);
+  assert.equal(strength.minPerceptibility, PAINT_STRENGTH_MIN_USABLE_PERCEPTIBILITY);
+  assert.equal(strength.minAcceptableScore, 5);
   assert.equal(strength.penalties, 0);
   assert.equal(strength.finalScore, 7);
+  assert.equal(strength.passes, true);
+});
+
+test('isUsablePaintStrength accepts a clearly visible but not perfect repaint', () => {
+  assert.equal(
+    isUsablePaintStrength({
+      finalScore: 4.2,
+      perceptibilityScore: 0.29,
+    }),
+    true,
+  );
+});
+
+test('evaluatePaintStrength derives a usable baseline when review scores are missing', () => {
+  const strength = evaluatePaintStrength(
+    {
+      overallScore: 0,
+      maskedChangeRatio: 0.42,
+      focusRegionChangeRatio: 0.18,
+      maskedColorShiftRatio: 0.14,
+      maskedLuminanceDelta: 0.1,
+      outsideMaskChangeRatio: 0.08,
+    },
+    'paint_warm_neutral',
+  );
+
+  assert.ok(strength.baselineScore >= 4);
+  assert.equal(strength.penalties, 0);
   assert.equal(strength.passes, true);
 });
 
@@ -553,6 +583,26 @@ test('shouldSkipPaintGeneration keeps paint generation enabled for moodier or va
       meanSaturation: 0.24,
       colorVariance: 0.16,
       luminanceVariance: 0.19,
+    },
+  });
+
+  assert.equal(decision.skip, false);
+});
+
+test('shouldSkipPaintGeneration never skips the hard contrast paint test preset', () => {
+  const decision = shouldSkipPaintGeneration({
+    presetKey: 'paint_dark_charcoal_test',
+    assetAnalysis: {
+      overallQualityScore: 82,
+      lightingScore: 78,
+      retakeRecommended: false,
+    },
+    roomMetrics: {
+      coverageRatio: 0.26,
+      meanLuminance: 0.71,
+      meanSaturation: 0.08,
+      colorVariance: 0.06,
+      luminanceVariance: 0.07,
     },
   });
 
@@ -745,6 +795,41 @@ test('paint presets reject a subtle replicate wall repaint that misses strength 
   assert.equal(result.deliveryMode, 'none');
 });
 
+test('paint presets accept a visibly changed warm wall candidate when the usable floor is met', async () => {
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('paint_warm_neutral'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async () => [
+        {
+          providerKey: 'replicate_basic',
+          overallScore: 58,
+          maskedChangeRatio: 0.42,
+          maskedColorShiftRatio: 0.13,
+          maskedLuminanceDelta: 0.09,
+          maskedEdgeDensityDelta: 0.001,
+          topHalfChangeRatio: 0.03,
+          outsideMaskChangeRatio: 0.09,
+          furnitureCoverageIncreaseRatio: 0,
+          newFurnitureAdditionRatio: 0,
+        },
+      ],
+      runOpenAiEdit: async () => [],
+      runLocalSharp: async () => [],
+    },
+  });
+
+  assert.equal(result.providerUsed, 'replicate_basic');
+  assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
+  assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
+  assert.equal(result.deliveryMode, 'high_confidence');
+});
+
 test('paint presets keep a strong local fallback preview when strict review fields are missing', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
@@ -778,6 +863,40 @@ test('paint presets keep a strong local fallback preview when strict review fiel
   assert.equal(result.bestVariant?.providerKey, 'local_sharp');
   assert.equal(result.stoppedEarlyReason, 'advisory_fallback');
   assert.equal(result.deliveryMode, 'advisory_fallback');
+});
+
+test('dark charcoal test preset keeps the first safe visible candidate without strict paint-strength gating', async () => {
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('paint_dark_charcoal_test'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async ({ providerKey }) => [
+        {
+          providerKey,
+          overallScore: 0,
+          maskedChangeRatio: 0.32,
+          maskedColorShiftRatio: 0.11,
+          maskedLuminanceDelta: 0.11,
+          maskedEdgeDensityDelta: 0.001,
+          topHalfChangeRatio: 0.03,
+          outsideMaskChangeRatio: 0.1,
+          furnitureCoverageIncreaseRatio: 0,
+          newFurnitureAdditionRatio: 0,
+        },
+      ],
+      runOpenAiEdit: async () => [],
+      runLocalSharp: async () => [],
+    },
+  });
+
+  assert.equal(result.providerUsed, 'replicate_basic');
+  assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
+  assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
 });
 
 test('paint presets return best available advisory candidate when the time budget is reached', async () => {

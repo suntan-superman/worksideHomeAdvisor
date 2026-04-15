@@ -184,6 +184,30 @@ export const VISION_PRESETS = [
       'added furniture, new staging, changed flooring, changed trim color, changed ceiling color, altered windows, altered built-ins, unrealistic geometry, warped walls, low quality',
     replicateModel: REPLICATE_INPAINT_MODEL,
   },
+  {
+    key: 'paint_dark_charcoal_test',
+    legacyKeys: [],
+    displayName: 'Dark Paint Test',
+    shortLabel: 'Dark Test',
+    category: 'concept_preview',
+    roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'dining_room', 'office', 'unknown'],
+    providerPreference: 'replicate',
+    promptVersion: 1,
+    outputCount: 1,
+    disclaimerType: 'concept_preview',
+    recommendedUse: ['report'],
+    upgradeTier: 'premium',
+    basePrompt:
+      'Repaint all visible painted walls a deep charcoal or dark slate color. The result must be dramatically darker than the original image and immediately obvious at first glance. Maintain realistic lighting, shadows, wall texture, trim, windows, ceilings, and built-ins. Do not leave the walls light colored. Only modify painted wall surfaces and do not change the room structure.',
+    helperText:
+      'A hard-contrast test preset that proves the wall-paint pipeline can deliver an obvious visual change.',
+    strength: 0.95,
+    guidanceScale: 9.5,
+    numInferenceSteps: 55,
+    negativePrompt:
+      'furniture changes, decor changes, new objects, lighting changes, altered windows, changed flooring, changed trim color, unrealistic geometry, warped walls, low quality',
+    replicateModel: REPLICATE_INPAINT_MODEL,
+  },
     {
       key: 'floor_light_wood',
       legacyKeys: [],
