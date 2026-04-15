@@ -6,6 +6,7 @@ import {
   bridgeVerticalMaskGaps,
   buildBrightWindowExclusionMask,
   buildFreeformEnhancementPlan,
+  buildWindowRejectionMask,
   calculateVisionReviewOverallScore,
   getTaskSpecificMaskStrategy,
   normalizeRoomType,
@@ -94,6 +95,22 @@ async function createSyntheticLivingRoomBuffer() {
     .toBuffer();
 }
 
+function createSyntheticProbeBuffer(width, height, pixelFn) {
+  const buffer = Buffer.alloc(width * height * 3);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const [red, green, blue] = pixelFn(x, y);
+      const offset = (y * width + x) * 3;
+      buffer[offset] = red;
+      buffer[offset + 1] = green;
+      buffer[offset + 2] = blue;
+    }
+  }
+
+  return buffer;
+}
+
 test('semantic wall segmentation returns non-zero wall coverage for a living room', async () => {
   const sourceBuffer = await createSyntheticLivingRoomBuffer();
   const result = await segmentWallPlanesAtSourceSize(
@@ -134,6 +151,66 @@ test('wall presets prefer semantic wall segmentation before adaptive fallback', 
   );
 
   assert.equal(result.debug?.strategy, 'semantic_wall');
+});
+
+test('window rejection identifies bright structured window interiors', () => {
+  const width = 20;
+  const height = 20;
+  const sourceProbe = createSyntheticProbeBuffer(width, height, (x, y) => {
+    if (x >= 6 && x <= 13 && y >= 4 && y <= 16) {
+      return [(x + y) % 2 === 0 ? 245 : 214, (x + y) % 2 === 0 ? 246 : 216, 248];
+    }
+    return [198, 196, 190];
+  });
+
+  const result = buildWindowRejectionMask({
+    sourceProbe,
+    width,
+    height,
+    startY: 2,
+    endY: 18,
+  });
+
+  assert.equal(result.binaryMask[10 * width + 10], 1);
+  assert.ok(result.debug.coverageRatio > 0.05);
+});
+
+test('window rejection suppresses blind-like stripe regions', () => {
+  const width = 24;
+  const height = 18;
+  const sourceProbe = createSyntheticProbeBuffer(width, height, (x, y) => {
+    if (x >= 7 && x <= 16 && y >= 3 && y <= 15) {
+      const brightStripe = x % 2 === 0;
+      return brightStripe ? [232, 234, 236] : [186, 188, 190];
+    }
+    return [192, 191, 187];
+  });
+
+  const result = buildWindowRejectionMask({
+    sourceProbe,
+    width,
+    height,
+    startY: 2,
+    endY: 16,
+  });
+
+  assert.equal(result.binaryMask[9 * width + 10], 1);
+});
+
+test('window rejection does not remove smooth wall surfaces', () => {
+  const width = 20;
+  const height = 20;
+  const sourceProbe = createSyntheticProbeBuffer(width, height, () => [202, 200, 194]);
+
+  const result = buildWindowRejectionMask({
+    sourceProbe,
+    width,
+    height,
+    startY: 2,
+    endY: 18,
+  });
+
+  assert.ok(result.debug.coverageRatio < 0.02);
 });
 
 test('bridgeVerticalMaskGaps fills short gaps in stable wall columns', () => {

@@ -1912,6 +1912,9 @@ async function renderLocalWallPaintVariantBuffer(sourceBuffer, presetKey, roomTy
         resolvedWallMask.debug?.coverageRatio ?? resolvedWallMask.debug?.maskCoverageRatio ?? null,
       rawMaskCoverageRatio: resolvedWallMask.debug?.rawCoverageRatio ?? null,
       refinementStages: resolvedWallMask.debug?.refinementStages || [],
+      windowRejectionCoverageRatio: resolvedWallMask.debug?.windowRejectionCoverageRatio ?? null,
+      windowBrightPixelRatio: resolvedWallMask.debug?.windowBrightPixelRatio ?? null,
+      windowStructuredPixelRatio: resolvedWallMask.debug?.windowStructuredPixelRatio ?? null,
     },
   };
 }
@@ -2729,43 +2732,140 @@ async function runWallSegmentationProviderFromProbe({
   };
 }
 
-function buildSemanticLikelyWindowMask(sourceProbe, width, height) {
-  const { luminance, texture } = buildWallProbeFeatures(sourceProbe, width, height);
-  const brightBinary = new Uint8Array(width * height);
+function buildWindowProbeFeatures(sourceProbe, width, height) {
+  const luminance = new Float32Array(width * height);
+  const horizontalGrad = new Float32Array(width * height);
+  const verticalGrad = new Float32Array(width * height);
+  const texture = new Float32Array(width * height);
+  const stripeScore = new Float32Array(width * height);
 
-  for (let y = Math.round(height * 0.08); y < Math.round(height * 0.8); y += 1) {
+  for (let index = 0; index < width * height; index += 1) {
+    const offset = index * 3;
+    const red = sourceProbe[offset];
+    const green = sourceProbe[offset + 1];
+    const blue = sourceProbe[offset + 2];
+    luminance[index] = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  }
+
+  for (let y = 1; y < height - 1; y += 1) {
     for (let x = 1; x < width - 1; x += 1) {
       const index = y * width + x;
-      const lum = Number(luminance[index] || 0);
-      const tex = Number(texture[index] || 0);
+      const left = luminance[index - 1];
+      const right = luminance[index + 1];
+      const up = luminance[index - width];
+      const down = luminance[index + width];
 
-      if (lum > 205 && tex > 14) {
-        brightBinary[index] = 1;
+      horizontalGrad[index] = Math.abs(left - right);
+      verticalGrad[index] = Math.abs(up - down);
+      texture[index] = (horizontalGrad[index] + verticalGrad[index]) / 2;
+
+      const verticalStripeSignal =
+        Math.abs(left - right) > 14 && Math.abs(up - down) < 10;
+      stripeScore[index] = verticalStripeSignal ? 1 : 0;
+    }
+  }
+
+  return {
+    luminance,
+    horizontalGrad,
+    verticalGrad,
+    texture,
+    stripeScore,
+  };
+}
+
+function buildRawWindowCandidateMask({
+  features,
+  width,
+  height,
+  startY,
+  endY,
+}) {
+  const binary = new Uint8Array(width * height);
+
+  for (let y = startY; y <= endY; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      const lum = Number(features.luminance[index] || 0);
+      const tex = Number(features.texture[index] || 0);
+      const hGrad = Number(features.horizontalGrad[index] || 0);
+      const vGrad = Number(features.verticalGrad[index] || 0);
+      const stripe = Number(features.stripeScore[index] || 0);
+
+      const isBlownOut = lum > 235;
+      const isBrightStructured = lum > 205 && tex > 10;
+      const isBlindRegion = lum > 180 && stripe > 0 && hGrad > vGrad * 1.15;
+      const isExteriorLightPatch = lum > 215 && tex > 8;
+
+      if (isBlownOut || isBrightStructured || isBlindRegion || isExteriorLightPatch) {
+        binary[index] = 1;
       }
     }
   }
 
-  const connectedBright = closeBinaryMask(brightBinary, width, height, 1);
-  const filledBright = fillBinaryMaskHoles(connectedBright, width, height);
-  const filteredBright = filterBinaryMaskComponents(filledBright, width, height, {
-    minArea: Math.max(60, Math.round(width * height * 0.004)),
-    minBoxWidth: Math.max(6, Math.round(width * 0.05)),
-    minBoxHeight: Math.max(8, Math.round(height * 0.16)),
-  });
-  return dilateBinaryMask(filteredBright, width, height, 1);
+  return binary;
 }
 
-function suppressSemanticLikelyWindows(binaryMask, sourceProbe, width, height) {
-  const next = new Uint8Array(binaryMask);
-  const expandedBright = buildSemanticLikelyWindowMask(sourceProbe, width, height);
+function consolidateWindowRegions(binaryMask, width, height) {
+  let current = new Uint8Array(binaryMask);
+  current = closeBinaryMask(current, width, height, 1);
+  current = fillBinaryMaskHoles(current, width, height);
+  current = filterBinaryMaskComponents(current, width, height, {
+    minArea: Math.max(60, Math.round(width * height * 0.004)),
+    minBoxWidth: Math.max(6, Math.round(width * 0.05)),
+    minBoxHeight: Math.max(10, Math.round(height * 0.16)),
+  });
+  current = dilateBinaryMask(current, width, height, 1);
 
-  for (let index = 0; index < next.length; index += 1) {
-    if (expandedBright[index]) {
-      next[index] = 0;
+  return current;
+}
+
+export function buildWindowRejectionMask({
+  sourceProbe,
+  width,
+  height,
+  startY,
+  endY,
+}) {
+  const features = buildWindowProbeFeatures(sourceProbe, width, height);
+  const rawMask = buildRawWindowCandidateMask({
+    features,
+    width,
+    height,
+    startY,
+    endY,
+  });
+  let finalMask = consolidateWindowRegions(rawMask, width, height);
+  let coverageRatio = calculateBinaryMaskCoverageRatio(finalMask);
+
+  if (coverageRatio > 0.32) {
+    console.warn('Window rejection mask is unusually large; clipping to safer threshold', {
+      coverageRatio,
+    });
+    finalMask = erodeBinaryMask(finalMask, width, height, 1);
+    coverageRatio = calculateBinaryMaskCoverageRatio(finalMask);
+  }
+
+  let brightPixelCount = 0;
+  let structuredPixelCount = 0;
+  for (let index = 0; index < width * height; index += 1) {
+    if (features.luminance[index] > 205) {
+      brightPixelCount += 1;
+    }
+    if (features.texture[index] > 10) {
+      structuredPixelCount += 1;
     }
   }
 
-  return next;
+  return {
+    binaryMask: finalMask,
+    rawBinaryMask: rawMask,
+    debug: {
+      coverageRatio,
+      brightPixelRatio: Number((brightPixelCount / Math.max(1, width * height)).toFixed(4)),
+      structuredPixelRatio: Number((structuredPixelCount / Math.max(1, width * height)).toFixed(4)),
+    },
+  };
 }
 
 function suppressSemanticDangerZones(binaryMask, width, height) {
@@ -2785,6 +2885,7 @@ function refineSemanticWallMask({
 }) {
   const refinementStages = [];
   const semanticFeatures = buildWallProbeFeatures(sourceProbe, width, height);
+  let windowRejectionDebug = null;
 
   function stage(name, binary, note) {
     const coverageRatio = calculateBinaryMaskCoverageRatio(binary);
@@ -2830,14 +2931,32 @@ function refineSemanticWallMask({
   });
   stage('semantic_after_targeted_expansion', current, 'After coverage-aware semantic wall expansion.');
 
-  const semanticWindowMask = buildSemanticLikelyWindowMask(sourceProbe, width, height);
-  current = subtractBinaryMask(current, semanticWindowMask);
-  stage('semantic_after_window_suppression', current, 'After strong semantic window suppression.');
+  const windowRejection = buildWindowRejectionMask({
+    sourceProbe,
+    width,
+    height,
+    startY: Math.round(height * 0.08),
+    endY: Math.round(height * 0.8),
+  });
+  windowRejectionDebug = windowRejection.debug;
+  console.info('vision_window_rejection_debug', {
+    presetKey,
+    roomType,
+    coverageRatio: windowRejection.debug.coverageRatio,
+    brightPixelRatio: windowRejection.debug.brightPixelRatio,
+    structuredPixelRatio: windowRejection.debug.structuredPixelRatio,
+  });
+  current = subtractBinaryMask(current, windowRejection.binaryMask);
+  stage(
+    'semantic_after_window_rejection',
+    current,
+    'After drop-in window rejection removed blinds, bright window interiors, and exterior light patches.',
+  );
 
   current = expandSemanticWallMask({
     binaryMask: current,
     baseGeometryMask,
-    blockedMask: semanticWindowMask,
+    blockedMask: windowRejection.binaryMask,
     features: semanticFeatures,
     width,
     height,
@@ -2869,6 +2988,7 @@ function refineSemanticWallMask({
     rawCoverageRatio,
     coverageRatio: calculateBinaryMaskCoverageRatio(current),
     refinementStages,
+    windowRejectionDebug,
   };
 }
 
@@ -2935,6 +3055,9 @@ export async function segmentWallPlanesAtSourceSize(
       coverageRatio: refined.coverageRatio,
       rawCoverageRatio: refined.rawCoverageRatio,
       refinementStages: refined.refinementStages,
+      windowRejectionCoverageRatio: refined.windowRejectionDebug?.coverageRatio ?? null,
+      windowBrightPixelRatio: refined.windowRejectionDebug?.brightPixelRatio ?? null,
+      windowStructuredPixelRatio: refined.windowRejectionDebug?.structuredPixelRatio ?? null,
     },
   };
 }
@@ -5204,6 +5327,9 @@ async function buildReviewedLocalSharpCandidates({
         surfaceMaskDebug?.coverageRatio ?? surfaceMaskDebug?.maskCoverageRatio ?? null,
       rawMaskCoverageRatio: surfaceMaskDebug?.rawMaskCoverageRatio ?? null,
       refinementStages: surfaceMaskDebug?.refinementStages || [],
+      windowRejectionCoverageRatio: surfaceMaskDebug?.windowRejectionCoverageRatio ?? null,
+      windowBrightPixelRatio: surfaceMaskDebug?.windowBrightPixelRatio ?? null,
+      windowStructuredPixelRatio: surfaceMaskDebug?.windowStructuredPixelRatio ?? null,
       review,
       overallScore,
       visualChangeRatio,
@@ -5879,6 +6005,9 @@ async function buildReviewedReplicateCandidates({
         resolvedMask.debug?.coverageRatio ?? resolvedMask.debug?.maskCoverageRatio ?? null,
       rawMaskCoverageRatio: resolvedMask.debug?.rawCoverageRatio ?? null,
       refinementStages: resolvedMask.debug?.refinementStages || [],
+      windowRejectionCoverageRatio: resolvedMask.debug?.windowRejectionCoverageRatio ?? null,
+      windowBrightPixelRatio: resolvedMask.debug?.windowBrightPixelRatio ?? null,
+      windowStructuredPixelRatio: resolvedMask.debug?.windowStructuredPixelRatio ?? null,
       review,
       overallScore,
       visualChangeRatio,
@@ -6458,6 +6587,9 @@ async function buildReviewedOpenAiCandidates({
         resolvedMask.debug?.coverageRatio ?? resolvedMask.debug?.maskCoverageRatio ?? null,
       rawMaskCoverageRatio: resolvedMask.debug?.rawCoverageRatio ?? null,
       refinementStages: resolvedMask.debug?.refinementStages || [],
+      windowRejectionCoverageRatio: resolvedMask.debug?.windowRejectionCoverageRatio ?? null,
+      windowBrightPixelRatio: resolvedMask.debug?.windowBrightPixelRatio ?? null,
+      windowStructuredPixelRatio: resolvedMask.debug?.windowStructuredPixelRatio ?? null,
       review,
       overallScore,
       visualChangeRatio,
@@ -6557,6 +6689,9 @@ async function persistOrchestratedVisionCandidates({
           maskCoverageRatio: candidate.maskCoverageRatio ?? null,
           rawMaskCoverageRatio: candidate.rawMaskCoverageRatio ?? null,
           refinementStages: candidate.refinementStages || [],
+          windowRejectionCoverageRatio: candidate.windowRejectionCoverageRatio ?? null,
+          windowBrightPixelRatio: candidate.windowBrightPixelRatio ?? null,
+          windowStructuredPixelRatio: candidate.windowStructuredPixelRatio ?? null,
         },
         fallbackApplied: Boolean(orchestrationResult?.fallbackApplied),
         orchestrationAttempts: orchestrationResult?.orchestration?.attempts || [],
