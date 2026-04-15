@@ -6770,7 +6770,13 @@ async function persistOrchestratedVisionCandidates({
           windowBrightPixelRatio: candidate.windowBrightPixelRatio ?? null,
           windowStructuredPixelRatio: candidate.windowStructuredPixelRatio ?? null,
         },
-        fallbackApplied: Boolean(orchestrationResult?.fallbackApplied),
+        fallbackApplied:
+          Boolean(orchestrationResult?.fallbackApplied) ||
+          orchestrationResult?.stoppedEarlyReason === 'advisory_finish_fallback',
+        fallbackReason:
+          orchestrationResult?.stoppedEarlyReason === 'advisory_finish_fallback'
+            ? 'no_strong_visual_change_detected'
+            : '',
         orchestrationAttempts: orchestrationResult?.orchestration?.attempts || [],
         orchestrationElapsedMs: Number(orchestrationResult?.elapsedTimeMs || 0),
         orchestrationTimeBudgetMs: Number(orchestrationResult?.maxExecutionTimeMs || 0),
@@ -7097,11 +7103,18 @@ export async function createImageEnhancementJob({
     job.provider = orchestrationResult.providerUsed || 'vision_orchestrator';
     job.attemptCount = Number(orchestrationResult.providerAttemptCount || 0);
     job.maxAttempts = Number(orchestrationResult.orchestration?.chain?.length || 1);
+    const usedAdvisoryFinishFallback =
+      orchestrationResult.stoppedEarlyReason === 'advisory_finish_fallback';
     const usedFallbackVariant =
       Boolean(orchestrationResult.fallbackApplied) ||
+      usedAdvisoryFinishFallback ||
       createdVariants.some((variant) => Boolean(variant?.metadata?.fallbackApplied));
     job.currentStage = usedFallbackVariant ? 'fallback' : 'completed';
-    job.fallbackMode = usedFallbackVariant ? 'provider_fallback' : null;
+    job.fallbackMode = usedFallbackVariant
+      ? usedAdvisoryFinishFallback
+        ? 'best_available_preview'
+        : 'provider_fallback'
+      : null;
     job.failureReason = '';
     job.outputVariantIds = createdVariants.map((variant) => variant.id);
     job.selectedVariantId = createdVariants[0]?.id || null;
@@ -7115,13 +7128,17 @@ export async function createImageEnhancementJob({
       orchestrationStoppedEarlyReason: orchestrationResult.stoppedEarlyReason || '',
       orchestrationTimeBudgetReached: Boolean(orchestrationResult.timeBudgetReached),
     };
-    job.warning = usedFallbackVariant
-      ? 'Primary provider was insufficient, so an advanced AI fallback was used.'
-      : renderPlan.warning;
+    job.warning = usedAdvisoryFinishFallback
+      ? 'No strong visual change detected, so the best available preview was selected instead of failing the job.'
+      : usedFallbackVariant
+        ? 'Primary provider was insufficient, so an advanced AI fallback was used.'
+        : renderPlan.warning;
     job.message =
       requestedMode === 'freeform'
         ? `Custom enhancement request saved and processed via ${orchestrationResult.providerUsed || 'vision_orchestrator'}.`
-        : `Generated via ${orchestrationResult.providerUsed || 'vision_orchestrator'}${usedFallbackVariant ? ' after fallback' : ''}.`;
+        : usedAdvisoryFinishFallback
+          ? `Generated best available preview via ${orchestrationResult.providerUsed || 'vision_orchestrator'} after low-impact finish detection.`
+          : `Generated via ${orchestrationResult.providerUsed || 'vision_orchestrator'}${usedFallbackVariant ? ' after fallback' : ''}.`;
     await job.save();
 
     return {

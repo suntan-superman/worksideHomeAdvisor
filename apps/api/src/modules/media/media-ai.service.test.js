@@ -667,6 +667,40 @@ test('paint presets reject a subtle replicate wall repaint that misses strength 
   assert.equal(result.stoppedEarlyReason, 'no_usable_finish_candidate');
 });
 
+test('paint presets keep a strong local fallback preview when strict review fields are missing', async () => {
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('paint_warm_neutral'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async () => [],
+      runOpenAiEdit: async () => [],
+      runLocalSharp: async () => [
+        {
+          providerKey: 'local_sharp',
+          overallScore: 8,
+          maskedChangeRatio: 0.9902,
+          focusRegionChangeRatio: 0.3469,
+          outsideMaskChangeRatio: 0,
+          maskedColorShiftRatio: 0.2584,
+          maskedLuminanceDelta: 0.2556,
+          maskedEdgeDensityDelta: -0.0468,
+          furnitureCoverageIncreaseRatio: 0,
+          newFurnitureAdditionRatio: 0,
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
+  assert.equal(result.stoppedEarlyReason, 'advisory_finish_fallback');
+});
+
 test('paint ranking prefers clearer visible repaint over safer but barely changed result', () => {
   const ranked = rankCandidates(
     [

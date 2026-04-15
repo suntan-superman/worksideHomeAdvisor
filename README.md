@@ -177,14 +177,14 @@ npm run clone:demo --workspace=@workside/api -- --source=demo@worksidesoftware.c
 ////////////////////////////////////////////////////////////
 To clean up photo variants
 
-From c:\Users\sjroy\Source\HomeAdvisor, use:
+From PowerShell in c:\Users\sjroy\Source\HomeAdvisor, use:
 
-npm run cleanup:variants-before-date -- --before=2026-04-09
+npm run cleanup:variants-before-date -- 2026-04-09
 That shows what would be deleted.
 
 If the dry run looks right, run:
 
-npm run cleanup:variants-before-date -- --before=2026-04-09 --confirm
+npm run cleanup:variants-before-date -- 2026-04-09 --confirm
 
 If you are already inside apps/api, the same command works there too.
 

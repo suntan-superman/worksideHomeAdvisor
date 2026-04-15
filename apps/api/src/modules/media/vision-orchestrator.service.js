@@ -156,6 +156,55 @@ export async function orchestrateVisionJob({
     return Boolean(candidate.isSufficient);
   };
 
+  const isAcceptableFinishFallbackCandidate = (candidate) => {
+    if (!candidate || !isSurfaceFinishPreset) {
+      return false;
+    }
+
+    if (isPaintPreset) {
+      const topHalfChangeRatio = Number(candidate.topHalfChangeRatio);
+      const outsideMaskChangeRatio = Number(candidate.outsideMaskChangeRatio);
+      const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
+      const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
+      const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
+
+      if (Number.isFinite(topHalfChangeRatio) && topHalfChangeRatio > 0.12) {
+        return false;
+      }
+      if (Number.isFinite(outsideMaskChangeRatio) && outsideMaskChangeRatio > 0.14) {
+        return false;
+      }
+      if (furnitureCoverageIncreaseRatio > 0.01 || newFurnitureAdditionRatio > 0.01) {
+        return false;
+      }
+      if (maskedEdgeDensityDelta > 0.004) {
+        return false;
+      }
+
+      return isStrongEnoughFinishCandidate(candidate);
+    }
+
+    if (isFloorPreset) {
+      const outsideMaskChangeRatio = Number(candidate.outsideMaskChangeRatio);
+      const topHalfChangeRatio = Number(candidate.topHalfChangeRatio);
+      const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
+
+      if (Number.isFinite(outsideMaskChangeRatio) && outsideMaskChangeRatio > 0.18) {
+        return false;
+      }
+      if (Number.isFinite(topHalfChangeRatio) && topHalfChangeRatio > 0.1) {
+        return false;
+      }
+      if (furnitureCoverageIncreaseRatio > 0.02) {
+        return false;
+      }
+
+      return isStrongEnoughFinishCandidate(candidate);
+    }
+
+    return false;
+  };
+
   const diagnoseFinishFailure = (candidates = []) => {
     const best = rankCandidates(candidates, normalizedPresetKey)[0];
     if (!best) {
@@ -483,6 +532,18 @@ export async function orchestrateVisionJob({
           });
         }
 
+        const acceptableFinishFallback = normalizedCandidates.find((candidate) =>
+          isAcceptableFinishFallbackCandidate(candidate),
+        );
+        const isFinalProviderInIteration = providerIndex >= chain.length - 1;
+        if (acceptableFinishFallback && isFinalProviderInIteration) {
+          return buildResponse({
+            providerUsed: providerKey,
+            bestVariant: acceptableFinishFallback,
+            stoppedEarlyReason: 'advisory_finish_fallback',
+          });
+        }
+
         const elapsedAfterProvider = Math.max(0, Number(nowFn()) - startedAt);
         if (
           providerIndex < chain.length - 1 &&
@@ -549,6 +610,9 @@ export async function orchestrateVisionJob({
     allCandidates,
     preset.key,
   ).length > 0;
+  const acceptableFinishFallback = rankedCandidates.find((candidate) =>
+    isAcceptableFinishFallbackCandidate(candidate),
+  );
   const hasRealChange = allCandidates.some(
     (candidate) =>
       Number(candidate.maskedChangeRatio || 0) > 0.02 ||
@@ -559,7 +623,9 @@ export async function orchestrateVisionJob({
     shouldRequireRealFinishCandidate &&
     (!sufficientCandidateExists || !hasRealChange) &&
     !preferredFinishFallbackExists
-      ? allowBestEffortFinishCandidate
+      ? acceptableFinishFallback
+        ? acceptableFinishFallback
+        : allowBestEffortFinishCandidate
         ? rankedCandidates[0] || allCandidates[0] || null
         : null
       : rankedCandidates[0] || allCandidates[0] || null;
@@ -571,7 +637,9 @@ export async function orchestrateVisionJob({
       shouldRequireRealFinishCandidate &&
       (!sufficientCandidateExists || !hasRealChange) &&
       !preferredFinishFallbackExists
-        ? allowBestEffortFinishCandidate
+        ? acceptableFinishFallback
+          ? 'advisory_finish_fallback'
+          : allowBestEffortFinishCandidate
           ? 'best_effort_finish_candidate'
           : 'no_usable_finish_candidate'
         : null,

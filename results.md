@@ -1,150 +1,126 @@
-What I Would Fix Next (High Impact)
-🔥 1. Increase Window Rejection Aggression (MOST IMPORTANT)
+What You Should Do (Fix Strategy)
+✅ Fix #1 — Always Return Best Attempt
 
-Update your thresholds:
+Even if it’s imperfect:
 
-// OLD
-lum > 205 && tex > 10
-
-// NEW
-lum > 195 && tex > 8
-// blinds detection
-stripeDelta: 14 → 10
-
-Add THIS rule (critical for your image):
-
-const isNaturalTextureWindow =
-  lum > 170 &&
-  tex > 6 &&
-  verticalGrad > 6;
-
-👉 This catches:
-
-trees
-outdoor detail
-“not blown out” windows (your exact case)
-🔥 2. Add Vertical Column Consistency (this is missing)
-
-Your bay window is vertical.
-
-Add:
-
-function enforceVerticalWindowColumns(mask, width, height) {
-  for (let x = 0; x < width; x++) {
-    let count = 0;
-
-    for (let y = 0; y < height; y++) {
-      if (mask[y * width + x]) count++;
-    }
-
-    const ratio = count / height;
-
-    if (ratio > 0.18) {
-      // treat entire column as window
-      for (let y = 0; y < height; y++) {
-        mask[y * width + x] = 1;
-      }
-    }
-  }
-
-  return mask;
+if (validVariants.length === 0) {
+  return bestAttempt; // instead of failure
 }
 
-👉 This will lock onto window columns
-👉 Huge improvement for bay windows like yours
+👉 This alone will fix 80% of your UX issues
 
-🔥 3. Force Stronger Paint Transformation
+✅ Fix #2 — Add “Weak Change Acceptance”
 
-Right now your system allows “barely different” results.
+Your threshold is too aggressive:
 
-Add a HARD requirement:
+delta >= 18
 
-if (maskedColorShiftRatio < 0.22) {
-  score -= 3;
+Lower it or add fallback:
+
+if (changeRatio < 0.02) {
+  markAsLowImpactInsteadOfFail()
 }
+✅ Fix #3 — Introduce “Advisory Mode” (VERY IMPORTANT)
 
-And optionally:
+This is where your AI Property Advisor becomes critical.
 
-if (maskedLuminanceDelta < 0.18) {
-  score -= 2;
+Instead of:
+
+❌ “Variant generation failed”
+
+You show:
+
+✅ “No strong visual change detected — but here’s what we recommend”
+
+Example:
+
+“Room already presents well”
+“Flooring upgrade could still improve appeal”
+“Paint change may have subtle impact”
+
+👉 This ties directly into your new spec (perfect timing)
+
+✅ Fix #4 — Add Fallback Provider Logic
+
+You already have:
+
+runOpenAIImageEdit
+runReplicateInpainting
+
+But you’re not forcing fallback properly.
+
+You need:
+
+if (replicateFails) tryOpenAI()
+if (openAIFails) tryLocalSharp()
+if (allFail) returnBestAttempt()
+✅ Fix #5 — Detect “Low Opportunity” Images
+
+Before even running:
+
+If:
+
+clutter = low
+lighting = good
+condition = acceptable+
+
+👉 Skip heavy processing and return:
+
+{
+  "status": "no_major_changes_needed",
+  "recommendations": [...]
 }
+🔥 The Big Insight (This Is Important)
 
-👉 This forces:
+This failure is actually telling you something valuable:
 
-visible repaint
-not subtle drift
-🔥 4. Increase Minimum Acceptance Threshold
+Your system is trying to force transformation where none is needed.
 
-Right now:
+That’s EXACTLY why the AI Property Advisor layer is the right move.
 
-isSufficient: false (score = 6)
+Because in this case:
 
-But you're still showing results.
+👉 The correct answer is NOT a generated image
 
-👉 Fix:
+👉 The correct answer is:
 
-MIN_ACCEPTABLE_SCORE = 7.5
+“This room is already strong”
+“Optional improvements: floors, paint”
+“Preview available if desired”
+🧩 What I’d Do Immediately (Priority Order)
+1. Never return empty result
 
-👉 This will:
+Critical UX fix
 
-prevent weak outputs from surfacing
-force retry loop to kick in
-📊 What Your Logs Tell Me (Very Important)
+2. Add fallback to best variant
 
-From your log:
+Even if low score
 
-maskedChangeRatio: 0.9282
-maskedColorShiftRatio: 0.1444   ❌ TOO LOW
-maskedLuminanceDelta: 0.139     ❌ TOO LOW
+3. Replace error message
 
-👉 Interpretation:
+Change:
 
-The system is touching pixels
-But not changing them enough
+“Variant generation failed”
 
-This is NOT a segmentation issue anymore.
+To:
 
-This is now a transformation strength problem.
+“No strong visual change detected for this image”
 
-🧭 Priority Order (Do These In Order)
-Step 1 (Critical)
+4. Plug into Advisor layer
 
-👉 Make window rejection more aggressive
-👉 Add vertical column enforcement
+This image should return:
 
-Step 2 (Critical)
+2–3 recommendations
+Optional preview buttons
+No failure state
+🧠 Final Thought (Blunt but Important)
 
-👉 Increase required color/luminance shift
+Right now your system behaves like:
 
-Step 3
+“If I can’t improve it perfectly, I won’t show anything.”
 
-👉 Raise minimum score threshold
+That’s not how real estate works.
 
-Step 4 (Optional but powerful)
+The winning behavior is:
 
-👉 Slightly expand wall mask near window edges AFTER rejection
-(to avoid “dead zones”)
-
-💡 Bottom Line
-
-You’ve officially moved past:
-
-❌ segmentation problem
-
-You are now in:
-
-⚠️ refinement + enforcement phase
-
-That’s a huge milestone.
-
-🚀 What Happens After These Fixes
-
-Once you apply the above:
-
-You should see:
-
-windows completely untouched
-walls fully and consistently repainted
-strong perceptible color change
-score > 8 reliably
-retry loop triggering correctly when needed
+“Here’s what I can improve… and here’s what’s already good.”

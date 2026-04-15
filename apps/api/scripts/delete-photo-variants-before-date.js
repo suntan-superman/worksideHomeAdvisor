@@ -26,11 +26,14 @@ function printUsage() {
 function parseArgs(argv) {
   const options = {
     before: DEFAULT_BEFORE_DATE,
+    beforeWasExplicit: false,
     confirm: false,
     help: false,
   };
 
-  for (const arg of argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+
     if (arg === '--confirm') {
       options.confirm = true;
       continue;
@@ -43,6 +46,24 @@ function parseArgs(argv) {
 
     if (arg.startsWith('--before=')) {
       options.before = arg.slice('--before='.length).trim();
+      options.beforeWasExplicit = true;
+      continue;
+    }
+
+    if (arg === '--before') {
+      const nextArg = argv[index + 1];
+      if (!nextArg) {
+        throw new Error('Missing value for --before.');
+      }
+      options.before = String(nextArg).trim();
+      options.beforeWasExplicit = true;
+      index += 1;
+      continue;
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(arg) || /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(arg)) {
+      options.before = String(arg).trim();
+      options.beforeWasExplicit = true;
       continue;
     }
 
@@ -50,6 +71,33 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+function isTruthyFlag(value) {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === '' || normalized === 'true' || normalized === '1' || normalized === 'yes';
+}
+
+function buildArgsFromNpmConfigEnv(env = process.env) {
+  const args = [];
+
+  if (typeof env.npm_config_before === 'string' && env.npm_config_before.trim()) {
+    args.push(`--before=${env.npm_config_before.trim()}`);
+  }
+
+  if (isTruthyFlag(env.npm_config_confirm)) {
+    args.push('--confirm');
+  }
+
+  if (isTruthyFlag(env.npm_config_help)) {
+    args.push('--help');
+  }
+
+  return args;
 }
 
 function parseLocalCutoffDate(value) {
@@ -86,10 +134,18 @@ function uniqueStrings(values) {
 }
 
 async function run() {
-  const options = parseArgs(process.argv.slice(2));
+  const cliArgs = process.argv.slice(2);
+  const envArgs = buildArgsFromNpmConfigEnv();
+  const options = parseArgs([...envArgs, ...cliArgs]);
   if (options.help) {
     printUsage();
     return;
+  }
+
+  if (options.confirm && !options.beforeWasExplicit) {
+    throw new Error(
+      'Confirmed delete requires an explicit cutoff date. In PowerShell, use: npm run cleanup:variants-before-date -- 2026-04-13 --confirm',
+    );
   }
 
   const cutoffDate = parseLocalCutoffDate(options.before);
