@@ -1,14 +1,14 @@
 import { demoDashboard } from '../../data/demoData.js';
-import { getLatestPricingAnalysis } from '../pricing/pricing.service.js';
-import { getPropertyById } from '../properties/property.service.js';
-import { getOrCreatePropertyChecklist, summarizeChecklistAsImprovements } from '../tasks/tasks.service.js';
+import { getPropertyWorkspaceSnapshot } from '../properties/property-workspace.service.js';
+import { summarizeChecklistAsImprovements } from '../tasks/tasks.service.js';
 
 export async function dashboardRoutes(fastify) {
   fastify.get('/:propertyId/dashboard', async (request, reply) => {
     try {
-      const property = await getPropertyById(request.params.propertyId);
-      const latestPricing = await getLatestPricingAnalysis(request.params.propertyId);
-      const checklist = await getOrCreatePropertyChecklist(request.params.propertyId);
+      const snapshot = await getPropertyWorkspaceSnapshot(request.params.propertyId);
+      const property = snapshot?.property || null;
+      const latestPricing = snapshot?.pricingAnalyses?.latest || null;
+      const checklist = snapshot?.checklist || null;
 
       if (property) {
         return reply.send({

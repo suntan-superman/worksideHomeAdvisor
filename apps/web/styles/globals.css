@@ -3096,6 +3096,35 @@ select {
   gap: 14px;
 }
 
+.workspace-guide-card {
+  background: linear-gradient(180deg, rgba(255, 248, 242, 0.98), rgba(255, 255, 255, 0.98));
+  border-color: rgba(190, 104, 60, 0.18);
+  box-shadow: 0 18px 42px rgba(190, 104, 60, 0.08);
+}
+
+.workspace-guide-card-muted {
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.workspace-guide-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workspace-guide-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workspace-guide-dismiss {
+  padding: 0.2rem 0.45rem;
+  min-height: auto;
+  color: var(--muted);
+}
+
 .workspace-workflow-nav-card {
   gap: 14px;
 }

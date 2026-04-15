@@ -174,6 +174,10 @@ export function getProperty(propertyId) {
   return request(`/api/v1/properties/${propertyId}`);
 }
 
+export function getPropertyFull(propertyId) {
+  return request(`/api/v1/properties/${propertyId}/full`);
+}
+
 export function setPropertyPricingDecision(propertyId, payload, ownerUserId) {
   return request(`/api/v1/properties/${propertyId}/pricing-decision`, {
     method: 'PATCH',

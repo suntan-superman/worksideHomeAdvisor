@@ -2733,6 +2733,142 @@ function suppressLikelyWindows(binaryMask, luminance, texture, width, height) {
   }
 }
 
+function suppressStrongVerticalFrames(binaryMask, luminance, width, height) {
+  const columnScores = new Float32Array(width);
+
+  for (let x = 1; x < width - 1; x += 1) {
+    let score = 0;
+    for (let y = Math.round(height * 0.12); y < Math.round(height * 0.76); y += 1) {
+      const index = y * width + x;
+      const left = luminance[index - 1];
+      const right = luminance[index + 1];
+      score += Math.abs(left - right);
+    }
+    columnScores[x] = score / Math.max(1, Math.round(height * 0.64));
+  }
+
+  const threshold = 34;
+  for (let x = 1; x < width - 1; x += 1) {
+    if (columnScores[x] < threshold) {
+      continue;
+    }
+
+    for (let y = Math.round(height * 0.12); y < Math.round(height * 0.78); y += 1) {
+      const idx = y * width + x;
+      binaryMask[idx] = 0;
+      binaryMask[idx - 1] = 0;
+      binaryMask[idx + 1] = 0;
+    }
+  }
+}
+
+async function buildFallbackWallPaintMaskAtSourceSize(sourceBuffer, presetKey, roomType) {
+  const metadata = await sharp(sourceBuffer).rotate().metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const probeWidth = Math.max(96, Math.min(192, width));
+  const probeHeight = Math.max(72, Math.round((height / Math.max(1, width)) * probeWidth));
+
+  const baseMaskBuffer = await buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType);
+  const [sourceProbe, baseMaskProbe] = await Promise.all([
+    sharp(sourceBuffer)
+      .rotate()
+      .resize(probeWidth, probeHeight, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    sharp(baseMaskBuffer)
+      .resize(probeWidth, probeHeight, { fit: 'fill' })
+      .removeAlpha()
+      .greyscale()
+      .raw()
+      .toBuffer(),
+  ]);
+
+  const luminance = new Float32Array(probeWidth * probeHeight);
+  const texture = new Float32Array(probeWidth * probeHeight);
+  const binary = new Uint8Array(probeWidth * probeHeight);
+
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      const index = y * probeWidth + x;
+      const offset = index * 3;
+      const red = sourceProbe[offset];
+      const green = sourceProbe[offset + 1];
+      const blue = sourceProbe[offset + 2];
+      luminance[index] = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    }
+  }
+
+  for (let y = 1; y < probeHeight - 1; y += 1) {
+    for (let x = 1; x < probeWidth - 1; x += 1) {
+      const index = y * probeWidth + x;
+      const center = luminance[index];
+      texture[index] =
+        (Math.abs(center - luminance[index - 1]) +
+          Math.abs(center - luminance[index + 1]) +
+          Math.abs(center - luminance[index - probeWidth]) +
+          Math.abs(center - luminance[index + probeWidth])) /
+        4;
+    }
+  }
+
+  const topClip = Math.round(probeHeight * 0.08);
+  const bottomClip = Math.round(probeHeight * 0.73);
+  const sideInset = Math.max(1, Math.round(probeWidth * 0.025));
+  const baseboardDeadZone = Math.max(1, Math.round(probeHeight * 0.08));
+
+  for (let y = topClip; y < bottomClip; y += 1) {
+    for (let x = sideInset; x < probeWidth - sideInset; x += 1) {
+      const index = y * probeWidth + x;
+      if (baseMaskProbe[index] <= 16) {
+        continue;
+      }
+      if (y >= probeHeight - baseboardDeadZone) {
+        continue;
+      }
+      binary[index] = 1;
+    }
+  }
+
+  suppressLikelyWindows(binary, luminance, texture, probeWidth, probeHeight);
+  suppressStrongVerticalFrames(binary, luminance, probeWidth, probeHeight);
+  suppressWallDangerZones(binary, probeWidth, probeHeight);
+
+  const components = extractBinaryMaskComponents(
+    binary,
+    probeWidth,
+    probeHeight,
+    Math.max(28, Math.round(probeWidth * probeHeight * 0.0025)),
+  );
+  const finalBinary = new Uint8Array(binary.length);
+  for (const component of components) {
+    if (
+      component.area >= Math.max(28, Math.round(probeWidth * probeHeight * 0.0025)) &&
+      component.boxWidth >= 6 &&
+      component.boxHeight >= 8
+    ) {
+      for (const pixelIndex of component.pixels) {
+        finalBinary[pixelIndex] = 1;
+      }
+    }
+  }
+
+  const adaptiveMaskBuffer = await buildBinaryMaskPngBuffer({
+    binaryMask: finalBinary,
+    inputWidth: probeWidth,
+    inputHeight: probeHeight,
+    outputWidth: width,
+    outputHeight: height,
+  });
+
+  return {
+    width,
+    height,
+    adaptiveMaskBuffer,
+  };
+}
+
 function suppressFloorDangerZones(binaryMask, width, height) {
   const sideInset = Math.max(1, Math.round(width * 0.01));
   const bottomInset = Math.max(1, Math.round(height * 0.02));
@@ -2990,13 +3126,44 @@ function validateMaskCoverage({ presetKey, coverageRatio }) {
 
 async function resolveSurfaceMaskAtSourceSize(sourceBuffer, presetKey, roomType) {
   if (isWallPreset(presetKey)) {
-    const wall = await buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, roomType);
-    const coverageRatio = await calculateMaskCoverageRatio(wall.adaptiveMaskBuffer);
-    validateMaskCoverage({ presetKey, coverageRatio });
-    return {
-      maskBuffer: wall.adaptiveMaskBuffer,
-      debug: { strategy: 'adaptive_wall', maskCoverageRatio: coverageRatio },
-    };
+    try {
+      const wall = await buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, roomType);
+      const coverageRatio = await calculateMaskCoverageRatio(wall.adaptiveMaskBuffer);
+      validateMaskCoverage({ presetKey, coverageRatio });
+      console.log('vision_wall_mask_debug', {
+        presetKey,
+        roomType,
+        strategy: 'adaptive_wall',
+        wallMaskCoverage: coverageRatio,
+      });
+      return {
+        maskBuffer: wall.adaptiveMaskBuffer,
+        debug: { strategy: 'adaptive_wall', maskCoverageRatio: coverageRatio },
+      };
+    } catch (error) {
+      const fallbackWall = await buildFallbackWallPaintMaskAtSourceSize(
+        sourceBuffer,
+        presetKey,
+        roomType,
+      );
+      const fallbackCoverageRatio = await calculateMaskCoverageRatio(
+        fallbackWall.adaptiveMaskBuffer,
+      );
+      console.log('vision_wall_mask_debug', {
+        presetKey,
+        roomType,
+        strategy: 'fallback_wall',
+        wallMaskCoverage: fallbackCoverageRatio,
+        reason: error?.message || String(error),
+      });
+      if (fallbackCoverageRatio < 0.05) {
+        throw new Error(`Fallback wall mask coverage out of range: ${fallbackCoverageRatio}`);
+      }
+      return {
+        maskBuffer: fallbackWall.adaptiveMaskBuffer,
+        debug: { strategy: 'fallback_wall', maskCoverageRatio: fallbackCoverageRatio },
+      };
+    }
   }
 
   if (isFloorPreset(presetKey)) {

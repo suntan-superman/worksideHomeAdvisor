@@ -14,6 +14,51 @@ import { MediaAssetModel } from './media.model.js';
 import { MediaVariantModel } from './media-variant.model.js';
 import { deleteStoredAssetIfUnreferenced } from './storage-reference.service.js';
 
+const MEDIA_ASSET_PROJECTION = {
+  _id: 1,
+  propertyId: 1,
+  roomLabel: 1,
+  source: 1,
+  assetType: 1,
+  generationStage: 1,
+  sourceMediaId: 1,
+  sourceVariantId: 1,
+  savedFromVision: 1,
+  generationLabel: 1,
+  notes: 1,
+  mimeType: 1,
+  width: 1,
+  height: 1,
+  storageProvider: 1,
+  storageKey: 1,
+  byteSize: 1,
+  imageUrl: 1,
+  imageDataUrl: 1,
+  listingCandidate: 1,
+  listingNote: 1,
+  uploadedByUserId: 1,
+  analysis: 1,
+  createdAt: 1,
+  updatedAt: 1,
+};
+
+const SELECTED_VARIANT_PROJECTION = {
+  _id: 1,
+  visionJobId: 1,
+  variantType: 1,
+  variantCategory: 1,
+  label: 1,
+  imageUrl: 1,
+  lifecycleState: 1,
+  expiresAt: 1,
+  selectedAt: 1,
+  useInBrochure: 1,
+  useInReport: 1,
+  metadata: 1,
+  createdAt: 1,
+  updatedAt: 1,
+};
+
 function shouldIgnorePersistedMediaUrl(url) {
   if (!url) {
     return true;
@@ -146,10 +191,15 @@ export async function listMediaAssets(propertyId) {
     return [];
   }
 
-  const assets = await MediaAssetModel.find({ propertyId }).sort({ createdAt: -1 }).lean();
+  const assets = await MediaAssetModel.find({ propertyId })
+    .select(MEDIA_ASSET_PROJECTION)
+    .sort({ createdAt: -1 })
+    .lean();
   const assetIds = assets.map((asset) => asset._id);
   const selectedVariants = assetIds.length
-    ? await MediaVariantModel.find({ mediaId: { $in: assetIds }, isSelected: true }).lean()
+    ? await MediaVariantModel.find({ mediaId: { $in: assetIds }, isSelected: true })
+        .select(SELECTED_VARIANT_PROJECTION)
+        .lean()
     : [];
   const selectedByAssetId = new Map(
     selectedVariants.map((variant) => [variant.mediaId?.toString?.() || String(variant.mediaId), variant]),
@@ -264,9 +314,11 @@ export async function getMediaAssetById(assetId) {
     return null;
   }
 
-  const asset = await MediaAssetModel.findById(assetId).lean();
+  const asset = await MediaAssetModel.findById(assetId).select(MEDIA_ASSET_PROJECTION).lean();
   const selectedVariant = asset
-    ? await MediaVariantModel.findOne({ mediaId: asset._id, isSelected: true }).lean()
+    ? await MediaVariantModel.findOne({ mediaId: asset._id, isSelected: true })
+        .select(SELECTED_VARIANT_PROJECTION)
+        .lean()
     : null;
   return serializeMediaAsset(asset, selectedVariant);
 }

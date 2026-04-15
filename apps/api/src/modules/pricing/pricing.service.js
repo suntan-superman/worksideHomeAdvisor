@@ -77,6 +77,29 @@ function serializePricingAnalysis(document) {
   };
 }
 
+const PRICING_ANALYSIS_PROJECTION = {
+  propertyId: 1,
+  source: 1,
+  usedLiveData: 1,
+  cacheKey: 1,
+  avm: 1,
+  subjectSnapshot: 1,
+  selectedComps: 1,
+  medianPricePerSqft: 1,
+  recommendedListLow: 1,
+  recommendedListMid: 1,
+  recommendedListHigh: 1,
+  variance: 1,
+  confidenceScore: 1,
+  strengths: 1,
+  risks: 1,
+  summary: 1,
+  pricingStrategy: 1,
+  warning: 1,
+  createdAt: 1,
+  updatedAt: 1,
+};
+
 function buildStoredPricingAnalysisPayload({ propertyDocument, property, pricingAnalysis, narrative }) {
   return {
     propertyId: propertyDocument._id,
@@ -173,6 +196,7 @@ export async function getLatestPricingAnalysis(propertyId) {
   }
 
   const record = await pricingServiceDependencies.PricingAnalysisModel.findOne({ propertyId })
+    .select(PRICING_ANALYSIS_PROJECTION)
     .sort({ createdAt: -1 })
     .lean();
 

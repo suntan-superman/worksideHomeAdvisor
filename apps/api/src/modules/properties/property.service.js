@@ -14,6 +14,33 @@ export const propertyServiceDependencies = {
   deletePropertiesByIds: propertyLifecycleService.deletePropertiesByIds,
 };
 
+const PROPERTY_PROJECTION = {
+  _id: 1,
+  ownerUserId: 1,
+  title: 1,
+  addressLine1: 1,
+  city: 1,
+  state: 1,
+  zip: 1,
+  propertyType: 1,
+  bedrooms: 1,
+  bathrooms: 1,
+  squareFeet: 1,
+  lotSizeSqFt: 1,
+  yearBuilt: 1,
+  selectedListPrice: 1,
+  selectedListPriceSource: 1,
+  selectedListPriceUpdatedAt: 1,
+  status: 1,
+  archivedAt: 1,
+  archivedReason: 1,
+  readinessScore: 1,
+  sellerProfile: 1,
+  attribution: 1,
+  createdAt: 1,
+  updatedAt: 1,
+};
+
 const ARCHIVED_PROPERTY_MESSAGE =
   'This property is archived and read-only. Restore it before making changes.';
 
@@ -65,7 +92,10 @@ export async function listProperties(ownerUserId) {
   }
 
   const query = ownerUserId ? { ownerUserId } : {};
-  const properties = await PropertyModel.find(query).sort({ createdAt: -1 }).lean();
+  const properties = await PropertyModel.find(query)
+    .select(PROPERTY_PROJECTION)
+    .sort({ createdAt: -1 })
+    .lean();
   return properties
     .map(serializeProperty)
     .sort((left, right) => {
@@ -122,7 +152,7 @@ export async function getPropertyById(propertyId) {
     return demoDashboard.property;
   }
 
-  const property = await PropertyModel.findById(propertyId).lean();
+  const property = await PropertyModel.findById(propertyId).select(PROPERTY_PROJECTION).lean();
   return serializeProperty(property);
 }
 

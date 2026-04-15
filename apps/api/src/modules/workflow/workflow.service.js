@@ -1,11 +1,7 @@
 import { getLatestPropertyFlyer } from '../documents/flyer.service.js';
 import { getLatestPropertyReport } from '../documents/report.service.js';
-import { listMediaAssets } from '../media/media.service.js';
-import { MediaVariantModel } from '../media/media-variant.model.js';
-import { getLatestPricingAnalysis } from '../pricing/pricing.service.js';
-import { getPropertyById } from '../properties/property.service.js';
+import { getPropertyWorkspaceSnapshot } from '../properties/property-workspace.service.js';
 import { listProviderLeadsForProperty } from '../providers/providers.service.js';
-import { getOrCreatePropertyChecklist } from '../tasks/tasks.service.js';
 
 const CORE_ROOM_LABELS = ['Living room', 'Kitchen', 'Primary bedroom', 'Bathroom', 'Exterior'];
 const PHASE_LABELS = {
@@ -534,28 +530,23 @@ function buildReadinessSummary(marketReadyScore, completionPercent) {
 
 export async function getGuidedWorkflowState(propertyId, role = 'seller') {
   const normalizedRole = normalizeRole(role);
-  const [property, pricing, mediaAssets, checklist, latestFlyer, latestReport, providerLeads] =
-    await Promise.all([
-      getPropertyById(propertyId),
-      getLatestPricingAnalysis(propertyId),
-      listMediaAssets(propertyId),
-      getOrCreatePropertyChecklist(propertyId),
-      getLatestPropertyFlyer(propertyId),
-      getLatestPropertyReport(propertyId),
-      listProviderLeadsForProperty(propertyId),
-    ]);
+  const [snapshot, providerLeads] = await Promise.all([
+    getPropertyWorkspaceSnapshot(propertyId),
+    listProviderLeadsForProperty(propertyId),
+  ]);
+
+  const property = snapshot?.property || null;
+  const pricing = snapshot?.pricingAnalyses?.latest || null;
+  const mediaAssets = snapshot?.mediaAssets || [];
+  const checklist = snapshot?.checklist || null;
+  const latestFlyer = snapshot?.reports?.latestFlyer || null;
+  const latestReport = snapshot?.reports?.latestReport || null;
 
   if (!property) {
     throw new Error('Property not found.');
   }
 
-  const mediaIds = mediaAssets.map((asset) => asset.id).filter(Boolean);
-  const variants = mediaIds.length
-    ? await MediaVariantModel.find({ mediaId: { $in: mediaIds } })
-        .select({ createdAt: 1 })
-        .sort({ createdAt: -1 })
-        .lean()
-    : [];
+  const variants = snapshot?.mediaVariants || [];
   const photoSummary = coverageSummary(mediaAssets);
   const providerPromptCount = (checklist?.items || []).filter(
     (item) => item.providerCategoryKey && item.status !== 'done',

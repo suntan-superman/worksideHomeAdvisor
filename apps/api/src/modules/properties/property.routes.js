@@ -11,6 +11,7 @@ import {
   restoreProperty,
   updatePropertyPricingDecision,
 } from './property.service.js';
+import { getPropertyWorkspaceSnapshot } from './property-workspace.service.js';
 import { recordPublicFunnelEvent } from '../public/public.service.js';
 
 const querySchema = z.object({
@@ -79,6 +80,21 @@ export async function propertyRoutes(fastify) {
       }
 
       return reply.send({ property });
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/:propertyId/full', async (request, reply) => {
+    try {
+      const { propertyId } = paramsSchema.parse(request.params);
+      const snapshot = await getPropertyWorkspaceSnapshot(propertyId);
+
+      if (!snapshot?.property) {
+        return reply.code(404).send({ message: 'Property not found.' });
+      }
+
+      return reply.send(snapshot);
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }

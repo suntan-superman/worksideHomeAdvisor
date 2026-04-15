@@ -25,22 +25,16 @@ import {
   generateFlyer,
   generateReport,
   generateSocialPack,
-  getChecklist,
-  getDashboard,
   getImageEnhancementJob,
   getFlyerExportUrl,
-  getLatestFlyer,
-  getLatestPricing,
-  getLatestReport,
   getLatestSocialPack,
-  getProperty,
+  getPropertyFull,
   getProviderReferenceSheetExportUrl,
   getReportExportUrl,
   getWorkflow,
   listProviderLeads,
   listProviderReferences,
   listProviders,
-  listMediaAssets,
   listImageEnhancementJobs,
   listMediaVariants,
   listVisionPresets,
@@ -88,6 +82,7 @@ const PROPERTY_WORKSPACE_HIDDEN_WORKFLOW_STEPS = new Set([
   'property_added',
 ]);
 const DASHBOARD_FLASH_TOAST_KEY = 'worksideDashboardFlashToast';
+const HOME_ADVISOR_GUIDE_STORAGE_KEY_PREFIX = 'workside.homeAdvisorGuide.hidden';
 
 const REPORT_SECTION_OPTIONS = [
   { id: 'executive_summary', label: 'Executive Summary' },
@@ -351,6 +346,20 @@ function getVariantCreatedAtTimestamp(variant) {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
+function buildDashboardFromSnapshot(snapshot = {}) {
+  const latestPricing = snapshot?.pricingAnalyses?.latest || null;
+  const latestFlyer = snapshot?.reports?.latestFlyer || null;
+  const latestReport = snapshot?.reports?.latestReport || null;
+
+  return {
+    property: snapshot?.property || null,
+    comps: latestPricing?.selectedComps || [],
+    pricingSummary: latestPricing?.summary || '',
+    flyer: latestFlyer,
+    report: latestReport,
+  };
+}
+
 function getVisionWorkflowStageKeyForVariant(variant) {
   return (
     variant?.metadata?.workflowStageKey ||
@@ -582,6 +591,23 @@ function readWorkspaceSectionState(storageKey) {
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch {
     return {};
+  }
+}
+
+function readBooleanWorkspacePreference(storageKey, fallbackValue = false) {
+  if (typeof window === 'undefined' || !storageKey) {
+    return fallbackValue;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(storageKey);
+    if (rawValue == null) {
+      return fallbackValue;
+    }
+
+    return rawValue === 'true';
+  } catch {
+    return fallbackValue;
   }
 }
 
@@ -991,6 +1017,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const visionCompareRef = useRef(null);
   const visionCurrentActionRef = useRef(null);
   const lastVisionAssetResetRef = useRef('');
+  const propertySnapshotRefreshPromiseRef = useRef(null);
   const workspaceBodyMainRef = useRef(null);
   const providerSuggestionsRef = useRef(null);
   const visionCompletionAudioContextRef = useRef(null);
@@ -1067,6 +1094,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [workflowPreviewStepKey, setWorkflowPreviewStepKey] = useState('');
   const [checklistSummaryMode, setChecklistSummaryMode] = useState('open');
   const [workspaceSectionState, setWorkspaceSectionState] = useState({});
+  const [isHomeAdvisorGuideHidden, setIsHomeAdvisorGuideHidden] = useState(false);
   const [pendingWorkspaceScrollTarget, setPendingWorkspaceScrollTarget] = useState('');
   const [pendingChecklistFocusTarget, setPendingChecklistFocusTarget] = useState('');
   const [status, setStatus] = useState('Loading property workspace...');
@@ -1091,10 +1119,20 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     () => `workside.workspace.sections.${viewerIdentityKey}.${propertyId}`,
     [propertyId, viewerIdentityKey],
   );
+  const homeAdvisorGuideStorageKey = useMemo(
+    () => `${HOME_ADVISOR_GUIDE_STORAGE_KEY_PREFIX}.${viewerIdentityKey}.${propertyId}`,
+    [propertyId, viewerIdentityKey],
+  );
 
   useEffect(() => {
     setWorkspaceSectionState(readWorkspaceSectionState(workspaceSectionStorageKey));
   }, [workspaceSectionStorageKey]);
+
+  useEffect(() => {
+    setIsHomeAdvisorGuideHidden(
+      readBooleanWorkspacePreference(homeAdvisorGuideStorageKey, false),
+    );
+  }, [homeAdvisorGuideStorageKey]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !workspaceSectionStorageKey) {
@@ -1108,6 +1146,19 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       );
     } catch {}
   }, [workspaceSectionState, workspaceSectionStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !homeAdvisorGuideStorageKey) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        homeAdvisorGuideStorageKey,
+        String(isHomeAdvisorGuideHidden),
+      );
+    } catch {}
+  }, [homeAdvisorGuideStorageKey, isHomeAdvisorGuideHidden]);
 
   function isWorkspaceSectionOpen(sectionKey, defaultOpen = true) {
     if (Object.prototype.hasOwnProperty.call(workspaceSectionState, sectionKey)) {
@@ -1526,36 +1577,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     });
   }
 
-  const liveDashboardQuery = useQuery({
-    queryKey: ['property-dashboard', propertyId],
+  const propertyFullQuery = useQuery({
+    queryKey: ['property-full', propertyId],
     enabled: Boolean(propertyId),
-    queryFn: async () => getDashboard(propertyId),
+    queryFn: async () => getPropertyFull(propertyId),
     staleTime: 10_000,
     refetchInterval: 15_000,
-    refetchOnWindowFocus: true,
-  });
-
-  const liveChecklistQuery = useQuery({
-    queryKey: ['property-checklist', propertyId],
-    enabled: Boolean(propertyId),
-    queryFn: async () => {
-      const response = await getChecklist(propertyId);
-      return response.checklist;
-    },
-    staleTime: 10_000,
-    refetchInterval: 15_000,
-    refetchOnWindowFocus: true,
-  });
-
-  const liveMediaAssetsQuery = useQuery({
-    queryKey: ['property-media-assets', propertyId],
-    enabled: Boolean(propertyId),
-    queryFn: async () => {
-      const response = await listMediaAssets(propertyId);
-      return response.assets || [];
-    },
-    staleTime: 5_000,
-    refetchInterval: 5_000,
     refetchOnWindowFocus: true,
   });
 
@@ -2152,6 +2179,98 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     return { title: 'Review the latest outputs', detail: 'Both brochure and report are ready. Use Overview to compare the latest deliverables.', tab: 'overview' };
   }, [checklist?.nextTask?.detail, checklist?.nextTask?.title, latestFlyer, latestReport, listingCandidateAssets.length, mediaAssets.length, property?.status, selectedMediaAsset, selectedVariant]);
   const workflowNextStep = guidedWorkflow?.nextStep || null;
+  const homeAdvisorGuide = useMemo(() => {
+    if (isHomeAdvisorGuideHidden) {
+      return null;
+    }
+
+    if (!property?.id) {
+      return {
+        title: 'Home Advisor Agent',
+        body: 'Start by creating a property so pricing, photos, and seller-facing materials have somewhere to live.',
+        ctaLabel: 'Open Overview',
+        ctaAction: () => setActiveTab('overview'),
+        highlights: ['Property setup first', 'Everything else builds from there'],
+      };
+    }
+
+    if (!latestPricing) {
+      return {
+        title: 'Home Advisor Agent',
+        body: 'Run pricing first so brochure, report, and seller guidance all have a live comp-backed foundation.',
+        ctaLabel: 'Open Pricing',
+        ctaAction: () => setActiveTab('pricing'),
+        highlights: ['Review comps', 'Confirm pricing direction'],
+      };
+    }
+
+    if (!mediaAssets.length) {
+      return {
+        title: 'Home Advisor Agent',
+        body: 'Bring in photos next. One strong room photo is enough to start the Vision workflow and seller picks.',
+        ctaLabel: 'Open Photos',
+        ctaAction: () => setActiveTab('photos'),
+        highlights: ['Import photos', 'Start with strongest rooms'],
+      };
+    }
+
+    if (!listingCandidateAssets.length) {
+      return {
+        title: 'Home Advisor Agent',
+        body: 'Mark a few seller picks so the brochure and report use the right photos by default.',
+        ctaLabel: 'Open Seller Picks',
+        ctaAction: () => setActiveTab('seller_picks'),
+        highlights: ['Choose strongest rooms', 'Keep the story focused'],
+      };
+    }
+
+    if (!latestFlyer) {
+      return {
+        title: 'Home Advisor Agent',
+        body: 'You have pricing and photo picks. The fastest next win is generating the brochure draft.',
+        ctaLabel: 'Open Brochure',
+        ctaAction: () => setActiveTab('brochure'),
+        highlights: ['Generate brochure draft', 'Check headline and selected photos'],
+      };
+    }
+
+    if (!latestReport) {
+      return {
+        title: 'Home Advisor Agent',
+        body: 'With pricing and photos in place, create the report so the seller sees the full strategy and readiness story.',
+        ctaLabel: 'Open Report',
+        ctaAction: () => setActiveTab('report'),
+        highlights: ['Package pricing and photos', 'Share a premium seller deliverable'],
+      };
+    }
+
+    if (workflowNextStep) {
+      return {
+        title: 'Home Advisor Agent',
+        body: workflowNextStep.description || 'Keep moving through the recommended workflow step.',
+        ctaLabel: workflowNextStep.ctaLabel || 'Open next step',
+        ctaAction: () => openWorkflowStep(workflowNextStep),
+        highlights: [workflowNextStep.title, workflowNextStep.helperText].filter(Boolean),
+      };
+    }
+
+    return {
+      title: 'Home Advisor Agent',
+      body: 'The essentials are in place. Use Seller Picks, Brochure, and Report to review the final presentation package.',
+      ctaLabel: 'Open Seller Picks',
+      ctaAction: () => setActiveTab('seller_picks'),
+      highlights: ['Review deliverables', 'Fine-tune presentation'],
+    };
+  }, [
+    isHomeAdvisorGuideHidden,
+    listingCandidateAssets.length,
+    latestFlyer,
+    latestPricing,
+    latestReport,
+    mediaAssets.length,
+    property?.id,
+    workflowNextStep,
+  ]);
   const workflowSteps = (guidedWorkflow?.steps || []).filter(
     (step) => !PROPERTY_WORKSPACE_HIDDEN_WORKFLOW_STEPS.has(step.key),
   );
@@ -2213,30 +2332,23 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   useEffect(() => {
-    if (!liveDashboardQuery.data) {
+    if (!propertyFullQuery.data) {
       return;
     }
 
-    setDashboard(liveDashboardQuery.data);
-    if (liveDashboardQuery.data?.property) {
-      setProperty(liveDashboardQuery.data.property);
-    }
-  }, [liveDashboardQuery.data]);
+    const snapshot = propertyFullQuery.data;
+    const nextAssets = snapshot.mediaAssets || [];
+    const nextPricing = snapshot.pricingAnalyses?.latest || null;
+    const nextFlyer = snapshot.reports?.latestFlyer || null;
+    const nextReport = snapshot.reports?.latestReport || null;
+    const nextDashboard = buildDashboardFromSnapshot(snapshot);
 
-  useEffect(() => {
-    if (!liveChecklistQuery.data) {
-      return;
-    }
-
-    setChecklist(liveChecklistQuery.data);
-  }, [liveChecklistQuery.data]);
-
-  useEffect(() => {
-    if (!liveMediaAssetsQuery.data) {
-      return;
-    }
-
-    const nextAssets = liveMediaAssetsQuery.data || [];
+    setProperty(snapshot.property || null);
+    setDashboard(nextDashboard);
+    setChecklist(snapshot.checklist || null);
+    setLatestPricing(nextPricing);
+    setLatestFlyer(nextFlyer);
+    setLatestReport(nextReport);
     setMediaAssets(nextAssets);
     setSelectedMediaAssetId((current) => {
       if (nextAssets.some((asset) => asset.id === current)) {
@@ -2244,7 +2356,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       }
       return nextAssets[0]?.id || '';
     });
-  }, [liveMediaAssetsQuery.data]);
+  }, [propertyFullQuery.data]);
 
   useEffect(() => {
     if (!activePhotoDetailsAsset?.id) {
@@ -2476,10 +2588,22 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     reportPhotoPool,
   ]);
 
-  async function refreshMediaAssets(preferredAssetId = selectedMediaAssetId) {
-    const mediaResponse = await listMediaAssets(propertyId);
-    const nextAssets = mediaResponse.assets || [];
-    queryClient.setQueryData(['property-media-assets', propertyId], nextAssets);
+  function applyPropertySnapshot(snapshot, preferredAssetId = selectedMediaAssetId) {
+    const nextAssets = snapshot?.mediaAssets || [];
+    const nextPricing = snapshot?.pricingAnalyses?.latest || null;
+    const nextFlyer = snapshot?.reports?.latestFlyer || null;
+    const nextReport = snapshot?.reports?.latestReport || null;
+    const nextChecklist = snapshot?.checklist || null;
+    const nextProperty = snapshot?.property || null;
+    const nextDashboard = buildDashboardFromSnapshot(snapshot);
+
+    queryClient.setQueryData(['property-full', propertyId], snapshot);
+    setProperty(nextProperty);
+    setDashboard(nextDashboard);
+    setChecklist(nextChecklist);
+    setLatestPricing(nextPricing);
+    setLatestFlyer(nextFlyer);
+    setLatestReport(nextReport);
     setMediaAssets(nextAssets);
     setSelectedMediaAssetId(() => {
       if (preferredAssetId && nextAssets.some((asset) => asset.id === preferredAssetId)) {
@@ -2487,7 +2611,40 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       }
       return nextAssets[0]?.id || '';
     });
-    return nextAssets;
+
+    return {
+      dashboard: nextDashboard,
+      checklist: nextChecklist,
+      mediaAssets: nextAssets,
+      property: nextProperty,
+      latestPricing: nextPricing,
+      latestFlyer: nextFlyer,
+      latestReport: nextReport,
+    };
+  }
+
+  async function refreshPropertySnapshot(preferredAssetId = selectedMediaAssetId) {
+    if (propertySnapshotRefreshPromiseRef.current) {
+      return propertySnapshotRefreshPromiseRef.current;
+    }
+
+    const refreshPromise = (async () => {
+      const snapshot = await getPropertyFull(propertyId);
+      return applyPropertySnapshot(snapshot, preferredAssetId);
+    })();
+
+    propertySnapshotRefreshPromiseRef.current = refreshPromise;
+
+    try {
+      return await refreshPromise;
+    } finally {
+      propertySnapshotRefreshPromiseRef.current = null;
+    }
+  }
+
+  async function refreshMediaAssets(preferredAssetId = selectedMediaAssetId) {
+    const snapshot = await refreshPropertySnapshot(preferredAssetId);
+    return snapshot.mediaAssets;
   }
 
   async function refreshMediaVariants(assetId = selectedMediaAssetId) {
@@ -2512,20 +2669,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   async function refreshDashboardSnapshot() {
-    const dashboardResponse = await getDashboard(propertyId);
-    queryClient.setQueryData(['property-dashboard', propertyId], dashboardResponse);
-    setDashboard(dashboardResponse);
-    if (dashboardResponse?.property) {
-      setProperty(dashboardResponse.property);
-    }
-    return dashboardResponse;
+    const snapshot = await refreshPropertySnapshot(selectedMediaAssetId);
+    return snapshot.dashboard;
   }
 
   async function refreshChecklist() {
-    const checklistResponse = await getChecklist(propertyId);
-    queryClient.setQueryData(['property-checklist', propertyId], checklistResponse.checklist);
-    setChecklist(checklistResponse.checklist);
-    return checklistResponse.checklist;
+    const snapshot = await refreshPropertySnapshot(selectedMediaAssetId);
+    return snapshot.checklist;
   }
 
   async function refreshWorkflow() {
@@ -2682,51 +2832,22 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setStatus('Loading property workspace...');
       setToast(null);
       try {
-        const [propertyResponse, dashboardResponse, checklistResponse] = await Promise.all([
-          getProperty(propertyId),
-          getDashboard(propertyId),
-          getChecklist(propertyId),
+        const [snapshotResponse, presetsResponse] = await Promise.all([
+          getPropertyFull(propertyId),
+          listVisionPresets(),
         ]);
-        setProperty(propertyResponse.property);
-        setDashboard(dashboardResponse);
-        setChecklist(checklistResponse.checklist);
-        try {
-          const presetsResponse = await listVisionPresets();
-          setVisionPresets(presetsResponse.presets || []);
-        } catch {
-          setVisionPresets([]);
-        }
-        try {
-          const pricingResponse = await getLatestPricing(propertyId);
-          setLatestPricing(pricingResponse.analysis);
-        } catch {
-          setLatestPricing(null);
-        }
-        try {
-          const flyerResponse = await getLatestFlyer(propertyId);
-          setLatestFlyer(flyerResponse.flyer);
-        } catch {
-          setLatestFlyer(null);
-        }
-        try {
-          const reportResponse = await getLatestReport(propertyId);
-          setLatestReport(reportResponse.report);
-        } catch {
-          setLatestReport(null);
-        }
+        applyPropertySnapshot(snapshotResponse);
+        setVisionPresets(presetsResponse.presets || []);
         await refreshSocialPack();
-        try {
-          await refreshMediaAssets();
-        } catch {
-          setMediaAssets([]);
-          setSelectedMediaAssetId('');
-        }
         try {
           await refreshProviderLeads();
         } catch {
           setProviderLeads([]);
         }
       } catch (requestError) {
+        try {
+          setVisionPresets([]);
+        } catch {}
         setToast({ tone: 'error', title: 'Could not load property', message: requestError.message });
       } finally {
         setStatus('');
@@ -7545,6 +7666,52 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             <section className="workspace-content-layout">
               <div className="workspace-tab-main">{renderActiveTab()}</div>
               <aside className="workspace-quick-rail">
+                {homeAdvisorGuide ? (
+                  <div className="content-card workspace-quick-card workspace-guide-card">
+                    <div className="workspace-guide-header">
+                      <span className="label">Home Advisor Agent</span>
+                      <button
+                        type="button"
+                        className="button-ghost workspace-guide-dismiss"
+                        onClick={() => setIsHomeAdvisorGuideHidden(true)}
+                        aria-label="Dismiss Home Advisor guide"
+                      >
+                        Hide
+                      </button>
+                    </div>
+                    <h3>{homeAdvisorGuide.title}</h3>
+                    <p>{homeAdvisorGuide.body}</p>
+                    {homeAdvisorGuide.highlights?.length ? (
+                      <div className="workspace-guide-chip-list">
+                        {homeAdvisorGuide.highlights.map((highlight) => (
+                          <span key={highlight} className="metric-pill">
+                            {highlight}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="button-primary"
+                      onClick={homeAdvisorGuide.ctaAction}
+                      disabled={Boolean(status)}
+                    >
+                      {homeAdvisorGuide.ctaLabel}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="content-card workspace-quick-card workspace-guide-card workspace-guide-card-muted">
+                    <span className="label">Home Advisor Agent</span>
+                    <p>The guide is hidden for this property. Bring it back any time if you want a simpler next-step prompt.</p>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => setIsHomeAdvisorGuideHidden(false)}
+                    >
+                      Show guide
+                    </button>
+                  </div>
+                )}
                 <div className="content-card workspace-quick-card">
                   <span className="label">Next step</span>
                   <h3>{workflowNextStep?.title || nextBestAction.title}</h3>
