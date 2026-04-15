@@ -1803,10 +1803,10 @@ async function renderLocalWallPaintVariantBuffer(sourceBuffer, presetKey, roomTy
   const width = Number(metadata.width || 0);
   const height = Number(metadata.height || 0);
   const toneConfig = buildLocalWallPaintToneConfig(presetKey);
-  const wallMask = await buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, roomType);
+  const resolvedWallMask = await resolveSurfaceMaskAtSourceSize(sourceBuffer, presetKey, roomType);
   const [sourceRgba, maskRaw] = await Promise.all([
     sharp(sourceBuffer).rotate().ensureAlpha().raw().toBuffer(),
-    sharp(wallMask.adaptiveMaskBuffer)
+    sharp(resolvedWallMask.maskBuffer)
       .resize(width, height, { fit: 'fill' })
       .removeAlpha()
       .greyscale()
@@ -1893,7 +1893,7 @@ async function renderLocalWallPaintVariantBuffer(sourceBuffer, presetKey, roomTy
   return blendVariantWithSourceMask({
     sourceBuffer,
     variantBuffer,
-    maskBuffer: wallMask.adaptiveMaskBuffer,
+    maskBuffer: resolvedWallMask.maskBuffer,
     maskBlur: getFinishMaskBlurRadius(presetKey),
   });
 }
@@ -2701,6 +2701,74 @@ async function buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, r
   };
 }
 
+function calculateBinaryMaskCoverageRatio(binaryMask) {
+  let activePixels = 0;
+  for (let index = 0; index < binaryMask.length; index += 1) {
+    activePixels += binaryMask[index] ? 1 : 0;
+  }
+
+  return Number((activePixels / Math.max(1, binaryMask.length)).toFixed(4));
+}
+
+function filterBinaryMaskComponents(
+  binaryMask,
+  width,
+  height,
+  { minArea = 0, minBoxWidth = 1, minBoxHeight = 1 } = {},
+) {
+  const components = extractBinaryMaskComponents(binaryMask, width, height, minArea);
+  const filtered = new Uint8Array(binaryMask.length);
+
+  for (const component of components) {
+    if (
+      component.area < minArea ||
+      component.boxWidth < minBoxWidth ||
+      component.boxHeight < minBoxHeight
+    ) {
+      continue;
+    }
+
+    for (const pixelIndex of component.pixels) {
+      filtered[pixelIndex] = 1;
+    }
+  }
+
+  return filtered;
+}
+
+function buildGeometricWallFallbackBinaryMask({
+  probeWidth,
+  probeHeight,
+  topClip,
+  bottomClip,
+  sideInset,
+  baseboardDeadZone,
+}) {
+  const binary = new Uint8Array(probeWidth * probeHeight);
+
+  for (let y = topClip; y < bottomClip; y += 1) {
+    if (y >= probeHeight - baseboardDeadZone) {
+      continue;
+    }
+
+    for (let x = sideInset; x < probeWidth - sideInset; x += 1) {
+      binary[y * probeWidth + x] = 1;
+    }
+  }
+
+  return binary;
+}
+
+function logWallMaskStageCoverage({ presetKey, roomType, stage, coverageRatio, note = '' }) {
+  console.info('vision_wall_mask_stage_debug', {
+    presetKey,
+    roomType,
+    stage,
+    wallMaskCoverage: coverageRatio,
+    note: note || undefined,
+  });
+}
+
 function suppressWallDangerZones(binaryMask, width, height) {
   const topDeadZone = Math.max(1, Math.round(height * 0.06));
   const bottomDeadZone = Math.max(1, Math.round(height * 0.08));
@@ -2787,7 +2855,6 @@ async function buildFallbackWallPaintMaskAtSourceSize(sourceBuffer, presetKey, r
 
   const luminance = new Float32Array(probeWidth * probeHeight);
   const texture = new Float32Array(probeWidth * probeHeight);
-  const binary = new Uint8Array(probeWidth * probeHeight);
 
   for (let y = 0; y < probeHeight; y += 1) {
     for (let x = 0; x < probeWidth; x += 1) {
@@ -2818,6 +2885,7 @@ async function buildFallbackWallPaintMaskAtSourceSize(sourceBuffer, presetKey, r
   const sideInset = Math.max(1, Math.round(probeWidth * 0.025));
   const baseboardDeadZone = Math.max(1, Math.round(probeHeight * 0.08));
 
+  const coarseBinary = new Uint8Array(probeWidth * probeHeight);
   for (let y = topClip; y < bottomClip; y += 1) {
     for (let x = sideInset; x < probeWidth - sideInset; x += 1) {
       const index = y * probeWidth + x;
@@ -2827,32 +2895,95 @@ async function buildFallbackWallPaintMaskAtSourceSize(sourceBuffer, presetKey, r
       if (y >= probeHeight - baseboardDeadZone) {
         continue;
       }
-      binary[index] = 1;
+      coarseBinary[index] = 1;
     }
   }
 
-  suppressLikelyWindows(binary, luminance, texture, probeWidth, probeHeight);
-  suppressStrongVerticalFrames(binary, luminance, probeWidth, probeHeight);
-  suppressWallDangerZones(binary, probeWidth, probeHeight);
-
-  const components = extractBinaryMaskComponents(
-    binary,
+  const geometricBinary = buildGeometricWallFallbackBinaryMask({
     probeWidth,
     probeHeight,
-    Math.max(28, Math.round(probeWidth * probeHeight * 0.0025)),
+    topClip,
+    bottomClip,
+    sideInset,
+    baseboardDeadZone,
+  });
+  const afterWindowSuppression = new Uint8Array(coarseBinary);
+  suppressLikelyWindows(afterWindowSuppression, luminance, texture, probeWidth, probeHeight);
+  const afterFrameSuppression = new Uint8Array(afterWindowSuppression);
+  suppressStrongVerticalFrames(afterFrameSuppression, luminance, probeWidth, probeHeight);
+  const afterDangerSuppression = new Uint8Array(afterFrameSuppression);
+  suppressWallDangerZones(afterDangerSuppression, probeWidth, probeHeight);
+  const componentFiltered = filterBinaryMaskComponents(
+    afterDangerSuppression,
+    probeWidth,
+    probeHeight,
+    {
+      minArea: Math.max(28, Math.round(probeWidth * probeHeight * 0.0025)),
+      minBoxWidth: 6,
+      minBoxHeight: 8,
+    },
   );
-  const finalBinary = new Uint8Array(binary.length);
-  for (const component of components) {
-    if (
-      component.area >= Math.max(28, Math.round(probeWidth * probeHeight * 0.0025)) &&
-      component.boxWidth >= 6 &&
-      component.boxHeight >= 8
-    ) {
-      for (const pixelIndex of component.pixels) {
-        finalBinary[pixelIndex] = 1;
-      }
-    }
+
+  const stageCandidates = [
+    {
+      stage: 'initial_geometry_seed',
+      binary: coarseBinary,
+      note: 'Base inpainting wall region before any wall-specific suppression.',
+    },
+    {
+      stage: 'after_window_suppression',
+      binary: afterWindowSuppression,
+      note: 'After bright / textured window removal.',
+    },
+    {
+      stage: 'after_frame_suppression',
+      binary: afterFrameSuppression,
+      note: 'After strong vertical frame suppression.',
+    },
+    {
+      stage: 'after_danger_zone_suppression',
+      binary: afterDangerSuppression,
+      note: 'After top / bottom / side danger-zone trimming.',
+    },
+    {
+      stage: 'after_component_filter',
+      binary: componentFiltered,
+      note: 'After connected-component cleanup.',
+    },
+    {
+      stage: 'hard_geometric_fallback',
+      binary: geometricBinary,
+      note: 'Last-resort broad wall region without base-mask dependency.',
+    },
+  ].map((candidate) => ({
+    ...candidate,
+    coverageRatio: calculateBinaryMaskCoverageRatio(candidate.binary),
+  }));
+
+  for (const candidate of stageCandidates) {
+    logWallMaskStageCoverage({
+      presetKey,
+      roomType,
+      stage: candidate.stage,
+      coverageRatio: candidate.coverageRatio,
+      note: candidate.note,
+    });
   }
+
+  const viableStage =
+    [...stageCandidates].reverse().find(
+      (candidate) =>
+        candidate.stage !== 'hard_geometric_fallback' && candidate.coverageRatio >= 0.015,
+    ) ||
+    [...stageCandidates].reverse().find((candidate) => candidate.coverageRatio > 0);
+  logWallMaskStageCoverage({
+    presetKey,
+    roomType,
+    stage: viableStage?.stage || 'no_viable_stage',
+    coverageRatio: viableStage?.coverageRatio || 0,
+    note: 'Selected fallback wall-mask stage.',
+  });
+  const finalBinary = viableStage?.binary || geometricBinary;
 
   const adaptiveMaskBuffer = await buildBinaryMaskPngBuffer({
     binaryMask: finalBinary,

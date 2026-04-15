@@ -18,6 +18,9 @@ function setReadyState(value) {
 
 function createSortedLeanQuery(result) {
   return {
+    select() {
+      return this;
+    },
     sort() {
       return {
         lean: async () => result,

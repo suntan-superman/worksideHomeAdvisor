@@ -7,6 +7,9 @@ import { deleteProperty, propertyServiceDependencies } from './property.service.
 
 function createSortedLeanQuery(result) {
   return {
+    select() {
+      return this;
+    },
     sort() {
       return {
         lean: async () => result,
