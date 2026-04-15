@@ -600,6 +600,12 @@ function getFinishMaskBlurRadius(presetKey = '') {
   return 1.2;
 }
 
+const WALL_MASK_STRATEGIES = Object.freeze({
+  SEMANTIC: 'semantic_wall',
+  ADAPTIVE: 'adaptive_wall',
+  FALLBACK: 'fallback_wall',
+});
+
 function mixValue(source, target, ratio) {
   return Number(source || 0) + (Number(target || 0) - Number(source || 0)) * clamp01(ratio);
 }
@@ -1890,12 +1896,24 @@ async function renderLocalWallPaintVariantBuffer(sourceBuffer, presetKey, roomTy
     .jpeg({ quality: 92, mozjpeg: true })
     .toBuffer();
 
-  return blendVariantWithSourceMask({
+  const compositedBuffer = await blendVariantWithSourceMask({
     sourceBuffer,
     variantBuffer,
     maskBuffer: resolvedWallMask.maskBuffer,
     maskBlur: getFinishMaskBlurRadius(presetKey),
   });
+
+  return {
+    buffer: compositedBuffer,
+    debug: {
+      wallMaskBuffer: resolvedWallMask.maskBuffer,
+      strategy: resolvedWallMask.debug?.strategy || null,
+      maskCoverageRatio:
+        resolvedWallMask.debug?.coverageRatio ?? resolvedWallMask.debug?.maskCoverageRatio ?? null,
+      rawMaskCoverageRatio: resolvedWallMask.debug?.rawCoverageRatio ?? null,
+      refinementStages: resolvedWallMask.debug?.refinementStages || [],
+    },
+  };
 }
 
 async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) {
@@ -2506,6 +2524,419 @@ async function buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType) {
     .blur(0.6)
     .png()
     .toBuffer();
+}
+
+function buildWallProbeFeatures(sourceProbe, width, height) {
+  const luminance = new Float32Array(width * height);
+  const saturation = new Float32Array(width * height);
+  const horizontalGrad = new Float32Array(width * height);
+  const verticalGrad = new Float32Array(width * height);
+  const texture = new Float32Array(width * height);
+
+  function rgbAt(index) {
+    const offset = index * 3;
+    return [sourceProbe[offset], sourceProbe[offset + 1], sourceProbe[offset + 2]];
+  }
+
+  for (let index = 0; index < width * height; index += 1) {
+    const [red, green, blue] = rgbAt(index);
+    luminance[index] = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    saturation[index] = Math.max(red, green, blue) - Math.min(red, green, blue);
+  }
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      horizontalGrad[index] = Math.abs(luminance[index - 1] - luminance[index + 1]);
+      verticalGrad[index] = Math.abs(luminance[index - width] - luminance[index + width]);
+      texture[index] = (horizontalGrad[index] + verticalGrad[index]) / 2;
+    }
+  }
+
+  return {
+    luminance,
+    saturation,
+    horizontalGrad,
+    verticalGrad,
+    texture,
+  };
+}
+
+function getSemanticWallCoverageTarget(roomType) {
+  const normalizedRoomType = normalizeRoomType(roomType);
+
+  if (
+    normalizedRoomType === 'living_room' ||
+    normalizedRoomType === 'bedroom' ||
+    normalizedRoomType === 'dining_room'
+  ) {
+    return 0.5;
+  }
+
+  return 0.42;
+}
+
+function collectMaskedChannelMedian(binaryMask, channel, fallbackValue) {
+  const samples = [];
+  for (let index = 0; index < binaryMask.length; index += 1) {
+    if (!binaryMask[index]) {
+      continue;
+    }
+    samples.push(Number(channel[index] || 0));
+  }
+
+  return medianChannel(samples, fallbackValue);
+}
+
+function expandSemanticWallMask({
+  binaryMask,
+  baseGeometryMask,
+  blockedMask = null,
+  features,
+  width,
+  height,
+  roomType,
+}) {
+  const targetCoverage = getSemanticWallCoverageTarget(roomType);
+  let current = new Uint8Array(binaryMask);
+  let coverageRatio = calculateBinaryMaskCoverageRatio(current);
+  if (coverageRatio >= targetCoverage) {
+    return current;
+  }
+
+  const startY = Math.round(height * 0.08);
+  const endY = Math.round(height * 0.78);
+  const medianLum = collectMaskedChannelMedian(current, features.luminance, 188);
+  const medianSat = collectMaskedChannelMedian(current, features.saturation, 22);
+  const medianTexture = collectMaskedChannelMedian(current, features.texture, 10);
+
+  for (let pass = 0; pass < 3 && coverageRatio < targetCoverage; pass += 1) {
+    const next = new Uint8Array(current);
+    let growthCount = 0;
+
+    for (let y = startY + 1; y < endY - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x;
+        if (
+          current[index] ||
+          (baseGeometryMask[index] || 0) <= 20 ||
+          (blockedMask && blockedMask[index])
+        ) {
+          continue;
+        }
+
+        const lum = Number(features.luminance[index] || 0);
+        const sat = Number(features.saturation[index] || 0);
+        const tex = Number(features.texture[index] || 0);
+        const hGrad = Number(features.horizontalGrad[index] || 0);
+        const vGrad = Number(features.verticalGrad[index] || 0);
+
+        if (
+          lum < 40 ||
+          lum > 245 ||
+          sat > Math.max(68, medianSat + 18) ||
+          tex > Math.max(22, medianTexture + 8) ||
+          hGrad > 30 ||
+          vGrad > 36 ||
+          Math.abs(lum - medianLum) > 34
+        ) {
+          continue;
+        }
+
+        let neighborCount = 0;
+        const neighbors = [
+          index - 1,
+          index + 1,
+          index - width,
+          index + width,
+          index - width - 1,
+          index - width + 1,
+          index + width - 1,
+          index + width + 1,
+        ];
+        for (const neighborIndex of neighbors) {
+          neighborCount += current[neighborIndex] ? 1 : 0;
+        }
+
+        const verticallyConnected =
+          (current[index - width] && current[index + width]) ||
+          (current[index - width] && current[index - width - 1]) ||
+          (current[index - width] && current[index - width + 1]) ||
+          (current[index + width] && current[index + width - 1]) ||
+          (current[index + width] && current[index + width + 1]);
+
+        if (neighborCount >= 2 || verticallyConnected) {
+          next[index] = 1;
+          growthCount += 1;
+        }
+      }
+    }
+
+    current = next;
+    coverageRatio = calculateBinaryMaskCoverageRatio(current);
+    if (!growthCount) {
+      break;
+    }
+  }
+
+  return current;
+}
+
+async function runWallSegmentationProviderFromProbe({
+  sourceProbe,
+  probeWidth,
+  probeHeight,
+  roomType,
+  baseGeometryMask,
+}) {
+  void roomType;
+  const features = buildWallProbeFeatures(sourceProbe, probeWidth, probeHeight);
+  const binary = new Uint8Array(probeWidth * probeHeight);
+
+  const startY = Math.round(probeHeight * 0.08);
+  const endY = Math.round(probeHeight * 0.78);
+
+  for (let y = startY; y <= endY; y += 1) {
+    for (let x = 1; x < probeWidth - 1; x += 1) {
+      const index = y * probeWidth + x;
+      if ((baseGeometryMask[index] || 0) <= 20) {
+        continue;
+      }
+
+      const lum = Number(features.luminance[index] || 0);
+      const sat = Number(features.saturation[index] || 0);
+      const tex = Number(features.texture[index] || 0);
+      const hGrad = Number(features.horizontalGrad[index] || 0);
+      const vGrad = Number(features.verticalGrad[index] || 0);
+
+      const looksLikeWallPlane =
+        lum >= 40 &&
+        lum <= 245 &&
+        sat <= 60 &&
+        tex <= 18 &&
+        hGrad <= 26 &&
+        vGrad <= 32;
+
+      if (looksLikeWallPlane) {
+        binary[index] = 1;
+      }
+    }
+  }
+
+  return {
+    binary,
+    features,
+  };
+}
+
+function buildSemanticLikelyWindowMask(sourceProbe, width, height) {
+  const { luminance, texture } = buildWallProbeFeatures(sourceProbe, width, height);
+  const brightBinary = new Uint8Array(width * height);
+
+  for (let y = Math.round(height * 0.08); y < Math.round(height * 0.8); y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      const lum = Number(luminance[index] || 0);
+      const tex = Number(texture[index] || 0);
+
+      if (lum > 205 && tex > 14) {
+        brightBinary[index] = 1;
+      }
+    }
+  }
+
+  const connectedBright = closeBinaryMask(brightBinary, width, height, 1);
+  const filledBright = fillBinaryMaskHoles(connectedBright, width, height);
+  const filteredBright = filterBinaryMaskComponents(filledBright, width, height, {
+    minArea: Math.max(60, Math.round(width * height * 0.004)),
+    minBoxWidth: Math.max(6, Math.round(width * 0.05)),
+    minBoxHeight: Math.max(8, Math.round(height * 0.16)),
+  });
+  return dilateBinaryMask(filteredBright, width, height, 1);
+}
+
+function suppressSemanticLikelyWindows(binaryMask, sourceProbe, width, height) {
+  const next = new Uint8Array(binaryMask);
+  const expandedBright = buildSemanticLikelyWindowMask(sourceProbe, width, height);
+
+  for (let index = 0; index < next.length; index += 1) {
+    if (expandedBright[index]) {
+      next[index] = 0;
+    }
+  }
+
+  return next;
+}
+
+function suppressSemanticDangerZones(binaryMask, width, height) {
+  const next = new Uint8Array(binaryMask);
+  suppressWallDangerZones(next, width, height);
+  return next;
+}
+
+function refineSemanticWallMask({
+  binaryMask,
+  sourceProbe,
+  baseGeometryMask,
+  width,
+  height,
+  roomType,
+  presetKey,
+}) {
+  const refinementStages = [];
+  const semanticFeatures = buildWallProbeFeatures(sourceProbe, width, height);
+
+  function stage(name, binary, note) {
+    const coverageRatio = calculateBinaryMaskCoverageRatio(binary);
+    refinementStages.push({
+      stage: name,
+      coverageRatio,
+    });
+    logWallMaskStageCoverage({
+      presetKey,
+      roomType,
+      stage: name,
+      coverageRatio,
+      note,
+    });
+    return binary;
+  }
+
+  let current = new Uint8Array(binaryMask);
+  const rawCoverageRatio = calculateBinaryMaskCoverageRatio(current);
+  stage('semantic_raw', current, 'Raw semantic wall-plane classification.');
+
+  current = closeBinaryMask(current, width, height, 1);
+  stage('semantic_after_close', current, 'After semantic morphology closing.');
+
+  current = fillBinaryMaskHoles(current, width, height);
+  stage('semantic_after_hole_fill', current, 'After semantic hole filling.');
+
+  current = bridgeVerticalMaskGaps(current, width, height, {
+    startY: Math.round(height * 0.08),
+    endY: Math.round(height * 0.78),
+    maxGap: 4,
+    minColumnCoverageRatio: 0.18,
+  });
+  stage('semantic_after_vertical_bridge', current, 'After vertical wall-plane continuity bridging.');
+
+  current = expandSemanticWallMask({
+    binaryMask: current,
+    baseGeometryMask,
+    features: semanticFeatures,
+    width,
+    height,
+    roomType,
+  });
+  stage('semantic_after_targeted_expansion', current, 'After coverage-aware semantic wall expansion.');
+
+  const semanticWindowMask = buildSemanticLikelyWindowMask(sourceProbe, width, height);
+  current = subtractBinaryMask(current, semanticWindowMask);
+  stage('semantic_after_window_suppression', current, 'After strong semantic window suppression.');
+
+  current = expandSemanticWallMask({
+    binaryMask: current,
+    baseGeometryMask,
+    blockedMask: semanticWindowMask,
+    features: semanticFeatures,
+    width,
+    height,
+    roomType,
+  });
+  stage(
+    'semantic_after_post_window_expansion',
+    current,
+    'After re-expanding safe wall regions that are not part of windows.',
+  );
+
+  current = suppressSemanticDangerZones(current, width, height);
+  stage('semantic_after_danger_zones', current, 'After semantic danger-zone trimming.');
+
+  if (calculateBinaryMaskCoverageRatio(current) > 0.56) {
+    current = erodeBinaryMask(current, width, height, 1);
+    stage('semantic_after_edge_buffer', current, 'After a light edge buffer to protect trim lines.');
+  }
+
+  current = filterBinaryMaskComponents(current, width, height, {
+    minArea: Math.max(60, Math.round(width * height * 0.004)),
+    minBoxWidth: 6,
+    minBoxHeight: 8,
+  });
+  stage('semantic_after_component_filter', current, 'After semantic connected-component cleanup.');
+
+  return {
+    binary: current,
+    rawCoverageRatio,
+    coverageRatio: calculateBinaryMaskCoverageRatio(current),
+    refinementStages,
+  };
+}
+
+export async function segmentWallPlanesAtSourceSize(
+  sourceBuffer,
+  roomType,
+  presetKey = 'paint_bright_white',
+) {
+  const metadata = await sharp(sourceBuffer).rotate().metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const probeWidth = Math.max(160, Math.min(320, width));
+  const probeHeight = Math.max(120, Math.round((height / Math.max(1, width)) * probeWidth));
+
+  const [sourceProbe, baseGeometryMask] = await Promise.all([
+    sharp(sourceBuffer)
+      .rotate()
+      .resize(probeWidth, probeHeight, { fit: 'fill' })
+      .removeAlpha()
+      .raw()
+      .toBuffer(),
+    buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType).then((buffer) =>
+      sharp(buffer)
+        .resize(probeWidth, probeHeight, { fit: 'fill' })
+        .removeAlpha()
+        .greyscale()
+        .raw()
+        .toBuffer(),
+    ),
+  ]);
+
+  const rawSemantic = await runWallSegmentationProviderFromProbe({
+    sourceProbe,
+    probeWidth,
+    probeHeight,
+    roomType,
+    baseGeometryMask,
+  });
+
+  const refined = refineSemanticWallMask({
+    binaryMask: rawSemantic.binary,
+    sourceProbe,
+    baseGeometryMask,
+    width: probeWidth,
+    height: probeHeight,
+    roomType,
+    presetKey,
+  });
+
+  const wallMaskBuffer = await buildBinaryMaskPngBuffer({
+    binaryMask: refined.binary,
+    inputWidth: probeWidth,
+    inputHeight: probeHeight,
+    outputWidth: width,
+    outputHeight: height,
+  });
+
+  return {
+    width,
+    height,
+    wallMaskBuffer,
+    debug: {
+      strategy: WALL_MASK_STRATEGIES.SEMANTIC,
+      coverageRatio: refined.coverageRatio,
+      rawCoverageRatio: refined.rawCoverageRatio,
+      refinementStages: refined.refinementStages,
+    },
+  };
 }
 
 async function buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, roomType) {
@@ -3563,9 +3994,16 @@ export function getTaskSpecificMaskStrategy(presetKey = '') {
   return 'generic';
 }
 
-function validateMaskCoverage({ presetKey, coverageRatio }) {
-  if (isWallPreset(presetKey) && (coverageRatio < 0.08 || coverageRatio > 0.62)) {
+function validateMaskCoverage({ presetKey, coverageRatio, roomType }) {
+  if (isWallPreset(presetKey) && (coverageRatio < 0.12 || coverageRatio > 0.72)) {
     throw new Error(`Wall mask coverage out of range: ${coverageRatio}`);
+  }
+  if (isWallPreset(presetKey) && coverageRatio < 0.3) {
+    console.warn('Wall mask coverage is conservative; results may be too subtle', {
+      presetKey,
+      roomType,
+      coverageRatio,
+    });
   }
 
   if (isFloorPreset(presetKey) && (coverageRatio < 0.1 || coverageRatio > 0.58)) {
@@ -3573,44 +4011,80 @@ function validateMaskCoverage({ presetKey, coverageRatio }) {
   }
 }
 
-async function resolveSurfaceMaskAtSourceSize(sourceBuffer, presetKey, roomType) {
+export async function resolveSurfaceMaskAtSourceSize(sourceBuffer, presetKey, roomType) {
   if (isWallPreset(presetKey)) {
     try {
-      const wall = await buildAdaptiveWallPaintMaskAtSourceSize(sourceBuffer, presetKey, roomType);
-      const coverageRatio = await calculateMaskCoverageRatio(wall.adaptiveMaskBuffer);
-      validateMaskCoverage({ presetKey, coverageRatio });
+      const semanticWall = await segmentWallPlanesAtSourceSize(sourceBuffer, roomType, presetKey);
+      validateMaskCoverage({
+        presetKey,
+        coverageRatio: semanticWall.debug.coverageRatio,
+        roomType,
+      });
       console.log('vision_wall_mask_debug', {
         presetKey,
         roomType,
-        strategy: 'adaptive_wall',
-        wallMaskCoverage: coverageRatio,
+        strategy: WALL_MASK_STRATEGIES.SEMANTIC,
+        wallMaskCoverage: semanticWall.debug.coverageRatio,
       });
       return {
-        maskBuffer: wall.adaptiveMaskBuffer,
-        debug: { strategy: 'adaptive_wall', maskCoverageRatio: coverageRatio },
+        maskBuffer: semanticWall.wallMaskBuffer,
+        debug: semanticWall.debug,
       };
-    } catch (error) {
-      const fallbackWall = await buildFallbackWallPaintMaskAtSourceSize(
-        sourceBuffer,
+    } catch (semanticError) {
+      console.warn('semantic wall mask failed', {
         presetKey,
         roomType,
-      );
-      const fallbackCoverageRatio = await calculateMaskCoverageRatio(
-        fallbackWall.adaptiveMaskBuffer,
-      );
-      console.log('vision_wall_mask_debug', {
-        presetKey,
-        roomType,
-        strategy: 'fallback_wall',
-        wallMaskCoverage: fallbackCoverageRatio,
-        reason: error?.message || String(error),
+        message: semanticError?.message || String(semanticError),
       });
-      if (fallbackCoverageRatio < 0.05) {
-        throw new Error(`Fallback wall mask coverage out of range: ${fallbackCoverageRatio}`);
-      }
-      return {
-        maskBuffer: fallbackWall.adaptiveMaskBuffer,
-        debug: { strategy: 'fallback_wall', maskCoverageRatio: fallbackCoverageRatio },
+
+      try {
+        const adaptiveWall = await buildAdaptiveWallPaintMaskAtSourceSize(
+          sourceBuffer,
+          presetKey,
+          roomType,
+        );
+        const coverageRatio = await calculateMaskCoverageRatio(adaptiveWall.adaptiveMaskBuffer);
+        validateMaskCoverage({ presetKey, coverageRatio, roomType });
+        console.log('vision_wall_mask_debug', {
+          presetKey,
+          roomType,
+          strategy: WALL_MASK_STRATEGIES.ADAPTIVE,
+          wallMaskCoverage: coverageRatio,
+          reason: semanticError?.message || String(semanticError),
+        });
+        return {
+          maskBuffer: adaptiveWall.adaptiveMaskBuffer,
+          debug: {
+            strategy: WALL_MASK_STRATEGIES.ADAPTIVE,
+            maskCoverageRatio: coverageRatio,
+          },
+        };
+      } catch (adaptiveError) {
+        const fallbackWall = await buildFallbackWallPaintMaskAtSourceSize(
+          sourceBuffer,
+          presetKey,
+          roomType,
+        );
+        const fallbackCoverageRatio = await calculateMaskCoverageRatio(
+          fallbackWall.adaptiveMaskBuffer,
+        );
+        console.log('vision_wall_mask_debug', {
+          presetKey,
+          roomType,
+          strategy: WALL_MASK_STRATEGIES.FALLBACK,
+          wallMaskCoverage: fallbackCoverageRatio,
+          reason: adaptiveError?.message || String(adaptiveError),
+        });
+        if (fallbackCoverageRatio < 0.05) {
+          throw new Error(`Fallback wall mask coverage out of range: ${fallbackCoverageRatio}`);
+        }
+        return {
+          maskBuffer: fallbackWall.adaptiveMaskBuffer,
+          debug: {
+            strategy: WALL_MASK_STRATEGIES.FALLBACK,
+            maskCoverageRatio: fallbackCoverageRatio,
+          },
+        };
       };
     }
   }
@@ -3618,7 +4092,7 @@ async function resolveSurfaceMaskAtSourceSize(sourceBuffer, presetKey, roomType)
   if (isFloorPreset(presetKey)) {
     const floor = await buildAdaptiveFloorMaskAtSourceSize(sourceBuffer, presetKey, roomType);
     const coverageRatio = await calculateMaskCoverageRatio(floor.adaptiveMaskBuffer);
-    validateMaskCoverage({ presetKey, coverageRatio });
+    validateMaskCoverage({ presetKey, coverageRatio, roomType });
     return {
       maskBuffer: floor.adaptiveMaskBuffer,
       debug: { strategy: 'adaptive_floor', maskCoverageRatio: coverageRatio },
@@ -4563,6 +5037,8 @@ async function buildReviewedLocalSharpCandidates({
   sourceImageBase64,
 }) {
   const rendered = await renderVariantBuffer(sourceBuffer, preset.key, resolvedRoomType);
+  let surfaceMaskDebug =
+    isWallPreset(preset.key) || isFloorPreset(preset.key) ? rendered.debug || null : null;
   if (preset.key === 'floor_tile_stone' && rendered.debug?.floorMaskBuffer && asset?.propertyId) {
     const propertyId = asset.propertyId?.toString?.() || String(asset.propertyId);
     const [maskStorage, preblendStorage] = await Promise.all([
@@ -4611,9 +5087,20 @@ async function buildReviewedLocalSharpCandidates({
   let newFurnitureAdditionRatio = 0;
 
   if (isWallPreset(preset.key) || isFloorPreset(preset.key)) {
-    maskBuffer = (
-      await resolveSurfaceMaskAtSourceSize(sourceBuffer, preset.key, resolvedRoomType)
-    ).maskBuffer;
+    if (surfaceMaskDebug?.wallMaskBuffer || surfaceMaskDebug?.floorMaskBuffer) {
+      maskBuffer = surfaceMaskDebug.wallMaskBuffer || surfaceMaskDebug.floorMaskBuffer;
+    } else {
+      const resolvedMask = await resolveSurfaceMaskAtSourceSize(
+        sourceBuffer,
+        preset.key,
+        resolvedRoomType,
+      );
+      maskBuffer = resolvedMask.maskBuffer;
+      surfaceMaskDebug = {
+        ...(surfaceMaskDebug || {}),
+        ...(resolvedMask.debug || {}),
+      };
+    }
   }
 
   if (maskBuffer) {
@@ -4712,6 +5199,11 @@ async function buildReviewedLocalSharpCandidates({
       instructions: normalizedInstructions,
       normalizedPlan,
       providerSourceUrl: null,
+      maskStrategy: surfaceMaskDebug?.strategy || null,
+      maskCoverageRatio:
+        surfaceMaskDebug?.coverageRatio ?? surfaceMaskDebug?.maskCoverageRatio ?? null,
+      rawMaskCoverageRatio: surfaceMaskDebug?.rawMaskCoverageRatio ?? null,
+      refinementStages: surfaceMaskDebug?.refinementStages || [],
       review,
       overallScore,
       visualChangeRatio,
@@ -4832,7 +5324,9 @@ async function buildReviewedReplicateCandidates({
       presetKey: preset.key,
       providerKey,
       strategy: resolvedMask.debug?.strategy || null,
-      maskCoverageRatio: resolvedMask.debug?.maskCoverageRatio ?? null,
+      maskCoverageRatio:
+        resolvedMask.debug?.coverageRatio ?? resolvedMask.debug?.maskCoverageRatio ?? null,
+      rawMaskCoverageRatio: resolvedMask.debug?.rawCoverageRatio ?? null,
     });
   }
   const providerOutputs = await runReplicateInpainting({
@@ -5380,6 +5874,11 @@ async function buildReviewedReplicateCandidates({
       instructions: normalizedInstructions,
       normalizedPlan,
       providerSourceUrl: getProviderSourceUrl(output),
+      maskStrategy: resolvedMask.debug?.strategy || null,
+      maskCoverageRatio:
+        resolvedMask.debug?.coverageRatio ?? resolvedMask.debug?.maskCoverageRatio ?? null,
+      rawMaskCoverageRatio: resolvedMask.debug?.rawCoverageRatio ?? null,
+      refinementStages: resolvedMask.debug?.refinementStages || [],
       review,
       overallScore,
       visualChangeRatio,
@@ -5419,11 +5918,26 @@ async function buildReviewedOpenAiCandidates({
   sourceBuffer,
   sourceImageBase64,
 }) {
-  const maskBuffer = await buildTaskSpecificMaskBuffer(
-    sourceBuffer,
-    preset.key,
-    resolvedRoomType,
-  );
+  const resolvedMask =
+    isWallPreset(preset.key) || isFloorPreset(preset.key)
+      ? await resolveSurfaceMaskAtSourceSize(sourceBuffer, preset.key, resolvedRoomType).catch(
+          async (error) => {
+            console.warn('Surface mask fallback triggered', {
+              presetKey: preset.key,
+              roomType: resolvedRoomType,
+              message: error?.message || String(error),
+            });
+            return {
+              maskBuffer: await buildInpaintingMaskBuffer(sourceBuffer, preset.key, resolvedRoomType),
+              debug: { strategy: 'geometric_fallback', maskCoverageRatio: null },
+            };
+          },
+        )
+      : {
+          maskBuffer: await buildTaskSpecificMaskBuffer(sourceBuffer, preset.key, resolvedRoomType),
+          debug: { strategy: 'geometric_fallback', maskCoverageRatio: null },
+        };
+  const maskBuffer = resolvedMask.maskBuffer;
   let removeFurnitureEvaluationMaskBuffer = null;
   let sourceFurnitureEdgeDensity = null;
   let paintEvaluationMaskBuffer = null;
@@ -5939,6 +6453,11 @@ async function buildReviewedOpenAiCandidates({
       instructions: normalizedInstructions,
       normalizedPlan,
       providerSourceUrl: output.providerSourceUrl || null,
+      maskStrategy: resolvedMask.debug?.strategy || null,
+      maskCoverageRatio:
+        resolvedMask.debug?.coverageRatio ?? resolvedMask.debug?.maskCoverageRatio ?? null,
+      rawMaskCoverageRatio: resolvedMask.debug?.rawCoverageRatio ?? null,
+      refinementStages: resolvedMask.debug?.refinementStages || [],
       review,
       overallScore,
       visualChangeRatio,
@@ -6033,6 +6552,12 @@ async function persistOrchestratedVisionCandidates({
         instructions: normalizedInstructions,
         normalizedPlan,
         providerSourceUrl: candidate.providerSourceUrl || null,
+        debug: {
+          maskStrategy: candidate.maskStrategy || null,
+          maskCoverageRatio: candidate.maskCoverageRatio ?? null,
+          rawMaskCoverageRatio: candidate.rawMaskCoverageRatio ?? null,
+          refinementStages: candidate.refinementStages || [],
+        },
         fallbackApplied: Boolean(orchestrationResult?.fallbackApplied),
         orchestrationAttempts: orchestrationResult?.orchestration?.attempts || [],
         orchestrationElapsedMs: Number(orchestrationResult?.elapsedTimeMs || 0),

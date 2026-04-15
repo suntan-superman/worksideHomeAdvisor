@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import sharp from 'sharp';
 
 import {
   bridgeVerticalMaskGaps,
@@ -8,7 +9,9 @@ import {
   calculateVisionReviewOverallScore,
   getTaskSpecificMaskStrategy,
   normalizeRoomType,
+  resolveSurfaceMaskAtSourceSize,
   resolveFreeformPresetKey,
+  segmentWallPlanesAtSourceSize,
   selectViableWallMaskStage,
 } from './media-ai.service.js';
 import {
@@ -32,6 +35,105 @@ test('task specific mask strategy uses adaptive masks for wall and floor presets
   assert.equal(getTaskSpecificMaskStrategy('paint_bright_white'), 'adaptive_wall');
   assert.equal(getTaskSpecificMaskStrategy('floor_tile_stone'), 'adaptive_floor');
   assert.equal(getTaskSpecificMaskStrategy('remove_furniture'), 'generic');
+});
+
+async function createSyntheticLivingRoomBuffer() {
+  const width = 96;
+  const height = 72;
+  const raw = Buffer.alloc(width * height * 3);
+
+  function setPixel(x, y, red, green, blue) {
+    const offset = (y * width + x) * 3;
+    raw[offset] = red;
+    raw[offset + 1] = green;
+    raw[offset + 2] = blue;
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let red = 214;
+      let green = 212;
+      let blue = 206;
+
+      if (y >= 52) {
+        red = 60;
+        green = 38;
+        blue = 28;
+      }
+
+      if (x <= 9 && y < 58) {
+        red = 186;
+        green = 184;
+        blue = 178;
+      }
+
+      const inLeftWindow = x >= 18 && x <= 36 && y >= 12 && y <= 45;
+      const inCenterWindow = x >= 42 && x <= 58 && y >= 12 && y <= 45;
+      const inRightWindow = x >= 64 && x <= 84 && y >= 12 && y <= 45;
+      if (inLeftWindow || inCenterWindow || inRightWindow) {
+        const stripe = y % 4 === 0 || y % 4 === 1;
+        red = stripe ? 242 : 208;
+        green = stripe ? 244 : 214;
+        blue = stripe ? 245 : 220;
+      }
+
+      if (y <= 6) {
+        red = 188;
+        green = 186;
+        blue = 180;
+      }
+
+      setPixel(x, y, red, green, blue);
+    }
+  }
+
+  return sharp(raw, {
+    raw: { width, height, channels: 3 },
+  })
+    .png()
+    .toBuffer();
+}
+
+test('semantic wall segmentation returns non-zero wall coverage for a living room', async () => {
+  const sourceBuffer = await createSyntheticLivingRoomBuffer();
+  const result = await segmentWallPlanesAtSourceSize(
+    sourceBuffer,
+    'living_room',
+    'paint_warm_neutral',
+  );
+
+  assert.equal(result.debug.strategy, 'semantic_wall');
+  assert.ok(result.debug.coverageRatio > 0.15);
+  assert.ok(result.debug.rawCoverageRatio >= result.debug.coverageRatio);
+  assert.ok(result.debug.refinementStages.length >= 5);
+});
+
+test('semantic wall segmentation excludes bright window regions', async () => {
+  const sourceBuffer = await createSyntheticLivingRoomBuffer();
+  const result = await segmentWallPlanesAtSourceSize(
+    sourceBuffer,
+    'living_room',
+    'paint_warm_neutral',
+  );
+  const maskRaw = await sharp(result.wallMaskBuffer).removeAlpha().greyscale().raw().toBuffer();
+  const width = result.width;
+
+  const leftWallMaskValue = maskRaw[28 * width + 12];
+  const centerWindowMaskValue = maskRaw[28 * width + 50];
+
+  assert.ok(leftWallMaskValue > 150);
+  assert.ok(centerWindowMaskValue < 100);
+});
+
+test('wall presets prefer semantic wall segmentation before adaptive fallback', async () => {
+  const sourceBuffer = await createSyntheticLivingRoomBuffer();
+  const result = await resolveSurfaceMaskAtSourceSize(
+    sourceBuffer,
+    'paint_warm_neutral',
+    'living_room',
+  );
+
+  assert.equal(result.debug?.strategy, 'semantic_wall');
 });
 
 test('bridgeVerticalMaskGaps fills short gaps in stable wall columns', () => {
