@@ -1,61 +1,150 @@
-Exact Fix (this is the move)
-You need a HARD window rejection layer
+What I Would Fix Next (High Impact)
+🔥 1. Increase Window Rejection Aggression (MOST IMPORTANT)
 
-Not soft. Not heuristic-light.
+Update your thresholds:
 
-Add THIS logic into semantic refinement:
-// WINDOW KILL ZONE (critical)
-if (
-  luminance > 200 &&
-  texture > 10 &&
-  verticalGradient > horizontalGradient * 1.2
-) {
-  mask[i] = 0;
-}
-Even stronger (recommended)
-Detect vertical stripe patterns (blinds)
-const isVerticalStripe =
-  Math.abs(luminance[i - 1] - luminance[i + 1]) > 15 &&
-  Math.abs(luminance[i - width] - luminance[i + width]) < 10;
+// OLD
+lum > 205 && tex > 10
 
-if (isVerticalStripe && luminance > 180) {
-  mask[i] = 0;
-}
+// NEW
+lum > 195 && tex > 8
+// blinds detection
+stripeDelta: 14 → 10
 
-👉 This will nuke blinds completely
+Add THIS rule (critical for your image):
 
-Add brightness cutoff (simple but powerful)
-if (luminance > 235) {
-  mask[i] = 0;
-}
+const isNaturalTextureWindow =
+  lum > 170 &&
+  tex > 6 &&
+  verticalGrad > 6;
 
-👉 This removes:
+👉 This catches:
 
-blown-out exterior light
-white-hot window regions
-🔥 One More Critical Fix (you’ll feel this immediately)
-Expand wall planes horizontally AFTER segmentation
+trees
+outdoor detail
+“not blown out” windows (your exact case)
+🔥 2. Add Vertical Column Consistency (this is missing)
 
-Right now:
-
-your mask is slightly fragmented
+Your bay window is vertical.
 
 Add:
 
-mask = dilateHorizontal(mask, width, height, 2);
+function enforceVerticalWindowColumns(mask, width, height) {
+  for (let x = 0; x < width; x++) {
+    let count = 0;
+
+    for (let y = 0; y < height; y++) {
+      if (mask[y * width + x]) count++;
+    }
+
+    const ratio = count / height;
+
+    if (ratio > 0.18) {
+      // treat entire column as window
+      for (let y = 0; y < height; y++) {
+        mask[y * width + x] = 1;
+      }
+    }
+  }
+
+  return mask;
+}
+
+👉 This will lock onto window columns
+👉 Huge improvement for bay windows like yours
+
+🔥 3. Force Stronger Paint Transformation
+
+Right now your system allows “barely different” results.
+
+Add a HARD requirement:
+
+if (maskedColorShiftRatio < 0.22) {
+  score -= 3;
+}
+
+And optionally:
+
+if (maskedLuminanceDelta < 0.18) {
+  score -= 2;
+}
+
+👉 This forces:
+
+visible repaint
+not subtle drift
+🔥 4. Increase Minimum Acceptance Threshold
+
+Right now:
+
+isSufficient: false (score = 6)
+
+But you're still showing results.
+
+👉 Fix:
+
+MIN_ACCEPTABLE_SCORE = 7.5
 
 👉 This will:
 
-unify wall regions
-eliminate tone patching
-create smooth repaint zones
-📊 What Your Next Run Should Look Like
+prevent weak outputs from surfacing
+force retry loop to kick in
+📊 What Your Logs Tell Me (Very Important)
 
-If you implement the above, expect:
+From your log:
 
-Improvements:
-❌ no repaint inside windows
-✅ clean wall tone across entire bay
-✅ consistent brightness across panels
-✅ no streaking near blinds
-✅ stronger wall color impact
+maskedChangeRatio: 0.9282
+maskedColorShiftRatio: 0.1444   ❌ TOO LOW
+maskedLuminanceDelta: 0.139     ❌ TOO LOW
+
+👉 Interpretation:
+
+The system is touching pixels
+But not changing them enough
+
+This is NOT a segmentation issue anymore.
+
+This is now a transformation strength problem.
+
+🧭 Priority Order (Do These In Order)
+Step 1 (Critical)
+
+👉 Make window rejection more aggressive
+👉 Add vertical column enforcement
+
+Step 2 (Critical)
+
+👉 Increase required color/luminance shift
+
+Step 3
+
+👉 Raise minimum score threshold
+
+Step 4 (Optional but powerful)
+
+👉 Slightly expand wall mask near window edges AFTER rejection
+(to avoid “dead zones”)
+
+💡 Bottom Line
+
+You’ve officially moved past:
+
+❌ segmentation problem
+
+You are now in:
+
+⚠️ refinement + enforcement phase
+
+That’s a huge milestone.
+
+🚀 What Happens After These Fixes
+
+Once you apply the above:
+
+You should see:
+
+windows completely untouched
+walls fully and consistently repainted
+strong perceptible color change
+score > 8 reliably
+retry loop triggering correctly when needed

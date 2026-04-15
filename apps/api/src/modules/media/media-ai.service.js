@@ -725,42 +725,42 @@ function buildLocalWallPaintToneConfig(presetKey) {
       targetHueMix: 1,
       targetSaturationMix: 1,
       lightnessMix: 1,
-      additionalLift: 0.3,
-      blendMix: 0.998,
+      additionalLift: 0.34,
+      blendMix: 0.999,
       alphaExponent: 0.64,
-      minBlend: 0.92,
-      shadingRange: 0.1,
+      minBlend: 0.95,
+      shadingRange: 0.095,
     };
   }
 
   if (presetKey === 'paint_soft_greige') {
     return {
       targetHue: 24 / 360,
-      targetSaturation: 0.16,
-      targetLightness: 0.62,
+      targetSaturation: 0.18,
+      targetLightness: 0.7,
       targetHueMix: 1,
       targetSaturationMix: 1,
       lightnessMix: 1,
-      additionalLift: 0.03,
+      additionalLift: 0.065,
       blendMix: 0.999,
       alphaExponent: 0.52,
-      minBlend: 0.94,
-      shadingRange: 0.14,
+      minBlend: 0.96,
+      shadingRange: 0.12,
     };
   }
 
   return {
       targetHue: 28 / 360,
-    targetSaturation: 0.18,
-    targetLightness: 0.66,
+    targetSaturation: 0.2,
+    targetLightness: 0.75,
     targetHueMix: 1,
     targetSaturationMix: 1,
     lightnessMix: 1,
-    additionalLift: 0.03,
-    blendMix: 0.998,
+    additionalLift: 0.075,
+    blendMix: 0.999,
     alphaExponent: 0.56,
-    minBlend: 0.93,
-    shadingRange: 0.14,
+    minBlend: 0.96,
+    shadingRange: 0.12,
   };
 }
 
@@ -2760,7 +2760,7 @@ function buildWindowProbeFeatures(sourceProbe, width, height) {
       texture[index] = (horizontalGrad[index] + verticalGrad[index]) / 2;
 
       const verticalStripeSignal =
-        Math.abs(left - right) > 14 && Math.abs(up - down) < 10;
+        Math.abs(left - right) > 10 && Math.abs(up - down) < 10;
       stripeScore[index] = verticalStripeSignal ? 1 : 0;
     }
   }
@@ -2793,11 +2793,18 @@ function buildRawWindowCandidateMask({
       const stripe = Number(features.stripeScore[index] || 0);
 
       const isBlownOut = lum > 235;
-      const isBrightStructured = lum > 205 && tex > 10;
+      const isBrightStructured = lum > 195 && tex > 8;
       const isBlindRegion = lum > 180 && stripe > 0 && hGrad > vGrad * 1.15;
-      const isExteriorLightPatch = lum > 215 && tex > 8;
+      const isExteriorLightPatch = lum > 205 && tex > 7;
+      const isNaturalTextureWindow = lum > 170 && tex > 6 && vGrad > 6;
 
-      if (isBlownOut || isBrightStructured || isBlindRegion || isExteriorLightPatch) {
+      if (
+        isBlownOut ||
+        isBrightStructured ||
+        isBlindRegion ||
+        isExteriorLightPatch ||
+        isNaturalTextureWindow
+      ) {
         binary[index] = 1;
       }
     }
@@ -2806,7 +2813,41 @@ function buildRawWindowCandidateMask({
   return binary;
 }
 
-function consolidateWindowRegions(binaryMask, width, height) {
+export function enforceVerticalWindowColumns(
+  binaryMask,
+  width,
+  height,
+  {
+    startY = 0,
+    endY = height - 1,
+    minColumnCoverageRatio = 0.18,
+  } = {},
+) {
+  const next = new Uint8Array(binaryMask);
+  const safeStartY = Math.max(0, Math.min(height - 1, Math.round(startY)));
+  const safeEndY = Math.max(safeStartY, Math.min(height - 1, Math.round(endY)));
+  const bandHeight = Math.max(1, safeEndY - safeStartY + 1);
+
+  for (let x = 0; x < width; x += 1) {
+    let count = 0;
+
+    for (let y = safeStartY; y <= safeEndY; y += 1) {
+      if (binaryMask[y * width + x]) {
+        count += 1;
+      }
+    }
+
+    if (count / bandHeight >= minColumnCoverageRatio) {
+      for (let y = safeStartY; y <= safeEndY; y += 1) {
+        next[y * width + x] = 1;
+      }
+    }
+  }
+
+  return next;
+}
+
+function consolidateWindowRegions(binaryMask, width, height, { startY, endY } = {}) {
   let current = new Uint8Array(binaryMask);
   current = closeBinaryMask(current, width, height, 1);
   current = fillBinaryMaskHoles(current, width, height);
@@ -2815,6 +2856,13 @@ function consolidateWindowRegions(binaryMask, width, height) {
     minBoxWidth: Math.max(6, Math.round(width * 0.05)),
     minBoxHeight: Math.max(10, Math.round(height * 0.16)),
   });
+  current = enforceVerticalWindowColumns(current, width, height, {
+    startY,
+    endY,
+    minColumnCoverageRatio: 0.18,
+  });
+  current = closeBinaryMask(current, width, height, 1);
+  current = fillBinaryMaskHoles(current, width, height);
   current = dilateBinaryMask(current, width, height, 1);
 
   return current;
@@ -2835,7 +2883,10 @@ export function buildWindowRejectionMask({
     startY,
     endY,
   });
-  let finalMask = consolidateWindowRegions(rawMask, width, height);
+  let finalMask = consolidateWindowRegions(rawMask, width, height, {
+    startY,
+    endY,
+  });
   let coverageRatio = calculateBinaryMaskCoverageRatio(finalMask);
 
   if (coverageRatio > 0.32) {

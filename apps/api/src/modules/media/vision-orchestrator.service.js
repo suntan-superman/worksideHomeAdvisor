@@ -1,13 +1,22 @@
 import {
   buildProviderChain,
   calculatePerceptibilityScore,
+  evaluatePaintStrength,
   getPreferredFinishFallbackCandidates,
   getVisionExecutionTimeBudgetMs,
   isHighConfidenceEarlyExitCandidate,
   isCandidateSufficient,
+  PAINT_STRENGTH_MIN_ACCEPTABLE_SCORE,
+  PAINT_STRENGTH_MIN_COLOR_SHIFT,
+  PAINT_STRENGTH_MIN_LUMINANCE_DELTA,
+  PAINT_STRENGTH_MIN_PERCEPTIBILITY,
   rankCandidates,
   resolveVisionUserPlan,
 } from './vision-orchestrator.helpers.js';
+
+const MAX_PAINT_RETRIES = 3;
+const PAINT_STRENGTH_RETRY_APPENDIX =
+  'Apply a clearly visible, uniform coat of paint to all wall surfaces. The color must be noticeably different from the original. Do not preserve original wall tones or accept subtle drift. Maintain clean edges around windows, trim, ceilings, and built-ins.';
 
 export async function orchestrateVisionJob({
   asset,
@@ -38,14 +47,13 @@ export async function orchestrateVisionJob({
   const exhaustProviderChain =
     normalizedPresetKey === 'remove_furniture' || isSurfaceFinishPreset;
   const requiresLocalTileStoneAttempt = normalizedPresetKey === 'floor_tile_stone';
-  const allowBestEffortFinishCandidate =
-    normalizedPresetKey.startsWith('floor_') || normalizedPresetKey.startsWith('paint_');
+  const allowBestEffortFinishCandidate = normalizedPresetKey.startsWith('floor_');
   const startedAt = Number(nowFn());
   const maxExecutionTimeMs = getVisionExecutionTimeBudgetMs(preset?.key);
   const attempts = [];
   const allCandidates = [];
   const allSufficientCandidates = [];
-  const maxAdaptiveIterations = isPaintPreset ? 2 : 1;
+  const maxAdaptiveIterations = isPaintPreset ? MAX_PAINT_RETRIES + 1 : 1;
   let activePreset = { ...preset };
   const selectBestCandidates = (candidates = allCandidates) => {
     const sufficientCandidates = rankCandidates(
@@ -116,12 +124,15 @@ export async function orchestrateVisionJob({
     }
 
     if (isPaintPreset) {
+      const paintStrength = evaluatePaintStrength(candidate);
       return (
         Number(candidate.maskedChangeRatio || 0) >= 0.12 &&
-        Number(candidate.maskedColorShiftRatio || 0) >= 0.06 &&
-        Math.abs(Number(candidate.maskedLuminanceDelta || 0)) >= 0.02 &&
+        Number(candidate.maskedColorShiftRatio || 0) >= PAINT_STRENGTH_MIN_COLOR_SHIFT &&
+        Math.abs(Number(candidate.maskedLuminanceDelta || 0)) >=
+          PAINT_STRENGTH_MIN_LUMINANCE_DELTA &&
         Number(candidate.newFurnitureAdditionRatio || 0) <= 0.01 &&
-        calculatePerceptibilityScore(candidate) >= 0.08
+        paintStrength.perceptibilityScore >= PAINT_STRENGTH_MIN_PERCEPTIBILITY &&
+        paintStrength.passes
       );
     }
 
@@ -142,6 +153,7 @@ export async function orchestrateVisionJob({
     }
 
     if (isPaintPreset) {
+      const paintStrength = evaluatePaintStrength(best);
       if (
         Number(best.newFurnitureAdditionRatio || 0) > 0.01 ||
         Number(best.maskedEdgeDensityDelta || 0) > 0.01 ||
@@ -153,11 +165,20 @@ export async function orchestrateVisionJob({
       if (Number(best.maskedChangeRatio || 0) < 0.08) {
         return { shouldRetry: true, type: 'too_subtle', action: 'increase_strength', best };
       }
-      if (Number(best.maskedColorShiftRatio || 0) < 0.04) {
+      if (Number(best.maskedColorShiftRatio || 0) < PAINT_STRENGTH_MIN_COLOR_SHIFT) {
         return { shouldRetry: true, type: 'color_not_distinct', action: 'increase_color_shift', best };
       }
-      if (Math.abs(Number(best.maskedLuminanceDelta || 0)) < 0.015) {
+      if (
+        Math.abs(Number(best.maskedLuminanceDelta || 0)) <
+        PAINT_STRENGTH_MIN_LUMINANCE_DELTA
+      ) {
         return { shouldRetry: true, type: 'not_bright_enough', action: 'increase_brightness', best };
+      }
+      if (paintStrength.perceptibilityScore < PAINT_STRENGTH_MIN_PERCEPTIBILITY) {
+        return { shouldRetry: true, type: 'low_perceptibility', action: 'increase_strength', best };
+      }
+      if (paintStrength.finalScore < PAINT_STRENGTH_MIN_ACCEPTABLE_SCORE) {
+        return { shouldRetry: true, type: 'score_too_low', action: 'increase_strength', best };
       }
     }
 
@@ -180,21 +201,33 @@ export async function orchestrateVisionJob({
 
     const updatedPreset = {
       ...currentPreset,
+      intensity:
+        adjustment.action === 'increase_color_shift' ||
+        adjustment.action === 'increase_brightness'
+          ? 'very strong'
+          : 'strong',
       strength: Number(
-        Math.min(0.98, Number(currentPreset.strength || 0.7) + 0.05).toFixed(2),
+        Math.min(0.99, Number(currentPreset.strength || 0.7) + 0.08).toFixed(2),
       ),
       guidanceScale: Number(
-        Math.min(10, Number(currentPreset.guidanceScale || 7.5) + 0.5).toFixed(2),
+        Math.min(10, Number(currentPreset.guidanceScale || 7.5) + 0.75).toFixed(2),
       ),
-      numInferenceSteps: Math.min(70, Number(currentPreset.numInferenceSteps || 35) + 6),
+      numInferenceSteps: Math.min(76, Number(currentPreset.numInferenceSteps || 35) + 8),
     };
 
+    if (!String(updatedPreset.basePrompt || '').includes(PAINT_STRENGTH_RETRY_APPENDIX)) {
+      updatedPreset.basePrompt =
+        `${currentPreset.basePrompt} ${PAINT_STRENGTH_RETRY_APPENDIX}`.trim();
+    }
+
     if (adjustment.action === 'increase_brightness') {
-      updatedPreset.basePrompt = `${currentPreset.basePrompt} Make the change clearly brighter and more visible.`;
+      updatedPreset.basePrompt =
+        `${updatedPreset.basePrompt} Make the repaint clearly brighter and more visible without touching windows or trim.`.trim();
     }
 
     if (adjustment.action === 'increase_color_shift') {
-      updatedPreset.basePrompt = `${currentPreset.basePrompt} The wall color difference must be immediately noticeable at first glance.`;
+      updatedPreset.basePrompt =
+        `${updatedPreset.basePrompt} The wall color difference must be immediately noticeable at first glance.`.trim();
     }
 
     if (adjustment.action === 'tighten_negative_prompt') {
@@ -213,9 +246,11 @@ export async function orchestrateVisionJob({
             maskedLuminanceDelta: Number(adjustment.best.maskedLuminanceDelta || 0),
             newFurnitureAdditionRatio: Number(adjustment.best.newFurnitureAdditionRatio || 0),
             perceptibilityScore: calculatePerceptibilityScore(adjustment.best),
+            paintStrength: evaluatePaintStrength(adjustment.best),
           }
         : null,
       nextSettings: {
+        intensity: updatedPreset.intensity,
         strength: updatedPreset.strength,
         guidanceScale: updatedPreset.guidanceScale,
         numInferenceSteps: updatedPreset.numInferenceSteps,
@@ -316,18 +351,26 @@ export async function orchestrateVisionJob({
         }
 
         const normalizedCandidates = rankCandidates(
-          filteredCandidates.map((candidate, index) => ({
-            ...candidate,
-            providerKey,
-            providerAttemptIndex: attempts.length,
-            providerCandidateIndex: index,
-            isSufficient: isCandidateSufficient(candidate, activePreset.key),
-          })),
+          filteredCandidates.map((candidate, index) => {
+            const paintStrength = isPaintPreset ? evaluatePaintStrength(candidate) : null;
+
+            return {
+              ...candidate,
+              providerKey,
+              providerAttemptIndex: attempts.length,
+              providerCandidateIndex: index,
+              paintStrength,
+              isSufficient: isCandidateSufficient(candidate, activePreset.key),
+            };
+          }),
           activePreset.key,
         );
 
         if (isSurfaceFinishPreset && normalizedCandidates.length) {
           normalizedCandidates.forEach((candidate) => {
+            const paintStrength = isPaintPreset
+              ? candidate.paintStrength || evaluatePaintStrength(candidate)
+              : null;
             console.log('Candidate evaluation', {
               presetKey: activePreset.key,
               providerKey,
@@ -344,8 +387,25 @@ export async function orchestrateVisionJob({
                 candidate.furnitureCoverageIncreaseRatio || 0,
               ),
               perceptibilityScore: calculatePerceptibilityScore(candidate),
+              paintStrengthFinalScore: paintStrength?.finalScore ?? null,
+              paintStrengthPenaltyCount: paintStrength?.penalties ?? null,
               isSufficient: Boolean(candidate.isSufficient),
             });
+
+            if (paintStrength) {
+              console.log('Paint Strength Check', {
+                presetKey: activePreset.key,
+                providerKey,
+                iteration,
+                maskedColorShiftRatio: paintStrength.maskedColorShiftRatio,
+                maskedLuminanceDelta: paintStrength.maskedLuminanceDelta,
+                perceptibilityScore: paintStrength.perceptibilityScore,
+                penalties: paintStrength.penalties,
+                baselineScore: paintStrength.baselineScore,
+                finalScore: paintStrength.finalScore,
+                passes: paintStrength.passes,
+              });
+            }
           });
         }
 
