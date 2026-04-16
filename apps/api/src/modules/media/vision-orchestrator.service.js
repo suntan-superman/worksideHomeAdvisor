@@ -243,6 +243,23 @@ export async function orchestrateVisionJob({
       const maskedChangeRatio = Number(candidate.maskedChangeRatio || 0);
       const maskedColorShiftRatio = Number(candidate.maskedColorShiftRatio || 0);
       const maskedLuminanceDelta = Math.abs(Number(candidate.maskedLuminanceDelta || 0));
+
+      if (normalizedPresetKey === 'paint_dark_charcoal_test') {
+        return (
+          paintScore.shouldUse &&
+          maskedChangeRatio >= 0.12 &&
+          (maskedColorShiftRatio >= 0.08 ||
+            maskedLuminanceDelta >= 0.06 ||
+            perceptibilityScore >= 0.35) &&
+          (!Number.isFinite(topHalfChangeRatio) || topHalfChangeRatio <= 0.16) &&
+          (!Number.isFinite(outsideMaskChangeRatio) ||
+            outsideMaskChangeRatio <= Math.max(0.42, outsideMaskLimit)) &&
+          newFurnitureAdditionRatio <= 0.01 &&
+          furnitureCoverageIncreaseRatio <= 0.01 &&
+          maskedEdgeDensityDelta <= 0.02
+        );
+      }
+
       return (
         paintScore.shouldUse &&
         maskedChangeRatio >= 0.08 &&
@@ -594,6 +611,7 @@ export async function orchestrateVisionJob({
             const paintStrength = isPaintPreset
               ? candidate.paintStrength || evaluatePaintStrength(candidate, activePreset.key)
               : null;
+            const candidateQuality = classifyCandidateQuality(candidate);
             console.log('Candidate evaluation', {
               presetKey: activePreset.key,
               providerKey,
@@ -601,6 +619,7 @@ export async function orchestrateVisionJob({
               overallScore: Number(candidate.overallScore || 0),
               maskedChangeRatio: Number(candidate.maskedChangeRatio || 0),
               focusRegionChangeRatio: Number(candidate.focusRegionChangeRatio || 0),
+              topHalfChangeRatio: Number(candidate.topHalfChangeRatio || 0),
               outsideMaskChangeRatio: Number(candidate.outsideMaskChangeRatio || 0),
               maskedColorShiftRatio: Number(candidate.maskedColorShiftRatio || 0),
               maskedLuminanceDelta: Number(candidate.maskedLuminanceDelta || 0),
@@ -613,6 +632,7 @@ export async function orchestrateVisionJob({
               paintStrengthFinalScore: paintStrength?.finalScore ?? null,
               paintStrengthPenaltyCount: paintStrength?.penalties ?? null,
               isSufficient: Boolean(candidate.isSufficient),
+              candidateQuality,
             });
 
             if (paintStrength) {

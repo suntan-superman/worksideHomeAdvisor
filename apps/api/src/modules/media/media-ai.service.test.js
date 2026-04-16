@@ -1028,6 +1028,42 @@ test('dark charcoal test preset keeps the first safe visible candidate without s
   assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
 });
 
+test('dark charcoal test preset surfaces a strong but spillier diagnostic candidate as best effort', async () => {
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('paint_dark_charcoal_test'),
+    roomType: 'living_room',
+    requestedMode: 'freeform',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async () => [],
+      runOpenAiEdit: async () => [
+        {
+          providerKey: 'openai_edit',
+          overallScore: 0,
+          maskedChangeRatio: 0.7805,
+          focusRegionChangeRatio: 0.4905,
+          outsideMaskChangeRatio: 0.3569,
+          maskedColorShiftRatio: 0.3405,
+          maskedLuminanceDelta: -0.2841,
+          maskedEdgeDensityDelta: -0.0014,
+          newFurnitureAdditionRatio: 0,
+          furnitureCoverageIncreaseRatio: 0,
+          perceptibilityScore: 0.5492,
+        },
+      ],
+      runLocalSharp: async () => [],
+    },
+  });
+
+  assert.equal(result.providerUsed, 'openai_edit');
+  assert.equal(result.bestVariant?.providerKey, 'openai_edit');
+  assert.equal(result.stoppedEarlyReason, 'best_effort_preview_candidate');
+  assert.equal(result.deliveryMode, 'best_effort_preview');
+});
+
 test('paint presets return best available advisory candidate when the time budget is reached', async () => {
   let now = 0;
   const callOrder = [];
