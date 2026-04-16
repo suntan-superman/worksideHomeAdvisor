@@ -846,7 +846,9 @@ test('tile or stone floors keep the best safe replicate candidate when strict th
 
   assert.equal(result.providerUsed, 'replicate_advanced');
   assert.equal(result.bestVariant?.providerKey, 'replicate_advanced');
-  assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
+  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.quality, 'poor');
 });
 
 test('paint presets reject a subtle replicate wall repaint that misses strength enforcement', async () => {
@@ -879,10 +881,11 @@ test('paint presets reject a subtle replicate wall repaint that misses strength 
     },
   });
 
-  assert.equal(result.providerUsed, null);
-  assert.equal(result.bestVariant?.providerKey || null, null);
-  assert.equal(result.stoppedEarlyReason, 'no_candidate_generated');
-  assert.equal(result.deliveryMode, 'none');
+  assert.equal(result.providerUsed, 'replicate_basic');
+  assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
+  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.quality, 'poor');
 });
 
 test('paint presets accept a visibly changed warm wall candidate when the usable floor is met', async () => {
@@ -916,8 +919,9 @@ test('paint presets accept a visibly changed warm wall candidate when the usable
 
   assert.equal(result.providerUsed, 'replicate_basic');
   assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
-  assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
-  assert.equal(result.deliveryMode, 'high_confidence');
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
+  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.quality, 'high');
 });
 
 test('paint presets accept window-heavy warm wall candidates with high outside-mask change', async () => {
@@ -955,8 +959,9 @@ test('paint presets accept window-heavy warm wall candidates with high outside-m
 
   assert.equal(result.providerUsed, 'openai_edit');
   assert.equal(result.bestVariant?.providerKey, 'openai_edit');
-  assert.equal(result.stoppedEarlyReason, 'acceptable_candidate');
-  assert.equal(result.deliveryMode, 'acceptable');
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
+  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.quality, 'good');
 });
 
 test('paint presets keep a strong local fallback preview when strict review fields are missing', async () => {
@@ -990,8 +995,9 @@ test('paint presets keep a strong local fallback preview when strict review fiel
 
   assert.equal(result.providerUsed, 'local_sharp');
   assert.equal(result.bestVariant?.providerKey, 'local_sharp');
-  assert.equal(result.stoppedEarlyReason, 'best_effort_preview_candidate');
-  assert.equal(result.deliveryMode, 'best_effort_preview');
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
+  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.quality, 'high');
 });
 
 test('dark charcoal test preset keeps the first safe visible candidate without strict paint-strength gating', async () => {
@@ -1025,7 +1031,9 @@ test('dark charcoal test preset keeps the first safe visible candidate without s
 
   assert.equal(result.providerUsed, 'replicate_basic');
   assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
-  assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
+  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.quality, 'high');
 });
 
 test('dark charcoal test preset surfaces a strong but spillier diagnostic candidate as best effort', async () => {
@@ -1061,8 +1069,9 @@ test('dark charcoal test preset surfaces a strong but spillier diagnostic candid
 
   assert.equal(result.providerUsed, 'openai_edit');
   assert.equal(result.bestVariant?.providerKey, 'openai_edit');
-  assert.equal(result.stoppedEarlyReason, 'best_effort_preview_candidate');
-  assert.equal(result.deliveryMode, 'best_effort_preview');
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
+  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.quality, 'concept');
 });
 
 test('paint presets return best available advisory candidate when the time budget is reached', async () => {
@@ -1112,7 +1121,8 @@ test('paint presets return best available advisory candidate when the time budge
   assert.equal(result.providerUsed, 'replicate_basic');
   assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
   assert.equal(result.stoppedEarlyReason, 'time_budget_best_available');
-  assert.equal(result.deliveryMode, 'best_effort_preview');
+  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.quality, 'concept');
   assert.equal(result.timeBudgetReached, true);
 });
 
@@ -1149,8 +1159,9 @@ test('paint presets return a best-effort preview instead of advisor-only when a 
 
   assert.equal(result.providerUsed, 'openai_edit');
   assert.equal(result.bestVariant?.providerKey, 'openai_edit');
-  assert.equal(result.stoppedEarlyReason, 'best_effort_preview_candidate');
-  assert.equal(result.deliveryMode, 'best_effort_preview');
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
+  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.quality, 'poor');
 });
 
 test('paint ranking prefers clearer visible repaint over safer but barely changed result', () => {
@@ -1223,7 +1234,9 @@ test('paint presets fall through to openai_edit when replicate returns nothing u
   assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit']);
   assert.equal(result.providerUsed, 'openai_edit');
   assert.equal(result.bestVariant?.providerKey, 'openai_edit');
-  assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
+  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.quality, 'high');
 });
 
 test('paint presets fall through to local_sharp when ai providers return nothing usable', async () => {
@@ -1268,7 +1281,9 @@ test('paint presets fall through to local_sharp when ai providers return nothing
   assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp']);
   assert.equal(result.providerUsed, 'local_sharp');
   assert.equal(result.bestVariant?.providerKey, 'local_sharp');
-  assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
+  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.quality, 'high');
 });
 
 test('paint presets retry with stronger settings when first pass is too subtle', async () => {
@@ -1350,7 +1365,9 @@ test('floor presets surface the best-effort finish outcome when tile providers r
 
   assert.equal(result.providerUsed, null);
   assert.equal(result.bestVariant?.providerKey || null, null);
-  assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
+  assert.equal(result.stoppedEarlyReason, 'no_candidates_available');
+  assert.equal(result.deliveryMode, 'none');
+  assert.equal(result.quality, 'poor');
 });
 
 test('floor presets keep a subtle candidate instead of dropping everything as a no-op', async () => {
@@ -1382,7 +1399,9 @@ test('floor presets keep a subtle candidate instead of dropping everything as a 
 
   assert.equal(result.providerUsed, 'replicate_basic');
   assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
-  assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
+  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.quality, 'poor');
 });
 
 test('floor presets keep even extremely subtle raw candidates instead of filtering them out', async () => {
@@ -1414,7 +1433,9 @@ test('floor presets keep even extremely subtle raw candidates instead of filteri
 
   assert.equal(result.providerUsed, 'replicate_basic');
   assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
-  assert.equal(result.stoppedEarlyReason, 'best_effort_finish_candidate');
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
+  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.quality, 'poor');
 });
 
 test('paint presets accept a strong local candidate after weak ai outputs', async () => {
@@ -1458,7 +1479,9 @@ test('paint presets accept a strong local candidate after weak ai outputs', asyn
 
   assert.equal(result.providerUsed, 'local_sharp');
   assert.equal(result.bestVariant?.providerKey, 'local_sharp');
-  assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
+  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.quality, 'high');
 });
 
 test('getReplicateSettings reduces remove_furniture sample counts for faster execution', () => {

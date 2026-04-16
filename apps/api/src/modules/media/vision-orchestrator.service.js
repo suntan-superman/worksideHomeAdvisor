@@ -3,14 +3,12 @@ import {
   calculatePerceptibilityScore,
   evaluatePaintStrength,
   getPaintOutsideMaskLimit,
-  getPreferredFinishFallbackCandidates,
   getVisionExecutionTimeBudgetMs,
   isHighConfidenceEarlyExitCandidate,
   isCandidateSufficient,
   isUsablePaintStrength,
   rankCandidates,
   resolveVisionUserPlan,
-  scorePaintCandidate,
 } from './vision-orchestrator.helpers.js';
 
 const MAX_PAINT_RETRIES = 3;
@@ -47,7 +45,6 @@ export async function orchestrateVisionJob({
   const exhaustProviderChain =
     normalizedPresetKey === 'remove_furniture' || isSurfaceFinishPreset;
   const requiresLocalTileStoneAttempt = normalizedPresetKey === 'floor_tile_stone';
-  const allowBestEffortFinishCandidate = normalizedPresetKey.startsWith('floor_');
   const startedAt = Number(nowFn());
   const maxExecutionTimeMs = getVisionExecutionTimeBudgetMs(preset?.key);
   const attempts = [];
@@ -55,25 +52,8 @@ export async function orchestrateVisionJob({
   const allSufficientCandidates = [];
   const maxAdaptiveIterations = isPaintPreset ? MAX_PAINT_RETRIES + 1 : 1;
   let activePreset = { ...preset };
-  const selectBestCandidates = (candidates = allCandidates) => {
-    const sufficientCandidates = rankCandidates(
-      candidates.filter((candidate) => candidate.isSufficient),
-      preset.key,
-    );
-    if (sufficientCandidates.length) {
-      return sufficientCandidates;
-    }
-
-    const preferredFinishFallbackCandidates = getPreferredFinishFallbackCandidates(
-      candidates,
-      preset.key,
-    );
-    if (preferredFinishFallbackCandidates.length) {
-      return preferredFinishFallbackCandidates;
-    }
-
-    return rankCandidates(candidates, preset.key);
-  };
+  const rankAvailableCandidates = (candidates = allCandidates) =>
+    rankCandidates(candidates, activePreset.key);
 
   const canStopForTimeBudget = () => {
     if (!allSufficientCandidates.length) {
@@ -102,6 +82,7 @@ export async function orchestrateVisionJob({
   const buildResponse = ({
     providerUsed = null,
     bestVariant = null,
+    quality = null,
     stoppedEarlyReason = null,
     timeBudgetReached = false,
     cancelled = false,
@@ -111,7 +92,8 @@ export async function orchestrateVisionJob({
     providerAttemptCount: attempts.length,
     fallbackApplied: providerUsed ? chain.indexOf(providerUsed) > 0 : false,
     bestVariant,
-    allCandidates: selectBestCandidates(allCandidates),
+    quality,
+    allCandidates: rankAvailableCandidates(allCandidates),
     orchestration: { chain, attempts },
     userPlan: effectiveUserPlan,
     stoppedEarlyReason,
@@ -171,194 +153,96 @@ export async function orchestrateVisionJob({
     return Boolean(candidate.isSufficient);
   };
 
-  const isAcceptableFinishFallbackCandidate = (candidate) => {
-    if (!candidate || !isSurfaceFinishPreset) {
-      return false;
-    }
-
-    if (isPaintPreset) {
-      const topHalfChangeRatio = Number(candidate.topHalfChangeRatio);
-      const outsideMaskChangeRatio = Number(candidate.outsideMaskChangeRatio);
-      const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
-      const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
-      const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
-      const outsideMaskLimit = getPaintOutsideMaskLimit(candidate, normalizedPresetKey);
-
-      if (Number.isFinite(topHalfChangeRatio) && topHalfChangeRatio > 0.12) {
-        return false;
-      }
-      if (Number.isFinite(outsideMaskChangeRatio) && outsideMaskChangeRatio > outsideMaskLimit) {
-        return false;
-      }
-      if (furnitureCoverageIncreaseRatio > 0.01 || newFurnitureAdditionRatio > 0.01) {
-        return false;
-      }
-      if (maskedEdgeDensityDelta > 0.004) {
-        return false;
-      }
-
-      return isStrongEnoughFinishCandidate(candidate);
-    }
-
-    if (isFloorPreset) {
-      const outsideMaskChangeRatio = Number(candidate.outsideMaskChangeRatio);
-      const topHalfChangeRatio = Number(candidate.topHalfChangeRatio);
-      const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
-
-      if (Number.isFinite(outsideMaskChangeRatio) && outsideMaskChangeRatio > 0.18) {
-        return false;
-      }
-      if (Number.isFinite(topHalfChangeRatio) && topHalfChangeRatio > 0.1) {
-        return false;
-      }
-      if (furnitureCoverageIncreaseRatio > 0.02) {
-        return false;
-      }
-
-      return isStrongEnoughFinishCandidate(candidate);
-    }
-
-    return false;
-  };
-
-  const isSafeBestEffortCandidate = (candidate) => {
-    if (!candidate || !isSurfaceFinishPreset) {
-      return false;
-    }
-
-    const topHalfChangeRatio = Number(candidate.topHalfChangeRatio);
-    const outsideMaskChangeRatio = Number(candidate.outsideMaskChangeRatio);
-    const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
-    const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
-    const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
-
-    if (isPaintPreset) {
-      const paintStrength = evaluatePaintStrength(candidate, normalizedPresetKey);
-      const paintScore = scorePaintCandidate(
-        { ...candidate, paintStrength },
-        normalizedPresetKey,
-      );
-      const outsideMaskLimit = getPaintOutsideMaskLimit(candidate, normalizedPresetKey);
-      const perceptibilityScore = calculatePerceptibilityScore(candidate);
-      const maskedChangeRatio = Number(candidate.maskedChangeRatio || 0);
-      const maskedColorShiftRatio = Number(candidate.maskedColorShiftRatio || 0);
-      const maskedLuminanceDelta = Math.abs(Number(candidate.maskedLuminanceDelta || 0));
-
-      if (normalizedPresetKey === 'paint_dark_charcoal_test') {
-        return (
-          paintScore.shouldUse &&
-          maskedChangeRatio >= 0.12 &&
-          (maskedColorShiftRatio >= 0.08 ||
-            maskedLuminanceDelta >= 0.06 ||
-            perceptibilityScore >= 0.35) &&
-          (!Number.isFinite(topHalfChangeRatio) || topHalfChangeRatio <= 0.85) &&
-          (!Number.isFinite(outsideMaskChangeRatio) ||
-            outsideMaskChangeRatio <= Math.max(0.55, outsideMaskLimit)) &&
-          newFurnitureAdditionRatio <= 0.01 &&
-          furnitureCoverageIncreaseRatio <= 0.01 &&
-          maskedEdgeDensityDelta <= 0.08
-        );
-      }
-
-      return (
-        paintScore.shouldUse &&
-        maskedChangeRatio >= 0.08 &&
-        (maskedColorShiftRatio >= 0.05 ||
-          maskedLuminanceDelta >= 0.02 ||
-          perceptibilityScore >= 0.2) &&
-        (!Number.isFinite(topHalfChangeRatio) || topHalfChangeRatio <= 0.12) &&
-        (!Number.isFinite(outsideMaskChangeRatio) ||
-          outsideMaskChangeRatio <= Math.max(0.3, outsideMaskLimit)) &&
-        newFurnitureAdditionRatio <= 0.01 &&
-        furnitureCoverageIncreaseRatio <= 0.01 &&
-        maskedEdgeDensityDelta <= 0.015
-      );
-    }
-
-    if (isFloorPreset) {
-      return (
-        Number(candidate.focusRegionChangeRatio || 0) >= 0.03 &&
-        Number(candidate.maskedChangeRatio || 0) >= 0.04 &&
-        (!Number.isFinite(topHalfChangeRatio) || topHalfChangeRatio <= 0.12) &&
-        (!Number.isFinite(outsideMaskChangeRatio) || outsideMaskChangeRatio <= 0.18) &&
-        furnitureCoverageIncreaseRatio <= 0.02 &&
-        newFurnitureAdditionRatio <= 0.01
-      );
-    }
-
-    return Number(candidate.overallScore || 0) >= 6.5;
-  };
-
-  const classifyCandidateQuality = (candidate) => {
+  const classifyQuality = (candidate, presetKey = activePreset.key) => {
     if (!candidate) {
-      return 'unusable';
+      return 'poor';
     }
 
-    if (isHighConfidenceEarlyExitCandidate(candidate, activePreset.key)) {
-      return 'high_confidence';
+    const normalizedQualityPresetKey = String(presetKey || '');
+    const perceptibility = calculatePerceptibilityScore(candidate);
+    const outsideMask = Number(candidate.outsideMaskChangeRatio || 0);
+    const topHalfChangeRatio = Number(candidate.topHalfChangeRatio || 0);
+    const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
+    const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
+
+    if (normalizedQualityPresetKey.startsWith('paint_')) {
+      const paintStrength =
+        candidate.paintStrength || evaluatePaintStrength(candidate, normalizedQualityPresetKey);
+
+      if (
+        isHighConfidenceEarlyExitCandidate(candidate, normalizedQualityPresetKey) ||
+        (
+          paintStrength.passes &&
+          perceptibility >= 0.35 &&
+          outsideMask <= 0.12 &&
+          topHalfChangeRatio <= 0.08 &&
+          furnitureCoverageIncreaseRatio <= 0.01 &&
+          newFurnitureAdditionRatio <= 0.01
+        )
+      ) {
+        return 'high';
+      }
+
+      if (
+        candidate.isSufficient ||
+        (
+          paintStrength.finalScore >= 5 &&
+          perceptibility >= 0.25 &&
+          outsideMask <= 0.2 &&
+          topHalfChangeRatio <= 0.16 &&
+          furnitureCoverageIncreaseRatio <= 0.01 &&
+          newFurnitureAdditionRatio <= 0.01
+        )
+      ) {
+        return 'good';
+      }
+
+      if (perceptibility >= 0.15 && paintStrength.finalScore >= 3) {
+        return 'concept';
+      }
+
+      return 'poor';
+    }
+
+    if (normalizedQualityPresetKey.startsWith('floor_')) {
+      if (isHighConfidenceEarlyExitCandidate(candidate, normalizedQualityPresetKey)) {
+        return 'high';
+      }
+
+      if (candidate.isSufficient) {
+        return 'good';
+      }
+
+      if (
+        Number(candidate.focusRegionChangeRatio || 0) >= 0.03 &&
+        Number(candidate.maskedChangeRatio || 0) >= 0.04
+      ) {
+        return 'concept';
+      }
+
+      return 'poor';
+    }
+
+    if (isHighConfidenceEarlyExitCandidate(candidate, normalizedQualityPresetKey)) {
+      return 'high';
     }
 
     if (candidate.isSufficient) {
-      return 'acceptable';
+      return 'good';
     }
 
-    if (
-      isAcceptableFinishFallbackCandidate(candidate) ||
-      isSafeBestEffortCandidate(candidate)
-    ) {
-      return 'best_effort_preview';
-    }
-
-    return 'unusable';
+    return Number(candidate.overallScore || 0) >= 5 ? 'concept' : 'poor';
   };
 
-  const selectReturnCandidate = (candidates = allCandidates) => {
-    const ranked = rankCandidates(candidates, activePreset.key);
-    const highConfidence = ranked.find(
-      (candidate) => classifyCandidateQuality(candidate) === 'high_confidence',
-    );
-    if (highConfidence) {
-      return {
-        variant: highConfidence,
-        stoppedEarlyReason: 'high_confidence_candidate',
-        deliveryMode: 'high_confidence',
-      };
-    }
-
-    const acceptable = ranked.find(
-      (candidate) => classifyCandidateQuality(candidate) === 'acceptable',
-    );
-    if (acceptable) {
-      return {
-        variant: acceptable,
-        stoppedEarlyReason: 'acceptable_candidate',
-        deliveryMode: 'acceptable',
-      };
-    }
-
-    const bestEffort = ranked.find(
-      (candidate) => classifyCandidateQuality(candidate) === 'best_effort_preview',
-    );
-    if (bestEffort) {
-      return {
-        variant: bestEffort,
-        stoppedEarlyReason: 'best_effort_preview_candidate',
-        deliveryMode: 'best_effort_preview',
-      };
-    }
-
-    if (allowBestEffortFinishCandidate) {
-      return {
-        variant: ranked[0] || null,
-        stoppedEarlyReason: 'best_effort_finish_candidate',
-        deliveryMode: ranked[0] ? 'acceptable' : 'none',
-      };
-    }
+  const selectBestCandidate = (candidates = allCandidates) => {
+    const ranked = rankAvailableCandidates(candidates);
+    const bestCandidate = ranked[0] || null;
 
     return {
-      variant: null,
-      stoppedEarlyReason: 'no_candidate_generated',
-      deliveryMode: 'none',
+      variant: bestCandidate,
+      quality: classifyQuality(bestCandidate, activePreset.key),
+      stoppedEarlyReason: bestCandidate ? 'ranked_best_candidate' : 'no_candidates_available',
+      deliveryMode: bestCandidate ? 'always_return_best' : 'none',
     };
   };
 
@@ -500,10 +384,11 @@ export async function orchestrateVisionJob({
         allCandidates.length &&
         (isSurfaceFinishPreset || canStopForTimeBudget())
       ) {
-        const selection = selectReturnCandidate(allCandidates);
+        const selection = selectBestCandidate(allCandidates);
         return buildResponse({
           providerUsed: selection.variant?.providerKey || null,
           bestVariant: selection.variant || null,
+          quality: selection.quality,
           stoppedEarlyReason: selection.variant
             ? 'time_budget_best_available'
             : 'time_budget_no_candidate',
@@ -611,7 +496,7 @@ export async function orchestrateVisionJob({
             const paintStrength = isPaintPreset
               ? candidate.paintStrength || evaluatePaintStrength(candidate, activePreset.key)
               : null;
-            const candidateQuality = classifyCandidateQuality(candidate);
+            const candidateQuality = classifyQuality(candidate, activePreset.key);
             console.log('Candidate evaluation', {
               presetKey: activePreset.key,
               providerKey,
@@ -683,29 +568,29 @@ export async function orchestrateVisionJob({
         )[0];
         const shouldStopForCurrentCandidate =
           sufficient &&
-          (!requiresLocalTileStoneAttempt || providerKey === 'local_sharp') &&
-          (!exhaustProviderChain ||
-            isHighConfidenceEarlyExitCandidate(sufficient, activePreset.key));
+          !exhaustProviderChain &&
+          (!requiresLocalTileStoneAttempt || providerKey === 'local_sharp');
         if (shouldStopForCurrentCandidate) {
           return buildResponse({
             providerUsed: providerKey,
             bestVariant: sufficient,
-            stoppedEarlyReason:
-              exhaustProviderChain ? 'high_confidence_candidate' : 'sufficient_candidate',
-            deliveryMode: exhaustProviderChain ? 'high_confidence' : 'acceptable',
+            quality: classifyQuality(sufficient, activePreset.key),
+            stoppedEarlyReason: 'sufficient_candidate',
+            deliveryMode: 'always_return_best',
           });
         }
 
-        const bestEffortPreview = normalizedCandidates.find(
-          (candidate) => classifyCandidateQuality(candidate) === 'best_effort_preview',
-        );
-        const isFinalProviderInIteration = providerIndex >= chain.length - 1;
-        if (bestEffortPreview && isFinalProviderInIteration) {
+        const shouldStopForExceptionalRemovalCandidate =
+          normalizedPresetKey === 'remove_furniture' &&
+          sufficient &&
+          isHighConfidenceEarlyExitCandidate(sufficient, activePreset.key);
+        if (shouldStopForExceptionalRemovalCandidate) {
           return buildResponse({
             providerUsed: providerKey,
-            bestVariant: bestEffortPreview,
-            stoppedEarlyReason: 'best_effort_preview_candidate',
-            deliveryMode: 'best_effort_preview',
+            bestVariant: sufficient,
+            quality: classifyQuality(sufficient, activePreset.key),
+            stoppedEarlyReason: 'high_confidence_candidate',
+            deliveryMode: 'always_return_best',
           });
         }
 
@@ -716,10 +601,11 @@ export async function orchestrateVisionJob({
           allCandidates.length &&
           (isSurfaceFinishPreset || canStopForTimeBudget())
         ) {
-          const selection = selectReturnCandidate(allCandidates);
+          const selection = selectBestCandidate(allCandidates);
           return buildResponse({
             providerUsed: selection.variant?.providerKey || null,
             bestVariant: selection.variant || null,
+            quality: selection.quality,
             stoppedEarlyReason: selection.variant
               ? 'time_budget_best_available'
               : 'time_budget_no_candidate',
@@ -756,7 +642,7 @@ export async function orchestrateVisionJob({
       break;
     }
 
-    const bestCurrentIterationCandidate = selectBestCandidates(iterationCandidates)[0];
+    const bestCurrentIterationCandidate = rankAvailableCandidates(iterationCandidates)[0];
     if (isStrongEnoughFinishCandidate(bestCurrentIterationCandidate)) {
       break;
     }
@@ -769,10 +655,11 @@ export async function orchestrateVisionJob({
     activePreset = applyAdaptiveAdjustment(activePreset, adjustment, iteration + 1);
   }
 
-  const selection = selectReturnCandidate(allCandidates);
+  const selection = selectBestCandidate(allCandidates);
   return buildResponse({
     providerUsed: selection.variant?.providerKey || null,
     bestVariant: selection.variant || null,
+    quality: selection.quality,
     stoppedEarlyReason: selection.stoppedEarlyReason,
     deliveryMode: selection.deliveryMode,
   });

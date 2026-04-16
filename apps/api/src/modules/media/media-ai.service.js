@@ -6939,6 +6939,16 @@ async function persistOrchestratedVisionCandidates({
       buffer: candidate.buffer,
     });
 
+    const isSelectedBestCandidate =
+      candidate?.providerKey === orchestrationResult?.bestVariant?.providerKey &&
+      Number(candidate?.providerAttemptIndex ?? -1) ===
+        Number(orchestrationResult?.bestVariant?.providerAttemptIndex ?? -2) &&
+      Number(candidate?.providerCandidateIndex ?? -1) ===
+        Number(orchestrationResult?.bestVariant?.providerCandidateIndex ?? -2);
+    const selectedCandidateQuality = isSelectedBestCandidate
+      ? String(orchestrationResult?.quality || 'poor')
+      : '';
+
     const variant = await MediaVariantModel.create({
       visionJobId: job._id,
       mediaId: asset._id,
@@ -6994,16 +7004,17 @@ async function persistOrchestratedVisionCandidates({
         },
         fallbackApplied:
           Boolean(orchestrationResult?.fallbackApplied) ||
-          orchestrationResult?.stoppedEarlyReason === 'best_effort_preview_candidate',
+          (isSelectedBestCandidate && selectedCandidateQuality !== 'high'),
         fallbackReason:
-          orchestrationResult?.stoppedEarlyReason === 'best_effort_preview_candidate'
-            ? 'best_effort_preview'
+          isSelectedBestCandidate && selectedCandidateQuality && selectedCandidateQuality !== 'high'
+            ? `quality_${selectedCandidateQuality}`
             : '',
         orchestrationAttempts: orchestrationResult?.orchestration?.attempts || [],
         orchestrationElapsedMs: Number(orchestrationResult?.elapsedTimeMs || 0),
         orchestrationTimeBudgetMs: Number(orchestrationResult?.maxExecutionTimeMs || 0),
         orchestrationStoppedEarlyReason: orchestrationResult?.stoppedEarlyReason || '',
         orchestrationTimeBudgetReached: Boolean(orchestrationResult?.timeBudgetReached),
+        orchestrationQuality: selectedCandidateQuality,
         review: {
           ...(candidate.review || {}),
           overallScore: candidate.overallScore,
@@ -7025,6 +7036,7 @@ async function persistOrchestratedVisionCandidates({
           objectRemovalScore: candidate.objectRemovalScore,
           shouldHideByDefault: Boolean(candidate.shouldHideByDefault),
           rejectionCategory: candidate.rejectionCategory || '',
+          quality: selectedCandidateQuality || candidate.review?.quality || '',
           providerKey: candidate.providerKey || '',
         },
       },
@@ -7377,11 +7389,12 @@ export async function createImageEnhancementJob({
         orchestrationTimeBudgetMs: Number(orchestrationResult.maxExecutionTimeMs || 0),
         orchestrationStoppedEarlyReason: orchestrationResult.stoppedEarlyReason || '',
         orchestrationTimeBudgetReached: Boolean(orchestrationResult.timeBudgetReached),
+        orchestrationQuality: orchestrationResult.quality || 'poor',
         orchestrationDeliveryMode: orchestrationResult.deliveryMode || 'advisor_only',
       };
-      job.message = 'No strong visual change detected for this image.';
+      job.message = 'No visual preview was returned for this image.';
       job.warning =
-        'The room may already present well, or the requested change was too subtle to preview reliably.';
+        'All providers finished without producing a savable preview. Try a stronger request or retry the generation.';
       await job.save();
 
       return {
@@ -7414,19 +7427,17 @@ export async function createImageEnhancementJob({
     job.provider = orchestrationResult.providerUsed || 'vision_orchestrator';
     job.attemptCount = Number(orchestrationResult.providerAttemptCount || 0);
     job.maxAttempts = Number(orchestrationResult.orchestration?.chain?.length || 1);
-    const usedBestEffortPreview =
-      orchestrationResult.stoppedEarlyReason === 'best_effort_preview_candidate' ||
-      orchestrationResult.deliveryMode === 'best_effort_preview';
+    const orchestrationQuality = String(orchestrationResult.quality || 'poor');
+    const usedQualityWarning = ['good', 'concept', 'poor'].includes(orchestrationQuality);
     const usedFallbackVariant =
       Boolean(orchestrationResult.fallbackApplied) ||
-      usedBestEffortPreview ||
       createdVariants.some((variant) => Boolean(variant?.metadata?.fallbackApplied));
-    job.currentStage = usedFallbackVariant ? 'fallback' : 'completed';
-    job.fallbackMode = usedFallbackVariant
-      ? usedBestEffortPreview
-        ? 'best_available_preview'
-        : 'provider_fallback'
-      : null;
+    job.currentStage = usedFallbackVariant || usedQualityWarning ? 'fallback' : 'completed';
+    job.fallbackMode = usedQualityWarning
+      ? 'best_available_preview'
+      : usedFallbackVariant
+        ? 'provider_fallback'
+        : null;
     job.failureReason = '';
     job.outputVariantIds = createdVariants.map((variant) => variant.id);
     job.selectedVariantId = createdVariants[0]?.id || null;
@@ -7439,21 +7450,41 @@ export async function createImageEnhancementJob({
       orchestrationTimeBudgetMs: Number(orchestrationResult.maxExecutionTimeMs || 0),
       orchestrationStoppedEarlyReason: orchestrationResult.stoppedEarlyReason || '',
       orchestrationTimeBudgetReached: Boolean(orchestrationResult.timeBudgetReached),
+      orchestrationQuality,
       orchestrationDeliveryMode: orchestrationResult.deliveryMode || 'none',
     };
-    job.warning = usedBestEffortPreview
-      ? preset.key === 'paint_dark_charcoal_test'
-        ? 'Showing a diagnostic statement-color preview. The wall change was strong enough to inspect, but spill into bright upper-wall and window-adjacent regions means you should treat it as a debugging preview rather than a listing-ready concept.'
-        : 'Showing the best available concept preview. Review manually before relying on subtle finish changes.'
+    const providerLabel = orchestrationResult.providerUsed || 'vision_orchestrator';
+    const qualityWarning =
+      orchestrationQuality === 'high'
+        ? ''
+        : orchestrationQuality === 'good'
+          ? 'Strong preview — the change is clear, with only minor imperfections to review before listing use.'
+          : orchestrationQuality === 'concept'
+            ? preset.key === 'paint_dark_charcoal_test'
+              ? 'Concept preview — the wall-color change is obvious, but bright upper-wall or window-adjacent spill may still be present.'
+              : 'Concept preview — the requested direction is visible, though minor edge spill or cleanup issues may still exist.'
+            : 'Low-confidence preview — limited change was detected, so the result may not fully reflect the intended update.';
+    job.warning = qualityWarning
+      ? qualityWarning
       : usedFallbackVariant
         ? 'Primary provider was insufficient, so an advanced AI fallback was used.'
         : renderPlan.warning;
     job.message =
       requestedMode === 'freeform'
-        ? `Custom enhancement request saved and processed via ${orchestrationResult.providerUsed || 'vision_orchestrator'}.`
-        : usedBestEffortPreview
-          ? `Generated best available preview via ${orchestrationResult.providerUsed || 'vision_orchestrator'} after low-confidence finish review.`
-          : `Generated via ${orchestrationResult.providerUsed || 'vision_orchestrator'}${usedFallbackVariant ? ' after fallback' : ''}.`;
+        ? orchestrationQuality === 'high'
+          ? `Custom enhancement ready via ${providerLabel}.`
+          : orchestrationQuality === 'good'
+            ? `Custom enhancement ready with a strong preview via ${providerLabel}.`
+            : orchestrationQuality === 'concept'
+              ? `Custom enhancement ready as a concept preview via ${providerLabel}.`
+              : `Custom enhancement generated with low confidence via ${providerLabel}.`
+        : orchestrationQuality === 'high'
+          ? `Generated via ${providerLabel}${usedFallbackVariant ? ' after fallback' : ''}.`
+          : orchestrationQuality === 'good'
+            ? `Strong preview generated via ${providerLabel}.`
+            : orchestrationQuality === 'concept'
+              ? `Concept preview generated via ${providerLabel}.`
+              : `Low-confidence preview generated via ${providerLabel}.`;
     await job.save();
 
     return {

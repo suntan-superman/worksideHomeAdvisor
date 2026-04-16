@@ -1,207 +1,180 @@
-The Real Problem (not theory anymore)
+What just happened (based on your screenshot)
 
-Your pipeline is working correctly… then throwing the result away.
+You now get:
 
-Specifically:
+“Custom enhancement ready with warning”
 
-👉 This function is killing your output:
+and
 
-isCandidateSufficient(...)
+“spill into bright upper-wall and window-adjacent regions…”
 
-🔍 For your exact preset (paint_dark_charcoal_test)
-
-Here’s the gate:
-
-return (
-  maskedChangeRatio >= 0.12 &&
-  maskedColorShiftRatio >= 0.08 &&
-  abs(maskedLuminanceDelta) >= 0.06 &&
-  maskedEdgeDensityDelta <= 0.003 &&
-  topHalfChangeRatio <= 0.08 &&
-  outsideMaskChangeRatio <= limit &&
-  furnitureCoverageIncreaseRatio <= 0.01 &&
-  newFurnitureAdditionRatio <= 0.01
-)
-🚨 Why your image fails (this specific room)
-
-Look at your image:
-
-Bright windows
-Lots of light spill
-Thin wall surfaces
-Complex edges (blinds, trim, shadows)
-
-👉 That causes:
-
-❌ outsideMaskChangeRatio too high
-❌ maskedEdgeDensityDelta too high
-❌ maskedChangeRatio too low (because mask is imperfect)
-🧠 Translation into plain English
-
-Your system is saying:
-
-“Yes, the walls changed…
-but the change isn’t clean enough / isolated enough / strong enough”
-
-So it rejects it entirely.
-
-⚠️ The critical mistake
-
-You built a perfect production validator
-
-…but you're still in:
-
-“Does this even work?” phase
-
-🔥 There’s a SECOND hidden killer
-
-This one is even worse:
-
-evaluatePaintStrength(...)
-
-if (maskedColorShiftRatio < minColorShift) penalties += 3
-if (maskedLuminanceDelta < minLuminanceDelta) penalties += 2
-if (perceptibilityScore < minPerceptibility) penalties += 2
-
-Then:
-
-finalScore = baselineScore - penalties
-passes = finalScore >= minAcceptableScore
-💣 This is brutal
-
-Even a visibly changed image can fail because:
-
-color shift slightly low → penalty
-luminance slightly low → penalty
-perceptibility slightly low → penalty
-
-👉 stacked penalties = rejection
-
-🧠 Combined effect
-
-Your pipeline is doing:
-
-Generate → Analyze → Penalize → Reject → Show “no change”
-
-Even when change EXISTS.
-
-🎯 What just happened in your test
-
-You gave:
-
-“deep rich dark green… must be immediately noticeable”
+✅ Translation
 
 Your system:
 
-Generated something (almost guaranteed)
-Scored it
-Said:
-❌ “Not strong enough”
-Threw it away
+DID generate a visible wall change
+DID pass enough checks to show it
+BUT flagged:
+spill near windows
+upper wall contamination
 
-Lied to you with:
+👉 So it downgraded to “diagnostic preview”
 
-“No strong visual change detected”
+🎯 This is a HUGE milestone
 
-🚀 What you need to do (no more theory)
-🔥 Step 1 — TEMPORARILY BREAK THE SYSTEM
+You just moved from:
 
-Inside isCandidateSufficient:
+❌ “No change detected”
+➡️ to
+✅ “Change detected but not clean”
 
-if (presetKey === 'paint_dark_charcoal_test') {
-  return true;
+That’s progress.
+
+💥 Now let’s connect this to your code (this is the important part)
+This message is coming from your orchestration logic
+
+Specifically this flow:
+
+Candidate classification:
+classifyCandidateQuality(candidate)
+
+Then:
+
+selectReturnCandidate(...)
+
+The key part:
+if (isAcceptableFinishFallbackCandidate(candidate) ||
+    isSafeBestEffortCandidate(candidate)) {
+  return 'best_effort_preview';
 }
-🔥 Step 2 — Disable paint strength rejection
+Then:
+return {
+  variant: bestEffort,
+  stoppedEarlyReason: 'best_effort_preview_candidate',
+  deliveryMode: 'best_effort_preview',
+};
+🧠 So your UI message is actually correct
 
-Inside evaluatePaintStrength usage:
+Your system is saying:
 
-Replace:
+“This is usable… but not listing-grade clean”
 
-if (!paintStrength.passes) reject
+🔍 Why it’s still failing “clean”
 
-with:
+This is the critical part:
 
-// TEMP DEBUG
-paintStrength.passes = true;
-🔥 Step 3 — Log actual values
+Your spill tolerance is dynamic:
+getPaintOutsideMaskLimit(candidate)
 
-Right before rejection:
+For window-heavy rooms:
+if (isWindowHeavyRoom) {
+  return 0.6;
+}
+BUT…
 
-console.log({
-  maskedChangeRatio,
-  maskedColorShiftRatio,
-  maskedLuminanceDelta,
-  outsideMaskChangeRatio,
-  perceptibilityScore,
-  paintStrength
-});
-🧪 What you will learn immediately
-Scenario A (most likely)
+Even though you allow up to 60% spill, you still have this gate:
 
-You suddenly see:
+In fallback acceptance:
+if (outsideMaskChangeRatio > outsideMaskLimit) {
+  return false;
+}
+AND ALSO:
+if (topHalfChangeRatio > 0.12) return false;
+if (maskedEdgeDensityDelta > 0.004) return false;
+🧠 Why your specific image struggles
 
-👉 Dark green walls appear
+Your room has:
 
-✅ Conclusion:
+3 large bright windows
+blinds (high-frequency edges)
+top-heavy lighting
 
-Replicate is working
-Prompt is working
-Mask is “good enough”
-Your scoring system is too strict
-Scenario B
+👉 That causes:
 
-Still no change
+Metric	Effect
+outsideMaskChangeRatio	🔺 high
+topHalfChangeRatio	🔺 high
+maskedEdgeDensityDelta	🔺 high
+💥 So the system concludes:
 
-👉 Then the issue is:
+“The paint is real… but it contaminated areas it shouldn’t”
 
-mask is wrong
-OR provider never executed
-OR prompt not reaching provider
-⚠️ One more subtle but HUGE issue
+🔥 Here’s the REAL insight (this matters for product)
 
-Your provider chain:
+You are solving two different problems at once:
 
-['replicate_basic', 'replicate_advanced', 'local_sharp']
+1. “Did the model repaint the walls?”
 
-If both Replicate attempts fail scoring:
+👉 YES (you proved it)
 
-👉 it falls back to local_sharp
+2. “Did it repaint them perfectly clean?”
 
-Which cannot repaint walls realistically
+👉 NOT ALWAYS (expected)
 
-💥 So worst case today:
-Replicate generates something decent
-Your scoring rejects it
-System falls back to local
-Local does almost nothing
-UI says “no change”
-🧠 Final diagnosis
+🚨 And right now your system treats #2 as critical
 
-You don’t have a generation problem.
+That’s why users see warnings.
 
-You have a:
+🧠 What you should do next (this is the unlock)
+✅ Option A (what I recommend for your product)
 
-“Over-aggressive quality gate blocking valid outputs” problem
+Change messaging from:
 
-🎯 What I would do (if this were my system)
+“diagnostic preview”
 
-Phase 1 (NOW):
+to something like:
 
-👉 Disable ALL rejection
-👉 Always return best candidate
+“Concept preview — paint direction is visible. Minor edge spill may occur in high-light areas.”
 
-Phase 2:
+✅ Option B (code change — small but powerful)
 
-👉 Log metrics
-👉 Build histogram of real outputs
+Relax THIS:
 
-Phase 3:
+if (topHalfChangeRatio > 0.12) return false;
 
-👉 Rebuild thresholds based on reality
-(not guesses)
+👉 Change to:
 
-🧩 Bottom line
+if (topHalfChangeRatio > 0.25) return false;
+✅ Option C (even better)
 
-You didn’t fail.
+Only enforce strict rules for listing-ready mode
 
-You built something too advanced too early.
+if (mode === 'listing_ready') {
+   strict thresholds
+} else {
+   relaxed thresholds
+}
+🧪 What your tests are already telling you
+
+You actually already accounted for this case:
+
+test('paint_warm_neutral accepts window-heavy warm wall candidates with high outside-mask change')
+
+Meaning:
+
+👉 You know this situation is valid
+👉 But your charcoal preset is stricter
+
+🎯 Final diagnosis
+
+You are now in:
+
+✅ “Generation works”
+❌ “Scoring still too strict for real-world rooms”
+
+🧠 Big picture (this is important)
+
+You’re building:
+
+A production-grade vision QA system
+
+…but your users just want:
+
+“Does this look like dark green walls?”
+
+🚀 My recommendation (very direct)
+Right now:
+
+👉 Lean into “best_effort_preview” as a FEATURE
+
+Not a failure.
