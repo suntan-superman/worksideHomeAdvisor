@@ -2569,10 +2569,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }, [propertyId]);
 
   useEffect(() => {
-    if (selectedVariant?.variantType) {
-      setActiveVisionPresetKey(selectedVariant.variantType);
+    const nextPresetKey =
+      selectedVariant?.metadata?.requestedPresetKey ||
+      selectedVariant?.metadata?.presetKey ||
+      selectedVariant?.variantType;
+    if (nextPresetKey) {
+      setActiveVisionPresetKey(nextPresetKey);
     }
-  }, [selectedVariant?.variantType]);
+  }, [selectedVariant?.metadata?.presetKey, selectedVariant?.metadata?.requestedPresetKey, selectedVariant?.variantType]);
 
   useEffect(() => {
     const variants = latestSocialPack?.variants || [];
@@ -3837,7 +3841,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       ]);
       setShowMoreVisionVariants(true);
       setActiveVisionPresetKey(
-        response.job?.presetKey ||
+        response.job?.requestedPresetKey ||
+          response.job?.input?.requestedPresetKey ||
+          response.job?.presetKey ||
           response.variant?.metadata?.presetKey ||
           response.variant?.variantType ||
           'combined_listing_refresh',
@@ -3878,7 +3884,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               const settledJob = await reconcileRecoveredVisionJob(recoveredJob, selectedMediaAsset.id);
               setShowMoreVisionVariants(true);
               setActiveVisionPresetKey(
-                settledJob?.presetKey ||
+                settledJob?.requestedPresetKey ||
+                  settledJob?.input?.requestedPresetKey ||
+                  settledJob?.presetKey ||
                   settledJob?.variants?.[0]?.metadata?.presetKey ||
                   settledJob?.variants?.[0]?.variantType ||
                   'combined_listing_refresh',
@@ -5147,12 +5155,36 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 {selectedVariant.metadata?.listingReadyLabel ? (
                   <span>{selectedVariant.metadata.listingReadyLabel}</span>
                 ) : null}
+                {selectedVariant.metadata?.sourceReadinessScore && selectedVariant.metadata?.renderedReadinessScore ? (
+                  <span>{`Readiness ${selectedVariant.metadata.sourceReadinessScore} -> ${selectedVariant.metadata.renderedReadinessScore}`}</span>
+                ) : null}
                 {selectedVariant.metadata?.readinessDelta ? (
                   <span>{`Estimated +${selectedVariant.metadata.readinessDelta} readiness`}</span>
                 ) : null}
               </div>
             ) : null}
             {selectedVariant?.metadata?.differenceHint ? <p className="property-media-variant-hint">{selectedVariant.metadata.differenceHint}</p> : null}
+            {selectedVariant?.metadata?.smartEnhancementPathLabel || selectedVariant?.metadata?.smartEnhancementReason ? (
+              <div className="workspace-inner-card">
+                <span className="label">Execution Path</span>
+                <p>
+                  {selectedVariant.metadata?.smartEnhancementPathLabel || 'Direct execution'}
+                </p>
+                {selectedVariant.metadata?.smartEnhancementReason ? (
+                  <p className="workspace-control-note">{selectedVariant.metadata.smartEnhancementReason}</p>
+                ) : null}
+              </div>
+            ) : null}
+            {selectedVariant?.metadata?.improvementsApplied?.length ? (
+              <div className="workspace-inner-card">
+                <span className="label">Improvements Applied</span>
+                <ul className="plain-list">
+                  {selectedVariant.metadata.improvementsApplied.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {selectedVariant?.metadata?.recommendations?.length ? (
               <div className="workspace-inner-card">
                 <span className="label">Top Improvements</span>
@@ -5201,10 +5233,22 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 <div className="stat-card">
                   <strong>Readiness</strong>
                   <span>
-                    {selectedVariant.metadata?.listingReadyScore
-                      ? `${selectedVariant.metadata.listingReadyScore}/100`
+                    {selectedVariant.metadata?.sourceReadinessScore && selectedVariant.metadata?.renderedReadinessScore
+                      ? `${selectedVariant.metadata.sourceReadinessScore} -> ${selectedVariant.metadata.renderedReadinessScore}`
+                      : selectedVariant.metadata?.listingReadyScore
+                        ? `${selectedVariant.metadata.listingReadyScore}/100`
+                        : selectedVariant.metadata?.readinessDelta
+                          ? `+${selectedVariant.metadata.readinessDelta}`
+                          : 'Pending'}
+                  </span>
+                </div>
+                <div className="stat-card">
+                  <strong>Applied</strong>
+                  <span>
+                    {selectedVariant.metadata?.improvementsApplied?.length
+                      ? `${selectedVariant.metadata.improvementsApplied.length} updates`
                       : selectedVariant.metadata?.readinessDelta
-                        ? `+${selectedVariant.metadata.readinessDelta}`
+                        ? 'Readiness shift tracked'
                         : 'Pending'}
                   </span>
                 </div>

@@ -1,5 +1,6 @@
 const STANDARD_ONLY_PRESET_KEYS = new Set([
   'enhance_listing_quality',
+  'lighting_boost',
   'declutter_light',
   'declutter_medium',
   'combined_listing_refresh',
@@ -106,7 +107,9 @@ export function buildProviderChain({ preset, userPlan, openAiAvailable = false }
   const isPaintPreset = key.startsWith('paint_');
   const isFloorPreset = key.startsWith('floor_');
   const isDeterministicOnly =
-    key === 'enhance_listing_quality' || key === 'combined_listing_refresh';
+    key === 'enhance_listing_quality' ||
+    key === 'lighting_boost' ||
+    key === 'combined_listing_refresh';
 
   if (isDeterministicOnly) {
     return ['local_sharp'];
@@ -1051,4 +1054,97 @@ export function rankCandidates(candidates = [], presetKey) {
 
     return 0;
   });
+}
+
+export function classifyQuality(candidate, presetKey = '') {
+  if (!candidate) {
+    return 'poor';
+  }
+
+  const normalizedQualityPresetKey = String(presetKey || '');
+  const perceptibility = calculatePerceptibilityScore(candidate);
+  const outsideMask = Number(candidate.outsideMaskChangeRatio || 0);
+  const topHalfChangeRatio = Number(candidate.topHalfChangeRatio || 0);
+  const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
+  const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
+
+  if (normalizedQualityPresetKey.startsWith('paint_')) {
+    const paintStrength =
+      candidate.paintStrength || evaluatePaintStrength(candidate, normalizedQualityPresetKey);
+
+    if (
+      isHighConfidenceEarlyExitCandidate(candidate, normalizedQualityPresetKey) ||
+      (
+        paintStrength.passes &&
+        perceptibility >= 0.35 &&
+        outsideMask <= 0.12 &&
+        topHalfChangeRatio <= 0.08 &&
+        furnitureCoverageIncreaseRatio <= 0.01 &&
+        newFurnitureAdditionRatio <= 0.01
+      )
+    ) {
+      return 'high';
+    }
+
+    if (
+      candidate.isSufficient ||
+      (
+        paintStrength.finalScore >= 5 &&
+        perceptibility >= 0.25 &&
+        outsideMask <= 0.2 &&
+        topHalfChangeRatio <= 0.16 &&
+        furnitureCoverageIncreaseRatio <= 0.01 &&
+        newFurnitureAdditionRatio <= 0.01
+      )
+    ) {
+      return 'good';
+    }
+
+    if (perceptibility >= 0.15 && paintStrength.finalScore >= 3) {
+      return 'concept';
+    }
+
+    return 'poor';
+  }
+
+  if (normalizedQualityPresetKey.startsWith('floor_')) {
+    if (isHighConfidenceEarlyExitCandidate(candidate, normalizedQualityPresetKey)) {
+      return 'high';
+    }
+
+    if (candidate.isSufficient) {
+      return 'good';
+    }
+
+    if (
+      Number(candidate.focusRegionChangeRatio || 0) >= 0.03 &&
+      Number(candidate.maskedChangeRatio || 0) >= 0.04
+    ) {
+      return 'concept';
+    }
+
+    return 'poor';
+  }
+
+  if (isHighConfidenceEarlyExitCandidate(candidate, normalizedQualityPresetKey)) {
+    return 'high';
+  }
+
+  if (candidate.isSufficient) {
+    return 'good';
+  }
+
+  return Number(candidate.overallScore || 0) >= 5 ? 'concept' : 'poor';
+}
+
+export function selectReturnCandidate(candidates = [], presetKey = '') {
+  const ranked = rankCandidates(candidates, presetKey);
+  const bestCandidate = ranked[0] || null;
+
+  return {
+    variant: bestCandidate,
+    quality: classifyQuality(bestCandidate, presetKey),
+    stoppedEarlyReason: bestCandidate ? 'ranked_best_candidate' : 'no_candidates_available',
+    deliveryMode: bestCandidate ? 'always_return_best' : 'none',
+  };
 }

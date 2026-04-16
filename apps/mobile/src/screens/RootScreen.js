@@ -145,6 +145,9 @@ function getVisionJobLabel(jobType) {
   if (jobType === 'declutter_preview') {
     return 'Decluttering photo';
   }
+  if (jobType === 'combined_listing_refresh') {
+    return 'Preparing listing-ready photo';
+  }
 
   return 'Enhancing photo';
 }
@@ -173,13 +176,46 @@ function summarizePricing(pricingSummary) {
     .slice(0, 3);
 }
 
-function getRecommendedVisionAction(asset) {
+function getRecommendedVisionAction(asset, selectedVariant = null) {
+  const requestedPresetKey =
+    selectedVariant?.metadata?.requestedPresetKey ||
+    asset?.selectedVariant?.metadata?.requestedPresetKey ||
+    '';
+  const executionPresetKey =
+    selectedVariant?.metadata?.executionPresetKey ||
+    asset?.selectedVariant?.metadata?.executionPresetKey ||
+    selectedVariant?.metadata?.presetKey ||
+    '';
+  const pipelineStage =
+    selectedVariant?.metadata?.pipelineStage ||
+    asset?.selectedVariant?.metadata?.pipelineStage ||
+    '';
+  const smartPlan =
+    selectedVariant?.metadata?.smartEnhancementPlan ||
+    asset?.selectedVariant?.metadata?.smartEnhancementPlan ||
+    [];
   const summary = String(asset?.analysis?.summary || '').toLowerCase();
   const hasDeclutterSignal =
+    smartPlan.includes('declutter') ||
     asset?.analysis?.retakeRecommended ||
     /clutter|declutter|distraction|tidy|retake|busy|remove/i.test(summary);
 
-  return hasDeclutterSignal ? 'declutter_preview' : 'enhance_listing_quality';
+  if (hasDeclutterSignal) {
+    return 'declutter_preview';
+  }
+
+  if (
+    requestedPresetKey === 'combined_listing_refresh' &&
+    (executionPresetKey === 'declutter_light' || executionPresetKey === 'declutter_medium')
+  ) {
+    return 'combined_listing_refresh';
+  }
+
+  if (pipelineStage === 'first_impression' || pipelineStage === 'smart_enhancement') {
+    return 'combined_listing_refresh';
+  }
+
+  return 'enhance_listing_quality';
 }
 
 function getRecommendedSection(nextStepKey) {
@@ -331,7 +367,7 @@ export function RootScreen() {
   const nextMissingRoom = roomCoverage.find((item) => !item.captured)?.roomLabel || ROOM_LABEL_OPTIONS[0];
   const recommendedSection = getRecommendedSection(workflow?.nextStep?.key);
   const pricingHighlights = summarizePricing(dashboard?.pricingSummary);
-  const recommendedVisionAction = getRecommendedVisionAction(selectedAsset);
+  const recommendedVisionAction = getRecommendedVisionAction(selectedAsset, selectedVariant);
   const visibleVisionEffects = (selectedVariant?.metadata?.effects || []).slice(0, 2);
   const hiddenVisionEffectCount = Math.max((selectedVariant?.metadata?.effects || []).length - 2, 0);
   const openChecklistItems = checklistItems.filter((task) => task.status !== 'done');
@@ -1020,9 +1056,13 @@ export function RootScreen() {
       ]);
       setSelectedVariantId(response.variant?.id || '');
       setStatus(
-        response.job?.warning ||
+        response.variant?.metadata?.smartEnhancementReason ||
+          response.job?.input?.smartEnhancementReason ||
+          response.job?.warning ||
           (jobType === 'declutter_preview'
             ? 'Declutter preview generated.'
+            : jobType === 'combined_listing_refresh'
+              ? 'Listing-ready path generated.'
             : 'Enhanced listing version generated.'),
       );
     } catch (requestError) {
@@ -1506,6 +1546,30 @@ export function RootScreen() {
                     </Text>
                   </Pressable>
                   <Pressable
+                    onPress={() => handleGenerateVariant('combined_listing_refresh')}
+                    style={[
+                      styles.button,
+                      recommendedVisionAction === 'combined_listing_refresh' ? styles.buttonPrimary : styles.buttonSecondary,
+                      styles.flexButton,
+                      styles.visionActionButton,
+                    ]}
+                    disabled={busy}
+                  >
+                    <Text
+                      style={[
+                        recommendedVisionAction === 'combined_listing_refresh' ? styles.buttonText : styles.buttonSecondaryText,
+                        styles.visionActionButtonText,
+                      ]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.85}
+                    >
+                      {pendingVisionJobType === 'combined_listing_refresh' && createVariantMutation.isPending
+                        ? 'Refreshing...'
+                        : 'Listing ready'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
                     onPress={() => handleGenerateVariant('declutter_preview')}
                     style={[
                       styles.button,
@@ -1571,6 +1635,17 @@ export function RootScreen() {
                     {selectedVariant.metadata?.differenceHint ? (
                       <Text style={styles.variantHint}>{selectedVariant.metadata.differenceHint}</Text>
                     ) : null}
+                    {selectedVariant.metadata?.smartEnhancementPathLabel || selectedVariant.metadata?.smartEnhancementReason ? (
+                      <View style={styles.summaryBulletList}>
+                        <Text style={styles.label}>Execution path</Text>
+                        {selectedVariant.metadata?.smartEnhancementPathLabel ? (
+                          <Text style={styles.summaryBullet}>• {selectedVariant.metadata.smartEnhancementPathLabel}</Text>
+                        ) : null}
+                        {selectedVariant.metadata?.smartEnhancementReason ? (
+                          <Text style={styles.summaryBullet}>• {selectedVariant.metadata.smartEnhancementReason}</Text>
+                        ) : null}
+                      </View>
+                    ) : null}
                     {selectedVariant.metadata?.confidenceBadge || selectedVariant.metadata?.listingReadyLabel ? (
                       <View style={styles.effectList}>
                         {selectedVariant.metadata?.confidenceBadge ? (
@@ -1583,6 +1658,23 @@ export function RootScreen() {
                             <Text style={styles.effectChipText}>{selectedVariant.metadata.listingReadyLabel}</Text>
                           </View>
                         ) : null}
+                        {selectedVariant.metadata?.sourceReadinessScore && selectedVariant.metadata?.renderedReadinessScore ? (
+                          <View style={styles.effectChip}>
+                            <Text style={styles.effectChipText}>
+                              {`Readiness ${selectedVariant.metadata.sourceReadinessScore}->${selectedVariant.metadata.renderedReadinessScore}`}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    ) : null}
+                    {selectedVariant.metadata?.improvementsApplied?.length ? (
+                      <View style={styles.summaryBulletList}>
+                        <Text style={styles.label}>Improvements applied</Text>
+                        {selectedVariant.metadata.improvementsApplied.map((item) => (
+                          <Text key={item} style={styles.summaryBullet}>
+                            • {item}
+                          </Text>
+                        ))}
                       </View>
                     ) : null}
                     {selectedVariant.metadata?.recommendations?.length ? (
@@ -2541,6 +2633,7 @@ const styles = StyleSheet.create({
   },
   visionActionRow: {
     alignItems: 'stretch',
+    flexWrap: 'wrap',
   },
   segmentButton: {
     flex: 1,

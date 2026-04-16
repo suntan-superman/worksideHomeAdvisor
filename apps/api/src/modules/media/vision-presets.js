@@ -21,6 +21,25 @@ export const VISION_PRESETS = [
       'Improve brightness, clarity, and overall presentation while keeping the room realistic.',
   },
   {
+    key: 'lighting_boost',
+    legacyKeys: [],
+    displayName: 'Lighting Boost',
+    shortLabel: 'Lighting',
+    internalOnly: true,
+    category: 'enhancement',
+    roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'exterior', 'unknown'],
+    providerPreference: 'local_sharp_only',
+    promptVersion: 1,
+    outputCount: 1,
+    disclaimerType: 'truthful_enhancement',
+    recommendedUse: ['brochure', 'report'],
+    upgradeTier: 'standard',
+    basePrompt:
+      'Improve this real estate photo with a lighting-first enhancement. Lift dark areas, balance bright windows, and make the room read cleaner and brighter while preserving the true structure, layout, finishes, and furnishings. Keep the image realistic and honest.',
+    helperText:
+      'Recover darker rooms with a lighting-first pass before stronger enhancement or listing polish.',
+  },
+  {
     key: 'declutter_light',
     legacyKeys: ['declutter_preview'],
     displayName: 'Light Declutter',
@@ -510,7 +529,7 @@ const LEGACY_PRESET_LOOKUP = new Map(
 );
 
 export function listVisionPresets() {
-  return VISION_PRESETS.map((preset) => ({
+  return VISION_PRESETS.filter((preset) => !preset.internalOnly).map((preset) => ({
     ...preset,
     legacyKeys: [...(preset.legacyKeys || [])],
     roomCompatibility: [...(preset.roomCompatibility || [])],

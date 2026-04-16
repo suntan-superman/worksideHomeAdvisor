@@ -6,15 +6,18 @@ import {
   analyzeVisionScene,
   bridgeVerticalMaskGaps,
   buildFirstImpressionRecommendations,
+  buildSceneAwareEnhancementRecipe,
   buildBrightWindowExclusionMask,
   buildFreeformEnhancementPlan,
   buildWindowRejectionMask,
   calculateVisionReviewOverallScore,
   classifyListingReadiness,
   enforceVerticalWindowColumns,
+  estimateSceneReadinessScore,
   getTaskSpecificMaskStrategy,
   normalizeRoomType,
   planSmartEnhancements,
+  resolveSmartEnhancementExecution,
   resolveSurfaceMaskAtSourceSize,
   resolveFreeformPresetKey,
   segmentWallPlanesAtSourceSize,
@@ -24,6 +27,7 @@ import {
 import {
   buildProviderChain,
   calculatePerceptibilityScore,
+  classifyQuality,
   evaluatePaintStrength,
   getReplicateSettings,
   isCandidateSufficient,
@@ -32,6 +36,7 @@ import {
   rankCandidates,
   resolveVisionUserPlan,
   scorePaintCandidate,
+  selectReturnCandidate,
 } from './vision-orchestrator.helpers.js';
 import { orchestrateVisionJob } from './vision-orchestrator.service.js';
 import { resolveVisionPreset } from './vision-presets.js';
@@ -353,6 +358,109 @@ test('analyzeVisionScene derives first-impression signals from a bright windowed
   assert.match(scene.wallToneEstimate, /light|neutral|dark/);
 });
 
+test('estimateSceneReadinessScore rewards brighter cleaner scenes', () => {
+  const weaker = estimateSceneReadinessScore({
+    brightnessScore: 0.42,
+    contrastScore: 0.3,
+    lightingQuality: 0.4,
+    clutterLevel: 0.7,
+    furnitureDensity: 0.55,
+    windowCoverage: 0.08,
+    wallToneEstimate: 'dark',
+  });
+  const stronger = estimateSceneReadinessScore({
+    brightnessScore: 0.7,
+    contrastScore: 0.52,
+    lightingQuality: 0.73,
+    clutterLevel: 0.22,
+    furnitureDensity: 0.18,
+    windowCoverage: 0.28,
+    wallToneEstimate: 'light',
+  });
+
+  assert.ok(stronger > weaker);
+  assert.ok(stronger >= 60);
+});
+
+test('buildSceneAwareEnhancementRecipe keeps first-impression boosts stronger than listing refresh', () => {
+  const darkScene = {
+    brightnessScore: 0.4,
+    contrastScore: 0.32,
+    lightingQuality: 0.45,
+    clutterLevel: 0.3,
+    windowCoverage: 0.22,
+    wallToneEstimate: 'dark',
+  };
+  const firstImpressionRecipe = buildSceneAwareEnhancementRecipe(
+    darkScene,
+    'enhance_listing_quality',
+  );
+  const listingRecipe = buildSceneAwareEnhancementRecipe(
+    darkScene,
+    'combined_listing_refresh',
+  );
+
+  assert.ok(firstImpressionRecipe.exposureBoost > listingRecipe.exposureBoost);
+  assert.ok(firstImpressionRecipe.shadowLift > listingRecipe.shadowLift);
+  assert.ok(
+    firstImpressionRecipe.improvementsApplied.includes('first-impression polish'),
+  );
+  assert.ok(listingRecipe.improvementsApplied.includes('tone balancing'));
+});
+
+test('resolveSmartEnhancementExecution routes listing refresh through declutter when clutter is high', () => {
+  const routed = resolveSmartEnhancementExecution({
+    requestedPresetKey: 'combined_listing_refresh',
+    sceneAnalysis: {
+      roomType: 'living_room',
+      clutterLevel: 0.74,
+      lightingQuality: 0.68,
+      furnitureDensity: 0.36,
+      wallVisibility: 0.45,
+      windowCoverage: 0.22,
+    },
+  });
+
+  assert.equal(routed.executionPresetKey, 'declutter_medium');
+  assert.equal(routed.routingApplied, true);
+  assert.match(routed.reason, /clutter/i);
+});
+
+test('resolveSmartEnhancementExecution keeps listing refresh direct when the scene is already stable', () => {
+  const routed = resolveSmartEnhancementExecution({
+    requestedPresetKey: 'combined_listing_refresh',
+    sceneAnalysis: {
+      roomType: 'living_room',
+      clutterLevel: 0.18,
+      lightingQuality: 0.75,
+      furnitureDensity: 0.28,
+      wallVisibility: 0.52,
+      windowCoverage: 0.18,
+    },
+  });
+
+  assert.equal(routed.executionPresetKey, 'combined_listing_refresh');
+  assert.equal(routed.routingApplied, false);
+});
+
+test('resolveSmartEnhancementExecution routes listing refresh through lighting boost when the room is too dim', () => {
+  const routed = resolveSmartEnhancementExecution({
+    requestedPresetKey: 'combined_listing_refresh',
+    sceneAnalysis: {
+      roomType: 'living_room',
+      clutterLevel: 0.22,
+      lightingQuality: 0.41,
+      furnitureDensity: 0.36,
+      wallVisibility: 0.45,
+      windowCoverage: 0.18,
+    },
+  });
+
+  assert.equal(routed.executionPresetKey, 'lighting_boost');
+  assert.equal(routed.routingApplied, true);
+  assert.match(routed.reason, /lighting baseline/i);
+});
+
 test('buildFirstImpressionRecommendations prioritizes clutter, lighting, and wall tone guidance', () => {
   const recommendations = buildFirstImpressionRecommendations({
     clutterScore: 0.7,
@@ -385,6 +493,47 @@ test('planSmartEnhancements favors declutter and lighting before wall color expl
     'light_staging',
     'wall_color_test',
   ]);
+});
+
+test('classifyQuality keeps subtle but usable smart-enhancement candidates instead of hard rejecting them', () => {
+  const quality = classifyQuality(
+    {
+      overallScore: 5.8,
+      isSufficient: false,
+      focusRegionChangeRatio: 0.05,
+      maskedChangeRatio: 0.07,
+      furnitureCoverageIncreaseRatio: 0.01,
+    },
+    'floor_light_wood',
+  );
+
+  assert.equal(quality, 'concept');
+});
+
+test('selectReturnCandidate always returns the strongest ranked candidate when one exists', () => {
+  const selection = selectReturnCandidate(
+    [
+      {
+        providerKey: 'replicate_basic',
+        overallScore: 4.2,
+        isSufficient: false,
+        focusRegionChangeRatio: 0.03,
+        maskedChangeRatio: 0.05,
+      },
+      {
+        providerKey: 'local_sharp',
+        overallScore: 7.1,
+        isSufficient: true,
+        focusRegionChangeRatio: 0.08,
+        maskedChangeRatio: 0.09,
+      },
+    ],
+    'declutter_light',
+  );
+
+  assert.equal(selection.variant?.providerKey, 'local_sharp');
+  assert.equal(selection.quality, 'high');
+  assert.equal(selection.deliveryMode, 'always_return_best');
 });
 
 test('classifyListingReadiness returns listing-ready badge for strong clean outputs', () => {

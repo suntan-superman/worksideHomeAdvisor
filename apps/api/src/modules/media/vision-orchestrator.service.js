@@ -1,6 +1,7 @@
 import {
   buildProviderChain,
   calculatePerceptibilityScore,
+  classifyQuality,
   evaluatePaintStrength,
   getPaintOutsideMaskLimit,
   getVisionExecutionTimeBudgetMs,
@@ -9,6 +10,7 @@ import {
   isUsablePaintStrength,
   rankCandidates,
   resolveVisionUserPlan,
+  selectReturnCandidate,
 } from './vision-orchestrator.helpers.js';
 
 const MAX_PAINT_RETRIES = 3;
@@ -153,98 +155,8 @@ export async function orchestrateVisionJob({
     return Boolean(candidate.isSufficient);
   };
 
-  const classifyQuality = (candidate, presetKey = activePreset.key) => {
-    if (!candidate) {
-      return 'poor';
-    }
-
-    const normalizedQualityPresetKey = String(presetKey || '');
-    const perceptibility = calculatePerceptibilityScore(candidate);
-    const outsideMask = Number(candidate.outsideMaskChangeRatio || 0);
-    const topHalfChangeRatio = Number(candidate.topHalfChangeRatio || 0);
-    const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
-    const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
-
-    if (normalizedQualityPresetKey.startsWith('paint_')) {
-      const paintStrength =
-        candidate.paintStrength || evaluatePaintStrength(candidate, normalizedQualityPresetKey);
-
-      if (
-        isHighConfidenceEarlyExitCandidate(candidate, normalizedQualityPresetKey) ||
-        (
-          paintStrength.passes &&
-          perceptibility >= 0.35 &&
-          outsideMask <= 0.12 &&
-          topHalfChangeRatio <= 0.08 &&
-          furnitureCoverageIncreaseRatio <= 0.01 &&
-          newFurnitureAdditionRatio <= 0.01
-        )
-      ) {
-        return 'high';
-      }
-
-      if (
-        candidate.isSufficient ||
-        (
-          paintStrength.finalScore >= 5 &&
-          perceptibility >= 0.25 &&
-          outsideMask <= 0.2 &&
-          topHalfChangeRatio <= 0.16 &&
-          furnitureCoverageIncreaseRatio <= 0.01 &&
-          newFurnitureAdditionRatio <= 0.01
-        )
-      ) {
-        return 'good';
-      }
-
-      if (perceptibility >= 0.15 && paintStrength.finalScore >= 3) {
-        return 'concept';
-      }
-
-      return 'poor';
-    }
-
-    if (normalizedQualityPresetKey.startsWith('floor_')) {
-      if (isHighConfidenceEarlyExitCandidate(candidate, normalizedQualityPresetKey)) {
-        return 'high';
-      }
-
-      if (candidate.isSufficient) {
-        return 'good';
-      }
-
-      if (
-        Number(candidate.focusRegionChangeRatio || 0) >= 0.03 &&
-        Number(candidate.maskedChangeRatio || 0) >= 0.04
-      ) {
-        return 'concept';
-      }
-
-      return 'poor';
-    }
-
-    if (isHighConfidenceEarlyExitCandidate(candidate, normalizedQualityPresetKey)) {
-      return 'high';
-    }
-
-    if (candidate.isSufficient) {
-      return 'good';
-    }
-
-    return Number(candidate.overallScore || 0) >= 5 ? 'concept' : 'poor';
-  };
-
-  const selectBestCandidate = (candidates = allCandidates) => {
-    const ranked = rankAvailableCandidates(candidates);
-    const bestCandidate = ranked[0] || null;
-
-    return {
-      variant: bestCandidate,
-      quality: classifyQuality(bestCandidate, activePreset.key),
-      stoppedEarlyReason: bestCandidate ? 'ranked_best_candidate' : 'no_candidates_available',
-      deliveryMode: bestCandidate ? 'always_return_best' : 'none',
-    };
-  };
+  const selectBestCandidate = (candidates = allCandidates) =>
+    selectReturnCandidate(rankAvailableCandidates(candidates), activePreset.key);
 
   const diagnoseFinishFailure = (candidates = []) => {
     const best = rankCandidates(candidates, normalizedPresetKey)[0];

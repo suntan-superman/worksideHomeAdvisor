@@ -53,6 +53,9 @@ function serializeImageJob(document, variants = []) {
     provider: document.provider,
     providerJobId: document.providerJobId || null,
     presetKey: document.presetKey || document.jobType,
+    requestedPresetKey:
+      document.input?.requestedPresetKey || document.presetKey || document.jobType,
+    executionPresetKey: document.presetKey || document.jobType,
     mode: document.mode || 'preset',
     instructions: document.instructions || '',
     normalizedPlan: document.normalizedPlan || null,
@@ -1349,6 +1352,27 @@ function buildPresetRenderPlan(presetKey) {
     };
   }
 
+  if (preset.key === 'lighting_boost') {
+    return {
+      preset,
+      label: 'Lighting Boost',
+      warning: '',
+      summary:
+        'A lighting-first recovery pass that brightens darker rooms and balances highlights before stronger enhancement steps.',
+      differenceHint:
+        'Look for a cleaner brightness story, lifted shadows, and more balanced windows without any structural or styling changes.',
+      effects: ['Lighting recovery', 'Window balance', 'Shadow lift'],
+      cropInsetRatio: 0,
+      transform: (image) =>
+        image
+          .normalize()
+          .gamma(1.06)
+          .linear(1.08, -8)
+          .modulate({ brightness: 1.1, saturation: 1.04 })
+          .sharpen({ sigma: 1.15, m1: 0.9, m2: 2.1, x1: 2, x2: 12, x3: 24 }),
+    };
+  }
+
   return {
     preset,
     label: 'Enhanced Listing Version',
@@ -1519,6 +1543,187 @@ export async function analyzeVisionScene(buffer, roomType = 'unknown') {
   };
 }
 
+function buildExecutionAwareRenderPlan({
+  renderPlan,
+  requestedPreset,
+  executionPreset,
+  smartExecution = null,
+} = {}) {
+  if (
+    !renderPlan ||
+    !requestedPreset ||
+    !executionPreset ||
+    !smartExecution?.routingApplied ||
+    requestedPreset.key === executionPreset.key
+  ) {
+    return renderPlan;
+  }
+
+  const pathLabel = smartExecution.pathLabel || executionPreset.displayName || renderPlan.label;
+  const reasonSuffix = smartExecution.reason ? ` This path was chosen because ${smartExecution.reason}.` : '';
+  const differenceHint =
+    executionPreset.key === 'declutter_light' || executionPreset.key === 'declutter_medium'
+      ? 'Look for fewer distractions and a calmer room first. After that, the next listing-ready pass should read cleaner and more trustworthy.'
+      : executionPreset.key === 'lighting_boost'
+        ? 'Look for brighter shadows, steadier highlights, and a more balanced lighting baseline before the next listing-ready step.'
+        : renderPlan.differenceHint;
+
+  return {
+    ...renderPlan,
+    label: `${requestedPreset.displayName} via ${executionPreset.displayName}`,
+    summary: `${requestedPreset.displayName} is routing through ${executionPreset.displayName.toLowerCase()} first to improve the next listing-ready step.${reasonSuffix}`,
+    differenceHint,
+    effects: Array.from(new Set([...(renderPlan.effects || []), `Smart path: ${pathLabel}`])),
+  };
+}
+
+export function estimateSceneReadinessScore(scene = {}) {
+  const brightnessScore = clampUnit(scene.brightnessScore);
+  const contrastScore = clampUnit(scene.contrastScore);
+  const lightingQuality = clampUnit(scene.lightingQuality);
+  const clutterLevel = clampUnit(scene.clutterLevel || scene.clutterScore);
+  const furnitureDensity = clampUnit(scene.furnitureDensity);
+  const windowCoverage = clampUnit(scene.windowCoverage);
+  const wallPenalty = String(scene.wallToneEstimate || '') === 'dark' ? 5 : 0;
+
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        42 +
+          brightnessScore * 18 +
+          contrastScore * 12 +
+          lightingQuality * 14 +
+          Math.min(windowCoverage, 0.4) * 10 -
+          clutterLevel * 18 -
+          furnitureDensity * 8 -
+          wallPenalty,
+      ),
+    ),
+  );
+}
+
+export function buildSceneAwareEnhancementRecipe(
+  scene = {},
+  presetKey = 'enhance_listing_quality',
+) {
+  const isListingRefresh = String(presetKey || '') === 'combined_listing_refresh';
+  const isLightingBoost = String(presetKey || '') === 'lighting_boost';
+  const brightnessDeficit = clampUnit(0.68 - Number(scene.brightnessScore || 0));
+  const contrastDeficit = clampUnit(0.5 - Number(scene.contrastScore || 0));
+  const lightingDeficit = clampUnit(0.66 - Number(scene.lightingQuality || 0));
+  const clutterLevel = clampUnit(scene.clutterLevel || scene.clutterScore);
+  const windowCoverage = clampUnit(scene.windowCoverage);
+  const darkWallBoost = String(scene.wallToneEstimate || '') === 'dark' ? 1 : 0;
+  const cropInsetRatio = isLightingBoost
+    ? 0
+    : isListingRefresh
+      ? clutterLevel < 0.5
+        ? 0.03
+        : 0.018
+      : clutterLevel < 0.42
+        ? 0.014
+        : 0;
+  const exposureBoost = isLightingBoost
+    ? 0.08 + brightnessDeficit * 0.16 + lightingDeficit * 0.08
+    : isListingRefresh
+      ? 0.04 + brightnessDeficit * 0.08 + lightingDeficit * 0.03
+      : 0.06 + brightnessDeficit * 0.12 + lightingDeficit * 0.05;
+  const shadowLift = isLightingBoost
+    ? 0.08 + brightnessDeficit * 0.14
+    : isListingRefresh
+      ? 0.05 + brightnessDeficit * 0.08
+      : 0.06 + brightnessDeficit * 0.12;
+  const highlightCompression = Math.min(
+    isLightingBoost ? 0.12 : isListingRefresh ? 0.1 : 0.08,
+    0.02 + windowCoverage * (isLightingBoost ? 0.16 : isListingRefresh ? 0.13 : 0.1),
+  );
+  const contrastBoost = isLightingBoost
+    ? 0.03 + contrastDeficit * 0.07
+    : isListingRefresh
+      ? 0.03 + contrastDeficit * 0.08
+      : 0.05 + contrastDeficit * 0.12;
+  const saturationBoost = isLightingBoost
+    ? 0.008 + lightingDeficit * 0.016
+    : isListingRefresh
+      ? 0.01 + lightingDeficit * 0.02
+      : 0.015 + lightingDeficit * 0.03;
+  const warmthShift = Math.round(
+    (isLightingBoost ? 1 : isListingRefresh ? 1.5 : 2.5) +
+      darkWallBoost * (isLightingBoost ? 1 : 2) +
+      lightingDeficit * (isLightingBoost ? 3 : 6),
+  );
+  const sharpenSigma = isLightingBoost ? 1.05 : isListingRefresh ? 1.25 : 1.1;
+  const improvementsApplied = [];
+
+  if (exposureBoost >= 0.07) {
+    improvementsApplied.push('lighting enhancement');
+  }
+  if (shadowLift >= 0.08) {
+    improvementsApplied.push('shadow lift');
+  }
+  if (contrastBoost >= 0.05) {
+    improvementsApplied.push('clarity boost');
+  }
+  if (highlightCompression >= 0.04) {
+    improvementsApplied.push('highlight correction');
+  }
+  if (isLightingBoost) {
+    improvementsApplied.push('lighting recovery');
+    improvementsApplied.push('window balancing');
+  } else if (isListingRefresh) {
+    improvementsApplied.push('tone balancing');
+    improvementsApplied.push('color normalization');
+  } else {
+    improvementsApplied.push('first-impression polish');
+  }
+  if (cropInsetRatio >= 0.014) {
+    improvementsApplied.push('subtle crop optimization');
+  }
+
+  return {
+    cropInsetRatio: Number(cropInsetRatio.toFixed(4)),
+    exposureBoost: Number(exposureBoost.toFixed(4)),
+    shadowLift: Number(shadowLift.toFixed(4)),
+    highlightCompression: Number(highlightCompression.toFixed(4)),
+    contrastBoost: Number(contrastBoost.toFixed(4)),
+    saturationBoost: Number(saturationBoost.toFixed(4)),
+    warmthShift,
+    sharpenSigma,
+    improvementsApplied,
+  };
+}
+
+function detectListingArtifacts({
+  sourceSceneAnalysis = {},
+  renderedSceneAnalysis = {},
+  outsideMaskChangeRatio = 0,
+  topHalfChangeRatio = 0,
+  newFurnitureAdditionRatio = 0,
+  furnitureCoverageIncreaseRatio = 0,
+} = {}) {
+  const brightnessShift = Math.abs(
+    Number(renderedSceneAnalysis.brightnessScore || 0) -
+      Number(sourceSceneAnalysis.brightnessScore || 0),
+  );
+  const contrastDrop =
+    Number(sourceSceneAnalysis.contrastScore || 0) -
+    Number(renderedSceneAnalysis.contrastScore || 0);
+
+  return {
+    edgeArtifacts: Number(outsideMaskChangeRatio || 0) > 0.18,
+    lightingInconsistency: brightnessShift > 0.2,
+    colorBanding: contrastDrop > 0.18 && brightnessShift > 0.08,
+    unnaturalShadows:
+      brightnessShift > 0.12 && Number(renderedSceneAnalysis.windowCoverage || 0) < 0.05,
+    objectDistortion:
+      Number(topHalfChangeRatio || 0) > 0.12 ||
+      Number(newFurnitureAdditionRatio || 0) > 0.02 ||
+      Number(furnitureCoverageIncreaseRatio || 0) > 0.03,
+  };
+}
+
 export function buildFirstImpressionRecommendations(scene = {}) {
   const recommendations = [];
 
@@ -1644,6 +1849,82 @@ function buildEnhancementNextActions(plan = []) {
       return '';
     })
     .filter(Boolean);
+}
+
+async function renderSceneAwareEnhancementBuffer(
+  sourceBuffer,
+  presetKey,
+  sceneAnalysis = {},
+) {
+  const sourceMetadata = await sharp(sourceBuffer).rotate().metadata();
+  const width = Number(sourceMetadata.width || 0);
+  const height = Number(sourceMetadata.height || 0);
+  const recipe = buildSceneAwareEnhancementRecipe(sceneAnalysis, presetKey);
+  let workingImage = sharp(sourceBuffer).rotate();
+
+  if (recipe.cropInsetRatio > 0) {
+    workingImage = applyCenterCrop(workingImage, sourceMetadata, recipe.cropInsetRatio);
+  }
+
+  const sourceRgba = await workingImage.ensureAlpha().raw().toBuffer();
+  const transformed = Buffer.from(sourceRgba);
+
+  for (let index = 0; index < width * height; index += 1) {
+    const offset = index * 4;
+    let red = transformed[offset];
+    let green = transformed[offset + 1];
+    let blue = transformed[offset + 2];
+    const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+    const shadowMask = clampUnit((0.66 - luminance) / 0.66);
+    const highlightMask = clampUnit((luminance - 0.72) / 0.28);
+    const midtoneMask = clampUnit(1 - Math.abs(luminance - 0.5) / 0.5);
+    const exposureFactor = 1 + recipe.exposureBoost * (0.35 + shadowMask * 0.65);
+    const contrastFactor = 1 + recipe.contrastBoost * (0.4 + midtoneMask * 0.6);
+    const shadowOffset = recipe.shadowLift * shadowMask * 255 * (0.35 + midtoneMask * 0.65);
+    const highlightOffset =
+      recipe.highlightCompression * highlightMask * 255 * (0.45 + midtoneMask * 0.25);
+
+    red = red * exposureFactor + shadowOffset - highlightOffset;
+    green = green * exposureFactor + shadowOffset - highlightOffset;
+    blue = blue * exposureFactor + shadowOffset - highlightOffset;
+
+    red = (red - 127.5) * contrastFactor + 127.5;
+    green = (green - 127.5) * contrastFactor + 127.5;
+    blue = (blue - 127.5) * contrastFactor + 127.5;
+
+    const { h, s, l } = rgbToHsl(clampByte(red), clampByte(green), clampByte(blue));
+    const [tunedRed, tunedGreen, tunedBlue] = hslToRgb(
+      h,
+      clamp01(s * (1 + recipe.saturationBoost)),
+      l,
+    );
+
+    red =
+      tunedRed +
+      recipe.warmthShift * (0.35 + midtoneMask * 0.65) +
+      recipe.highlightCompression * highlightMask * 10;
+    green = tunedGreen + recipe.warmthShift * 0.18 * midtoneMask;
+    blue = tunedBlue - recipe.warmthShift * (0.3 + midtoneMask * 0.4);
+
+    transformed[offset] = clampByte(red);
+    transformed[offset + 1] = clampByte(green);
+    transformed[offset + 2] = clampByte(blue);
+  }
+
+  const buffer = await sharp(transformed, {
+    raw: { width, height, channels: 4 },
+  })
+    .sharpen({ sigma: recipe.sharpenSigma, m1: 0.8, m2: 1.8, x1: 2, x2: 12, x3: 24 })
+    .jpeg({ quality: 90, mozjpeg: true })
+    .toBuffer();
+
+  return {
+    buffer,
+    debug: {
+      recipe,
+      improvementsApplied: recipe.improvementsApplied,
+    },
+  };
 }
 
 function sortVisionVariants(variants = []) {
@@ -2641,19 +2922,24 @@ async function renderLocalFloorVariantBuffer(sourceBuffer, presetKey, roomType) 
   };
 }
 
-async function renderVariantBuffer(buffer, presetKey, roomType) {
+async function renderVariantBuffer(buffer, presetKey, roomType, { sceneAnalysis = null } = {}) {
   const renderPlan = buildPresetRenderPlan(presetKey);
   const sourceMetadata = await sharp(buffer).rotate().metadata();
-  const transformedResult = String(presetKey || '').startsWith('paint_')
-    ? await renderLocalWallPaintVariantBuffer(buffer, presetKey, roomType)
-    : String(presetKey || '').startsWith('floor_')
-      ? await renderLocalFloorVariantBuffer(buffer, presetKey, roomType)
-      : await (typeof renderPlan.transform === 'function'
-        ? renderPlan
-            .transform(sharp(buffer).rotate(), sourceMetadata)
-            .jpeg({ quality: 88, mozjpeg: true })
-            .toBuffer()
-        : sharp(buffer).rotate().jpeg({ quality: 88, mozjpeg: true }).toBuffer());
+  const transformedResult =
+    presetKey === 'enhance_listing_quality' ||
+    presetKey === 'combined_listing_refresh' ||
+    presetKey === 'lighting_boost'
+      ? await renderSceneAwareEnhancementBuffer(buffer, presetKey, sceneAnalysis || {})
+      : String(presetKey || '').startsWith('paint_')
+        ? await renderLocalWallPaintVariantBuffer(buffer, presetKey, roomType)
+        : String(presetKey || '').startsWith('floor_')
+          ? await renderLocalFloorVariantBuffer(buffer, presetKey, roomType)
+          : await (typeof renderPlan.transform === 'function'
+            ? renderPlan
+                .transform(sharp(buffer).rotate(), sourceMetadata)
+                .jpeg({ quality: 88, mozjpeg: true })
+                .toBuffer()
+            : sharp(buffer).rotate().jpeg({ quality: 88, mozjpeg: true }).toBuffer());
   const transformed =
     Buffer.isBuffer(transformedResult) ? transformedResult : transformedResult.buffer;
   const debug = Buffer.isBuffer(transformedResult) ? null : transformedResult.debug || null;
@@ -5562,6 +5848,7 @@ function buildVisionJobHash({
   assetId,
   sourceVariantId = '',
   presetKey,
+  requestedPresetKey = '',
   roomType,
   promptVersion,
   mode = 'preset',
@@ -5574,6 +5861,7 @@ function buildVisionJobHash({
         assetId,
         sourceVariantId: String(sourceVariantId || ''),
         presetKey,
+        requestedPresetKey: String(requestedPresetKey || presetKey || ''),
         roomType,
         promptVersion,
         mode,
@@ -5582,6 +5870,63 @@ function buildVisionJobHash({
       }),
     )
     .digest('hex');
+}
+
+export function resolveSmartEnhancementExecution({
+  requestedPresetKey = 'combined_listing_refresh',
+  sceneAnalysis = {},
+} = {}) {
+  const requestedPreset = resolveVisionPreset(requestedPresetKey);
+  const smartEnhancementPlan = planSmartEnhancements(sceneAnalysis);
+  const clutterLevel = Number(sceneAnalysis.clutterLevel || sceneAnalysis.clutterScore || 0);
+  const lightingQuality = Number(sceneAnalysis.lightingQuality || 0);
+  const requestKey = requestedPreset.key;
+
+  if (requestKey !== 'combined_listing_refresh') {
+    return {
+      requestedPresetKey: requestKey,
+      executionPresetKey: requestKey,
+      smartEnhancementPlan,
+      routingApplied: false,
+      pathLabel: requestedPreset.displayName,
+      reason: '',
+    };
+  }
+
+  if (smartEnhancementPlan.includes('declutter')) {
+    const executionPresetKey = clutterLevel >= 0.68 ? 'declutter_medium' : 'declutter_light';
+    return {
+      requestedPresetKey: requestKey,
+      executionPresetKey,
+      smartEnhancementPlan,
+      routingApplied: executionPresetKey !== requestKey,
+      pathLabel: executionPresetKey === 'declutter_medium' ? 'Stronger declutter first' : 'Light declutter first',
+      reason:
+        clutterLevel >= 0.68
+          ? 'visible clutter is still too strong for a trustworthy final listing pass'
+          : 'visible distractions should be reduced before the final listing polish',
+    };
+  }
+
+  if (lightingQuality < 0.62) {
+    return {
+      requestedPresetKey: requestKey,
+      executionPresetKey: 'lighting_boost',
+      smartEnhancementPlan,
+      routingApplied: true,
+      pathLabel: 'Lighting recovery first',
+      reason: 'the room needs a brighter and more balanced lighting baseline before final listing polish',
+    };
+  }
+
+  return {
+    requestedPresetKey: requestKey,
+    executionPresetKey: requestKey,
+    smartEnhancementPlan,
+    routingApplied: false,
+    pathLabel: requestedPreset.displayName,
+    reason: '',
+  };
 }
 
 async function loadJobVariants(jobId) {
@@ -5723,10 +6068,13 @@ async function buildReviewedLocalSharpCandidates({
   sourceImageBase64,
 }) {
   const sourceSceneAnalysis = await analyzeVisionScene(sourceBuffer, resolvedRoomType);
+  const sourceReadinessScore = estimateSceneReadinessScore(sourceSceneAnalysis);
   const firstImpressionRecommendations = buildFirstImpressionRecommendations(sourceSceneAnalysis);
   const smartEnhancementPlan = planSmartEnhancements(sourceSceneAnalysis);
   const nextActions = buildEnhancementNextActions(smartEnhancementPlan);
-  const rendered = await renderVariantBuffer(sourceBuffer, preset.key, resolvedRoomType);
+  const rendered = await renderVariantBuffer(sourceBuffer, preset.key, resolvedRoomType, {
+    sceneAnalysis: sourceSceneAnalysis,
+  });
   let surfaceMaskDebug =
     isWallPreset(preset.key) || isFloorPreset(preset.key) ? rendered.debug || null : null;
   if (preset.key === 'floor_tile_stone' && rendered.debug?.floorMaskBuffer && asset?.propertyId) {
@@ -5872,6 +6220,7 @@ async function buildReviewedLocalSharpCandidates({
   });
   const overallScore = calculateVisionReviewOverallScore(review);
   const renderedSceneAnalysis = await analyzeVisionScene(rendered.buffer, resolvedRoomType);
+  const renderedReadinessScore = estimateSceneReadinessScore(renderedSceneAnalysis);
   const listingReadiness = classifyListingReadiness({
     review,
     outsideMaskChangeRatio,
@@ -5879,19 +6228,18 @@ async function buildReviewedLocalSharpCandidates({
     hallucinatedObjectRisk:
       newFurnitureAdditionRatio > 0.03 || furnitureCoverageIncreaseRatio > 0.02,
   });
-  const estimatedReadinessDelta = Math.max(
-    1,
-    Math.min(
-      8,
-      Math.round(
-        Math.max(0, renderedSceneAnalysis.brightnessScore - sourceSceneAnalysis.brightnessScore) *
-          10 +
-          Math.max(0, renderedSceneAnalysis.contrastScore - sourceSceneAnalysis.contrastScore) * 8 +
-          Math.max(0, sourceSceneAnalysis.clutterScore - renderedSceneAnalysis.clutterScore) * 6 +
-          1,
-      ),
-    ),
-  );
+  const artifactFlags = detectListingArtifacts({
+    sourceSceneAnalysis,
+    renderedSceneAnalysis,
+    outsideMaskChangeRatio,
+    topHalfChangeRatio,
+    newFurnitureAdditionRatio,
+    furnitureCoverageIncreaseRatio,
+  });
+  const improvementsApplied = Array.isArray(rendered.debug?.improvementsApplied)
+    ? rendered.debug.improvementsApplied
+    : [];
+  const estimatedReadinessDelta = Math.max(0, renderedReadinessScore - sourceReadinessScore);
   const pipelineStage =
     preset.key === 'combined_listing_refresh'
       ? 'listing_ready'
@@ -5901,26 +6249,37 @@ async function buildReviewedLocalSharpCandidates({
   const summary =
     preset.key === 'combined_listing_refresh'
       ? listingReadiness.label === 'Listing Ready'
-        ? 'A stricter listing-ready polish pass that keeps the photo realistic while improving clarity, tone balance, and publish confidence.'
-        : 'A safe listing enhancement that improves clarity and presentation while preserving realism and trust.'
+        ? `A stricter listing-ready polish pass that keeps the photo realistic while improving clarity, tone balance, and publish confidence. Readiness ${sourceReadinessScore} -> ${renderedReadinessScore}.`
+        : `A safe listing enhancement that improves clarity and presentation while preserving realism and trust. Readiness ${sourceReadinessScore} -> ${renderedReadinessScore}.`
+      : preset.key === 'lighting_boost'
+        ? `A lighting-first recovery pass that brightens darker areas and balances highlights before heavier enhancement steps. Readiness ${sourceReadinessScore} -> ${renderedReadinessScore}.`
       : preset.key === 'enhance_listing_quality'
-        ? `An instant first-impression enhancement that lifts light and clarity while keeping the room truthful. Estimated readiness lift: +${estimatedReadinessDelta}.`
+        ? `An instant first-impression enhancement that lifts light, tone balance, and clarity while keeping the room truthful. Readiness ${sourceReadinessScore} -> ${renderedReadinessScore}.`
         : renderPlan.summary;
   const differenceHint =
     preset.key === 'combined_listing_refresh'
       ? 'Look for a cleaner, more publishable result with realistic lighting, restrained contrast, and no suspicious edits.'
+      : preset.key === 'lighting_boost'
+        ? 'Look for lifted shadows, better highlight control, and a more balanced lighting baseline without layout or style changes.'
       : preset.key === 'enhance_listing_quality'
         ? 'Look for better brightness, cleaner contrast, and a more inviting first impression at thumbnail size.'
         : renderPlan.differenceHint;
   const effects = Array.from(
     new Set([
       ...(rendered.effects || renderPlan.effects || []),
+      ...improvementsApplied,
+      preset.key === 'lighting_boost' ? 'Lighting-first recovery' : '',
       preset.key === 'enhance_listing_quality' ? 'Instant first-impression boost' : '',
       preset.key === 'combined_listing_refresh' ? listingReadiness.confidenceBadge : '',
     ].filter(Boolean)),
   );
   const warning =
-    preset.key === 'combined_listing_refresh' && listingReadiness.label !== 'Listing Ready'
+    preset.key === 'combined_listing_refresh' &&
+    (
+      listingReadiness.label !== 'Listing Ready' ||
+      artifactFlags.edgeArtifacts ||
+      artifactFlags.objectDistortion
+    )
       ? 'Advanced edits were limited to preserve realism and trust.'
       : rendered.warning;
 
@@ -5969,6 +6328,10 @@ async function buildReviewedLocalSharpCandidates({
       listingReadyScore: listingReadiness.score,
       listingReadyLabel: listingReadiness.label,
       readinessDelta: estimatedReadinessDelta,
+      sourceReadinessScore,
+      renderedReadinessScore,
+      improvementsApplied,
+      artifactFlags,
       recommendations: firstImpressionRecommendations,
       nextActions,
       sceneAnalysis: sourceSceneAnalysis,
@@ -5976,6 +6339,82 @@ async function buildReviewedLocalSharpCandidates({
       smartEnhancementPlan,
     },
   ];
+}
+
+async function buildGuaranteedMarketplaceFallbackCandidate({
+  asset,
+  requestedPreset,
+  failedExecutionPreset,
+  resolvedRoomType,
+  requestedMode,
+  normalizedInstructions,
+  normalizedPlan,
+  sourceBuffer,
+  sourceImageBase64,
+} = {}) {
+  const shouldGuaranteeFallback =
+    requestedMode === 'freeform' ||
+    requestedPreset?.category === 'enhancement' ||
+    failedExecutionPreset?.category === 'enhancement';
+  if (!shouldGuaranteeFallback) {
+    return null;
+  }
+
+  const fallbackPreset = resolveVisionPreset('enhance_listing_quality');
+  const fallbackRenderPlan = buildPresetRenderPlan(fallbackPreset.key);
+  const [candidate] = await buildReviewedLocalSharpCandidates({
+    asset,
+    preset: fallbackPreset,
+    renderPlan: fallbackRenderPlan,
+    resolvedRoomType,
+    requestedMode,
+    normalizedInstructions,
+    normalizedPlan,
+    sourceBuffer,
+    sourceImageBase64,
+  });
+
+  if (!candidate) {
+    return null;
+  }
+
+  const pathLabel =
+    requestedPreset?.key === 'combined_listing_refresh'
+      ? 'Safe listing fallback'
+      : requestedMode === 'freeform'
+        ? 'Safe custom fallback'
+        : 'Safe enhancement fallback';
+  const reason =
+    'the requested advanced enhancement did not produce a trustworthy preview, so a deterministic first-impression enhancement was returned instead';
+
+  candidate.label =
+    requestedPreset?.key === 'combined_listing_refresh'
+      ? 'Safe Listing Fallback'
+      : requestedMode === 'freeform'
+        ? 'Safe Custom Fallback'
+        : 'Safe Enhancement Fallback';
+  candidate.summary =
+    requestedPreset?.key === 'combined_listing_refresh'
+      ? 'The advanced listing-ready pass did not produce a trustworthy preview, so a deterministic enhancement was returned instead to keep the workflow moving.'
+      : requestedMode === 'freeform'
+        ? 'The custom request did not produce a trustworthy preview, so a deterministic enhancement was returned instead.'
+        : 'The requested enhancement did not produce a trustworthy preview, so a deterministic enhancement was returned instead.';
+  candidate.differenceHint =
+    'Look for a cleaner, brighter, trustworthy baseline result. This is a safe fallback rather than the full advanced transformation.';
+  candidate.warning = 'Advanced edits were limited to preserve realism and trust.';
+  candidate.effects = Array.from(
+    new Set([...(candidate.effects || []), 'Safe marketplace fallback']),
+  );
+  candidate.pipelineStage =
+    requestedPreset?.key === 'combined_listing_refresh' ? 'listing_ready' : 'first_impression';
+
+  return {
+    preset: fallbackPreset,
+    renderPlan: fallbackRenderPlan,
+    candidate,
+    pathLabel,
+    reason,
+  };
 }
 
 async function buildReviewedReplicateCandidates({
@@ -7313,6 +7752,13 @@ async function persistOrchestratedVisionCandidates({
         roomLabel: asset.roomLabel,
         roomType: resolvedRoomType,
         provider: candidate.providerKey || preset.providerPreference || 'local_sharp',
+        requestedPresetKey: job.input?.requestedPresetKey || preset.key,
+        requestedPresetLabel: job.input?.requestedPresetLabel || preset.displayName,
+        executionPresetKey: job.input?.executionPresetKey || preset.key,
+        executionPresetLabel: job.input?.executionPresetLabel || preset.displayName,
+        smartEnhancementPathLabel: job.input?.smartEnhancementPathLabel || '',
+        smartEnhancementReason: job.input?.smartEnhancementReason || '',
+        smartEnhancementRoutingApplied: Boolean(job.input?.smartEnhancementRoutingApplied),
         presetKey: preset.key,
         promptVersion: preset.promptVersion,
         helperText: preset.helperText,
@@ -7331,6 +7777,15 @@ async function persistOrchestratedVisionCandidates({
         listingReadyScore: candidate.listingReadyScore ?? null,
         listingReadyLabel: candidate.listingReadyLabel || '',
         readinessDelta: candidate.readinessDelta ?? null,
+        sourceReadinessScore: candidate.sourceReadinessScore ?? null,
+        renderedReadinessScore: candidate.renderedReadinessScore ?? null,
+        improvementsApplied: Array.isArray(candidate.improvementsApplied)
+          ? candidate.improvementsApplied
+          : [],
+        artifactFlags:
+          candidate.artifactFlags && typeof candidate.artifactFlags === 'object'
+            ? candidate.artifactFlags
+            : {},
         recommendations: Array.isArray(candidate.recommendations) ? candidate.recommendations : [],
         nextActions: Array.isArray(candidate.nextActions) ? candidate.nextActions : [],
         smartEnhancementPlan: Array.isArray(candidate.smartEnhancementPlan)
@@ -7453,10 +7908,35 @@ export async function createImageEnhancementJob({
     requestedMode === 'freeform'
       ? buildFreeformEnhancementPlan(normalizedInstructions, resolvedRoomType)
       : null;
-  const resolvedPresetKey =
+  const requestedPresetKey =
     requestedMode === 'freeform'
       ? resolveFreeformPresetKey({ presetKey, jobType, normalizedPlan })
       : presetKey || jobType;
+  const requestedPreset = resolveVisionPreset(requestedPresetKey);
+  let stored = null;
+  let smartExecution = {
+    requestedPresetKey: requestedPreset.key,
+    executionPresetKey: requestedPreset.key,
+    smartEnhancementPlan: [],
+    routingApplied: false,
+    pathLabel: requestedPreset.displayName,
+    reason: '',
+  };
+  let routedSceneAnalysis = null;
+
+  if (requestedMode === 'preset' && requestedPreset.key === 'combined_listing_refresh') {
+    stored = await readStoredAsset({
+      storageProvider: sourceRecord.storageProvider,
+      storageKey: sourceRecord.storageKey,
+    });
+    routedSceneAnalysis = await analyzeVisionScene(stored.buffer, resolvedRoomType);
+    smartExecution = resolveSmartEnhancementExecution({
+      requestedPresetKey: requestedPreset.key,
+      sceneAnalysis: routedSceneAnalysis,
+    });
+  }
+
+  const resolvedPresetKey = smartExecution.executionPresetKey || requestedPreset.key;
   const preset = resolveVisionPreset(resolvedPresetKey);
   if (requestedMode === 'freeform') {
     console.log('vision_freeform_plan_resolved', {
@@ -7475,6 +7955,7 @@ export async function createImageEnhancementJob({
     assetId: asset._id.toString(),
     sourceVariantId: normalizedSourceVariantId,
     presetKey: preset.key,
+    requestedPresetKey: requestedPreset.key,
     roomType: resolvedRoomType,
     promptVersion: preset.promptVersion,
     mode: requestedMode,
@@ -7538,6 +8019,15 @@ export async function createImageEnhancementJob({
       roomType: resolvedRoomType,
       mimeType: sourceRecord.mimeType || asset.mimeType,
       prompt: preset.basePrompt,
+      requestedPresetKey: requestedPreset.key,
+      requestedPresetLabel: requestedPreset.displayName,
+      executionPresetKey: preset.key,
+      executionPresetLabel: preset.displayName,
+      smartEnhancementPathLabel: smartExecution.pathLabel || '',
+      smartEnhancementReason: smartExecution.reason || '',
+      smartEnhancementRoutingApplied: Boolean(smartExecution.routingApplied),
+      smartEnhancementPlan: smartExecution.smartEnhancementPlan || [],
+      smartRoutingSceneAnalysis: routedSceneAnalysis,
       helperText: preset.helperText,
       recommendedUse: preset.recommendedUse,
       upgradeTier: preset.upgradeTier,
@@ -7555,10 +8045,19 @@ export async function createImageEnhancementJob({
   });
 
   try {
-    const renderPlan =
+    const baseRenderPlan =
       requestedMode === 'freeform'
         ? buildFreeformRenderPlan(normalizedPlan)
         : buildPresetRenderPlan(preset.key);
+    const renderPlan =
+      requestedMode === 'freeform'
+        ? baseRenderPlan
+        : buildExecutionAwareRenderPlan({
+            renderPlan: baseRenderPlan,
+            requestedPreset,
+            executionPreset: preset,
+            smartExecution,
+          });
     const roomPromptAddon = getRoomPromptAddon(resolvedRoomType);
     const presetPromptAddon = getPresetPromptAddon(preset.key, resolvedRoomType);
     const freeformPlanPromptAddon =
@@ -7580,10 +8079,12 @@ export async function createImageEnhancementJob({
       ...(job.input || {}),
       fullPrompt,
     };
-    const stored = await readStoredAsset({
-      storageProvider: sourceRecord.storageProvider,
-      storageKey: sourceRecord.storageKey,
-    });
+    if (!stored) {
+      stored = await readStoredAsset({
+        storageProvider: sourceRecord.storageProvider,
+        storageKey: sourceRecord.storageKey,
+      });
+    }
     const paintRoomMetrics = isWallPreset(preset.key)
       ? await extractPaintRoomMetrics(stored.buffer, preset.key, resolvedRoomType)
       : null;
@@ -7717,11 +8218,52 @@ export async function createImageEnhancementJob({
       throw new Error('Vision generation was cancelled.');
     }
 
-    if (!orchestrationResult.bestVariant) {
+    let responsePreset = preset;
+    let responseRenderPlan = renderPlan;
+    let finalOrchestrationResult = orchestrationResult;
+
+    if (!finalOrchestrationResult.bestVariant) {
+      const marketplaceFallback = await buildGuaranteedMarketplaceFallbackCandidate({
+        asset,
+        requestedPreset,
+        failedExecutionPreset: preset,
+        resolvedRoomType,
+        requestedMode,
+        normalizedInstructions,
+        normalizedPlan,
+        sourceBuffer: stored.buffer,
+        sourceImageBase64,
+      });
+
+      if (marketplaceFallback) {
+        responsePreset = marketplaceFallback.preset;
+        responseRenderPlan = marketplaceFallback.renderPlan;
+        finalOrchestrationResult = {
+          ...orchestrationResult,
+          providerUsed: 'local_sharp',
+          fallbackApplied: true,
+          bestVariant: marketplaceFallback.candidate,
+          quality: 'good',
+          allCandidates: [marketplaceFallback.candidate],
+          stoppedEarlyReason: 'safe_marketplace_fallback',
+          deliveryMode: 'safe_marketplace_fallback',
+        };
+        job.input = {
+          ...(job.input || {}),
+          executionPresetKey: responsePreset.key,
+          executionPresetLabel: responsePreset.displayName,
+          smartEnhancementPathLabel: marketplaceFallback.pathLabel,
+          smartEnhancementReason: marketplaceFallback.reason,
+          smartEnhancementRoutingApplied: true,
+        };
+      }
+    }
+
+    if (!finalOrchestrationResult.bestVariant) {
       job.status = 'completed';
-      job.provider = orchestrationResult.providerUsed || 'vision_orchestrator';
-      job.attemptCount = Number(orchestrationResult.providerAttemptCount || 0);
-      job.maxAttempts = Number(orchestrationResult.orchestration?.chain?.length || 1);
+      job.provider = finalOrchestrationResult.providerUsed || 'vision_orchestrator';
+      job.attemptCount = Number(finalOrchestrationResult.providerAttemptCount || 0);
+      job.maxAttempts = Number(finalOrchestrationResult.orchestration?.chain?.length || 1);
       job.currentStage = 'completed';
       job.fallbackMode = 'advisor_only';
       job.failureReason = '';
@@ -7729,15 +8271,15 @@ export async function createImageEnhancementJob({
       job.selectedVariantId = null;
       job.input = {
         ...(job.input || {}),
-        userPlan: orchestrationResult.userPlan,
-        orchestrationChain: orchestrationResult.orchestration?.chain || [],
-        orchestrationAttempts: orchestrationResult.orchestration?.attempts || [],
-        orchestrationElapsedMs: Number(orchestrationResult.elapsedTimeMs || 0),
-        orchestrationTimeBudgetMs: Number(orchestrationResult.maxExecutionTimeMs || 0),
-        orchestrationStoppedEarlyReason: orchestrationResult.stoppedEarlyReason || '',
-        orchestrationTimeBudgetReached: Boolean(orchestrationResult.timeBudgetReached),
-        orchestrationQuality: orchestrationResult.quality || 'poor',
-        orchestrationDeliveryMode: orchestrationResult.deliveryMode || 'advisor_only',
+        userPlan: finalOrchestrationResult.userPlan,
+        orchestrationChain: finalOrchestrationResult.orchestration?.chain || [],
+        orchestrationAttempts: finalOrchestrationResult.orchestration?.attempts || [],
+        orchestrationElapsedMs: Number(finalOrchestrationResult.elapsedTimeMs || 0),
+        orchestrationTimeBudgetMs: Number(finalOrchestrationResult.maxExecutionTimeMs || 0),
+        orchestrationStoppedEarlyReason: finalOrchestrationResult.stoppedEarlyReason || '',
+        orchestrationTimeBudgetReached: Boolean(finalOrchestrationResult.timeBudgetReached),
+        orchestrationQuality: finalOrchestrationResult.quality || 'poor',
+        orchestrationDeliveryMode: finalOrchestrationResult.deliveryMode || 'advisor_only',
       };
       job.message = 'No visual preview was returned for this image.';
       job.warning =
@@ -7746,7 +8288,7 @@ export async function createImageEnhancementJob({
 
       return {
         cached: false,
-        preset,
+        preset: responsePreset,
         job: serializeImageJob(job.toObject(), []),
         variants: [],
         variant: null,
@@ -7754,30 +8296,30 @@ export async function createImageEnhancementJob({
     }
 
     let createdVariants = await persistOrchestratedVisionCandidates({
-      candidates: orchestrationResult.allCandidates,
+      candidates: finalOrchestrationResult.allCandidates,
       job,
       asset,
       sourceRecord,
-      preset,
-      renderPlan,
+      preset: responsePreset,
+      renderPlan: responseRenderPlan,
       resolvedRoomType,
       requestedMode,
       normalizedInstructions,
       normalizedPlan,
       workflowStageKey: normalizedWorkflowStageKey,
-      orchestrationResult,
+      orchestrationResult: finalOrchestrationResult,
       roomPromptAddon,
       presetPromptAddon,
     });
     createdVariants = sortVisionVariants(createdVariants);
     job.status = 'completed';
-    job.provider = orchestrationResult.providerUsed || 'vision_orchestrator';
-    job.attemptCount = Number(orchestrationResult.providerAttemptCount || 0);
-    job.maxAttempts = Number(orchestrationResult.orchestration?.chain?.length || 1);
-    const orchestrationQuality = String(orchestrationResult.quality || 'poor');
+    job.provider = finalOrchestrationResult.providerUsed || 'vision_orchestrator';
+    job.attemptCount = Number(finalOrchestrationResult.providerAttemptCount || 0);
+    job.maxAttempts = Number(finalOrchestrationResult.orchestration?.chain?.length || 1);
+    const orchestrationQuality = String(finalOrchestrationResult.quality || 'poor');
     const usedQualityWarning = ['good', 'concept', 'poor'].includes(orchestrationQuality);
     const usedFallbackVariant =
-      Boolean(orchestrationResult.fallbackApplied) ||
+      Boolean(finalOrchestrationResult.fallbackApplied) ||
       createdVariants.some((variant) => Boolean(variant?.metadata?.fallbackApplied));
     job.currentStage = usedFallbackVariant || usedQualityWarning ? 'fallback' : 'completed';
     job.fallbackMode = usedQualityWarning
@@ -7790,34 +8332,43 @@ export async function createImageEnhancementJob({
     job.selectedVariantId = createdVariants[0]?.id || null;
     job.input = {
       ...(job.input || {}),
-      userPlan: orchestrationResult.userPlan,
-      orchestrationChain: orchestrationResult.orchestration?.chain || [],
-      orchestrationAttempts: orchestrationResult.orchestration?.attempts || [],
-      orchestrationElapsedMs: Number(orchestrationResult.elapsedTimeMs || 0),
-      orchestrationTimeBudgetMs: Number(orchestrationResult.maxExecutionTimeMs || 0),
-      orchestrationStoppedEarlyReason: orchestrationResult.stoppedEarlyReason || '',
-      orchestrationTimeBudgetReached: Boolean(orchestrationResult.timeBudgetReached),
+      userPlan: finalOrchestrationResult.userPlan,
+      orchestrationChain: finalOrchestrationResult.orchestration?.chain || [],
+      orchestrationAttempts: finalOrchestrationResult.orchestration?.attempts || [],
+      orchestrationElapsedMs: Number(finalOrchestrationResult.elapsedTimeMs || 0),
+      orchestrationTimeBudgetMs: Number(finalOrchestrationResult.maxExecutionTimeMs || 0),
+      orchestrationStoppedEarlyReason: finalOrchestrationResult.stoppedEarlyReason || '',
+      orchestrationTimeBudgetReached: Boolean(finalOrchestrationResult.timeBudgetReached),
       orchestrationQuality,
-      orchestrationDeliveryMode: orchestrationResult.deliveryMode || 'none',
+      orchestrationDeliveryMode: finalOrchestrationResult.deliveryMode || 'none',
     };
-    const providerLabel = orchestrationResult.providerUsed || 'vision_orchestrator';
+    const providerLabel = finalOrchestrationResult.providerUsed || 'vision_orchestrator';
     const qualityWarning =
       orchestrationQuality === 'high'
         ? ''
         : orchestrationQuality === 'good'
           ? 'Strong preview — the change is clear, with only minor imperfections to review before listing use.'
           : orchestrationQuality === 'concept'
-            ? preset.key === 'paint_dark_charcoal_test'
+            ? responsePreset.key === 'paint_dark_charcoal_test'
               ? 'Concept preview — the wall-color change is obvious, but bright upper-wall or window-adjacent spill may still be present.'
               : 'Concept preview — the requested direction is visible, though minor edge spill or cleanup issues may still exist.'
             : 'Low-confidence preview — limited change was detected, so the result may not fully reflect the intended update.';
-    job.warning = qualityWarning
+    const safeMarketplaceFallback =
+      finalOrchestrationResult.deliveryMode === 'safe_marketplace_fallback';
+    job.warning = safeMarketplaceFallback
+      ? 'Advanced edits were limited to preserve realism and trust.'
+      : qualityWarning
       ? qualityWarning
       : usedFallbackVariant
         ? 'Primary provider was insufficient, so an advanced AI fallback was used.'
-        : renderPlan.warning;
-    job.message =
-      requestedMode === 'freeform'
+        : responseRenderPlan.warning;
+    job.message = safeMarketplaceFallback
+      ? requestedMode === 'freeform'
+        ? 'Custom enhancement returned as a safe fallback preview.'
+        : requestedPreset.key === 'combined_listing_refresh'
+          ? 'Listing-ready request returned as a safe fallback preview.'
+          : 'Enhancement returned as a safe fallback preview.'
+      : requestedMode === 'freeform'
         ? orchestrationQuality === 'high'
           ? `Custom enhancement ready via ${providerLabel}.`
           : orchestrationQuality === 'good'
@@ -7836,7 +8387,7 @@ export async function createImageEnhancementJob({
 
     return {
       cached: false,
-      preset,
+      preset: responsePreset,
       job: serializeImageJob(job.toObject(), createdVariants),
       variants: createdVariants,
       variant: createdVariants[0] || null,
