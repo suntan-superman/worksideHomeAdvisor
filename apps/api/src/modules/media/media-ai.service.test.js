@@ -451,9 +451,9 @@ test('scorePaintCandidate rejects heavy-penalty no-op wall previews', () => {
     'paint_warm_neutral',
   );
 
-  assert.equal(score.classification, 'no-op');
+  assert.equal(score.classification, 'weak');
   assert.equal(score.shouldUse, false);
-  assert.equal(score.finalScore, 0);
+  assert.ok(score.finalScore > 0);
 });
 
 test('evaluatePaintStrength penalizes weak repaint candidates using normalized review scores', () => {
@@ -546,6 +546,75 @@ test('paint_warm_neutral sufficiency preserves zero spill metrics instead of coe
     ),
     true,
   );
+});
+
+test('paint_warm_neutral accepts strong wall repaint candidates in window-heavy rooms', () => {
+  assert.equal(
+    isCandidateSufficient(
+      {
+        overallScore: 0,
+        maskedChangeRatio: 0.8379,
+        focusRegionChangeRatio: 0.5825,
+        maskedColorShiftRatio: 0.1142,
+        maskedLuminanceDelta: 0.0841,
+        maskedEdgeDensityDelta: -0.0329,
+        topHalfChangeRatio: 0.04,
+        outsideMaskChangeRatio: 0.5256,
+        windowCoverageRatio: 0.5648,
+        windowBrightPixelRatio: 0.5401,
+        windowStructuredPixelRatio: 0.2132,
+        furnitureCoverageIncreaseRatio: 0,
+        newFurnitureAdditionRatio: 0,
+      },
+      'paint_warm_neutral',
+    ),
+    true,
+  );
+});
+
+test('paint_warm_neutral still rejects broad spill when the room is not window-heavy', () => {
+  assert.equal(
+    isCandidateSufficient(
+      {
+        overallScore: 0,
+        maskedChangeRatio: 0.8379,
+        focusRegionChangeRatio: 0.5825,
+        maskedColorShiftRatio: 0.1142,
+        maskedLuminanceDelta: 0.0841,
+        maskedEdgeDensityDelta: -0.0329,
+        topHalfChangeRatio: 0.04,
+        outsideMaskChangeRatio: 0.5256,
+        windowCoverageRatio: 0.08,
+        windowBrightPixelRatio: 0.12,
+        windowStructuredPixelRatio: 0.04,
+        furnitureCoverageIncreaseRatio: 0,
+        newFurnitureAdditionRatio: 0,
+      },
+      'paint_warm_neutral',
+    ),
+    false,
+  );
+});
+
+test('paint scoring does not misclassify window-heavy wall repaints as a no-op', () => {
+  const score = scorePaintCandidate(
+    {
+      maskedChangeRatio: 0.8379,
+      maskedColorShiftRatio: 0.1142,
+      maskedLuminanceDelta: 0.0841,
+      outsideMaskChangeRatio: 0.5256,
+      windowCoverageRatio: 0.5648,
+      windowBrightPixelRatio: 0.5401,
+      windowStructuredPixelRatio: 0.2132,
+      paintStrength: {
+        penalties: 3,
+      },
+    },
+    'paint_warm_neutral',
+  );
+
+  assert.equal(score.shouldUse, true);
+  assert.notEqual(score.classification, 'no-op');
 });
 
 test('shouldSkipPaintGeneration skips bright neutral rooms that already present well', () => {
@@ -828,6 +897,45 @@ test('paint presets accept a visibly changed warm wall candidate when the usable
   assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
   assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
   assert.equal(result.deliveryMode, 'high_confidence');
+});
+
+test('paint presets accept window-heavy warm wall candidates with high outside-mask change', async () => {
+  const result = await orchestrateVisionJob({
+    asset: { roomLabel: 'Living room' },
+    preset: resolveVisionPreset('paint_warm_neutral'),
+    roomType: 'living_room',
+    requestedMode: 'preset',
+    userPlan: 'premium',
+    sourceBuffer: Buffer.from('source'),
+    sourceImageBase64: 'source',
+    providerRunners: {
+      runReplicateProvider: async () => [],
+      runOpenAiEdit: async () => [
+        {
+          providerKey: 'openai_edit',
+          overallScore: 0,
+          maskedChangeRatio: 0.8379,
+          focusRegionChangeRatio: 0.5825,
+          maskedColorShiftRatio: 0.1142,
+          maskedLuminanceDelta: 0.0841,
+          maskedEdgeDensityDelta: -0.0329,
+          topHalfChangeRatio: 0.04,
+          outsideMaskChangeRatio: 0.5256,
+          windowCoverageRatio: 0.5648,
+          windowBrightPixelRatio: 0.5401,
+          windowStructuredPixelRatio: 0.2132,
+          furnitureCoverageIncreaseRatio: 0,
+          newFurnitureAdditionRatio: 0,
+        },
+      ],
+      runLocalSharp: async () => [],
+    },
+  });
+
+  assert.equal(result.providerUsed, 'openai_edit');
+  assert.equal(result.bestVariant?.providerKey, 'openai_edit');
+  assert.equal(result.stoppedEarlyReason, 'acceptable_candidate');
+  assert.equal(result.deliveryMode, 'acceptable');
 });
 
 test('paint presets keep a strong local fallback preview when strict review fields are missing', async () => {

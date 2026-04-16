@@ -37,10 +37,29 @@ export const PAINT_STRENGTH_MIN_ACCEPTABLE_SCORE = 5.5;
 export const PAINT_STRENGTH_MIN_USABLE_SCORE = 4;
 export const PAINT_STRENGTH_MIN_USABLE_PERCEPTIBILITY = 0.25;
 
+export function getPaintOutsideMaskLimit(candidate = {}, presetKey = '') {
+  const normalizedPresetKey = String(presetKey || '');
+  if (!normalizedPresetKey.startsWith('paint_')) {
+    return 0.25;
+  }
+
+  const windowCoverageRatio = Math.max(
+    Number(candidate.windowCoverageRatio || 0),
+    Number(candidate.windowRejectionCoverageRatio || 0),
+  );
+  const windowBrightPixelRatio = Number(candidate.windowBrightPixelRatio || 0);
+  const windowStructuredPixelRatio = Number(candidate.windowStructuredPixelRatio || 0);
+  const isWindowHeavyRoom =
+    windowCoverageRatio > 0.25 ||
+    (windowBrightPixelRatio > 0.4 && windowStructuredPixelRatio > 0.16);
+
+  return isWindowHeavyRoom ? 0.6 : 0.25;
+}
+
 function resolvePaintStrengthThresholds(presetKey) {
   if (presetKey === 'paint_warm_neutral') {
     return {
-      minColorShift: PAINT_STRENGTH_MIN_COLOR_SHIFT,
+      minColorShift: 0.11,
       minLuminanceDelta: PAINT_STRENGTH_MIN_LUMINANCE_DELTA,
       minPerceptibility: PAINT_STRENGTH_MIN_USABLE_PERCEPTIBILITY,
       minAcceptableScore: 5,
@@ -270,6 +289,7 @@ export function scorePaintCandidate(candidate = {}, presetKey = '') {
   const perceptibilityScore = calculatePerceptibilityScore(candidate);
   const outsideMaskChangeRatio = Number(candidate.outsideMaskChangeRatio || 0);
   const penalties = Number(candidate.paintStrength?.penalties ?? 0);
+  const outsideMaskLimit = getPaintOutsideMaskLimit(candidate, normalizedPresetKey);
   const strengthBoost =
     normalizedPresetKey === 'paint_bright_white'
       ? 1.08
@@ -277,7 +297,7 @@ export function scorePaintCandidate(candidate = {}, presetKey = '') {
         ? 1.04
         : 1;
   const visualImpact = Number((perceptibilityScore * strengthBoost).toFixed(4));
-  const spillPenalty = Math.max(0, outsideMaskChangeRatio - 0.15);
+  const spillPenalty = Math.max(0, outsideMaskChangeRatio - outsideMaskLimit);
   const penaltyMultiplier = Math.max(0.4, 1 - penalties * 0.08);
   const finalScore = Number(
     Math.max(0, visualImpact * penaltyMultiplier - spillPenalty).toFixed(4),
@@ -300,22 +320,23 @@ export function scorePaintCandidate(candidate = {}, presetKey = '') {
       classification === 'strong' ||
       (classification === 'weak' &&
         finalScore >= 0.08 &&
-        outsideMaskChangeRatio <= 0.22),
+        outsideMaskChangeRatio <= Math.max(0.22, outsideMaskLimit)),
   };
 }
 
-export function normalizeVisionCandidateScore(candidate = {}) {
+export function normalizeVisionCandidateScore(candidate = {}, presetKey = '') {
   const overallScore = Number(candidate.overallScore || 0);
   if (!Number.isFinite(overallScore) || overallScore <= 0) {
     const perceptibilityScore = calculatePerceptibilityScore(candidate);
     const maskedChangeRatio = Number(candidate.maskedChangeRatio || 0);
     const focusRegionChangeRatio = Number(candidate.focusRegionChangeRatio || 0);
     const outsideMaskChangeRatio = Number(candidate.outsideMaskChangeRatio || 0);
+    const outsideMaskLimit = getPaintOutsideMaskLimit(candidate, presetKey);
     const derivedScore =
       perceptibilityScore * 14 +
       maskedChangeRatio * 3 +
       focusRegionChangeRatio * 1.5 -
-      Math.max(0, outsideMaskChangeRatio - 0.12) * 4;
+      Math.max(0, outsideMaskChangeRatio - outsideMaskLimit) * 4;
     return Number(Math.max(0, Math.min(10, derivedScore)).toFixed(2));
   }
 
@@ -341,7 +362,7 @@ export function evaluatePaintStrength(candidate = {}, presetKey = '') {
     penalties += 2;
   }
 
-  const baselineScore = normalizeVisionCandidateScore(candidate);
+  const baselineScore = normalizeVisionCandidateScore(candidate, presetKey);
   const finalScore = Number(Math.max(0, baselineScore - penalties).toFixed(2));
 
   return {
@@ -548,6 +569,7 @@ export function isCandidateSufficient(candidate, presetKey) {
     const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
     const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
     const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
+    const outsideMaskLimit = getPaintOutsideMaskLimit(candidate, presetKey);
 
     if (presetKey === 'paint_dark_charcoal_test') {
       return (
@@ -556,7 +578,7 @@ export function isCandidateSufficient(candidate, presetKey) {
         Math.abs(maskedLuminanceDelta) >= 0.06 &&
         maskedEdgeDensityDelta <= 0.003 &&
         Number(candidate.topHalfChangeRatio ?? 1) <= 0.08 &&
-        Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.16 &&
+        Number(candidate.outsideMaskChangeRatio ?? 1) <= outsideMaskLimit &&
         furnitureCoverageIncreaseRatio <= 0.01 &&
         newFurnitureAdditionRatio <= 0.01
       );
@@ -573,7 +595,7 @@ export function isCandidateSufficient(candidate, presetKey) {
         isUsablePaintStrength(paintStrength) &&
         maskedEdgeDensityDelta <= 0.0025 &&
         Number(candidate.topHalfChangeRatio ?? 1) <= 0.08 &&
-        Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.12 &&
+        Number(candidate.outsideMaskChangeRatio ?? 1) <= outsideMaskLimit &&
         furnitureCoverageIncreaseRatio <= 0.01 &&
         newFurnitureAdditionRatio <= 0.01
       );
@@ -587,7 +609,7 @@ export function isCandidateSufficient(candidate, presetKey) {
       isUsablePaintStrength(paintStrength) &&
       maskedEdgeDensityDelta <= 0.0025 &&
       Number(candidate.topHalfChangeRatio ?? 1) <= 0.08 &&
-      Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.12 &&
+      Number(candidate.outsideMaskChangeRatio ?? 1) <= outsideMaskLimit &&
       furnitureCoverageIncreaseRatio <= 0.01 &&
       newFurnitureAdditionRatio <= 0.01
     );
@@ -618,11 +640,12 @@ function isPreferredFinishFallbackCandidate(candidate, presetKey) {
   const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
   const focusRegionChangeRatio = Number(candidate.focusRegionChangeRatio || 0);
   const paintStrength = evaluatePaintStrength(candidate, normalizedPresetKey);
+  const outsideMaskLimit = getPaintOutsideMaskLimit(candidate, normalizedPresetKey);
 
   if (isPaintPreset) {
     if (
       topHalfChangeRatio > 0.08 ||
-      outsideMaskChangeRatio > 0.12 ||
+      outsideMaskChangeRatio > outsideMaskLimit ||
       furnitureCoverageIncreaseRatio > 0.01 ||
       newFurnitureAdditionRatio > 0.01 ||
       maskedEdgeDensityDelta > 0.003

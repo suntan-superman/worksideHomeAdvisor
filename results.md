@@ -1,119 +1,132 @@
-The Fix (THIS is what you actually need)
-
-We are NOT tweaking…
-We are changing the philosophy of acceptance.
-
-✅ FIX 1 — Lower thresholds (immediate unblock)
-
-Replace this:
-
-export const PAINT_STRENGTH_MIN_COLOR_SHIFT = 0.22;
-export const PAINT_STRENGTH_MIN_LUMINANCE_DELTA = 0.18;
-export const PAINT_STRENGTH_MIN_PERCEPTIBILITY = 0.65;
-export const PAINT_STRENGTH_MIN_ACCEPTABLE_SCORE = 7.5;
-With this:
-export const PAINT_STRENGTH_MIN_COLOR_SHIFT = 0.12;
-export const PAINT_STRENGTH_MIN_LUMINANCE_DELTA = 0.08;
-export const PAINT_STRENGTH_MIN_PERCEPTIBILITY = 0.35;
-export const PAINT_STRENGTH_MIN_ACCEPTABLE_SCORE = 5.5;
-
-👉 This alone will unblock ~70% of your failures
-
-✅ FIX 2 — Stop requiring passes for usability
-
-This is HUGE.
+THE FIX (this is the real one, not optional)
+🔥 Fix 1 — Relax outside mask constraint for paint
 
 Change this:
 
-paintStrength.passes
+outsideMaskChangeRatio <= 0.16
 To:
-paintStrength.finalScore >= 4
+outsideMaskChangeRatio <= 0.55
+🔥 Fix 2 — Even better (context-aware)
 
-👉 Why?
-Because “usable” ≠ “perfect”
+Replace this:
 
-✅ FIX 3 — Relax isCandidateSufficient for paint
-
-Replace:
-
-paintStrength.perceptibilityScore >= paintStrength.minPerceptibility &&
-paintStrength.passes
+Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.16
 With:
-paintStrength.perceptibilityScore >= 0.25 &&
-paintStrength.finalScore >= 4
-✅ FIX 4 — Your scoring function is actually fine 👍
+const outsideMaskLimit =
+  candidate.windowCoverageRatio > 0.25 ? 0.6 : 0.25;
 
-This part is GOOD:
+Number(candidate.outsideMaskChangeRatio ?? 1) <= outsideMaskLimit
 
-classification === 'strong' ||
-(classification === 'weak' && finalScore >= 0.08)
+👉 Now:
 
-👉 The issue is:
-nothing ever reaches it because of earlier gates
+Bright window rooms → tolerant
+Normal rooms → strict
+🔥 Fix 3 — Stop zeroing out overallScore
 
-💥 FIX 5 — Add HARD TEST MODE (this is non-negotiable)
+Right now:
 
-Right now you’re testing with:
+overallScore: 0
 
-warm_neutral
+👉 That means somewhere you are doing:
 
-That’s like testing a speaker at volume 2 and saying it's broken.
+“If ANY constraint fails → score = 0”
 
-Add this preset:
-paint_dark_charcoal_test: {
-  key: 'paint_dark_charcoal_test',
-  strength: 0.95,
-  guidanceScale: 9.5,
-  numInferenceSteps: 55,
-  basePrompt: `
-  Repaint all walls a deep charcoal gray.
-  The result must be dramatically darker than the original image.
-  This change should be immediately obvious at first glance.
-  Maintain realistic lighting and shadows.
-  `,
-  negativePrompt: `
-  furniture changes, decor changes, new objects, lighting changes
-  `
-}
-AND bypass scoring for this preset:
+That’s too aggressive.
 
-Inside isPaintPreset logic:
+Replace hard fail with penalty:
 
-if (presetKey === 'paint_dark_charcoal_test') {
-  return true;
+Instead of:
+
+if (outsideMaskChangeRatio > threshold) {
+  overallScore = 0;
 }
 
-👉 This gives you:
+Do:
 
-A guaranteed visible result
-Confidence pipeline works
-🎯 What will happen after these fixes
-Your current image:
-Before	After
-❌ rejected	✅ accepted (weak but valid)
-❌ "no strong visual change"	✅ subtle visible shift
-❌ user frustrated	✅ user sees difference
-🧠 Bigger Product Insight (this matters)
+if (outsideMaskChangeRatio > threshold) {
+  overallScore -= 2;
+}
+🔥 Fix 4 — Your candidate SHOULD PASS
 
-You built a system that says:
+Based on your own data:
 
-“If it’s not impressive, hide it”
+Metric	Value	Verdict
+maskedChangeRatio	0.83	🔥 Excellent
+color shift	0.11	✅ Good
+luminance	0.08	✅ Good
+perceptibility	0.47	✅ Solid
+final score	5.35	✅ Usable
 
-But your product actually needs:
+👉 This is NOT a bad result
+👉 Your system is just rejecting it incorrectly
 
-“Show it, and explain it if subtle”
+🧠 The key realization
 
-💬 Your UI message should change too
+You built:
+
+A fraud detection system
+
+But you need:
+
+A visual enhancement system
+
+🎯 What your system should do here
 
 Instead of:
 
 ❌ “No strong visual change detected”
 
-Use:
+You should show:
 
-✅ “Subtle improvement applied — best suited for already well-presented rooms.”
+✅ “Subtle but realistic enhancement applied”
 
-🚀 Bottom Line
+🚀 Expected outcome after fix
 
-You are NOT dealing with a model problem
-You are dealing with a threshold + gating problem
+With JUST Fix #1 applied:
+
+Before	After
+❌ rejected	✅ accepted
+❌ overallScore = 0	✅ ~4–6
+❌ no UI update	✅ visible improvement
+❌ frustrating UX	✅ believable result
+💡 Bonus (this is next-level)
+
+You already compute:
+
+maskedChangeRatio: 0.8379
+
+👉 That’s insanely high
+
+You could actually add:
+
+if (candidate.maskedChangeRatio > 0.7) {
+  autoAccept = true;
+}
+
+Because:
+
+“If 80% of wall pixels changed… something clearly happened”
+
+🔥 Bottom line
+
+You don’t have:
+
+❌ a model problem
+❌ a prompt problem
+
+You have:
+
+✅ an overly strict validation system misclassifying good results
+
+If you want the next step (high ROI)
+
+I can help you implement:
+
+🧠 Smart acceptance tiers
+Strong
+Subtle
+Advisory (still show result)
+🔁 Auto retry escalation (you already started this 👏)
+Warm → stronger → bold
+🎯 Room-aware thresholds
+Bright rooms ≠ dark rooms

@@ -2,6 +2,7 @@ import {
   buildProviderChain,
   calculatePerceptibilityScore,
   evaluatePaintStrength,
+  getPaintOutsideMaskLimit,
   getPreferredFinishFallbackCandidates,
   getVisionExecutionTimeBudgetMs,
   isHighConfidenceEarlyExitCandidate,
@@ -181,11 +182,12 @@ export async function orchestrateVisionJob({
       const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
       const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
       const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
+      const outsideMaskLimit = getPaintOutsideMaskLimit(candidate, normalizedPresetKey);
 
       if (Number.isFinite(topHalfChangeRatio) && topHalfChangeRatio > 0.12) {
         return false;
       }
-      if (Number.isFinite(outsideMaskChangeRatio) && outsideMaskChangeRatio > 0.14) {
+      if (Number.isFinite(outsideMaskChangeRatio) && outsideMaskChangeRatio > outsideMaskLimit) {
         return false;
       }
       if (furnitureCoverageIncreaseRatio > 0.01 || newFurnitureAdditionRatio > 0.01) {
@@ -236,13 +238,14 @@ export async function orchestrateVisionJob({
         { ...candidate, paintStrength },
         normalizedPresetKey,
       );
+      const outsideMaskLimit = getPaintOutsideMaskLimit(candidate, normalizedPresetKey);
       return (
         paintScore.shouldUse &&
         Number(candidate.maskedChangeRatio || 0) >= 0.03 &&
         Number(candidate.maskedColorShiftRatio || 0) >= 0.05 &&
         Math.abs(Number(candidate.maskedLuminanceDelta || 0)) >= 0.04 &&
         (!Number.isFinite(topHalfChangeRatio) || topHalfChangeRatio <= 0.12) &&
-        (!Number.isFinite(outsideMaskChangeRatio) || outsideMaskChangeRatio <= 0.22) &&
+        (!Number.isFinite(outsideMaskChangeRatio) || outsideMaskChangeRatio <= outsideMaskLimit) &&
         newFurnitureAdditionRatio <= 0.01 &&
         furnitureCoverageIncreaseRatio <= 0.01 &&
         maskedEdgeDensityDelta <= 0.008
@@ -344,11 +347,12 @@ export async function orchestrateVisionJob({
 
     if (isPaintPreset) {
       const paintStrength = evaluatePaintStrength(best, normalizedPresetKey);
+      const outsideMaskLimit = getPaintOutsideMaskLimit(best, normalizedPresetKey);
       if (
         Number(best.newFurnitureAdditionRatio || 0) > 0.01 ||
         Number(best.maskedEdgeDensityDelta || 0) > 0.01 ||
         Number(best.topHalfChangeRatio || 0) > 0.08 ||
-        Number(best.outsideMaskChangeRatio || 0) > 0.12
+        Number(best.outsideMaskChangeRatio || 0) > outsideMaskLimit
       ) {
         return { shouldRetry: true, type: 'hallucination', action: 'tighten_negative_prompt', best };
       }
