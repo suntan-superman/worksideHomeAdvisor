@@ -239,16 +239,22 @@ export async function orchestrateVisionJob({
         normalizedPresetKey,
       );
       const outsideMaskLimit = getPaintOutsideMaskLimit(candidate, normalizedPresetKey);
+      const perceptibilityScore = calculatePerceptibilityScore(candidate);
+      const maskedChangeRatio = Number(candidate.maskedChangeRatio || 0);
+      const maskedColorShiftRatio = Number(candidate.maskedColorShiftRatio || 0);
+      const maskedLuminanceDelta = Math.abs(Number(candidate.maskedLuminanceDelta || 0));
       return (
         paintScore.shouldUse &&
-        Number(candidate.maskedChangeRatio || 0) >= 0.03 &&
-        Number(candidate.maskedColorShiftRatio || 0) >= 0.05 &&
-        Math.abs(Number(candidate.maskedLuminanceDelta || 0)) >= 0.04 &&
+        maskedChangeRatio >= 0.08 &&
+        (maskedColorShiftRatio >= 0.05 ||
+          maskedLuminanceDelta >= 0.02 ||
+          perceptibilityScore >= 0.2) &&
         (!Number.isFinite(topHalfChangeRatio) || topHalfChangeRatio <= 0.12) &&
-        (!Number.isFinite(outsideMaskChangeRatio) || outsideMaskChangeRatio <= outsideMaskLimit) &&
+        (!Number.isFinite(outsideMaskChangeRatio) ||
+          outsideMaskChangeRatio <= Math.max(0.3, outsideMaskLimit)) &&
         newFurnitureAdditionRatio <= 0.01 &&
         furnitureCoverageIncreaseRatio <= 0.01 &&
-        maskedEdgeDensityDelta <= 0.008
+        maskedEdgeDensityDelta <= 0.015
       );
     }
 
@@ -283,7 +289,7 @@ export async function orchestrateVisionJob({
       isAcceptableFinishFallbackCandidate(candidate) ||
       isSafeBestEffortCandidate(candidate)
     ) {
-      return 'advisory_fallback';
+      return 'best_effort_preview';
     }
 
     return 'unusable';
@@ -313,14 +319,14 @@ export async function orchestrateVisionJob({
       };
     }
 
-    const advisory = ranked.find(
-      (candidate) => classifyCandidateQuality(candidate) === 'advisory_fallback',
+    const bestEffort = ranked.find(
+      (candidate) => classifyCandidateQuality(candidate) === 'best_effort_preview',
     );
-    if (advisory) {
+    if (bestEffort) {
       return {
-        variant: advisory,
-        stoppedEarlyReason: 'advisory_fallback',
-        deliveryMode: 'advisory_fallback',
+        variant: bestEffort,
+        stoppedEarlyReason: 'best_effort_preview_candidate',
+        deliveryMode: 'best_effort_preview',
       };
     }
 
@@ -670,16 +676,16 @@ export async function orchestrateVisionJob({
           });
         }
 
-        const advisoryFallback = normalizedCandidates.find(
-          (candidate) => classifyCandidateQuality(candidate) === 'advisory_fallback',
+        const bestEffortPreview = normalizedCandidates.find(
+          (candidate) => classifyCandidateQuality(candidate) === 'best_effort_preview',
         );
         const isFinalProviderInIteration = providerIndex >= chain.length - 1;
-        if (advisoryFallback && isFinalProviderInIteration) {
+        if (bestEffortPreview && isFinalProviderInIteration) {
           return buildResponse({
             providerUsed: providerKey,
-            bestVariant: advisoryFallback,
-            stoppedEarlyReason: 'advisory_fallback',
-            deliveryMode: 'advisory_fallback',
+            bestVariant: bestEffortPreview,
+            stoppedEarlyReason: 'best_effort_preview_candidate',
+            deliveryMode: 'best_effort_preview',
           });
         }
 

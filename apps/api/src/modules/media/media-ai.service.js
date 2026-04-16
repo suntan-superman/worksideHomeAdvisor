@@ -6907,10 +6907,10 @@ async function persistOrchestratedVisionCandidates({
         },
         fallbackApplied:
           Boolean(orchestrationResult?.fallbackApplied) ||
-          orchestrationResult?.stoppedEarlyReason === 'advisory_fallback',
+          orchestrationResult?.stoppedEarlyReason === 'best_effort_preview_candidate',
         fallbackReason:
-          orchestrationResult?.stoppedEarlyReason === 'advisory_fallback'
-            ? 'no_strong_visual_change_detected'
+          orchestrationResult?.stoppedEarlyReason === 'best_effort_preview_candidate'
+            ? 'best_effort_preview'
             : '',
         orchestrationAttempts: orchestrationResult?.orchestration?.attempts || [],
         orchestrationElapsedMs: Number(orchestrationResult?.elapsedTimeMs || 0),
@@ -7315,15 +7315,16 @@ export async function createImageEnhancementJob({
     job.provider = orchestrationResult.providerUsed || 'vision_orchestrator';
     job.attemptCount = Number(orchestrationResult.providerAttemptCount || 0);
     job.maxAttempts = Number(orchestrationResult.orchestration?.chain?.length || 1);
-    const usedAdvisoryFinishFallback =
-      orchestrationResult.stoppedEarlyReason === 'advisory_fallback';
+    const usedBestEffortPreview =
+      orchestrationResult.stoppedEarlyReason === 'best_effort_preview_candidate' ||
+      orchestrationResult.deliveryMode === 'best_effort_preview';
     const usedFallbackVariant =
       Boolean(orchestrationResult.fallbackApplied) ||
-      usedAdvisoryFinishFallback ||
+      usedBestEffortPreview ||
       createdVariants.some((variant) => Boolean(variant?.metadata?.fallbackApplied));
     job.currentStage = usedFallbackVariant ? 'fallback' : 'completed';
     job.fallbackMode = usedFallbackVariant
-      ? usedAdvisoryFinishFallback
+      ? usedBestEffortPreview
         ? 'best_available_preview'
         : 'provider_fallback'
       : null;
@@ -7341,16 +7342,16 @@ export async function createImageEnhancementJob({
       orchestrationTimeBudgetReached: Boolean(orchestrationResult.timeBudgetReached),
       orchestrationDeliveryMode: orchestrationResult.deliveryMode || 'none',
     };
-    job.warning = usedAdvisoryFinishFallback
-      ? 'No strong visual change detected, so the best available preview was selected instead of failing the job.'
+    job.warning = usedBestEffortPreview
+      ? 'Showing the best available concept preview. Review manually before relying on subtle finish changes.'
       : usedFallbackVariant
         ? 'Primary provider was insufficient, so an advanced AI fallback was used.'
         : renderPlan.warning;
     job.message =
       requestedMode === 'freeform'
         ? `Custom enhancement request saved and processed via ${orchestrationResult.providerUsed || 'vision_orchestrator'}.`
-        : usedAdvisoryFinishFallback
-          ? `Generated best available preview via ${orchestrationResult.providerUsed || 'vision_orchestrator'} after low-impact finish detection.`
+        : usedBestEffortPreview
+          ? `Generated best available preview via ${orchestrationResult.providerUsed || 'vision_orchestrator'} after low-confidence finish review.`
           : `Generated via ${orchestrationResult.providerUsed || 'vision_orchestrator'}${usedFallbackVariant ? ' after fallback' : ''}.`;
     await job.save();
 

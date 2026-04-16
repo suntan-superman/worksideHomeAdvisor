@@ -40,7 +40,7 @@ export const PAINT_STRENGTH_MIN_USABLE_PERCEPTIBILITY = 0.25;
 export function getPaintOutsideMaskLimit(candidate = {}, presetKey = '') {
   const normalizedPresetKey = String(presetKey || '');
   if (!normalizedPresetKey.startsWith('paint_')) {
-    return 0.25;
+    return 0.3;
   }
 
   const windowCoverageRatio = Math.max(
@@ -49,11 +49,21 @@ export function getPaintOutsideMaskLimit(candidate = {}, presetKey = '') {
   );
   const windowBrightPixelRatio = Number(candidate.windowBrightPixelRatio || 0);
   const windowStructuredPixelRatio = Number(candidate.windowStructuredPixelRatio || 0);
+  const averageBrightness = Number(candidate.averageBrightness || 0);
   const isWindowHeavyRoom =
     windowCoverageRatio > 0.25 ||
+    averageBrightness > 0.6 ||
     (windowBrightPixelRatio > 0.4 && windowStructuredPixelRatio > 0.16);
 
-  return isWindowHeavyRoom ? 0.6 : 0.25;
+  if (isWindowHeavyRoom) {
+    return 0.6;
+  }
+
+  if (windowCoverageRatio > 0.1) {
+    return 0.45;
+  }
+
+  return 0.3;
 }
 
 function resolvePaintStrengthThresholds(presetKey) {

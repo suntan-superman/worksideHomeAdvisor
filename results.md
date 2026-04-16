@@ -1,132 +1,156 @@
-THE FIX (this is the real one, not optional)
-🔥 Fix 1 — Relax outside mask constraint for paint
+THE EXACT PROBLEM (not theoretical anymore)
 
-Change this:
+It’s here:
 
-outsideMaskChangeRatio <= 0.16
-To:
-outsideMaskChangeRatio <= 0.55
-🔥 Fix 2 — Even better (context-aware)
+const outsideMaskLimit = getPaintOutsideMaskLimit(candidate, normalizedPresetKey);
 
-Replace this:
+if (Number.isFinite(outsideMaskChangeRatio) && outsideMaskChangeRatio > outsideMaskLimit) {
+  return false;
+}
 
-Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.16
-With:
-const outsideMaskLimit =
-  candidate.windowCoverageRatio > 0.25 ? 0.6 : 0.25;
+👉 This is inside:
 
-Number(candidate.outsideMaskChangeRatio ?? 1) <= outsideMaskLimit
+isAcceptableFinishFallbackCandidate()
+
+AND also inside:
+
+isSafeBestEffortCandidate()
+🚨 Why your result is STILL rejected
+
+Your candidate:
+
+outsideMaskChangeRatio ≈ 0.52
+
+Your system:
+
+outsideMaskLimit ≈ 0.16–0.25 (based on current helper)
+
+👉 So EVERY candidate is getting rejected at this gate.
+
+🔥 The REAL root cause (new insight from your code)
+
+You actually already abstracted the logic correctly:
+
+getPaintOutsideMaskLimit(candidate, normalizedPresetKey)
+
+👏 That’s good architecture.
+
+👉 But your implementation is wrong for real-world rooms
+
+🧠 What your system thinks
+
+Outside mask change = hallucination
+
+🧠 What’s ACTUALLY happening
+
+In your image:
+
+3 large windows
+Bright outdoor foliage
+White trim
+Reflective surfaces
+
+When walls change:
+
+Light balance changes
+Contrast shifts
+Window brightness perception shifts
+
+👉 This creates false “outside mask change”
+
+💥 So your guardrail is misfiring
+
+You built it to catch:
+
+❌ Added furniture
+❌ Weird hallucinations
+❌ Structural edits
+
+But it’s catching:
+
+✅ Lighting changes
+✅ Exposure shifts
+✅ Color balance effects
+✅ THE FIX (clean + surgical)
+🔥 Fix the helper (this is the right place)
+
+You already centralized it:
+
+getPaintOutsideMaskLimit()
+
+👉 That’s where we fix everything.
+
+✏️ Replace it with THIS:
+export function getPaintOutsideMaskLimit(candidate, presetKey) {
+  const windowRatio = Number(candidate.windowCoverageRatio || 0);
+  const brightness = Number(candidate.averageBrightness || 0);
+
+  // Bright window-heavy rooms need MUCH higher tolerance
+  if (windowRatio > 0.25 || brightness > 0.6) {
+    return 0.6;
+  }
+
+  // Medium brightness rooms
+  if (windowRatio > 0.1) {
+    return 0.45;
+  }
+
+  // Default rooms
+  return 0.3;
+}
+🔥 Minimal version (if you want quick test)
+
+Just do this first:
+
+return 0.6;
+
+👉 Literally one line change
+👉 Your system will instantly start accepting results
+
+🔥 SECOND CRITICAL ISSUE (also killing you)
+
+Inside diagnoseFinishFailure():
+
+if (Number(best.outsideMaskChangeRatio || 0) > outsideMaskLimit) {
+  return { shouldRetry: true, type: 'hallucination', action: 'tighten_negative_prompt', best };
+}
+
+🚨 THIS IS WRONG FOR PAINT
+
+✏️ Replace with:
+if (Number(best.outsideMaskChangeRatio || 0) > outsideMaskLimit * 1.3) {
+  return { shouldRetry: true, type: 'hallucination', action: 'tighten_negative_prompt', best };
+}
 
 👉 Now:
 
-Bright window rooms → tolerant
-Normal rooms → strict
-🔥 Fix 3 — Stop zeroing out overallScore
+Slight overshoot → allowed
+Massive hallucination → still blocked
+🔥 THIRD ISSUE (subtle but important)
 
-Right now:
+Your system currently requires:
 
-overallScore: 0
+Number(candidate.maskedChangeRatio || 0) >= 0.12
 
-👉 That means somewhere you are doing:
+But your candidate is:
 
-“If ANY constraint fails → score = 0”
+0.83  ← INSANELY HIGH
 
-That’s too aggressive.
+👉 That should be an auto-accept signal
 
-Replace hard fail with penalty:
+✏️ Add this override:
 
-Instead of:
-
-if (outsideMaskChangeRatio > threshold) {
-  overallScore = 0;
-}
-
-Do:
-
-if (outsideMaskChangeRatio > threshold) {
-  overallScore -= 2;
-}
-🔥 Fix 4 — Your candidate SHOULD PASS
-
-Based on your own data:
-
-Metric	Value	Verdict
-maskedChangeRatio	0.83	🔥 Excellent
-color shift	0.11	✅ Good
-luminance	0.08	✅ Good
-perceptibility	0.47	✅ Solid
-final score	5.35	✅ Usable
-
-👉 This is NOT a bad result
-👉 Your system is just rejecting it incorrectly
-
-🧠 The key realization
-
-You built:
-
-A fraud detection system
-
-But you need:
-
-A visual enhancement system
-
-🎯 What your system should do here
-
-Instead of:
-
-❌ “No strong visual change detected”
-
-You should show:
-
-✅ “Subtle but realistic enhancement applied”
-
-🚀 Expected outcome after fix
-
-With JUST Fix #1 applied:
-
-Before	After
-❌ rejected	✅ accepted
-❌ overallScore = 0	✅ ~4–6
-❌ no UI update	✅ visible improvement
-❌ frustrating UX	✅ believable result
-💡 Bonus (this is next-level)
-
-You already compute:
-
-maskedChangeRatio: 0.8379
-
-👉 That’s insanely high
-
-You could actually add:
+Inside isStrongEnoughFinishCandidate:
 
 if (candidate.maskedChangeRatio > 0.7) {
-  autoAccept = true;
+  return true;
 }
-
-Because:
-
-“If 80% of wall pixels changed… something clearly happened”
-
-🔥 Bottom line
-
-You don’t have:
-
-❌ a model problem
-❌ a prompt problem
-
-You have:
-
-✅ an overly strict validation system misclassifying good results
-
-If you want the next step (high ROI)
-
-I can help you implement:
-
-🧠 Smart acceptance tiers
-Strong
-Subtle
-Advisory (still show result)
-🔁 Auto retry escalation (you already started this 👏)
-Warm → stronger → bold
-🎯 Room-aware thresholds
-Bright rooms ≠ dark rooms
+🧪 What will happen after fix
+BEFORE
+❌ Strong repaint rejected
+❌ “No strong visual change detected”
+❌ User confusion
+AFTER
+✅ Candidate passes
+✅ UI shows result
+✅ Perceived intelligence ↑ dramatically
