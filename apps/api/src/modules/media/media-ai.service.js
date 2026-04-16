@@ -1377,6 +1377,275 @@ export function calculateVisionReviewOverallScore(review = {}) {
   return Math.round(structuralScore * 0.45 + artifactScore * 0.35 + listingAppealScore * 0.2);
 }
 
+function clampUnit(value) {
+  return Math.max(0, Math.min(1, Number(value || 0)));
+}
+
+function normalizeDimensionScore(value, divisor) {
+  return clampUnit(Number(divisor) > 0 ? Number(value || 0) / Number(divisor) : 0);
+}
+
+export async function analyzeVisionScene(buffer, roomType = 'unknown') {
+  const probeWidth = 64;
+  const probeHeight = 64;
+  const probe = await sharp(buffer)
+    .rotate()
+    .resize(probeWidth, probeHeight, { fit: 'cover' })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+
+  const topHalfLimit = Math.floor(probeHeight * 0.6);
+  const bottomStart = Math.floor(probeHeight * 0.62);
+  let luminanceSum = 0;
+  let luminanceSquaredSum = 0;
+  let topWindowPixels = 0;
+  let topFlatPixels = 0;
+  let topAnalyzedPixels = 0;
+  let clutterEdgePixels = 0;
+  let clutterAnalyzedPixels = 0;
+  let bottomEdgePixels = 0;
+  let bottomAnalyzedPixels = 0;
+  let wallLuminanceSum = 0;
+  let wallLuminanceCount = 0;
+  let floorLuminanceSum = 0;
+  let floorLuminanceCount = 0;
+
+  function getPixel(x, y) {
+    const offset = (y * probeWidth + x) * 3;
+    return [probe[offset], probe[offset + 1], probe[offset + 2]];
+  }
+
+  function getLuminance(red, green, blue) {
+    return (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+  }
+
+  for (let y = 0; y < probeHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      const [red, green, blue] = getPixel(x, y);
+      const luminance = getLuminance(red, green, blue);
+      const maxChannel = Math.max(red, green, blue);
+      const minChannel = Math.min(red, green, blue);
+      const saturation = (maxChannel - minChannel) / 255;
+      luminanceSum += luminance;
+      luminanceSquaredSum += luminance * luminance;
+
+      if (y < topHalfLimit) {
+        topAnalyzedPixels += 1;
+        const isWindowLike = luminance >= 0.82 && saturation <= 0.18;
+        if (isWindowLike) {
+          topWindowPixels += 1;
+        } else if (saturation <= 0.16 && luminance >= 0.18 && luminance <= 0.82) {
+          topFlatPixels += 1;
+          wallLuminanceSum += luminance;
+          wallLuminanceCount += 1;
+        }
+      }
+
+      if (y >= bottomStart) {
+        floorLuminanceSum += luminance;
+        floorLuminanceCount += 1;
+      }
+
+      if (x < probeWidth - 1 && y < probeHeight - 1) {
+        const [rightRed, rightGreen, rightBlue] = getPixel(x + 1, y);
+        const [downRed, downGreen, downBlue] = getPixel(x, y + 1);
+        const horizontalDelta =
+          Math.abs(red - rightRed) + Math.abs(green - rightGreen) + Math.abs(blue - rightBlue);
+        const verticalDelta =
+          Math.abs(red - downRed) + Math.abs(green - downGreen) + Math.abs(blue - downBlue);
+        const edgeStrength = (horizontalDelta + verticalDelta) / (255 * 6);
+
+        if (y >= Math.floor(probeHeight * 0.25)) {
+          clutterAnalyzedPixels += 1;
+          if (edgeStrength >= 0.14) {
+            clutterEdgePixels += 1;
+          }
+        }
+
+        if (y >= bottomStart) {
+          bottomAnalyzedPixels += 1;
+          if (edgeStrength >= 0.12) {
+            bottomEdgePixels += 1;
+          }
+        }
+      }
+    }
+  }
+
+  const pixelCount = probeWidth * probeHeight;
+  const averageLuminance = pixelCount ? luminanceSum / pixelCount : 0;
+  const luminanceVariance = Math.max(
+    0,
+    pixelCount ? luminanceSquaredSum / pixelCount - averageLuminance * averageLuminance : 0,
+  );
+  const brightnessScore = clampUnit(averageLuminance);
+  const contrastScore = clampUnit(Math.sqrt(luminanceVariance) / 0.35);
+  const windowCoverage = clampUnit(topAnalyzedPixels ? topWindowPixels / topAnalyzedPixels : 0);
+  const wallVisibility = clampUnit(topAnalyzedPixels ? topFlatPixels / topAnalyzedPixels : 0);
+  const clutterScore = clampUnit(
+    clutterAnalyzedPixels ? clutterEdgePixels / clutterAnalyzedPixels : 0,
+  );
+  const furnitureDensity = clampUnit(
+    bottomAnalyzedPixels ? bottomEdgePixels / bottomAnalyzedPixels : clutterScore,
+  );
+  const lightingQuality = clampUnit(
+    brightnessScore * 0.55 + contrastScore * 0.25 + (1 - Math.min(windowCoverage, 0.55)) * 0.2,
+  );
+  const wallToneLuminance = wallLuminanceCount
+    ? wallLuminanceSum / wallLuminanceCount
+    : brightnessScore;
+  const floorToneLuminance = floorLuminanceCount
+    ? floorLuminanceSum / floorLuminanceCount
+    : brightnessScore;
+  const wallToneEstimate =
+    wallToneLuminance >= 0.72 ? 'light' : wallToneLuminance <= 0.45 ? 'dark' : 'neutral';
+  const floorToneEstimate =
+    floorToneLuminance >= 0.58 ? 'light' : floorToneLuminance <= 0.34 ? 'dark' : 'medium';
+  const clutterLevel = clampUnit(clutterScore * 0.7 + furnitureDensity * 0.3);
+
+  return {
+    roomType: normalizeRoomType(roomType),
+    brightnessScore: Number(brightnessScore.toFixed(4)),
+    contrastScore: Number(contrastScore.toFixed(4)),
+    clutterScore: Number(clutterScore.toFixed(4)),
+    clutterLevel: Number(clutterLevel.toFixed(4)),
+    wallVisibility: Number(wallVisibility.toFixed(4)),
+    windowCoverage: Number(windowCoverage.toFixed(4)),
+    furnitureDensity: Number(furnitureDensity.toFixed(4)),
+    lightingQuality: Number(lightingQuality.toFixed(4)),
+    wallToneEstimate,
+    floorToneEstimate,
+  };
+}
+
+export function buildFirstImpressionRecommendations(scene = {}) {
+  const recommendations = [];
+
+  if (Number(scene.clutterScore || scene.clutterLevel || 0) > 0.45) {
+    recommendations.push(
+      'Reduce visible clutter on surfaces and along the floor line to make the room feel larger.',
+    );
+  }
+
+  if (Number(scene.brightnessScore || 0) < 0.58 || Number(scene.lightingQuality || 0) < 0.62) {
+    recommendations.push(
+      'Brighten the room with better lighting or open blinds so the space feels more inviting online.',
+    );
+  }
+
+  if (String(scene.wallToneEstimate || '') === 'dark') {
+    recommendations.push(
+      'Consider lighter wall tones to improve buyer perception and make the room feel more open.',
+    );
+  }
+
+  if (Number(scene.windowCoverage || 0) > 0.35) {
+    recommendations.push(
+      'Lean into natural light in the listing sequence because this room already has a strong brightness story.',
+    );
+  }
+
+  if (recommendations.length < 3 && Number(scene.furnitureDensity || 0) > 0.35) {
+    recommendations.push(
+      'Simplify furniture placement before photography so the room reads more clearly at thumbnail size.',
+    );
+  }
+
+  return recommendations.slice(0, 3);
+}
+
+export function planSmartEnhancements(scene = {}) {
+  const plan = [];
+
+  if (Number(scene.clutterLevel || 0) > 0.5) {
+    plan.push('declutter');
+  }
+
+  if (Number(scene.lightingQuality || 0) < 0.6) {
+    plan.push('lighting_boost');
+  }
+
+  if (
+    Number(scene.furnitureDensity || 0) < 0.3 &&
+    String(scene.roomType || '') === 'living_room'
+  ) {
+    plan.push('light_staging');
+  }
+
+  if (Number(scene.wallVisibility || 0) > 0.4 && Number(scene.windowCoverage || 0) < 0.4) {
+    plan.push('wall_color_test');
+  }
+
+  return plan;
+}
+
+export function classifyListingReadiness({
+  review = {},
+  outsideMaskChangeRatio = 0,
+  distortionDetected = false,
+  hallucinatedObjectRisk = false,
+} = {}) {
+  const perceptibilityScore = normalizeDimensionScore(review.listingAppealScore, 100);
+  const structuralIntegrity = normalizeDimensionScore(review.structuralIntegrityScore, 100);
+  const lightingQuality = normalizeDimensionScore(review.artifactScore, 100);
+  const artifactPenalty = clampUnit(
+    hallucinatedObjectRisk
+      ? 1
+      : distortionDetected
+        ? 0.85
+        : Math.max(0, Number(outsideMaskChangeRatio || 0) * 1.5),
+  );
+
+  const score = Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        perceptibilityScore * 30 +
+          structuralIntegrity * 30 +
+          lightingQuality * 20 -
+          artifactPenalty * 20,
+      ),
+    ),
+  );
+
+  let label = 'Not Suitable';
+  if (score >= 85) {
+    label = 'Listing Ready';
+  } else if (score >= 70) {
+    label = 'Near Ready';
+  } else if (score >= 50) {
+    label = 'Needs Review';
+  }
+
+  return {
+    score,
+    label,
+    confidenceBadge: label === 'Listing Ready' ? 'Listing Ready' : 'Safe Enhancement',
+  };
+}
+
+function buildEnhancementNextActions(plan = []) {
+  return plan
+    .map((step) => {
+      if (step === 'declutter') {
+        return 'Try decluttering next to remove distractions before final listing photos.';
+      }
+      if (step === 'lighting_boost') {
+        return 'Run a lighting-focused enhancement next to improve brightness and clarity.';
+      }
+      if (step === 'light_staging') {
+        return 'Test light staging next if you want the room to feel more furnished without over-styling it.';
+      }
+      if (step === 'wall_color_test') {
+        return 'Explore wall color ideas only after the room feels bright, open, and clean.';
+      }
+      return '';
+    })
+    .filter(Boolean);
+}
+
 function sortVisionVariants(variants = []) {
   return [...variants].sort((left, right) => {
     if (Boolean(left?.isSelected) !== Boolean(right?.isSelected)) {
@@ -5453,6 +5722,10 @@ async function buildReviewedLocalSharpCandidates({
   sourceBuffer,
   sourceImageBase64,
 }) {
+  const sourceSceneAnalysis = await analyzeVisionScene(sourceBuffer, resolvedRoomType);
+  const firstImpressionRecommendations = buildFirstImpressionRecommendations(sourceSceneAnalysis);
+  const smartEnhancementPlan = planSmartEnhancements(sourceSceneAnalysis);
+  const nextActions = buildEnhancementNextActions(smartEnhancementPlan);
   const rendered = await renderVariantBuffer(sourceBuffer, preset.key, resolvedRoomType);
   let surfaceMaskDebug =
     isWallPreset(preset.key) || isFloorPreset(preset.key) ? rendered.debug || null : null;
@@ -5598,17 +5871,69 @@ async function buildReviewedLocalSharpCandidates({
     variantImageBase64: rendered.buffer.toString('base64'),
   });
   const overallScore = calculateVisionReviewOverallScore(review);
+  const renderedSceneAnalysis = await analyzeVisionScene(rendered.buffer, resolvedRoomType);
+  const listingReadiness = classifyListingReadiness({
+    review,
+    outsideMaskChangeRatio,
+    distortionDetected: topHalfChangeRatio > 0.12,
+    hallucinatedObjectRisk:
+      newFurnitureAdditionRatio > 0.03 || furnitureCoverageIncreaseRatio > 0.02,
+  });
+  const estimatedReadinessDelta = Math.max(
+    1,
+    Math.min(
+      8,
+      Math.round(
+        Math.max(0, renderedSceneAnalysis.brightnessScore - sourceSceneAnalysis.brightnessScore) *
+          10 +
+          Math.max(0, renderedSceneAnalysis.contrastScore - sourceSceneAnalysis.contrastScore) * 8 +
+          Math.max(0, sourceSceneAnalysis.clutterScore - renderedSceneAnalysis.clutterScore) * 6 +
+          1,
+      ),
+    ),
+  );
+  const pipelineStage =
+    preset.key === 'combined_listing_refresh'
+      ? 'listing_ready'
+      : preset.key === 'enhance_listing_quality'
+        ? 'first_impression'
+        : 'smart_enhancement';
+  const summary =
+    preset.key === 'combined_listing_refresh'
+      ? listingReadiness.label === 'Listing Ready'
+        ? 'A stricter listing-ready polish pass that keeps the photo realistic while improving clarity, tone balance, and publish confidence.'
+        : 'A safe listing enhancement that improves clarity and presentation while preserving realism and trust.'
+      : preset.key === 'enhance_listing_quality'
+        ? `An instant first-impression enhancement that lifts light and clarity while keeping the room truthful. Estimated readiness lift: +${estimatedReadinessDelta}.`
+        : renderPlan.summary;
+  const differenceHint =
+    preset.key === 'combined_listing_refresh'
+      ? 'Look for a cleaner, more publishable result with realistic lighting, restrained contrast, and no suspicious edits.'
+      : preset.key === 'enhance_listing_quality'
+        ? 'Look for better brightness, cleaner contrast, and a more inviting first impression at thumbnail size.'
+        : renderPlan.differenceHint;
+  const effects = Array.from(
+    new Set([
+      ...(rendered.effects || renderPlan.effects || []),
+      preset.key === 'enhance_listing_quality' ? 'Instant first-impression boost' : '',
+      preset.key === 'combined_listing_refresh' ? listingReadiness.confidenceBadge : '',
+    ].filter(Boolean)),
+  );
+  const warning =
+    preset.key === 'combined_listing_refresh' && listingReadiness.label !== 'Listing Ready'
+      ? 'Advanced edits were limited to preserve realism and trust.'
+      : rendered.warning;
 
   return [
     {
       providerKey: 'local_sharp',
       output: null,
       buffer: rendered.buffer,
-      warning: rendered.warning,
+      warning,
       label: rendered.label,
-      summary: renderPlan.summary,
-      differenceHint: renderPlan.differenceHint,
-      effects: rendered.effects || renderPlan.effects,
+      summary,
+      differenceHint,
+      effects,
       cropInsetPercent: rendered.cropInsetPercent,
       roomPromptAddon: rendered.roomPromptAddon,
       presetPromptAddon: '',
@@ -5639,6 +5964,16 @@ async function buildReviewedLocalSharpCandidates({
       newFurnitureAdditionRatio,
       objectRemovalScore: 0,
       shouldHideByDefault: false,
+      pipelineStage,
+      confidenceBadge: listingReadiness.confidenceBadge,
+      listingReadyScore: listingReadiness.score,
+      listingReadyLabel: listingReadiness.label,
+      readinessDelta: estimatedReadinessDelta,
+      recommendations: firstImpressionRecommendations,
+      nextActions,
+      sceneAnalysis: sourceSceneAnalysis,
+      renderedSceneAnalysis,
+      smartEnhancementPlan,
     },
   ];
 }
@@ -6991,6 +7326,18 @@ async function persistOrchestratedVisionCandidates({
         instructions: normalizedInstructions,
         normalizedPlan,
         providerSourceUrl: candidate.providerSourceUrl || null,
+        pipelineStage: candidate.pipelineStage || '',
+        confidenceBadge: candidate.confidenceBadge || '',
+        listingReadyScore: candidate.listingReadyScore ?? null,
+        listingReadyLabel: candidate.listingReadyLabel || '',
+        readinessDelta: candidate.readinessDelta ?? null,
+        recommendations: Array.isArray(candidate.recommendations) ? candidate.recommendations : [],
+        nextActions: Array.isArray(candidate.nextActions) ? candidate.nextActions : [],
+        smartEnhancementPlan: Array.isArray(candidate.smartEnhancementPlan)
+          ? candidate.smartEnhancementPlan
+          : [],
+        sceneAnalysis: candidate.sceneAnalysis || null,
+        renderedSceneAnalysis: candidate.renderedSceneAnalysis || null,
         debug: {
           maskStrategy: candidate.maskStrategy || null,
           maskCoverageRatio: candidate.maskCoverageRatio ?? null,

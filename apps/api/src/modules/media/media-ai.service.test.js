@@ -3,14 +3,18 @@ import assert from 'node:assert/strict';
 import sharp from 'sharp';
 
 import {
+  analyzeVisionScene,
   bridgeVerticalMaskGaps,
+  buildFirstImpressionRecommendations,
   buildBrightWindowExclusionMask,
   buildFreeformEnhancementPlan,
   buildWindowRejectionMask,
   calculateVisionReviewOverallScore,
+  classifyListingReadiness,
   enforceVerticalWindowColumns,
   getTaskSpecificMaskStrategy,
   normalizeRoomType,
+  planSmartEnhancements,
   resolveSurfaceMaskAtSourceSize,
   resolveFreeformPresetKey,
   segmentWallPlanesAtSourceSize,
@@ -336,6 +340,66 @@ test('buildFreeformEnhancementPlan understands stronger wall-surface phrasing fo
 
   assert.equal(plan.roomType, 'living_room');
   assert.equal(plan.wallColor, 'deep rich dark green');
+});
+
+test('analyzeVisionScene derives first-impression signals from a bright windowed living room', async () => {
+  const sourceBuffer = await createSyntheticLivingRoomBuffer();
+  const scene = await analyzeVisionScene(sourceBuffer, 'living_room');
+
+  assert.equal(scene.roomType, 'living_room');
+  assert.ok(scene.brightnessScore > 0.4);
+  assert.ok(scene.windowCoverage > 0.15);
+  assert.ok(scene.wallVisibility > 0.05);
+  assert.match(scene.wallToneEstimate, /light|neutral|dark/);
+});
+
+test('buildFirstImpressionRecommendations prioritizes clutter, lighting, and wall tone guidance', () => {
+  const recommendations = buildFirstImpressionRecommendations({
+    clutterScore: 0.7,
+    brightnessScore: 0.42,
+    lightingQuality: 0.48,
+    wallToneEstimate: 'dark',
+    windowCoverage: 0.2,
+    furnitureDensity: 0.5,
+  });
+
+  assert.equal(recommendations.length, 3);
+  assert.match(recommendations[0], /clutter/i);
+  assert.ok(recommendations.some((item) => /brighten|lighting/i.test(item)));
+  assert.ok(recommendations.some((item) => /lighter wall tones/i.test(item)));
+});
+
+test('planSmartEnhancements favors declutter and lighting before wall color exploration', () => {
+  const plan = planSmartEnhancements({
+    roomType: 'living_room',
+    clutterLevel: 0.72,
+    lightingQuality: 0.45,
+    furnitureDensity: 0.22,
+    wallVisibility: 0.58,
+    windowCoverage: 0.24,
+  });
+
+  assert.deepEqual(plan, [
+    'declutter',
+    'lighting_boost',
+    'light_staging',
+    'wall_color_test',
+  ]);
+});
+
+test('classifyListingReadiness returns listing-ready badge for strong clean outputs', () => {
+  const result = classifyListingReadiness({
+    review: {
+      structuralIntegrityScore: 92,
+      artifactScore: 88,
+      listingAppealScore: 90,
+    },
+    outsideMaskChangeRatio: 0.04,
+  });
+
+  assert.equal(result.label, 'Near Ready');
+  assert.equal(result.confidenceBadge, 'Safe Enhancement');
+  assert.ok(result.score >= 70);
 });
 
 test('resolveFreeformPresetKey routes advanced concept requests to the closest preset', () => {

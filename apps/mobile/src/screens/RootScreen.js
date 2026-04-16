@@ -1571,6 +1571,40 @@ export function RootScreen() {
                     {selectedVariant.metadata?.differenceHint ? (
                       <Text style={styles.variantHint}>{selectedVariant.metadata.differenceHint}</Text>
                     ) : null}
+                    {selectedVariant.metadata?.confidenceBadge || selectedVariant.metadata?.listingReadyLabel ? (
+                      <View style={styles.effectList}>
+                        {selectedVariant.metadata?.confidenceBadge ? (
+                          <View style={styles.effectChip}>
+                            <Text style={styles.effectChipText}>{selectedVariant.metadata.confidenceBadge}</Text>
+                          </View>
+                        ) : null}
+                        {selectedVariant.metadata?.listingReadyLabel ? (
+                          <View style={styles.effectChip}>
+                            <Text style={styles.effectChipText}>{selectedVariant.metadata.listingReadyLabel}</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    ) : null}
+                    {selectedVariant.metadata?.recommendations?.length ? (
+                      <View style={styles.summaryBulletList}>
+                        <Text style={styles.label}>Top improvements</Text>
+                        {selectedVariant.metadata.recommendations.map((item) => (
+                          <Text key={item} style={styles.summaryBullet}>
+                            • {item}
+                          </Text>
+                        ))}
+                      </View>
+                    ) : null}
+                    {selectedVariant.metadata?.nextActions?.length ? (
+                      <View style={styles.summaryBulletList}>
+                        <Text style={styles.label}>Next actions</Text>
+                        {selectedVariant.metadata.nextActions.map((item) => (
+                          <Text key={item} style={styles.summaryBullet}>
+                            • {item}
+                          </Text>
+                        ))}
+                      </View>
+                    ) : null}
                     {selectedVariant.metadata?.warning ? (
                       <Text style={styles.body}>{selectedVariant.metadata.warning}</Text>
                     ) : null}

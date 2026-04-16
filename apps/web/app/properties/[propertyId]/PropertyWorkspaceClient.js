@@ -5139,7 +5139,40 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 {selectedVariant.metadata.effects.map((effect) => <span key={effect}>{effect}</span>)}
               </div>
             ) : null}
+            {selectedVariant?.metadata?.confidenceBadge || selectedVariant?.metadata?.listingReadyLabel ? (
+              <div className="property-media-variant-effects">
+                {selectedVariant.metadata?.confidenceBadge ? (
+                  <span>{selectedVariant.metadata.confidenceBadge}</span>
+                ) : null}
+                {selectedVariant.metadata?.listingReadyLabel ? (
+                  <span>{selectedVariant.metadata.listingReadyLabel}</span>
+                ) : null}
+                {selectedVariant.metadata?.readinessDelta ? (
+                  <span>{`Estimated +${selectedVariant.metadata.readinessDelta} readiness`}</span>
+                ) : null}
+              </div>
+            ) : null}
             {selectedVariant?.metadata?.differenceHint ? <p className="property-media-variant-hint">{selectedVariant.metadata.differenceHint}</p> : null}
+            {selectedVariant?.metadata?.recommendations?.length ? (
+              <div className="workspace-inner-card">
+                <span className="label">Top Improvements</span>
+                <ul className="plain-list">
+                  {selectedVariant.metadata.recommendations.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {selectedVariant?.metadata?.nextActions?.length ? (
+              <div className="workspace-inner-card">
+                <span className="label">Next Actions</span>
+                <ul className="plain-list">
+                  {selectedVariant.metadata.nextActions.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {selectedVariant?.metadata?.review?.shouldHideByDefault ? (
               <div className="property-media-review-note">
                 <strong>Needs extra review</strong>
@@ -5160,6 +5193,20 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 <div className="stat-card">
                   <strong>Quality review</strong>
                   <span>{getVariantReviewScore(selectedVariant) ? `${getVariantReviewScore(selectedVariant)}/100` : 'Pending'}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Confidence</strong>
+                  <span>{selectedVariant.metadata?.confidenceBadge || selectedVariant.metadata?.listingReadyLabel || 'Pending'}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Readiness</strong>
+                  <span>
+                    {selectedVariant.metadata?.listingReadyScore
+                      ? `${selectedVariant.metadata.listingReadyScore}/100`
+                      : selectedVariant.metadata?.readinessDelta
+                        ? `+${selectedVariant.metadata.readinessDelta}`
+                        : 'Pending'}
+                  </span>
                 </div>
                 <div className="stat-card">
                   <strong>Structural realism</strong>
