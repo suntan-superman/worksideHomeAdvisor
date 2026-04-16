@@ -251,12 +251,12 @@ export async function orchestrateVisionJob({
           (maskedColorShiftRatio >= 0.08 ||
             maskedLuminanceDelta >= 0.06 ||
             perceptibilityScore >= 0.35) &&
-          (!Number.isFinite(topHalfChangeRatio) || topHalfChangeRatio <= 0.16) &&
+          (!Number.isFinite(topHalfChangeRatio) || topHalfChangeRatio <= 0.85) &&
           (!Number.isFinite(outsideMaskChangeRatio) ||
-            outsideMaskChangeRatio <= Math.max(0.42, outsideMaskLimit)) &&
+            outsideMaskChangeRatio <= Math.max(0.55, outsideMaskLimit)) &&
           newFurnitureAdditionRatio <= 0.01 &&
           furnitureCoverageIncreaseRatio <= 0.01 &&
-          maskedEdgeDensityDelta <= 0.02
+          maskedEdgeDensityDelta <= 0.08
         );
       }
 

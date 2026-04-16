@@ -7442,7 +7442,9 @@ export async function createImageEnhancementJob({
       orchestrationDeliveryMode: orchestrationResult.deliveryMode || 'none',
     };
     job.warning = usedBestEffortPreview
-      ? 'Showing the best available concept preview. Review manually before relying on subtle finish changes.'
+      ? preset.key === 'paint_dark_charcoal_test'
+        ? 'Showing a diagnostic statement-color preview. The wall change was strong enough to inspect, but spill into bright upper-wall and window-adjacent regions means you should treat it as a debugging preview rather than a listing-ready concept.'
+        : 'Showing the best available concept preview. Review manually before relying on subtle finish changes.'
       : usedFallbackVariant
         ? 'Primary provider was insufficient, so an advanced AI fallback was used.'
         : renderPlan.warning;

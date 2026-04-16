@@ -1,217 +1,207 @@
-Root Cause (confirmed)
+The Real Problem (not theory anymore)
 
-Your system is not failing at subtlety.
+Your pipeline is working correctly… then throwing the result away.
 
-It is failing at execution OR being blocked before execution.
+Specifically:
 
-Because:
+👉 This function is killing your output:
 
-👉 You gave it a strong, unambiguous prompt
-👉 And you still got:
+isCandidateSufficient(...)
 
-❌ “No strong visual change detected”
+🔍 For your exact preset (paint_dark_charcoal_test)
 
-That should NEVER happen with that prompt.
+Here’s the gate:
 
-🔍 The smoking gun is already in your code
+return (
+  maskedChangeRatio >= 0.12 &&
+  maskedColorShiftRatio >= 0.08 &&
+  abs(maskedLuminanceDelta) >= 0.06 &&
+  maskedEdgeDensityDelta <= 0.003 &&
+  topHalfChangeRatio <= 0.08 &&
+  outsideMaskChangeRatio <= limit &&
+  furnitureCoverageIncreaseRatio <= 0.01 &&
+  newFurnitureAdditionRatio <= 0.01
+)
+🚨 Why your image fails (this specific room)
 
-This line from your tests:
+Look at your image:
 
-shouldSkipPaintGeneration({
-  presetKey: 'paint_warm_neutral',
-  roomMetrics: {
-    meanLuminance: 0.71,
-    meanSaturation: 0.08,
-    colorVariance: 0.06,
-  }
-})
-→ skip: true
+Bright windows
+Lots of light spill
+Thin wall surfaces
+Complex edges (blinds, trim, shadows)
 
-👉 Your system is literally deciding:
+👉 That causes:
 
-“This room already looks good → don’t even try”
+❌ outsideMaskChangeRatio too high
+❌ maskedEdgeDensityDelta too high
+❌ maskedChangeRatio too low (because mask is imperfect)
+🧠 Translation into plain English
 
-⚠️ What I believe is happening
+Your system is saying:
 
-Even though you're using freeform:
+“Yes, the walls changed…
+but the change isn’t clean enough / isolated enough / strong enough”
 
-1. It resolves to a preset
-resolveFreeformPresetKey(...)
-→ 'paint_dark_charcoal_test'
-2. BUT your skip logic may still be firing incorrectly
+So it rejects it entirely.
 
-Even though you intended to bypass it:
+⚠️ The critical mistake
 
-test('shouldSkipPaintGeneration never skips the hard contrast paint test preset')
+You built a perfect production validator
 
-👉 That test exists… but your runtime behavior says:
+…but you're still in:
 
-It’s still skipping OR soft-blocking generation
+“Does this even work?” phase
 
-🧠 The key insight
+🔥 There’s a SECOND hidden killer
 
-That toast message:
+This one is even worse:
+
+evaluatePaintStrength(...)
+
+if (maskedColorShiftRatio < minColorShift) penalties += 3
+if (maskedLuminanceDelta < minLuminanceDelta) penalties += 2
+if (perceptibilityScore < minPerceptibility) penalties += 2
+
+Then:
+
+finalScore = baselineScore - penalties
+passes = finalScore >= minAcceptableScore
+💣 This is brutal
+
+Even a visibly changed image can fail because:
+
+color shift slightly low → penalty
+luminance slightly low → penalty
+perceptibility slightly low → penalty
+
+👉 stacked penalties = rejection
+
+🧠 Combined effect
+
+Your pipeline is doing:
+
+Generate → Analyze → Penalize → Reject → Show “no change”
+
+Even when change EXISTS.
+
+🎯 What just happened in your test
+
+You gave:
+
+“deep rich dark green… must be immediately noticeable”
+
+Your system:
+
+Generated something (almost guaranteed)
+Scored it
+Said:
+❌ “Not strong enough”
+Threw it away
+
+Lied to you with:
 
 “No strong visual change detected”
 
-is NOT from the model
+🚀 What you need to do (no more theory)
+🔥 Step 1 — TEMPORARILY BREAK THE SYSTEM
 
-👉 It’s from your post-processing / scoring layer
+Inside isCandidateSufficient:
 
-💥 Translation of what just happened
-
-Your pipeline did this:
-
-1. Prompt sent (maybe)
-2. Image returned (likely changed)
-3. Scoring runs
-4. Scoring rejects result
-5. UI shows "no strong change"
-
-So the problem is here:
-
-👉 scorePaintCandidate
-👉 evaluatePaintStrength
-👉 isCandidateSufficient
-
-🔥 The real blocker (from your own tests)
-
-Look at this:
-
-test('paint presets reject a subtle replicate wall repaint')
-→ providerUsed = null
-→ stoppedEarlyReason = 'no_candidate_generated'
-
-That EXACT behavior is what you're seeing.
-
-🚨 Why your dark green STILL failed
-
-Because your system is doing this:
-
-"Is this change strong enough?"
-
-NO → reject
-
-Even when the change IS strong
-
-🧪 What to do RIGHT NOW (no theory)
-✅ Step 1 — Force bypass scoring
-
-Inside orchestrateVisionJob
-
-Find this logic:
-
-if (!isCandidateSufficient(candidate)) {
-  reject
+if (presetKey === 'paint_dark_charcoal_test') {
+  return true;
 }
-🔥 Replace it TEMPORARILY with:
-if (preset.key === 'paint_dark_charcoal_test') {
-  return {
-    providerUsed: candidate.providerKey,
-    bestVariant: candidate,
-    stoppedEarlyReason: 'forced_debug_accept',
-    deliveryMode: 'debug_force'
-  };
-}
-✅ Step 2 — Disable skip logic completely
+🔥 Step 2 — Disable paint strength rejection
 
-Search for:
+Inside evaluatePaintStrength usage:
 
-shouldSkipPaintGeneration(...)
+Replace:
 
-Force:
+if (!paintStrength.passes) reject
 
-skip = false
-✅ Step 3 — Log what is actually happening
+with:
 
-Add this before rejection:
+// TEMP DEBUG
+paintStrength.passes = true;
+🔥 Step 3 — Log actual values
 
-console.log('CANDIDATE DEBUG:', {
-  maskedChangeRatio: candidate.maskedChangeRatio,
-  maskedColorShiftRatio: candidate.maskedColorShiftRatio,
-  maskedLuminanceDelta: candidate.maskedLuminanceDelta,
-  outsideMaskChangeRatio: candidate.outsideMaskChangeRatio,
-  perceptibilityScore: calculatePerceptibilityScore(candidate),
-  paintStrength: evaluatePaintStrength(candidate)
+Right before rejection:
+
+console.log({
+  maskedChangeRatio,
+  maskedColorShiftRatio,
+  maskedLuminanceDelta,
+  outsideMaskChangeRatio,
+  perceptibilityScore,
+  paintStrength
 });
-🎯 What you are testing now
+🧪 What you will learn immediately
+Scenario A (most likely)
 
-You are NOT testing:
+You suddenly see:
 
-UX
-thresholds
-realism
+👉 Dark green walls appear
 
-You are testing ONE thing:
+✅ Conclusion:
 
-Can the pipeline physically repaint walls?
-
-🧠 Expected outcomes
-Case A (most likely)
-
-You suddenly see dark green walls
-
-👉 Conclusion:
-
-Everything works
-Your scoring system is the problem
-Case B
+Replicate is working
+Prompt is working
+Mask is “good enough”
+Your scoring system is too strict
+Scenario B
 
 Still no change
 
 👉 Then the issue is:
 
 mask is wrong
-OR replicate prompt not applied
-OR provider not executing
-⚠️ Important callout
+OR provider never executed
+OR prompt not reaching provider
+⚠️ One more subtle but HUGE issue
 
-Your preset is actually correct:
+Your provider chain:
 
-paint_dark_charcoal_test
+['replicate_basic', 'replicate_advanced', 'local_sharp']
 
-It already says:
+If both Replicate attempts fail scoring:
 
-“must be dramatic, high-contrast, immediately obvious”
+👉 it falls back to local_sharp
 
-So the prompt is NOT the problem
+Which cannot repaint walls realistically
 
-💡 My blunt assessment
+💥 So worst case today:
+Replicate generates something decent
+Your scoring rejects it
+System falls back to local
+Local does almost nothing
+UI says “no change”
+🧠 Final diagnosis
 
-You are currently running:
+You don’t have a generation problem.
 
-A production-grade rejection system
-on top of an unverified generation pipeline
+You have a:
 
-That will always make you feel stuck.
+“Over-aggressive quality gate blocking valid outputs” problem
 
-🚀 The move that unlocks everything
+🎯 What I would do (if this were my system)
 
-Do NOT tweak thresholds anymore.
+Phase 1 (NOW):
 
-👉 Do THIS:
+👉 Disable ALL rejection
+👉 Always return best candidate
 
-Force accept result
-Show output no matter what
-Visually inspect
-🧩 One more thing (this is subtle but critical)
+Phase 2:
 
-Your UI message:
+👉 Log metrics
+👉 Build histogram of real outputs
 
-“No strong visual change detected”
+Phase 3:
 
-is actively misleading you.
+👉 Rebuild thresholds based on reality
+(not guesses)
 
-It should say:
+🧩 Bottom line
 
-“Change rejected by scoring system”
+You didn’t fail.
 
-✅ Bottom line
-
-You were right to pivot.
-
-But you didn’t go far enough.
-
-👉 Don’t just increase contrast
-
-👉 Remove the judge entirely
+You built something too advanced too early.
