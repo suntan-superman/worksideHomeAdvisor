@@ -296,6 +296,72 @@ function extractRequestedPhrase(text, expression) {
     .trim();
 }
 
+function normalizeFreeformColorPhrase(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[,:;]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^(a|an|the)\s+/i, '')
+    .replace(
+      /\s+and\s+(?:brighten|lighten|darken|remove|declutter|clean|refresh|update|add|stage)\b.*$/i,
+      '',
+    )
+    .replace(/\s+(look|finish|tone|color|colour|paint)$/i, '')
+    .trim();
+}
+
+function extractWallColorPhrase(instructions = '') {
+  const patterns = [
+    /repaint(?:\s+all)?(?:\s+visible)?\s+wall(?:\s+surfaces?)?(?:\s+(?:to|into|as|in))?\s+([a-z,\s\/-]{3,80}?)(?=\.|$| while | but )/i,
+    /paint(?:\s+all)?(?:\s+visible)?\s+wall(?:\s+surfaces?)?(?:\s+(?:to|into|as|in))?\s+([a-z,\s\/-]{3,80}?)(?=\.|$| while | but )/i,
+    /change\s+(?:the\s+)?wall(?:\s+color|s| surfaces?)?(?:\s+(?:to|into|as|in))?\s+([a-z,\s\/-]{3,80}?)(?=\.|$| while | but )/i,
+    /make\s+(?:the\s+)?wall(?:\s+color|s| surfaces?)?\s+([a-z,\s\/-]{3,80}?)(?=\.|$| while | but )/i,
+    /wall(?:\s+color| colours| colors|s)?(?:\s+(?:to|into|as|in))?\s+([a-z,\s\/-]{3,60}?)(?=,| and | with | while | but |\.|$)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = String(instructions || '').match(pattern);
+    if (!match?.[1]) {
+      continue;
+    }
+
+    const normalizedPhrase = normalizeFreeformColorPhrase(match[1]);
+    if (normalizedPhrase) {
+      return normalizedPhrase;
+    }
+  }
+
+  return '';
+}
+
+function isStatementWallColorRequest(wallColor = '') {
+  const normalized = String(wallColor || '').toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return [
+    'dark',
+    'deep',
+    'rich',
+    'bold',
+    'dramatic',
+    'moody',
+    'forest',
+    'emerald',
+    'olive',
+    'sage',
+    'green',
+    'navy',
+    'blue',
+    'teal',
+    'charcoal',
+    'black',
+    'burgundy',
+    'terracotta',
+  ].some((token) => normalized.includes(token));
+}
+
 export function buildFreeformEnhancementPlan(instructions, roomType) {
   const normalizedInstructions = String(instructions || '').toLowerCase();
   const removeObjects = [];
@@ -332,10 +398,7 @@ export function buildFreeformEnhancementPlan(instructions, roomType) {
     normalizedInstructions,
     /floor(?:ing)?(?:\s+(?:to|into|as|in|with))?\s+([a-z\s\/-]{3,40}?)(?=,| and | with | while | but |\.|$)/i,
   );
-  const wallColor = extractRequestedPhrase(
-    normalizedInstructions,
-    /wall(?:s| color| colours| colors)?(?:\s+(?:to|into|as|in))?\s+([a-z\s\/-]{3,40}?)(?=,| and | with | while | but |\.|$)/i,
-  );
+  const wallColor = extractWallColorPhrase(normalizedInstructions);
   const cabinetColor =
     extractRequestedPhrase(
       normalizedInstructions,
@@ -438,6 +501,7 @@ function getPresetPromptAddon(presetKey, roomType) {
     'paint_warm_neutral',
     'paint_bright_white',
     'paint_soft_greige',
+    'paint_dark_charcoal_test',
   ]);
   const flooringPresetKeys = new Set([
     'floor_light_wood',
@@ -1110,6 +1174,20 @@ function buildPresetRenderPlan(presetKey) {
     };
   }
 
+  if (preset.key === 'paint_dark_charcoal_test') {
+    return {
+      preset,
+      label: 'Statement Wall Color Preview',
+      warning:
+        'This is a concept preview only. Use it to test a bold wall-color direction before relying on it for marketing decisions.',
+      summary:
+        'A high-contrast paint concept preview intended to make the wall-color change unmistakable at first glance.',
+      differenceHint:
+        'Focus on whether the wall-color shift reads immediately and cleanly while the rest of the room stays structurally truthful.',
+      effects: ['Wall color concept', 'Bold statement palette', 'Diagnostic preview'],
+    };
+  }
+
   if (preset.key === 'floor_light_wood') {
     return {
       preset,
@@ -1568,6 +1646,9 @@ function resolveWallColorPresetKey(wallColor = '') {
   if (normalized.includes('greige') || normalized.includes('gray') || normalized.includes('grey') || normalized.includes('taupe')) {
     return 'paint_soft_greige';
   }
+  if (isStatementWallColorRequest(normalized)) {
+    return 'paint_dark_charcoal_test';
+  }
 
   return 'paint_warm_neutral';
 }
@@ -1641,7 +1722,9 @@ function getFreeformPlanPromptAddon(normalizedPlan = {}) {
   }
   if (normalizedPlan.wallColor) {
     instructions.push(
-      `If a wall-color concept can be shown believably, preview the walls in ${normalizedPlan.wallColor} while preserving trim lines, shadows, and texture.`,
+      isStatementWallColorRequest(normalizedPlan.wallColor)
+        ? `Repaint all visible wall surfaces in ${normalizedPlan.wallColor}. The wall color change must be immediate and dramatic at first glance. Apply a strong, uniform coat, do not preserve the original wall tone, and keep clean edges around windows, trim, ceilings, outlets, built-ins, and flooring.`
+        : `If a wall-color concept can be shown believably, preview the walls in ${normalizedPlan.wallColor} while preserving trim lines, shadows, and texture.`,
     );
   }
   if (normalizedPlan.flooring) {
@@ -1738,10 +1821,6 @@ function buildFreeformRenderPlan(normalizedPlan = {}) {
 }
 
 export function resolveFreeformPresetKey({ presetKey, jobType, normalizedPlan }) {
-  if (presetKey || jobType) {
-    return presetKey || jobType;
-  }
-
   if (normalizedPlan?.removeObjects?.includes('furniture')) {
     return 'remove_furniture';
   }
@@ -1770,6 +1849,10 @@ export function resolveFreeformPresetKey({ presetKey, jobType, normalizedPlan })
 
   if (normalizedPlan?.removeObjects?.includes('clutter')) {
     return 'declutter_medium';
+  }
+
+  if (presetKey || jobType) {
+    return presetKey || jobType;
   }
 
   return 'combined_listing_refresh';
@@ -1806,7 +1889,8 @@ export function buildVariantStoryBlock({ asset, variant }) {
   if (
     presetKey === 'paint_warm_neutral' ||
     presetKey === 'paint_bright_white' ||
-    presetKey === 'paint_soft_greige'
+    presetKey === 'paint_soft_greige' ||
+    presetKey === 'paint_dark_charcoal_test'
   ) {
     return {
       title: `${roomLabel} Paint Concept Preview`,
@@ -1822,7 +1906,9 @@ export function buildVariantStoryBlock({ asset, variant }) {
         'Paint is often one of the fastest ways to make a room feel cleaner, brighter, and more buyer-friendly.',
       suggestedAction:
         suggestedAction ||
-        'Compare the preview to the original and decide whether a lighter or more neutral palette would improve listing appeal before photography.',
+        (presetKey === 'paint_dark_charcoal_test'
+          ? 'Use this stronger preview to confirm the wall-paint pipeline can create an obvious color shift before tuning toward lighter or more market-friendly palettes.'
+          : 'Compare the preview to the original and decide whether a lighter or more neutral palette would improve listing appeal before photography.'),
       disclaimer:
         'This image is an AI-generated concept preview for planning purposes only.',
     };
@@ -2390,6 +2476,7 @@ function buildMaskShapes(metadata, presetKey, roomType) {
     'paint_warm_neutral',
     'paint_bright_white',
     'paint_soft_greige',
+    'paint_dark_charcoal_test',
   ]);
   const flooringPresetKeys = new Set([
     'floor_light_wood',
@@ -7012,6 +7099,18 @@ export async function createImageEnhancementJob({
       ? resolveFreeformPresetKey({ presetKey, jobType, normalizedPlan })
       : presetKey || jobType;
   const preset = resolveVisionPreset(resolvedPresetKey);
+  if (requestedMode === 'freeform') {
+    console.log('vision_freeform_plan_resolved', {
+      assetId: asset._id.toString(),
+      roomType: resolvedRoomType,
+      instructions: normalizedInstructions,
+      normalizedPlan,
+      requestedPresetKey: presetKey || jobType || '',
+      resolvedPresetKey,
+      sourceVariantId: normalizedSourceVariantId,
+      workflowStageKey: normalizedWorkflowStageKey,
+    });
+  }
   const effectiveUserPlan = resolveVisionUserPlan({ preset, userPlan });
   const inputHash = buildVisionJobHash({
     assetId: asset._id.toString(),

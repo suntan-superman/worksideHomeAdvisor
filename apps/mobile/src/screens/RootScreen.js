@@ -1045,7 +1045,6 @@ export function RootScreen() {
     try {
       const response = await createVariantMutation.mutateAsync({
         assetId: selectedAsset.id,
-        jobType: 'enhance_listing_quality',
         mode: 'freeform',
         instructions: freeformEnhancementInstructions.trim(),
       });

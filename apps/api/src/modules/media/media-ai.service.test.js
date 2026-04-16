@@ -328,6 +328,16 @@ test('buildFreeformEnhancementPlan extracts kitchen and exterior concept intent'
   assert.equal(exteriorPlan.roomType, 'exterior');
 });
 
+test('buildFreeformEnhancementPlan understands stronger wall-surface phrasing for bold paint requests', () => {
+  const plan = buildFreeformEnhancementPlan(
+    'Repaint all visible wall surfaces in a deep, rich dark green color. The change must be immediately noticeable at first glance.',
+    'Living room',
+  );
+
+  assert.equal(plan.roomType, 'living_room');
+  assert.equal(plan.wallColor, 'deep rich dark green');
+});
+
 test('resolveFreeformPresetKey routes advanced concept requests to the closest preset', () => {
   assert.equal(
     resolveFreeformPresetKey({
@@ -360,6 +370,17 @@ test('resolveFreeformPresetKey routes advanced concept requests to the closest p
       },
     }),
     'backyard_pool_preview',
+  );
+  assert.equal(
+    resolveFreeformPresetKey({
+      jobType: 'enhance_listing_quality',
+      normalizedPlan: {
+        roomType: 'living_room',
+        removeObjects: [],
+        wallColor: 'deep rich dark green',
+      },
+    }),
+    'paint_dark_charcoal_test',
   );
 });
 

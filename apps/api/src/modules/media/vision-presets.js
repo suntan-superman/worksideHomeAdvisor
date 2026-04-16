@@ -187,8 +187,8 @@ export const VISION_PRESETS = [
   {
     key: 'paint_dark_charcoal_test',
     legacyKeys: [],
-    displayName: 'Dark Paint Test',
-    shortLabel: 'Dark Test',
+    displayName: 'Statement Wall Color Test',
+    shortLabel: 'Statement Test',
     category: 'concept_preview',
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'dining_room', 'office', 'unknown'],
     providerPreference: 'replicate',
@@ -198,9 +198,9 @@ export const VISION_PRESETS = [
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Repaint all visible painted walls a deep charcoal or dark slate color. The result must be dramatically darker than the original image and immediately obvious at first glance. Maintain realistic lighting, shadows, wall texture, trim, windows, ceilings, and built-ins. Do not leave the walls light colored. Only modify painted wall surfaces and do not change the room structure.',
+      'Repaint all visible painted walls in a bold, dark, statement-making color concept directed by the seller instructions. The result must be dramatic, high-contrast, and immediately obvious at first glance. Apply a strong, uniform coat across the wall surfaces and do not preserve the original light wall tone. Maintain realistic lighting, shadows, wall texture, trim, windows, ceilings, built-ins, and room geometry. Only modify painted wall surfaces and do not change the room structure.',
     helperText:
-      'A hard-contrast test preset that proves the wall-paint pipeline can deliver an obvious visual change.',
+      'A hard-contrast wall-color test that proves the pipeline can deliver an obvious paint change.',
     strength: 0.95,
     guidanceScale: 9.5,
     numInferenceSteps: 55,
