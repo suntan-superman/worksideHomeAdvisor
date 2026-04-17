@@ -98,11 +98,79 @@ function normalizeGenerationStage(value) {
   return null;
 }
 
-function buildGeneratedAssetAnalysisSnapshot({ roomLabel, generationLabel, variant }) {
+export function resolveSavedVariantGenerationStage({ payloadGenerationStage, variant } = {}) {
+  const metadata = variant?.metadata && typeof variant.metadata === 'object' ? variant.metadata : {};
+  const pipelineDescriptor =
+    metadata.pipelineDescriptor && typeof metadata.pipelineDescriptor === 'object'
+      ? metadata.pipelineDescriptor
+      : {};
+  const pipelineStage = String(
+    pipelineDescriptor.stageKey || metadata.pipelineStage || metadata.generationStage || '',
+  ).trim();
+
+  return (
+    normalizeGenerationStage(payloadGenerationStage) ||
+    normalizeGenerationStage(metadata.workflowStageKey) ||
+    (pipelineStage === 'listing_ready'
+      ? 'finishes'
+      : pipelineStage === 'first_impression'
+        ? 'clean_room'
+        : pipelineStage === 'smart_enhancement' && variant?.variantCategory !== 'concept_preview'
+          ? 'finishes'
+          : null) ||
+    normalizeGenerationStage(metadata.generationStage) ||
+    (variant?.variantCategory === 'concept_preview' ? 'style' : 'style')
+  );
+}
+
+export function resolveSavedVariantListingCandidate({ payloadListingCandidate, variant } = {}) {
+  if (typeof payloadListingCandidate === 'boolean') {
+    return payloadListingCandidate;
+  }
+
+  const metadata = variant?.metadata && typeof variant.metadata === 'object' ? variant.metadata : {};
+  const pipelineDescriptor =
+    metadata.pipelineDescriptor && typeof metadata.pipelineDescriptor === 'object'
+      ? metadata.pipelineDescriptor
+      : {};
+
+  return Boolean(pipelineDescriptor.publishable || metadata.publishable);
+}
+
+export function buildGeneratedAssetAnalysisSnapshot({ roomLabel, generationLabel, variant }) {
   const overallQualityScore = Number(variant?.metadata?.review?.overallScore || 0) || undefined;
-  const summaryParts = ['This AI-generated image was saved from Vision.'];
+  const metadata = variant?.metadata && typeof variant.metadata === 'object' ? variant.metadata : {};
+  const pipelineDescriptor =
+    metadata.pipelineDescriptor && typeof metadata.pipelineDescriptor === 'object'
+      ? metadata.pipelineDescriptor
+      : {};
+  const qualityLabel = String(
+    metadata.qualityLabel ||
+      pipelineDescriptor.statusLabel ||
+      metadata.confidenceBadge ||
+      metadata.listingReadyLabel ||
+      '',
+  ).trim();
+  const stageLabel = String(
+    metadata.pipelineStageLabel || pipelineDescriptor.stageLabel || '',
+  ).trim();
+  const publishable = Boolean(pipelineDescriptor.publishable || metadata.publishable);
+  const summaryParts = [
+    publishable
+      ? 'This AI-generated image was saved from Vision as a publishable listing candidate.'
+      : 'This AI-generated image was saved from Vision as a review draft.',
+  ];
   if (generationLabel) {
     summaryParts.push(generationLabel);
+  }
+  if (qualityLabel) {
+    summaryParts.push(`Quality: ${qualityLabel}.`);
+  }
+  if (stageLabel) {
+    summaryParts.push(`Stage: ${stageLabel}.`);
+  }
+  if (pipelineDescriptor.reviewMessage) {
+    summaryParts.push(pipelineDescriptor.reviewMessage);
   }
 
   return {
@@ -111,6 +179,10 @@ function buildGeneratedAssetAnalysisSnapshot({ roomLabel, generationLabel, varia
     summary: summaryParts.join(' '),
     source: 'vision_saved',
     warning: variant?.metadata?.warning || '',
+    visionQualityLabel: qualityLabel,
+    visionPipelineStage: stageLabel,
+    visionPublishable: publishable,
+    recommendedNextStep: pipelineDescriptor.recommendedNextStep || metadata.recommendedNextStep || null,
   };
 }
 
@@ -403,14 +475,15 @@ export async function saveMediaVariantToPhotos(variantId, payload = {}) {
     throw new Error('Source photo for this variant was not found.');
   }
 
-  const normalizedStage =
-    normalizeGenerationStage(payload.generationStage) ||
-    normalizeGenerationStage(variant?.metadata?.workflowStageKey) ||
-    normalizeGenerationStage(variant?.metadata?.generationStage) ||
-    'style';
+  const normalizedStage = resolveSavedVariantGenerationStage({
+    payloadGenerationStage: payload.generationStage,
+    variant,
+  });
   const roomLabel = String(payload.roomLabel || sourceAsset.roomLabel || '').trim() || 'Generated photo';
-  const listingCandidate =
-    typeof payload.listingCandidate === 'boolean' ? payload.listingCandidate : true;
+  const listingCandidate = resolveSavedVariantListingCandidate({
+    payloadListingCandidate: payload.listingCandidate,
+    variant,
+  });
   const generationLabel = String(payload.generationLabel || variant.label || '').trim() || 'Saved Vision Result';
 
   let existingAsset = await MediaAssetModel.findOne({

@@ -269,6 +269,10 @@ function getVisionRecommendationLabel(presetKey, presets = []) {
 
 function buildVisionWorkflowRecommendation(asset, selectedVariant = null, presets = []) {
   const metadata = selectedVariant?.metadata || asset?.selectedVariant?.metadata || {};
+  const recommendedNextStep =
+    metadata?.recommendedNextStep && typeof metadata.recommendedNextStep === 'object'
+      ? metadata.recommendedNextStep
+      : null;
   const requestedPresetKey =
     metadata?.requestedPresetKey || metadata?.presetKey || selectedVariant?.variantType || '';
   const pipelineStage = String(metadata?.pipelineStage || '');
@@ -288,6 +292,27 @@ function buildVisionWorkflowRecommendation(asset, selectedVariant = null, preset
     clutterLevel > 0.5 ||
     /clutter|declutter|distraction|tidy|retake|busy|remove/i.test(summary);
   const declutterPresetKey = clutterLevel >= 0.68 ? 'declutter_medium' : 'declutter_light';
+
+  if (recommendedNextStep?.type === 'save_result') {
+    return {
+      type: 'save_result',
+      label: recommendedNextStep.label || 'Save this result',
+      reason:
+        recommendedNextStep.reason ||
+        'This preview is already reading as listing-ready, so the next move is to keep it and use it in Photos, brochure, or report output.',
+    };
+  }
+
+  if (recommendedNextStep?.presetKey) {
+    return {
+      type: 'generate',
+      presetKey: recommendedNextStep.presetKey,
+      label:
+        recommendedNextStep.label ||
+        getVisionRecommendationLabel(recommendedNextStep.presetKey, presets),
+      reason: recommendedNextStep.reason || 'This is the strongest next step based on the current result.',
+    };
+  }
 
   if (listingReadyLabel === 'Listing Ready') {
     return {
@@ -358,6 +383,47 @@ function buildVisionWorkflowRecommendation(asset, selectedVariant = null, preset
     label: getVisionRecommendationLabel('enhance_listing_quality', presets),
     reason:
       'Use the fast enhancement pass to re-establish a strong first impression before trying another advanced transformation.',
+  };
+}
+
+function getVisionSaveDefaults(variant, activeStageKey = 'style') {
+  const metadata = variant?.metadata || {};
+  const pipelineDescriptor =
+    metadata?.pipelineDescriptor && typeof metadata.pipelineDescriptor === 'object'
+      ? metadata.pipelineDescriptor
+      : null;
+  const pipelineStage = String(
+    pipelineDescriptor?.stageKey || metadata?.pipelineStage || '',
+  ).trim();
+  const workflowStageKey = String(metadata?.workflowStageKey || activeStageKey || '').trim();
+  const generationStage =
+    workflowStageKey === 'clean'
+      ? 'clean_room'
+      : workflowStageKey === 'finish'
+        ? 'finishes'
+        : workflowStageKey === 'style'
+          ? 'style'
+          : pipelineStage === 'listing_ready'
+            ? 'finishes'
+            : pipelineStage === 'first_impression'
+              ? 'clean_room'
+              : pipelineStage === 'smart_enhancement' &&
+                  variant?.variantCategory !== 'concept_preview'
+                ? 'finishes'
+                : 'style';
+
+  return {
+    generationStage,
+    listingCandidate: Boolean(
+      metadata?.publishable || pipelineDescriptor?.publishable,
+    ),
+    qualityLabel:
+      metadata?.qualityLabel ||
+      pipelineDescriptor?.statusLabel ||
+      metadata?.confidenceBadge ||
+      metadata?.listingReadyLabel ||
+      '',
+    publishable: Boolean(metadata?.publishable || pipelineDescriptor?.publishable),
   };
 }
 
@@ -1929,6 +1995,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         (asset) => String(asset?.sourceVariantId || '') === String(selectedVariant?.id || ''),
       ) || null,
     [mediaAssets, selectedVariant?.id],
+  );
+  const currentVisionSaveDefaults = useMemo(
+    () => getVisionSaveDefaults(selectedVariant, activeVisionWorkflowStageKey),
+    [activeVisionWorkflowStageKey, selectedVariant],
   );
   const selectedMediaAssetSourceAsset = useMemo(
     () =>
@@ -4111,24 +4181,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setStatus('Saving generated result to Photos...');
     setToast(null);
     try {
-      const generationStage =
-        selectedVariant?.metadata?.workflowStageKey === 'clean'
-          ? 'clean_room'
-          : selectedVariant?.metadata?.workflowStageKey === 'finish'
-          ? 'finishes'
-          : selectedVariant?.metadata?.workflowStageKey === 'style'
-          ? 'style'
-          : activeVisionWorkflowStageKey === 'clean'
-          ? 'clean_room'
-          : activeVisionWorkflowStageKey === 'finish'
-          ? 'finishes'
-          : 'style';
+      const { generationStage, listingCandidate, qualityLabel } =
+        getVisionSaveDefaults(selectedVariant, activeVisionWorkflowStageKey);
       const response = await saveVariantToPhotos(selectedVariant.id, {
         propertyId,
         roomLabel: selectedMediaAsset.roomLabel,
         generationStage,
         generationLabel: selectedVariant.label,
-        listingCandidate: true,
+        listingCandidate,
       });
 
       await Promise.all([
@@ -4144,8 +4204,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         title: 'Saved to Photos',
         message:
           response.created === false
-            ? 'This AI-generated version was already in your photo library and is ready to review there.'
-            : 'This AI-generated version has been added to your photo library.',
+            ? listingCandidate
+              ? 'This AI-generated version was already in your photo library and is already marked as a listing candidate.'
+              : 'This AI-generated version was already in your photo library and remains saved there as a review draft.'
+            : listingCandidate
+              ? 'This AI-generated version has been added to your photo library and marked as a listing candidate.'
+              : `This AI-generated version has been added to your photo library as a review draft${qualityLabel ? ` (${qualityLabel})` : ''}.`,
         actionLabel: savedAsset ? 'View in Photos' : '',
         onAction: savedAsset
           ? () => {
@@ -5307,6 +5371,20 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 ) : null}
               </div>
             ) : null}
+            {selectedVariant?.metadata?.pipelineDescriptor ? (
+              <div className="workspace-inner-card">
+                <span className="label">Marketplace status</span>
+                <p>
+                  {selectedVariant.metadata.pipelineDescriptor.stageLabel || 'Vision result'} ·{' '}
+                  {selectedVariant.metadata.pipelineDescriptor.statusLabel || 'Review pending'}
+                </p>
+                {selectedVariant.metadata.pipelineDescriptor.reviewMessage ? (
+                  <p className="workspace-control-note">
+                    {selectedVariant.metadata.pipelineDescriptor.reviewMessage}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             {selectedVariant?.metadata?.differenceHint ? <p className="property-media-variant-hint">{selectedVariant.metadata.differenceHint}</p> : null}
             {selectedVariant?.metadata?.smartEnhancementPathLabel || selectedVariant?.metadata?.smartEnhancementReason ? (
               <div className="workspace-inner-card">
@@ -5422,6 +5500,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     <p className="workspace-control-note">
                       This result is already saved in Photos as <strong>{savedAssetForSelectedVariant.roomLabel}</strong>.
                     </p>
+                  ) : selectedVariant ? (
+                    <p className="workspace-control-note">
+                      {currentVisionSaveDefaults.listingCandidate
+                        ? 'Saving this result to Photos will also mark it as a listing candidate.'
+                        : 'Saving this result to Photos will keep it as a review draft until you explicitly mark it as a seller pick.'}
+                    </p>
                   ) : null}
                 </div>
                 <div className="vision-result-actions">
@@ -5434,7 +5518,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     } : handleSaveCurrentVisionResultToPhotos}
                     disabled={Boolean(status) || isArchivedProperty}
                   >
-                    {savedAssetForSelectedVariant ? 'View in Photos' : 'Save as Listing Photo'}
+                    {savedAssetForSelectedVariant
+                      ? 'View in Photos'
+                      : currentVisionSaveDefaults.listingCandidate
+                        ? 'Save as Listing Photo'
+                        : 'Save Draft to Photos'}
                   </button>
                   {activeVisionWorkflowStage.key !== 'final' ? (
                     <button
@@ -5730,7 +5818,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                               className="button-primary"
                               onClick={handleSaveCurrentVisionResultToPhotos}
                             >
-                              Save this result to Photos
+                              {currentVisionSaveDefaults.listingCandidate
+                                ? 'Save this result as a listing photo'
+                                : 'Save this result as a draft'}
                             </button>
                           ) : null}
                         </div>

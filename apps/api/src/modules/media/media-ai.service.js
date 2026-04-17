@@ -1851,6 +1851,290 @@ function buildEnhancementNextActions(plan = []) {
     .filter(Boolean);
 }
 
+function resolveVisionPipelineStageKey(presetKey = '') {
+  const normalizedPresetKey = String(presetKey || '').trim();
+  if (normalizedPresetKey === 'combined_listing_refresh') {
+    return 'listing_ready';
+  }
+  if (normalizedPresetKey === 'enhance_listing_quality') {
+    return 'first_impression';
+  }
+  return 'smart_enhancement';
+}
+
+function getVisionPipelineStageDescriptor(stageKey = '') {
+  const normalizedStageKey = String(stageKey || '').trim();
+  if (normalizedStageKey === 'listing_ready') {
+    return {
+      key: 'listing_ready',
+      label: 'Listing Ready',
+      goal: 'Produce a publishable, trustworthy listing asset.',
+    };
+  }
+  if (normalizedStageKey === 'first_impression') {
+    return {
+      key: 'first_impression',
+      label: 'First Impression',
+      goal: 'Deliver a fast, visible improvement that feels better immediately.',
+    };
+  }
+  return {
+    key: 'smart_enhancement',
+    label: 'Smart Enhancement',
+    goal: 'Apply targeted upgrades that move the room toward listing quality.',
+  };
+}
+
+function getVisionRecommendationLabel(presetKey = '') {
+  const preset = resolveVisionPreset(presetKey);
+  if (preset?.displayName) {
+    return preset.displayName;
+  }
+
+  if (presetKey === 'enhance_listing_quality') {
+    return 'Enhance for Listing';
+  }
+  if (presetKey === 'combined_listing_refresh') {
+    return 'Listing Refresh';
+  }
+  if (presetKey === 'declutter_medium') {
+    return 'Medium Declutter';
+  }
+  if (presetKey === 'declutter_light') {
+    return 'Light Declutter';
+  }
+
+  return 'Vision enhancement';
+}
+
+export function buildVisionWorkflowRecommendation({
+  requestedPresetKey = '',
+  executionPresetKey = '',
+  pipelineStage = '',
+  smartEnhancementPlan = [],
+  sceneAnalysis = {},
+  listingReadyLabel = '',
+  fallbackApplied = false,
+  requestedMode = 'preset',
+} = {}) {
+  const normalizedRequestedPresetKey = String(requestedPresetKey || '').trim();
+  const normalizedExecutionPresetKey = String(executionPresetKey || '').trim();
+  const resolvedPipelineStage =
+    String(pipelineStage || '').trim() ||
+    resolveVisionPipelineStageKey(normalizedExecutionPresetKey || normalizedRequestedPresetKey);
+  const normalizedPlan = Array.isArray(smartEnhancementPlan) ? smartEnhancementPlan : [];
+  const clutterLevel = Number(sceneAnalysis.clutterLevel || sceneAnalysis.clutterScore || 0);
+  const hasDeclutterSignal =
+    normalizedPlan.includes('declutter') || Number(clutterLevel || 0) > 0.5;
+  const declutterPresetKey = clutterLevel >= 0.68 ? 'declutter_medium' : 'declutter_light';
+
+  if (String(listingReadyLabel || '') === 'Listing Ready') {
+    return {
+      type: 'save_result',
+      presetKey: '',
+      workflowStageKey: 'finish',
+      label: 'Save this result',
+      reason:
+        'This preview is already reading as listing-ready, so the next move is to keep it for publishable marketplace use.',
+    };
+  }
+
+  if (
+    normalizedRequestedPresetKey === 'combined_listing_refresh' &&
+    fallbackApplied &&
+    hasDeclutterSignal
+  ) {
+    return {
+      type: 'generate',
+      presetKey: declutterPresetKey,
+      workflowStageKey: 'clean',
+      label: getVisionRecommendationLabel(declutterPresetKey),
+      reason:
+        'The listing-ready pass fell back safely, which usually means visible distractions still need to be cleaned up first.',
+    };
+  }
+
+  if (
+    normalizedRequestedPresetKey === 'combined_listing_refresh' &&
+    (normalizedExecutionPresetKey === 'declutter_light' ||
+      normalizedExecutionPresetKey === 'declutter_medium' ||
+      normalizedExecutionPresetKey === 'lighting_boost')
+  ) {
+    return {
+      type: 'generate',
+      presetKey: 'combined_listing_refresh',
+      workflowStageKey: 'finish',
+      label: getVisionRecommendationLabel('combined_listing_refresh'),
+      reason:
+        normalizedExecutionPresetKey === 'lighting_boost'
+          ? 'The lighting baseline has been recovered, so the next step is the stricter listing-ready pass.'
+          : 'The cleanup step has run, so the next move is the stricter listing-ready pass.',
+    };
+  }
+
+  if (resolvedPipelineStage === 'first_impression' && hasDeclutterSignal) {
+    return {
+      type: 'generate',
+      presetKey: declutterPresetKey,
+      workflowStageKey: 'clean',
+      label: getVisionRecommendationLabel(declutterPresetKey),
+      reason:
+        'The first-impression pass is in place. Cleaning visual distractions next should create a stronger base for final listing polish.',
+    };
+  }
+
+  if (resolvedPipelineStage === 'first_impression' || resolvedPipelineStage === 'smart_enhancement') {
+    return {
+      type: 'generate',
+      presetKey: 'combined_listing_refresh',
+      workflowStageKey: 'finish',
+      label: getVisionRecommendationLabel('combined_listing_refresh'),
+      reason:
+        requestedMode === 'freeform'
+          ? 'Use the listing-ready pass next if you want to convert this direction-check preview into something safer for marketplace use.'
+          : 'The room now has a stable enough baseline for the stricter listing-ready pass that favors realism and publish confidence.',
+    };
+  }
+
+  if (normalizedRequestedPresetKey === 'combined_listing_refresh') {
+    return {
+      type: 'generate',
+      presetKey: hasDeclutterSignal ? declutterPresetKey : 'combined_listing_refresh',
+      workflowStageKey: hasDeclutterSignal ? 'clean' : 'finish',
+      label: getVisionRecommendationLabel(
+        hasDeclutterSignal ? declutterPresetKey : 'combined_listing_refresh',
+      ),
+      reason: hasDeclutterSignal
+        ? 'The result is safer than final. A cleanup step should improve the next listing-ready attempt.'
+        : 'The room is close, but another listing-ready attempt may still produce a cleaner publishable result.',
+    };
+  }
+
+  return {
+    type: 'generate',
+    presetKey: 'enhance_listing_quality',
+    workflowStageKey: 'clean',
+    label: getVisionRecommendationLabel('enhance_listing_quality'),
+    reason:
+      'Use the fast enhancement pass to re-establish a strong first impression before trying another advanced transformation.',
+  };
+}
+
+export function buildVisionPipelineDescriptor({
+  requestedPresetKey = '',
+  executionPresetKey = '',
+  pipelineStage = '',
+  requestedMode = 'preset',
+  deliveryMode = '',
+  fallbackApplied = false,
+  confidenceBadge = '',
+  listingReadyScore = null,
+  listingReadyLabel = '',
+  artifactFlags = {},
+  smartEnhancementPlan = [],
+  sceneAnalysis = {},
+  sourceReadinessScore = null,
+  renderedReadinessScore = null,
+} = {}) {
+  const stageKey =
+    String(pipelineStage || '').trim() ||
+    resolveVisionPipelineStageKey(executionPresetKey || requestedPresetKey);
+  const stage = getVisionPipelineStageDescriptor(stageKey);
+  const normalizedListingReadyLabel = String(listingReadyLabel || '').trim();
+  const normalizedConfidenceBadge = String(confidenceBadge || '').trim();
+  const normalizedArtifactFlags =
+    artifactFlags && typeof artifactFlags === 'object' ? artifactFlags : {};
+  const artifactCount = Object.values(normalizedArtifactFlags).filter(Boolean).length;
+  const didFallback = Boolean(fallbackApplied) || deliveryMode === 'safe_marketplace_fallback';
+  const readabilityDelta =
+    Number.isFinite(Number(sourceReadinessScore)) && Number.isFinite(Number(renderedReadinessScore))
+      ? Number((Number(renderedReadinessScore) - Number(sourceReadinessScore)).toFixed(1))
+      : null;
+
+  let statusKey = 'safe_enhancement';
+  let statusLabel = 'Safe Enhancement';
+  let publishable = false;
+  let reviewMessage = 'Advanced edits were limited to preserve realism and trust.';
+
+  if (stage.key === 'listing_ready') {
+    if (didFallback) {
+      statusKey = 'safe_enhancement';
+      statusLabel = 'Safe Enhancement';
+      reviewMessage = 'Advanced edits were limited to preserve realism and trust.';
+    } else if (
+      normalizedListingReadyLabel === 'Listing Ready' &&
+      !normalizedArtifactFlags.edgeArtifacts &&
+      !normalizedArtifactFlags.objectDistortion &&
+      !normalizedArtifactFlags.lightingInconsistency
+    ) {
+      statusKey = 'listing_ready';
+      statusLabel = 'Listing Ready';
+      publishable = true;
+      reviewMessage = 'Suitable for publishable listing workflows.';
+    } else if (normalizedListingReadyLabel === 'Near Ready') {
+      statusKey = 'near_ready';
+      statusLabel = 'Near Ready';
+      reviewMessage = 'Close to publishable, but still worth a quick review.';
+    } else if (normalizedListingReadyLabel === 'Needs Review') {
+      statusKey = 'needs_review';
+      statusLabel = 'Needs Review';
+      reviewMessage = 'The room improved, but visible issues still make this better as a reviewed draft than a final asset.';
+    } else if (normalizedListingReadyLabel === 'Not Suitable') {
+      statusKey = 'not_suitable';
+      statusLabel = 'Not Suitable';
+      reviewMessage = 'This result should not be treated as final marketplace output.';
+    }
+  } else if (requestedMode === 'freeform') {
+    statusKey = didFallback ? 'safe_enhancement' : 'concept_preview';
+    statusLabel = didFallback ? 'Safe Enhancement' : 'Concept Preview';
+    reviewMessage = didFallback
+      ? 'A safer enhancement was returned instead of a fragile custom edit.'
+      : 'Use this as a direction-check preview rather than a final publishable asset.';
+  } else if (stage.key === 'first_impression') {
+    statusKey = 'first_impression_ready';
+    statusLabel = 'First Impression Ready';
+    reviewMessage = 'A fast baseline improvement intended to make the photo read better immediately.';
+  } else {
+    statusKey = didFallback ? 'safe_enhancement' : 'smart_enhancement';
+    statusLabel = didFallback ? 'Safe Enhancement' : 'Smart Enhancement';
+    reviewMessage = didFallback
+      ? 'A safer enhancement was returned instead of a fragile advanced edit.'
+      : 'A targeted improvement designed to move the room toward listing quality.';
+  }
+
+  const recommendedNextStep = buildVisionWorkflowRecommendation({
+    requestedPresetKey,
+    executionPresetKey,
+    pipelineStage: stage.key,
+    smartEnhancementPlan,
+    sceneAnalysis,
+    listingReadyLabel: normalizedListingReadyLabel,
+    fallbackApplied: didFallback,
+    requestedMode,
+  });
+
+  return {
+    stageKey: stage.key,
+    stageLabel: stage.label,
+    stageGoal: stage.goal,
+    statusKey,
+    statusLabel:
+      stage.key === 'listing_ready' && normalizedConfidenceBadge === 'Listing Ready'
+        ? normalizedConfidenceBadge
+        : statusLabel,
+    publishable,
+    reviewMessage,
+    deliveryMode: deliveryMode || (didFallback ? 'safe_marketplace_fallback' : 'standard'),
+    listingReadyScore:
+      listingReadyScore === null || listingReadyScore === undefined
+        ? null
+        : Number(listingReadyScore),
+    artifactCount,
+    readinessDelta: readabilityDelta,
+    recommendedNextStep,
+  };
+}
+
 async function renderSceneAwareEnhancementBuffer(
   sourceBuffer,
   presetKey,
@@ -7722,6 +8006,30 @@ async function persistOrchestratedVisionCandidates({
     const selectedCandidateQuality = isSelectedBestCandidate
       ? String(orchestrationResult?.quality || 'poor')
       : '';
+    const requestedPresetKey = job.input?.requestedPresetKey || preset.key;
+    const executionPresetKey = job.input?.executionPresetKey || preset.key;
+    const pipelineDescriptor = buildVisionPipelineDescriptor({
+      requestedPresetKey,
+      executionPresetKey,
+      pipelineStage: candidate.pipelineStage,
+      requestedMode,
+      deliveryMode: orchestrationResult?.deliveryMode || '',
+      fallbackApplied:
+        Boolean(orchestrationResult?.fallbackApplied) ||
+        (isSelectedBestCandidate && selectedCandidateQuality && selectedCandidateQuality !== 'high'),
+      confidenceBadge: candidate.confidenceBadge,
+      listingReadyScore: candidate.listingReadyScore,
+      listingReadyLabel: candidate.listingReadyLabel,
+      artifactFlags: candidate.artifactFlags,
+      smartEnhancementPlan: candidate.smartEnhancementPlan,
+      sceneAnalysis: candidate.sceneAnalysis,
+      sourceReadinessScore: candidate.sourceReadinessScore,
+      renderedReadinessScore: candidate.renderedReadinessScore,
+    });
+    const variantConfidenceBadge =
+      pipelineDescriptor.stageKey === 'listing_ready'
+        ? candidate.confidenceBadge || pipelineDescriptor.statusLabel
+        : pipelineDescriptor.statusLabel;
 
     const variant = await MediaVariantModel.create({
       visionJobId: job._id,
@@ -7772,8 +8080,14 @@ async function persistOrchestratedVisionCandidates({
         instructions: normalizedInstructions,
         normalizedPlan,
         providerSourceUrl: candidate.providerSourceUrl || null,
-        pipelineStage: candidate.pipelineStage || '',
-        confidenceBadge: candidate.confidenceBadge || '',
+        pipelineStage: pipelineDescriptor.stageKey,
+        pipelineStageLabel: pipelineDescriptor.stageLabel,
+        pipelineStageGoal: pipelineDescriptor.stageGoal,
+        confidenceBadge: variantConfidenceBadge,
+        qualityClassification: pipelineDescriptor.statusKey,
+        qualityLabel: pipelineDescriptor.statusLabel,
+        publishable: pipelineDescriptor.publishable,
+        pipelineDescriptor,
         listingReadyScore: candidate.listingReadyScore ?? null,
         listingReadyLabel: candidate.listingReadyLabel || '',
         readinessDelta: candidate.readinessDelta ?? null,
@@ -7788,6 +8102,7 @@ async function persistOrchestratedVisionCandidates({
             : {},
         recommendations: Array.isArray(candidate.recommendations) ? candidate.recommendations : [],
         nextActions: Array.isArray(candidate.nextActions) ? candidate.nextActions : [],
+        recommendedNextStep: pipelineDescriptor.recommendedNextStep || null,
         smartEnhancementPlan: Array.isArray(candidate.smartEnhancementPlan)
           ? candidate.smartEnhancementPlan
           : [],
@@ -8321,6 +8636,12 @@ export async function createImageEnhancementJob({
     const usedFallbackVariant =
       Boolean(finalOrchestrationResult.fallbackApplied) ||
       createdVariants.some((variant) => Boolean(variant?.metadata?.fallbackApplied));
+    const selectedVariantMetadata = createdVariants[0]?.metadata || {};
+    const selectedPipelineDescriptor =
+      selectedVariantMetadata.pipelineDescriptor &&
+      typeof selectedVariantMetadata.pipelineDescriptor === 'object'
+        ? selectedVariantMetadata.pipelineDescriptor
+        : null;
     job.currentStage = usedFallbackVariant || usedQualityWarning ? 'fallback' : 'completed';
     job.fallbackMode = usedQualityWarning
       ? 'best_available_preview'
@@ -8341,6 +8662,8 @@ export async function createImageEnhancementJob({
       orchestrationTimeBudgetReached: Boolean(finalOrchestrationResult.timeBudgetReached),
       orchestrationQuality,
       orchestrationDeliveryMode: finalOrchestrationResult.deliveryMode || 'none',
+      selectedPipelineDescriptor,
+      recommendedNextStep: selectedVariantMetadata.recommendedNextStep || null,
     };
     const providerLabel = finalOrchestrationResult.providerUsed || 'vision_orchestrator';
     const qualityWarning =

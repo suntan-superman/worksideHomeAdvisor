@@ -197,34 +197,29 @@ function getVisionActionLabel(jobType) {
 }
 
 function getVisionActionRecommendation(asset, selectedVariant = null) {
+  const metadata = selectedVariant?.metadata || asset?.selectedVariant?.metadata || {};
+  const recommendedNextStep =
+    metadata?.recommendedNextStep && typeof metadata.recommendedNextStep === 'object'
+      ? metadata.recommendedNextStep
+      : null;
   const requestedPresetKey =
-    selectedVariant?.metadata?.requestedPresetKey ||
-    asset?.selectedVariant?.metadata?.requestedPresetKey ||
+    metadata?.requestedPresetKey ||
     '';
   const executionPresetKey =
-    selectedVariant?.metadata?.executionPresetKey ||
-    asset?.selectedVariant?.metadata?.executionPresetKey ||
-    selectedVariant?.metadata?.presetKey ||
+    metadata?.executionPresetKey ||
+    metadata?.presetKey ||
     '';
   const pipelineStage =
-    selectedVariant?.metadata?.pipelineStage ||
-    asset?.selectedVariant?.metadata?.pipelineStage ||
-    '';
-  const smartPlan =
-    selectedVariant?.metadata?.smartEnhancementPlan ||
-    asset?.selectedVariant?.metadata?.smartEnhancementPlan ||
-    [];
-  const sceneAnalysis = selectedVariant?.metadata?.sceneAnalysis || {};
+    metadata?.pipelineStage || '';
+  const smartPlan = metadata?.smartEnhancementPlan || [];
+  const sceneAnalysis = metadata?.sceneAnalysis || {};
   const clutterLevel = Number(
     sceneAnalysis?.clutterLevel || sceneAnalysis?.clutterScore || asset?.analysis?.clutterScore || 0,
   );
   const listingReadyLabel =
-    selectedVariant?.metadata?.listingReadyLabel ||
-    asset?.selectedVariant?.metadata?.listingReadyLabel ||
+    metadata?.listingReadyLabel ||
     '';
-  const fallbackApplied = Boolean(
-    selectedVariant?.metadata?.fallbackApplied || asset?.selectedVariant?.metadata?.fallbackApplied,
-  );
+  const fallbackApplied = Boolean(metadata?.fallbackApplied);
   const summary = String(asset?.analysis?.summary || '').toLowerCase();
   const hasDeclutterSignal =
     smartPlan.includes('declutter') ||
@@ -232,6 +227,26 @@ function getVisionActionRecommendation(asset, selectedVariant = null) {
     clutterLevel > 0.5 ||
     /clutter|declutter|distraction|tidy|retake|busy|remove/i.test(summary);
   const declutterPresetKey = clutterLevel >= 0.68 ? 'declutter_medium' : 'declutter_light';
+
+  if (recommendedNextStep?.type === 'save_result') {
+    return {
+      presetKey: '',
+      label: recommendedNextStep.label || 'Save this result',
+      reason:
+        recommendedNextStep.reason || 'This preview is already reading as listing-ready.',
+    };
+  }
+
+  if (recommendedNextStep?.presetKey) {
+    return {
+      presetKey: recommendedNextStep.presetKey,
+      label:
+        recommendedNextStep.label || getVisionActionLabel(recommendedNextStep.presetKey),
+      reason:
+        recommendedNextStep.reason ||
+        'This is the strongest next step based on the current result.',
+    };
+  }
 
   if (listingReadyLabel === 'Listing Ready') {
     return {
@@ -1763,6 +1778,20 @@ export function RootScreen() {
                               {`Readiness ${selectedVariant.metadata.sourceReadinessScore}->${selectedVariant.metadata.renderedReadinessScore}`}
                             </Text>
                           </View>
+                        ) : null}
+                      </View>
+                    ) : null}
+                    {selectedVariant.metadata?.pipelineDescriptor ? (
+                      <View style={styles.summaryBulletList}>
+                        <Text style={styles.label}>Marketplace status</Text>
+                        <Text style={styles.summaryBullet}>
+                          • {selectedVariant.metadata.pipelineDescriptor.stageLabel || 'Vision result'} ·{' '}
+                          {selectedVariant.metadata.pipelineDescriptor.statusLabel || 'Review pending'}
+                        </Text>
+                        {selectedVariant.metadata.pipelineDescriptor.reviewMessage ? (
+                          <Text style={styles.summaryBullet}>
+                            • {selectedVariant.metadata.pipelineDescriptor.reviewMessage}
+                          </Text>
                         ) : null}
                       </View>
                     ) : null}

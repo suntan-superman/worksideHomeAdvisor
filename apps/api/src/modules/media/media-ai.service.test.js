@@ -6,6 +6,8 @@ import {
   analyzeVisionScene,
   bridgeVerticalMaskGaps,
   buildFirstImpressionRecommendations,
+  buildVisionPipelineDescriptor,
+  buildVisionWorkflowRecommendation,
   buildSceneAwareEnhancementRecipe,
   buildBrightWindowExclusionMask,
   buildFreeformEnhancementPlan,
@@ -38,6 +40,11 @@ import {
   scorePaintCandidate,
   selectReturnCandidate,
 } from './vision-orchestrator.helpers.js';
+import {
+  buildGeneratedAssetAnalysisSnapshot,
+  resolveSavedVariantGenerationStage,
+  resolveSavedVariantListingCandidate,
+} from './media.service.js';
 import { orchestrateVisionJob } from './vision-orchestrator.service.js';
 import { resolveVisionPreset } from './vision-presets.js';
 
@@ -493,6 +500,133 @@ test('planSmartEnhancements favors declutter and lighting before wall color expl
     'light_staging',
     'wall_color_test',
   ]);
+});
+
+test('buildVisionWorkflowRecommendation sends cluttered first-impression results to declutter next', () => {
+  const recommendation = buildVisionWorkflowRecommendation({
+    requestedPresetKey: 'enhance_listing_quality',
+    executionPresetKey: 'enhance_listing_quality',
+    pipelineStage: 'first_impression',
+    smartEnhancementPlan: ['declutter', 'lighting_boost'],
+    sceneAnalysis: {
+      clutterLevel: 0.73,
+    },
+  });
+
+  assert.equal(recommendation.type, 'generate');
+  assert.equal(recommendation.presetKey, 'declutter_medium');
+  assert.equal(recommendation.workflowStageKey, 'clean');
+  assert.match(recommendation.reason, /clean/i);
+});
+
+test('buildVisionPipelineDescriptor marks clean listing outputs as publishable', () => {
+  const descriptor = buildVisionPipelineDescriptor({
+    requestedPresetKey: 'combined_listing_refresh',
+    executionPresetKey: 'combined_listing_refresh',
+    pipelineStage: 'listing_ready',
+    listingReadyScore: 88,
+    listingReadyLabel: 'Listing Ready',
+    artifactFlags: {
+      edgeArtifacts: false,
+      objectDistortion: false,
+      lightingInconsistency: false,
+    },
+    smartEnhancementPlan: [],
+    sceneAnalysis: {
+      clutterLevel: 0.18,
+      lightingQuality: 0.75,
+    },
+    sourceReadinessScore: 68,
+    renderedReadinessScore: 82,
+  });
+
+  assert.equal(descriptor.stageKey, 'listing_ready');
+  assert.equal(descriptor.statusKey, 'listing_ready');
+  assert.equal(descriptor.publishable, true);
+  assert.equal(descriptor.recommendedNextStep.type, 'save_result');
+});
+
+test('buildVisionPipelineDescriptor keeps safe listing fallbacks out of publishable state', () => {
+  const descriptor = buildVisionPipelineDescriptor({
+    requestedPresetKey: 'combined_listing_refresh',
+    executionPresetKey: 'enhance_listing_quality',
+    pipelineStage: 'listing_ready',
+    deliveryMode: 'safe_marketplace_fallback',
+    fallbackApplied: true,
+    listingReadyScore: 61,
+    listingReadyLabel: 'Needs Review',
+    artifactFlags: {
+      edgeArtifacts: false,
+      objectDistortion: false,
+      lightingInconsistency: false,
+    },
+    smartEnhancementPlan: ['declutter'],
+    sceneAnalysis: {
+      clutterLevel: 0.71,
+    },
+  });
+
+  assert.equal(descriptor.statusKey, 'safe_enhancement');
+  assert.equal(descriptor.publishable, false);
+  assert.equal(descriptor.recommendedNextStep.presetKey, 'declutter_medium');
+});
+
+test('resolveSavedVariantGenerationStage maps listing-ready variants to finishes when no explicit stage is provided', () => {
+  const generationStage = resolveSavedVariantGenerationStage({
+    variant: {
+      variantCategory: 'enhancement',
+      metadata: {
+        pipelineDescriptor: {
+          stageKey: 'listing_ready',
+        },
+      },
+    },
+  });
+
+  assert.equal(generationStage, 'finishes');
+});
+
+test('resolveSavedVariantListingCandidate defaults to false for non-publishable review drafts', () => {
+  const listingCandidate = resolveSavedVariantListingCandidate({
+    variant: {
+      metadata: {
+        pipelineDescriptor: {
+          publishable: false,
+        },
+      },
+    },
+  });
+
+  assert.equal(listingCandidate, false);
+});
+
+test('buildGeneratedAssetAnalysisSnapshot carries marketplace-quality summary for saved publishable variants', () => {
+  const analysis = buildGeneratedAssetAnalysisSnapshot({
+    roomLabel: 'Living Room',
+    generationLabel: 'Listing Refresh',
+    variant: {
+      metadata: {
+        warning: '',
+        review: {
+          overallScore: 86,
+        },
+        pipelineDescriptor: {
+          stageLabel: 'Listing Ready',
+          statusLabel: 'Listing Ready',
+          publishable: true,
+          reviewMessage: 'Suitable for publishable listing workflows.',
+          recommendedNextStep: {
+            type: 'save_result',
+            label: 'Save this result',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(analysis.visionPublishable, true);
+  assert.equal(analysis.visionQualityLabel, 'Listing Ready');
+  assert.match(analysis.summary, /publishable listing candidate/i);
 });
 
 test('classifyQuality keeps subtle but usable smart-enhancement candidates instead of hard rejecting them', () => {
