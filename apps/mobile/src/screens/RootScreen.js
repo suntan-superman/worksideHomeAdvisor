@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -144,13 +144,16 @@ function formatWorkflowStatus(status) {
 
 function getVisionJobLabel(jobType) {
   if (jobType === 'declutter_preview' || jobType === 'declutter_light' || jobType === 'declutter_medium') {
-    return 'Decluttering photo';
+    return 'Running smart declutter';
+  }
+  if (jobType === 'lighting_boost') {
+    return 'Running lighting recovery';
   }
   if (jobType === 'combined_listing_refresh') {
-    return 'Preparing listing-ready photo';
+    return 'Running listing-ready pass';
   }
   if (jobType === 'enhance_listing_quality') {
-    return 'Preparing first-impression enhancement';
+    return 'Running first-impression pass';
   }
 
   return 'Enhancing photo';
@@ -182,16 +185,19 @@ function summarizePricing(pricingSummary) {
 
 function getVisionActionLabel(jobType) {
   if (jobType === 'enhance_listing_quality') {
-    return 'Enhance';
+    return 'First Impression';
   }
   if (jobType === 'combined_listing_refresh') {
-    return 'Listing ready';
+    return 'Listing Ready';
   }
   if (jobType === 'declutter_medium') {
-    return 'Declutter+';
+    return 'Smart Declutter+';
   }
   if (jobType === 'declutter_light' || jobType === 'declutter_preview') {
-    return 'Declutter';
+    return 'Smart Declutter';
+  }
+  if (jobType === 'lighting_boost') {
+    return 'Lighting';
   }
 
   return 'Enhance';
@@ -217,6 +223,11 @@ function getVisionActionRecommendation(asset, selectedVariant = null) {
   const clutterLevel = Number(
     sceneAnalysis?.clutterLevel || sceneAnalysis?.clutterScore || asset?.analysis?.clutterScore || 0,
   );
+  const rawLightingQuality = Number(
+    sceneAnalysis?.lightingQuality ?? asset?.analysis?.lightingScore ?? 0,
+  );
+  const lightingQuality =
+    rawLightingQuality > 1 ? rawLightingQuality / 100 : rawLightingQuality;
   const listingReadyLabel =
     metadata?.listingReadyLabel ||
     '';
@@ -227,6 +238,8 @@ function getVisionActionRecommendation(asset, selectedVariant = null) {
     asset?.analysis?.retakeRecommended ||
     clutterLevel > 0.5 ||
     /clutter|declutter|distraction|tidy|retake|busy|remove/i.test(summary);
+  const needsLightingRecovery =
+    smartPlan.includes('lighting_boost') || (lightingQuality > 0 && lightingQuality < 0.6);
   const declutterPresetKey = clutterLevel >= 0.68 ? 'declutter_medium' : 'declutter_light';
 
   if (recommendedNextStep?.type === 'save_result') {
@@ -277,8 +290,26 @@ function getVisionActionRecommendation(asset, selectedVariant = null) {
   }
 
   if (
+    needsLightingRecovery &&
+    executionPresetKey !== 'lighting_boost'
+  ) {
+    return {
+      presetKey: 'lighting_boost',
+      label: getVisionActionLabel('lighting_boost'),
+      reason:
+        requestedPresetKey === 'combined_listing_refresh' && fallbackApplied
+          ? 'The listing-ready pass backed off safely, so the room likely needs a brighter lighting baseline first.'
+          : 'Recovering the lighting first should create a cleaner, more trustworthy base for the final listing-ready pass.',
+    };
+  }
+
+  if (
     requestedPresetKey === 'combined_listing_refresh' &&
-    (executionPresetKey === 'declutter_light' || executionPresetKey === 'declutter_medium')
+    (
+      executionPresetKey === 'declutter_light' ||
+      executionPresetKey === 'declutter_medium' ||
+      executionPresetKey === 'lighting_boost'
+    )
   ) {
     return {
       presetKey: 'combined_listing_refresh',
@@ -318,7 +349,7 @@ function getVisionSaveDefaults(variant) {
       : workflowStageKey === 'finish'
         ? 'finishes'
         : workflowStageKey === 'style'
-          ? 'style'
+          ? 'finishes'
           : pipelineStage === 'listing_ready'
             ? 'finishes'
             : pipelineStage === 'first_impression'
@@ -339,7 +370,76 @@ function getVisionSaveDefaults(variant) {
       metadata?.confidenceBadge ||
       metadata?.listingReadyLabel ||
       '',
+    publishable: Boolean(
+      metadata?.publishable || pipelineDescriptor?.publishable,
+    ),
   };
+}
+
+function getVisionPipelinePackageSummary(variant, saveDefaults = null) {
+  if (!variant) {
+    return null;
+  }
+
+  const metadata = variant?.metadata || {};
+  const pipelineDescriptor =
+    metadata?.pipelineDescriptor && typeof metadata.pipelineDescriptor === 'object'
+      ? metadata.pipelineDescriptor
+      : null;
+  const stageLabel =
+    pipelineDescriptor?.stageLabel || metadata?.pipelineStageLabel || 'Vision result';
+  const statusLabel =
+    saveDefaults?.qualityLabel ||
+    pipelineDescriptor?.statusLabel ||
+    metadata?.confidenceBadge ||
+    metadata?.listingReadyLabel ||
+    'Review pending';
+  const publishable = Boolean(
+    saveDefaults?.publishable || metadata?.publishable || pipelineDescriptor?.publishable,
+  );
+  const reviewMessage =
+    pipelineDescriptor?.reviewMessage || metadata?.warning || getVariantSummary(variant);
+
+  let deliveryMessage =
+    'Review this result before using it in final marketing materials.';
+  if (pipelineDescriptor?.stageKey === 'first_impression') {
+    deliveryMessage =
+      'This is your fast baseline improvement. Use Smart Enhancement next for clutter, lighting, or targeted cleanup.';
+  } else if (pipelineDescriptor?.stageKey === 'smart_enhancement') {
+    deliveryMessage =
+      'This result is ready for the stricter Listing Ready pass once the room feels clean and believable.';
+  } else if (publishable) {
+    deliveryMessage =
+      'This result is strong enough to keep as a listing candidate and use in final materials.';
+  } else if (pipelineDescriptor?.stageKey === 'listing_ready') {
+    deliveryMessage =
+      'Treat this as a reviewed draft unless you want to step back into Smart Enhancement for another pass.';
+  }
+
+  return {
+    stageLabel,
+    statusLabel,
+    reviewMessage,
+    deliveryMessage,
+    publishable,
+  };
+}
+
+function getVisionWorkflowStageKeyForJobType(jobType = '', mode = 'preset') {
+  if (mode === 'freeform') {
+    return 'finish';
+  }
+
+  const normalizedJobType = String(jobType || '').trim();
+  if (!normalizedJobType || normalizedJobType === 'enhance_listing_quality') {
+    return 'clean';
+  }
+
+  if (normalizedJobType === 'combined_listing_refresh') {
+    return 'style';
+  }
+
+  return 'finish';
 }
 
 function getRecommendedSection(nextStepKey) {
@@ -365,6 +465,7 @@ function getRecommendedSection(nextStepKey) {
 
 export function RootScreen() {
   const queryClient = useQueryClient();
+  const firstImpressionAutoStartedAssetIdsRef = useRef(new Set());
   const [authMode, setAuthMode] = useState('login');
   const [showPassword, setShowPassword] = useState(false);
   const [propertySection, setPropertySection] = useState('overview');
@@ -503,6 +604,11 @@ export function RootScreen() {
       : 'declutter_light';
   const isDeclutterRecommended =
     recommendedVisionAction === 'declutter_medium' || recommendedVisionAction === 'declutter_light';
+  const isLightingRecommended = recommendedVisionAction === 'lighting_boost';
+  const currentVisionPipelinePackage = getVisionPipelinePackageSummary(
+    selectedVariant,
+    currentVisionSaveDefaults,
+  );
   const visibleVisionEffects = (selectedVariant?.metadata?.effects || []).slice(0, 2);
   const hiddenVisionEffectCount = Math.max((selectedVariant?.metadata?.effects || []).length - 2, 0);
   const openChecklistItems = checklistItems.filter((task) => task.status !== 'done');
@@ -558,6 +664,36 @@ export function RootScreen() {
       mediaVariants.find((variant) => variant.isSelected)?.id || mediaVariants[0]?.id || '',
     );
   }, [mediaVariants, selectedVariantId]);
+
+  useEffect(() => {
+    if (
+      propertySection !== 'vision' ||
+      !selectedAsset?.id ||
+      selectedAsset.assetType === 'generated' ||
+      selectedAsset.selectedVariant ||
+      variantsQuery.isLoading ||
+      mediaVariants.length ||
+      selectedVariant ||
+      createVariantMutation.isPending
+    ) {
+      return;
+    }
+
+    if (firstImpressionAutoStartedAssetIdsRef.current.has(selectedAsset.id)) {
+      return;
+    }
+
+    firstImpressionAutoStartedAssetIdsRef.current.add(selectedAsset.id);
+    void handleGenerateVariant('enhance_listing_quality');
+  }, [
+    createVariantMutation.isPending,
+    handleGenerateVariant,
+    mediaVariants.length,
+    propertySection,
+    selectedAsset,
+    selectedVariant,
+    variantsQuery.isLoading,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -687,7 +823,7 @@ export function RootScreen() {
     setError('');
 
     try {
-      await savePhotoMutation.mutateAsync({
+      const response = await savePhotoMutation.mutateAsync({
         roomLabel: form.roomLabel,
         source: asset.importSource || 'mobile_capture',
         mimeType: asset.mimeType || 'image/jpeg',
@@ -696,8 +832,11 @@ export function RootScreen() {
         height: asset.height,
       });
       setPhotoAsset(null);
-      setPropertySection('gallery');
-      setStatus('Photo saved to the selected property.');
+      if (response?.asset?.id) {
+        setSelectedAssetId(response.asset.id);
+      }
+      setPropertySection('vision');
+      setStatus('Photo saved. Starting the first-impression pass for this room.');
     } catch (requestError) {
       setError(requestError.message);
     }
@@ -737,6 +876,7 @@ export function RootScreen() {
         jobType,
         mode,
         instructions,
+        workflowStageKey: getVisionWorkflowStageKeyForJobType(jobType, mode),
       }),
   });
 
@@ -1184,10 +1324,12 @@ export function RootScreen() {
     setPendingVisionJobType(jobType);
     setStatus(
       jobType === 'declutter_preview' || jobType === 'declutter_light' || jobType === 'declutter_medium'
-        ? 'Creating a declutter preview. This can take a moment.'
-        : jobType === 'combined_listing_refresh'
-          ? 'Creating a listing-ready preview. This can take a moment.'
-        : 'Enhancing the selected photo. This can take a moment.',
+        ? 'Running Smart Enhancement cleanup for this photo. This can take a moment.'
+        : jobType === 'lighting_boost'
+          ? 'Running Smart Enhancement lighting recovery for this photo. This can take a moment.'
+          : jobType === 'combined_listing_refresh'
+            ? 'Running the stricter Listing Ready pass for this photo. This can take a moment.'
+            : 'Running the First Impression pass for this photo. This can take a moment.',
     );
 
     try {
@@ -1207,10 +1349,12 @@ export function RootScreen() {
           response.job?.input?.smartEnhancementReason ||
           response.job?.warning ||
           (jobType === 'declutter_preview' || jobType === 'declutter_light' || jobType === 'declutter_medium'
-            ? 'Declutter preview generated.'
+            ? 'Smart Enhancement cleanup ready.'
+            : jobType === 'lighting_boost'
+              ? 'Lighting recovery ready.'
             : jobType === 'combined_listing_refresh'
-              ? 'Listing-ready path generated.'
-            : 'Enhanced listing version generated.'),
+              ? 'Listing Ready pass generated.'
+            : 'First Impression pass generated.'),
       );
     } catch (requestError) {
       setError(requestError.message);
@@ -1227,7 +1371,7 @@ export function RootScreen() {
 
     setError('');
     setPendingVisionJobType('freeform');
-    setStatus('Creating a custom enhancement preview. This can take a moment.');
+    setStatus('Creating a Smart Enhancement custom preview. This can take a moment.');
 
     try {
       const response = await createVariantMutation.mutateAsync({
@@ -1243,7 +1387,7 @@ export function RootScreen() {
       setStatus(
         response.job?.input?.orchestrationDeliveryMode === 'safe_marketplace_fallback'
           ? response.job?.warning || response.job?.message || 'A safe fallback preview was returned.'
-          : response.job?.warning || 'Custom enhancement preview generated.',
+          : response.job?.warning || 'Custom Smart Enhancement preview generated.',
       );
     } catch (requestError) {
       setError(requestError.message);
@@ -1303,7 +1447,7 @@ export function RootScreen() {
             ? 'This result was already saved in Photos and is marked as a listing candidate.'
             : 'This result was already saved in Photos as a review draft.'
           : currentVisionSaveDefaults.listingCandidate
-            ? 'This result has been saved to Photos and marked as a listing candidate.'
+            ? 'This result has been saved to Photos, marked as a listing candidate, and is ready for brochure/report workflows.'
             : `This result has been saved to Photos as a review draft${currentVisionSaveDefaults.qualityLabel ? ` (${currentVisionSaveDefaults.qualityLabel})` : ''}.`,
       );
     } catch (requestError) {
@@ -1682,13 +1826,13 @@ export function RootScreen() {
         {propertySection === 'vision' ? (
           <View style={styles.sectionPanel}>
             <Text style={styles.label}>Vision</Text>
-            <Text style={styles.body}>Generate the best listing-ready version of a saved photo.</Text>
+            <Text style={styles.body}>Run each saved photo through First Impression, Smart Enhancement, and Listing Ready.</Text>
             <Pressable onPress={() => setShowVisionDetails((current) => !current)} style={styles.learnMoreButton}>
               <Text style={styles.learnMoreButtonText}>{showVisionDetails ? 'Hide details' : 'Learn more'}</Text>
             </Pressable>
             {showVisionDetails ? (
               <Text style={styles.body}>
-                Enhance improves presentation while keeping the room believable. Declutter is best when the room feels busy or distracting.
+                First Impression is the default starting pass. Smart Enhancement handles clutter, lighting, and targeted cleanup. Listing Ready is the stricter publish-confidence step you run after the baseline looks strong.
               </Text>
             ) : null}
             <View style={styles.coverageList}>
@@ -1753,8 +1897,8 @@ export function RootScreen() {
                       minimumFontScale={0.85}
                     >
                       {pendingVisionJobType === 'enhance_listing_quality' && createVariantMutation.isPending
-                        ? 'Enhancing...'
-                        : 'Enhance'}
+                        ? 'Running...'
+                        : 'First Impression'}
                     </Text>
                   </Pressable>
                   <Pressable
@@ -1777,8 +1921,8 @@ export function RootScreen() {
                       minimumFontScale={0.85}
                     >
                       {pendingVisionJobType === 'combined_listing_refresh' && createVariantMutation.isPending
-                        ? 'Refreshing...'
-                        : 'Listing ready'}
+                        ? 'Running...'
+                        : 'Listing Ready'}
                     </Text>
                   </Pressable>
                   <Pressable
@@ -1804,10 +1948,34 @@ export function RootScreen() {
                         pendingVisionJobType === 'declutter_medium' ||
                         pendingVisionJobType === 'declutter_preview') &&
                       createVariantMutation.isPending
-                        ? 'Decluttering...'
+                        ? 'Running...'
                         : recommendedDeclutterPresetKey === 'declutter_medium'
-                          ? 'Declutter+'
-                          : 'Declutter'}
+                          ? 'Smart Declutter+'
+                          : 'Smart Declutter'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => handleGenerateVariant('lighting_boost')}
+                    style={[
+                      styles.button,
+                      isLightingRecommended ? styles.buttonPrimary : styles.buttonSecondary,
+                      styles.flexButton,
+                      styles.visionActionButton,
+                    ]}
+                    disabled={busy}
+                  >
+                    <Text
+                      style={[
+                        isLightingRecommended ? styles.buttonText : styles.buttonSecondaryText,
+                        styles.visionActionButtonText,
+                      ]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.85}
+                    >
+                      {pendingVisionJobType === 'lighting_boost' && createVariantMutation.isPending
+                        ? 'Running...'
+                        : 'Lighting'}
                     </Text>
                   </Pressable>
                 </View>
@@ -1827,7 +1995,7 @@ export function RootScreen() {
                   <Text style={styles.buttonSecondaryText}>
                     {pendingVisionJobType === 'freeform' && createVariantMutation.isPending
                       ? 'Generating custom preview...'
-                      : 'Generate custom preview'}
+                      : 'Generate custom Smart Enhancement preview'}
                   </Text>
                 </Pressable>
                 {selectedVariant ? (
@@ -1898,6 +2066,20 @@ export function RootScreen() {
                         ) : null}
                       </View>
                     ) : null}
+                    {currentVisionPipelinePackage ? (
+                      <View style={styles.summaryBulletList}>
+                        <Text style={styles.label}>Pipeline package</Text>
+                        <Text style={styles.summaryBullet}>
+                          • {currentVisionPipelinePackage.stageLabel} · {currentVisionPipelinePackage.statusLabel}
+                        </Text>
+                        <Text style={styles.summaryBullet}>
+                          • {currentVisionPipelinePackage.reviewMessage}
+                        </Text>
+                        <Text style={styles.summaryBullet}>
+                          • {currentVisionPipelinePackage.deliveryMessage}
+                        </Text>
+                      </View>
+                    ) : null}
                     {selectedVariant.metadata?.improvementsApplied?.length ? (
                       <View style={styles.summaryBulletList}>
                         <Text style={styles.label}>Improvements applied</Text>
@@ -1943,6 +2125,11 @@ export function RootScreen() {
                           : 'Saving this result to Photos will keep it as a review draft until you promote it later.'}
                       </Text>
                     )}
+                    {currentVisionPipelinePackage?.publishable ? (
+                      <Text style={styles.body}>
+                        This result is strong enough to serve as a final listing candidate once you keep it.
+                      </Text>
+                    ) : null}
                     <View style={styles.variantList}>
                       {mediaVariants.map((variant) => (
                         <Pressable
@@ -1974,6 +2161,18 @@ export function RootScreen() {
                             ? 'Save as listing photo'
                             : 'Save draft to Photos'}
                         </Text>
+                      </Pressable>
+                    ) : null}
+                    {savedAssetForSelectedVariant ? (
+                      <Pressable
+                        onPress={() => {
+                          setSelectedAssetId(savedAssetForSelectedVariant.id);
+                          setPropertySection('gallery');
+                        }}
+                        style={[styles.button, styles.buttonSecondary]}
+                        disabled={busy}
+                      >
+                        <Text style={styles.buttonSecondaryText}>View saved photo</Text>
                       </Pressable>
                     ) : null}
                     <Pressable

@@ -101,71 +101,60 @@ const REPORT_SECTION_OPTIONS = [
 const VISION_WORKFLOW_STAGES = [
   {
     key: 'clean',
-    label: '1. Clean',
-    title: 'Clean room',
-    description: 'Remove furniture, declutter the room, and run a cleanup pass before changing finishes.',
+    label: '1. First Impression',
+    title: 'First Impression',
+    description:
+      'Run the fast baseline pass first so the photo improves immediately and starts from a stronger, more trustworthy foundation.',
     nextKey: 'finish',
     groups: [
       {
-        key: 'clean_room',
-        label: 'Clean room workflow',
-        items: [
-          'remove_furniture',
-          'cleanup_empty_room',
-          'declutter_light',
-          'declutter_medium',
-        ],
+        key: 'first_impression',
+        label: 'Fast baseline',
+        items: ['enhance_listing_quality'],
       },
     ],
     allowFreeform: false,
   },
   {
     key: 'finish',
-    label: '2. Finishes',
-    title: 'Buyer Appeal Previews',
+    label: '2. Smart Enhancement',
+    title: 'Smart Enhancement',
     description:
-      'Preview simple buyer-friendly finish directions like brighter walls and lighter, warmer, darker, or more neutral floors.',
+      'Apply targeted cleanup and selective buyer-friendly improvements before you run the stricter publish-confidence pass.',
     nextKey: 'style',
     groups: [
       {
-        key: 'wall_color',
-        label: 'Wall color previews',
-        items: ['paint_warm_neutral', 'paint_bright_white', 'paint_soft_greige'],
+        key: 'smart_cleanup',
+        label: 'High-confidence cleanup',
+        items: [
+          'declutter_light',
+          'declutter_medium',
+          'lighting_boost',
+          'remove_furniture',
+          'cleanup_empty_room',
+        ],
       },
       {
-        key: 'flooring',
-        label: 'Floor tone previews',
-        items: ['floor_light_wood', 'floor_medium_wood', 'floor_dark_hardwood', 'floor_lvp_neutral'],
+        key: 'finish_concepts',
+        label: 'Optional concept directions',
+        items: [
+          'paint_warm_neutral',
+          'paint_bright_white',
+          'paint_soft_greige',
+          'floor_light_wood',
+          'floor_medium_wood',
+          'floor_dark_hardwood',
+          'floor_lvp_neutral',
+        ],
       },
       {
-        key: 'kitchen_upgrade',
-        label: 'Kitchen upgrade concepts',
+        key: 'room_upgrades',
+        label: 'Additional room upgrades',
         items: [
           'kitchen_white_cabinets_granite',
           'kitchen_white_cabinets_quartz',
           'kitchen_green_cabinets_granite',
           'kitchen_green_cabinets_quartz',
-        ],
-      },
-    ],
-    allowFreeform: false,
-  },
-  {
-    key: 'style',
-    label: '3. Style',
-    title: 'Style concept',
-    description: 'Polish the current room version or try a guided natural-language concept request.',
-    nextKey: 'final',
-    groups: [
-      {
-        key: 'listing_enhancement',
-        label: 'Listing polish',
-        items: ['enhance_listing_quality', 'combined_listing_refresh'],
-      },
-      {
-        key: 'exterior_upgrade',
-        label: 'Exterior upgrade concepts',
-        items: [
           'exterior_curb_appeal_refresh',
           'backyard_entertaining_refresh',
           'backyard_pool_preview',
@@ -173,6 +162,22 @@ const VISION_WORKFLOW_STAGES = [
       },
     ],
     allowFreeform: true,
+  },
+  {
+    key: 'style',
+    label: '3. Listing Ready',
+    title: 'Listing Ready',
+    description:
+      'Run the strict publish-confidence pass. Save the winner if it reads clean and trustworthy, or step back to Smart Enhancement if it still needs work.',
+    nextKey: 'final',
+    groups: [
+      {
+        key: 'listing_ready',
+        label: 'Final publish pass',
+        items: ['combined_listing_refresh'],
+      },
+    ],
+    allowFreeform: false,
   },
   {
     key: 'final',
@@ -238,7 +243,7 @@ function getVisionWorkflowStageForPreset(presetKey) {
 
 function getDefaultVisionPresetKeyForStage(stageKey) {
   const stage = getVisionWorkflowStage(stageKey);
-  return stage.groups.flatMap((group) => group.items)[0] || 'remove_furniture';
+  return stage.groups.flatMap((group) => group.items)[0] || 'enhance_listing_quality';
 }
 
 function getNextVisionWorkflowStageKey(stageKey) {
@@ -252,16 +257,19 @@ function getVisionRecommendationLabel(presetKey, presets = []) {
   }
 
   if (presetKey === 'enhance_listing_quality') {
-    return 'Enhance for Listing';
+    return 'First Impression';
   }
   if (presetKey === 'combined_listing_refresh') {
-    return 'Listing Refresh';
+    return 'Listing Ready';
   }
   if (presetKey === 'declutter_medium') {
-    return 'Medium Declutter';
+    return 'Smart Declutter+';
   }
   if (presetKey === 'declutter_light') {
-    return 'Light Declutter';
+    return 'Smart Declutter';
+  }
+  if (presetKey === 'lighting_boost') {
+    return 'Lighting Recovery';
   }
 
   return 'Vision enhancement';
@@ -283,6 +291,10 @@ function buildVisionWorkflowRecommendation(asset, selectedVariant = null, preset
   const clutterLevel = Number(
     sceneAnalysis?.clutterLevel || sceneAnalysis?.clutterScore || asset?.analysis?.clutterScore || 0,
   );
+  const rawLightingQuality = Number(
+    sceneAnalysis?.lightingQuality ?? asset?.analysis?.lightingScore ?? 0,
+  );
+  const lightingQuality = rawLightingQuality > 1 ? rawLightingQuality / 100 : rawLightingQuality;
   const listingReadyLabel = String(metadata?.listingReadyLabel || '');
   const fallbackApplied = Boolean(metadata?.fallbackApplied);
   const summary = String(asset?.analysis?.summary || '').toLowerCase();
@@ -291,6 +303,8 @@ function buildVisionWorkflowRecommendation(asset, selectedVariant = null, preset
     asset?.analysis?.retakeRecommended ||
     clutterLevel > 0.5 ||
     /clutter|declutter|distraction|tidy|retake|busy|remove/i.test(summary);
+  const needsLightingRecovery =
+    smartPlan.includes('lighting_boost') || (lightingQuality > 0 && lightingQuality < 0.6);
   const declutterPresetKey = clutterLevel >= 0.68 ? 'declutter_medium' : 'declutter_light';
 
   if (recommendedNextStep?.type === 'save_result') {
@@ -353,6 +367,22 @@ function buildVisionWorkflowRecommendation(asset, selectedVariant = null, preset
     };
   }
 
+  if (
+    (pipelineStage === 'first_impression' || requestedPresetKey === 'combined_listing_refresh') &&
+    needsLightingRecovery &&
+    !hasDeclutterSignal
+  ) {
+    return {
+      type: 'generate',
+      presetKey: 'lighting_boost',
+      label: getVisionRecommendationLabel('lighting_boost', presets),
+      reason:
+        requestedPresetKey === 'combined_listing_refresh' && fallbackApplied
+          ? 'The listing-ready pass backed off safely, which usually means the room needs a stronger lighting baseline before final polish.'
+          : 'The first-impression baseline is in place. A lighting recovery pass should improve brightness before the stricter listing-ready step.',
+    };
+  }
+
   if (pipelineStage === 'first_impression' || pipelineStage === 'smart_enhancement') {
     return {
       type: 'generate',
@@ -366,14 +396,24 @@ function buildVisionWorkflowRecommendation(asset, selectedVariant = null, preset
   if (requestedPresetKey === 'combined_listing_refresh' && listingReadyLabel !== 'Listing Ready') {
     return {
       type: 'generate',
-      presetKey: hasDeclutterSignal ? declutterPresetKey : 'combined_listing_refresh',
+      presetKey: hasDeclutterSignal
+        ? declutterPresetKey
+        : needsLightingRecovery
+          ? 'lighting_boost'
+          : 'combined_listing_refresh',
       label: getVisionRecommendationLabel(
-        hasDeclutterSignal ? declutterPresetKey : 'combined_listing_refresh',
+        hasDeclutterSignal
+          ? declutterPresetKey
+          : needsLightingRecovery
+            ? 'lighting_boost'
+            : 'combined_listing_refresh',
         presets,
       ),
       reason: hasDeclutterSignal
         ? 'The result is safer than final. A cleanup step should improve the next listing-ready attempt.'
-        : 'The room is close, but another listing-ready attempt may still produce a cleaner publishable result.',
+        : needsLightingRecovery
+          ? 'The result is safer than final. A lighting recovery step should improve the next listing-ready attempt.'
+          : 'The room is close, but another listing-ready attempt may still produce a cleaner publishable result.',
     };
   }
 
@@ -402,7 +442,7 @@ function getVisionSaveDefaults(variant, activeStageKey = 'style') {
       : workflowStageKey === 'finish'
         ? 'finishes'
         : workflowStageKey === 'style'
-          ? 'style'
+          ? 'finishes'
           : pipelineStage === 'listing_ready'
             ? 'finishes'
             : pipelineStage === 'first_impression'
@@ -424,6 +464,55 @@ function getVisionSaveDefaults(variant, activeStageKey = 'style') {
       metadata?.listingReadyLabel ||
       '',
     publishable: Boolean(metadata?.publishable || pipelineDescriptor?.publishable),
+  };
+}
+
+function getVisionPipelinePackageSummary(variant, saveDefaults = null) {
+  if (!variant) {
+    return null;
+  }
+
+  const metadata = variant?.metadata || {};
+  const pipelineDescriptor =
+    metadata?.pipelineDescriptor && typeof metadata.pipelineDescriptor === 'object'
+      ? metadata.pipelineDescriptor
+      : null;
+  const stageLabel =
+    pipelineDescriptor?.stageLabel || metadata?.pipelineStageLabel || 'Vision result';
+  const statusLabel =
+    saveDefaults?.qualityLabel ||
+    pipelineDescriptor?.statusLabel ||
+    metadata?.confidenceBadge ||
+    metadata?.listingReadyLabel ||
+    'Review pending';
+  const publishable = Boolean(
+    saveDefaults?.publishable || metadata?.publishable || pipelineDescriptor?.publishable,
+  );
+  const reviewMessage =
+    pipelineDescriptor?.reviewMessage || metadata?.warning || getVariantSummary(variant);
+
+  let deliveryMessage =
+    'Review this result before using it in final marketing materials.';
+  if (pipelineDescriptor?.stageKey === 'first_impression') {
+    deliveryMessage =
+      'This is your fast baseline improvement. Use Smart Enhancement next for clutter, lighting, or selective cleanup.';
+  } else if (pipelineDescriptor?.stageKey === 'smart_enhancement') {
+    deliveryMessage =
+      'This result is ready for the stricter Listing Ready pass once the room feels clean and believable.';
+  } else if (publishable) {
+    deliveryMessage =
+      'This result is strong enough to save as a listing photo and use in brochure and report workflows.';
+  } else if (pipelineDescriptor?.stageKey === 'listing_ready') {
+    deliveryMessage =
+      'Treat this as a reviewed draft unless you want to step back into Smart Enhancement for another pass.';
+  }
+
+  return {
+    stageLabel,
+    statusLabel,
+    reviewMessage,
+    deliveryMessage,
+    publishable,
   };
 }
 
@@ -1200,6 +1289,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const visionCompareRef = useRef(null);
   const visionCurrentActionRef = useRef(null);
   const lastVisionAssetResetRef = useRef('');
+  const firstImpressionAutoStartedAssetIdsRef = useRef(new Set());
   const propertySnapshotRefreshPromiseRef = useRef(null);
   const workspaceBodyMainRef = useRef(null);
   const providerSuggestionsRef = useRef(null);
@@ -1221,7 +1311,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [selectedMediaAssetId, setSelectedMediaAssetId] = useState('');
   const [workflowSourceVariantId, setWorkflowSourceVariantId] = useState('');
   const [activeVisionWorkflowStageKey, setActiveVisionWorkflowStageKey] = useState('clean');
-  const [activeVisionPresetKey, setActiveVisionPresetKey] = useState('remove_furniture');
+  const [activeVisionPresetKey, setActiveVisionPresetKey] = useState('enhance_listing_quality');
   const [flyerType, setFlyerType] = useState('sale');
   const [flyerHeadlineDraft, setFlyerHeadlineDraft] = useState('');
   const [flyerSubheadlineDraft, setFlyerSubheadlineDraft] = useState('');
@@ -1999,6 +2089,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const currentVisionSaveDefaults = useMemo(
     () => getVisionSaveDefaults(selectedVariant, activeVisionWorkflowStageKey),
     [activeVisionWorkflowStageKey, selectedVariant],
+  );
+  const currentVisionPipelinePackage = useMemo(
+    () => getVisionPipelinePackageSummary(selectedVariant, currentVisionSaveDefaults),
+    [currentVisionSaveDefaults, selectedVariant],
   );
   const selectedMediaAssetSourceAsset = useMemo(
     () =>
@@ -3853,8 +3947,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         : isCleanupPreset
         ? 'Generating cleanup pass...'
         : isDeclutterPreset
-        ? 'Generating declutter variant...'
-        : 'Generating enhanced listing version...',
+        ? 'Generating smart-enhancement cleanup...'
+        : presetKey === 'combined_listing_refresh'
+          ? 'Generating listing-ready pass...'
+          : 'Generating first-impression pass...',
     );
     setVisionGenerationState({
       kind: isFurnitureRemovalPreset
@@ -3869,15 +3965,19 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         : isCleanupPreset
         ? 'Empty-room cleanup pass'
         : isDeclutterPreset
-        ? 'Declutter variant'
-        : activeVisionPreset?.displayName || 'Vision enhancement',
+        ? 'Smart cleanup pass'
+        : presetKey === 'combined_listing_refresh'
+          ? 'Listing Ready pass'
+          : 'First Impression pass',
       detail: isFurnitureRemovalPreset
         ? 'Generating a concept preview and checking whether fallback providers are needed.'
         : isCleanupPreset
         ? 'Refining the currently selected clean-room source and smoothing leftover artifacts.'
         : isDeclutterPreset
-        ? 'Cleaning the photo up for listing use and reviewing the strongest result.'
-        : 'Generating a stronger listing-ready version of the selected photo.',
+        ? 'Cleaning the photo up and reviewing the strongest targeted enhancement.'
+        : presetKey === 'combined_listing_refresh'
+          ? 'Running the stricter publish-confidence pass and checking whether the result is trustworthy enough to keep.'
+          : 'Generating the fast baseline improvement that should make the room read better immediately.',
       startedAt: generationStartedAt,
     });
     setToast(null);
@@ -3896,11 +3996,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         variant: response.variant,
         successTitle: isFurnitureRemovalPreset
           ? 'Furniture removal preview ready'
-          : isCleanupPreset
+        : isCleanupPreset
           ? 'Cleanup pass ready'
-          : isDeclutterPreset
-          ? 'Declutter variant ready'
-          : 'Enhanced photo ready',
+        : isDeclutterPreset
+          ? 'Smart enhancement ready'
+        : presetKey === 'combined_listing_refresh'
+          ? 'Listing-ready pass ready'
+          : 'First impression ready',
         successMessage:
           'The new image is now shown in the Vision compare area and the Generated options panel.',
       });
@@ -3998,6 +4100,42 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
   }
 
+  useEffect(() => {
+    if (
+      activeTab !== 'vision' ||
+      !selectedMediaAsset?.id ||
+      selectedMediaAsset.assetType === 'generated' ||
+      selectedMediaAsset.selectedVariant ||
+      liveMediaVariantsQuery.isLoading ||
+      mediaVariants.length ||
+      selectedVariant ||
+      workflowSourceVariant ||
+      visionGenerationState ||
+      isArchivedProperty
+    ) {
+      return;
+    }
+
+    if (firstImpressionAutoStartedAssetIdsRef.current.has(selectedMediaAsset.id)) {
+      return;
+    }
+
+    firstImpressionAutoStartedAssetIdsRef.current.add(selectedMediaAsset.id);
+    setActiveVisionWorkflowStageKey('clean');
+    setActiveVisionPresetKey('enhance_listing_quality');
+    void handleGenerateVariant('enhance_listing_quality');
+  }, [
+    activeTab,
+    handleGenerateVariant,
+    isArchivedProperty,
+    liveMediaVariantsQuery.isLoading,
+    mediaVariants.length,
+    selectedMediaAsset,
+    selectedVariant,
+    visionGenerationState,
+    workflowSourceVariant,
+  ]);
+
   function handleSelectVisionPreset(presetKey) {
     setActiveVisionWorkflowStageKey(getVisionWorkflowStageForPreset(presetKey));
     setActiveVisionPresetKey(presetKey);
@@ -4025,16 +4163,16 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
 
     setActiveTab('vision');
-    setActiveVisionWorkflowStageKey('style');
+    setActiveVisionWorkflowStageKey('finish');
     const generationStartedAt = Date.now();
     let keepVisionGenerationState = false;
     setVisionRecoveryState(null);
     setVisionCancellationPending(false);
-    setStatus('Generating custom enhancement preview...');
+    setStatus('Generating custom smart-enhancement preview...');
     setVisionGenerationState({
       kind: 'freeform',
-      title: 'Custom enhancement preview',
-      detail: 'Applying your natural-language request, reviewing the generated result, and preparing a completion chime for longer runs.',
+      title: 'Custom smart-enhancement preview',
+      detail: 'Applying your natural-language request inside the smart-enhancement stage and reviewing the generated result.',
       startedAt: generationStartedAt,
     });
     setToast(null);
@@ -4046,7 +4184,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         roomType: selectedMediaAsset.roomLabel,
         forceRegenerate: true,
         sourceVariantId: workflowSourceVariantId || undefined,
-        workflowStageKey: 'style',
+        workflowStageKey: 'finish',
       });
       await Promise.all([
         refreshMediaAssets(selectedMediaAsset.id),
@@ -4199,6 +4337,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       ]);
 
       const savedAsset = response.asset || null;
+      const shouldAdvanceToFinalize =
+        activeVisionWorkflowStageKey === 'style' || listingCandidate;
+      if (shouldAdvanceToFinalize) {
+        setWorkflowSourceVariantId(selectedVariant.id);
+        setActiveVisionWorkflowStageKey('final');
+      }
       setToast({
         tone: 'success',
         title: 'Saved to Photos',
@@ -4530,7 +4674,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
       const nextAssets = await refreshMediaAssets();
       if (nextAssets[0]?.id) {
+        setSelectedMediaAssetId(nextAssets[0].id);
         await refreshMediaVariants(nextAssets[0].id);
+        setActiveTab('vision');
+        setPendingWorkspaceScrollTarget('vision-top');
       }
       await Promise.all([refreshDashboardSnapshot(), refreshWorkflow()]);
       setPhotoImportNotes('');
@@ -5385,6 +5532,20 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 ) : null}
               </div>
             ) : null}
+            {currentVisionPipelinePackage ? (
+              <div className="workspace-inner-card">
+                <span className="label">Pipeline package</span>
+                <p>
+                  {currentVisionPipelinePackage.stageLabel} · {currentVisionPipelinePackage.statusLabel}
+                </p>
+                <p className="workspace-control-note">
+                  {currentVisionPipelinePackage.reviewMessage}
+                </p>
+                <p className="workspace-control-note">
+                  {currentVisionPipelinePackage.deliveryMessage}
+                </p>
+              </div>
+            ) : null}
             {selectedVariant?.metadata?.differenceHint ? <p className="property-media-variant-hint">{selectedVariant.metadata.differenceHint}</p> : null}
             {selectedVariant?.metadata?.smartEnhancementPathLabel || selectedVariant?.metadata?.smartEnhancementReason ? (
               <div className="workspace-inner-card">
@@ -5507,6 +5668,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         : 'Saving this result to Photos will keep it as a review draft until you explicitly mark it as a seller pick.'}
                     </p>
                   ) : null}
+                  {currentVisionPipelinePackage ? (
+                    <p className="workspace-control-note">
+                      {currentVisionPipelinePackage.publishable
+                        ? 'This result is ready to flow into brochure and report materials once you keep it.'
+                        : currentVisionPipelinePackage.deliveryMessage}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="vision-result-actions">
                   <button
@@ -5533,6 +5701,26 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     >
                       {`Use this result for ${getVisionWorkflowStage(getNextVisionWorkflowStageKey(activeVisionWorkflowStageKey)).title.toLowerCase()}`}
                     </button>
+                  ) : null}
+                  {(currentVisionSaveDefaults.publishable ||
+                    savedAssetForSelectedVariant ||
+                    activeVisionWorkflowStage.key === 'final') ? (
+                    <>
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => setActiveTab('brochure')}
+                      >
+                        Open Brochure
+                      </button>
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => setActiveTab('report')}
+                      >
+                        Open Report
+                      </button>
+                    </>
                   ) : null}
                   {latestGeneratedVariant && selectedVariant && latestGeneratedVariant.id !== selectedVariant.id ? (
                     <button
@@ -5666,7 +5854,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                           ? 'vision-stage-chip active'
                           : 'vision-stage-chip'
                       }
-                      onClick={() => setActiveVisionWorkflowStageKey(stage.key)}
+                      onClick={() => {
+                        setActiveVisionWorkflowStageKey(stage.key);
+                        if (stage.key !== 'final') {
+                          setActiveVisionPresetKey(getDefaultVisionPresetKeyForStage(stage.key));
+                        }
+                      }}
                     >
                       <strong>{stage.label}</strong>
                       <span>{stage.title}</span>
@@ -5889,7 +6082,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         </button>
                       </div>
                       <p className="workspace-control-note">
-                        Use this after the room is cleaned and the major finish changes are in place. It works best for subtle style direction, not starting from a cluttered room.
+                        Use this after the room is cleaned and the major finish changes are in place. It works best inside Smart Enhancement for directed styling, not as a substitute for cleanup.
                       </p>
                       {selectedVariant?.metadata?.mode === 'freeform' ? (
                         <div className="vision-freeform-result-card">
@@ -5942,7 +6135,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     <div className="workspace-inner-card brochure-control-card">
                       <span className="label">Advanced requests</span>
                       <p>
-                        Natural-language styling unlocks in the Style concept stage, after the room has been cleaned and the major finish changes are in place.
+                        Natural-language styling unlocks in Smart Enhancement, after the room has been cleaned and the major finish changes are in place.
                       </p>
                     </div>
                   )}
@@ -5965,6 +6158,32 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         {selectedVariant.isSelected ? 'Preferred variant selected' : 'Set as preferred variant'}
                       </button>
                     ) : null}
+                    {savedAssetForSelectedVariant ? (
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => {
+                          setSelectedMediaAssetId(savedAssetForSelectedVariant.id);
+                          setActiveTab('photos');
+                        }}
+                      >
+                        View saved photo
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => setActiveTab('brochure')}
+                    >
+                      Open Brochure
+                    </button>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => setActiveTab('report')}
+                    >
+                      Open Report
+                    </button>
                     <button
                       type="button"
                       className="button-secondary button-danger"

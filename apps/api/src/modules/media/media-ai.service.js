@@ -1892,16 +1892,19 @@ function getVisionRecommendationLabel(presetKey = '') {
   }
 
   if (presetKey === 'enhance_listing_quality') {
-    return 'Enhance for Listing';
+    return 'First Impression';
   }
   if (presetKey === 'combined_listing_refresh') {
-    return 'Listing Refresh';
+    return 'Listing Ready';
   }
   if (presetKey === 'declutter_medium') {
-    return 'Medium Declutter';
+    return 'Smart Declutter+';
   }
   if (presetKey === 'declutter_light') {
-    return 'Light Declutter';
+    return 'Smart Declutter';
+  }
+  if (presetKey === 'lighting_boost') {
+    return 'Lighting Recovery';
   }
 
   return 'Vision enhancement';
