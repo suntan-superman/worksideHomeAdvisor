@@ -3,7 +3,11 @@ import mongoose from 'mongoose';
 import { formatCurrency } from '@workside/utils';
 
 import { generateMarketingInsights } from '../../services/aiWorkflowService.js';
-import { listMediaAssets } from '../media/media.service.js';
+import {
+  getMediaAssetMarketplaceState,
+  listMediaAssets,
+  sortMarketplaceReadyAssets,
+} from '../media/media.service.js';
 import { getLatestPricingAnalysis } from '../pricing/pricing.service.js';
 import { getPropertyById } from '../properties/property.service.js';
 import { SocialPackModel } from './social-pack.model.js';
@@ -36,13 +40,7 @@ function serializeSocialPack(document) {
 }
 
 function rankAssets(assets = []) {
-  return [...assets].sort((left, right) => {
-    if (Boolean(left.listingCandidate) !== Boolean(right.listingCandidate)) {
-      return left.listingCandidate ? -1 : 1;
-    }
-
-    return Number(right.analysis?.overallQualityScore || 0) - Number(left.analysis?.overallQualityScore || 0);
-  });
+  return sortMarketplaceReadyAssets(assets);
 }
 
 export function buildMarkdown(pack) {
@@ -145,11 +143,17 @@ export async function generatePropertySocialPack(propertyId) {
 
   const selectedPhotos = rankAssets(mediaAssets)
     .slice(0, 3)
-    .map((asset) => ({
-      assetId: asset.id,
-      roomLabel: asset.roomLabel,
-      imageUrl: asset.selectedVariant?.imageUrl || asset.imageUrl || '',
-    }));
+    .map((asset) => {
+      const marketplaceState = getMediaAssetMarketplaceState(asset);
+      return {
+        assetId: asset.id,
+        roomLabel: asset.roomLabel,
+        imageUrl: asset.selectedVariant?.imageUrl || asset.imageUrl || '',
+        listingCandidate: marketplaceState.publishable,
+        qualityLabel: marketplaceState.qualityLabel,
+        marketplaceStatus: marketplaceState.publishable ? 'Marketplace ready' : 'Review draft',
+      };
+    });
 
   let marketing = null;
   try {

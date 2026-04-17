@@ -176,6 +176,8 @@ export function buildGeneratedAssetAnalysisSnapshot({ roomLabel, generationLabel
   return {
     roomGuess: roomLabel || '',
     overallQualityScore,
+    bestUse: publishable ? 'Listing candidate' : 'Review draft',
+    highlights: qualityLabel ? [qualityLabel] : [],
     summary: summaryParts.join(' '),
     source: 'vision_saved',
     warning: variant?.metadata?.warning || '',
@@ -184,6 +186,89 @@ export function buildGeneratedAssetAnalysisSnapshot({ roomLabel, generationLabel
     visionPublishable: publishable,
     recommendedNextStep: pipelineDescriptor.recommendedNextStep || metadata.recommendedNextStep || null,
   };
+}
+
+export function getMediaAssetMarketplaceState(asset = {}, options = {}) {
+  const preferredVariant =
+    options?.preferredVariant && typeof options.preferredVariant === 'object'
+      ? options.preferredVariant
+      : asset?.selectedVariant;
+  const analysis = asset?.analysis && typeof asset.analysis === 'object' ? asset.analysis : {};
+  const selectedVariantMetadata =
+    preferredVariant?.metadata && typeof preferredVariant.metadata === 'object'
+      ? preferredVariant.metadata
+      : {};
+  const selectedVariantPipelineDescriptor =
+    selectedVariantMetadata.pipelineDescriptor &&
+    typeof selectedVariantMetadata.pipelineDescriptor === 'object'
+      ? selectedVariantMetadata.pipelineDescriptor
+      : {};
+  const explicitListingCandidate = Boolean(asset?.listingCandidate);
+  const savedVisionPublishable = Boolean(analysis.visionPublishable);
+  const preferredVariantPublishable = Boolean(
+    selectedVariantMetadata.publishable || selectedVariantPipelineDescriptor.publishable,
+  );
+  const publishable =
+    explicitListingCandidate || savedVisionPublishable || preferredVariantPublishable;
+  const reviewDraft = Boolean(asset?.savedFromVision) && !publishable;
+  const qualityScore = Math.max(
+    Number(analysis?.overallQualityScore || 0),
+    Number(selectedVariantMetadata?.listingReadyScore || 0),
+    Number(selectedVariantMetadata?.review?.overallScore || 0),
+  );
+
+  return {
+    explicitListingCandidate,
+    savedVisionPublishable,
+    preferredVariantPublishable,
+    publishable,
+    reviewDraft,
+    qualityScore,
+    qualityLabel:
+      analysis?.visionQualityLabel ||
+      selectedVariantMetadata?.qualityLabel ||
+      selectedVariantPipelineDescriptor?.statusLabel ||
+      selectedVariantMetadata?.confidenceBadge ||
+      selectedVariantMetadata?.listingReadyLabel ||
+      '',
+  };
+}
+
+export function countMarketplaceReadyAssets(assets = []) {
+  return assets.filter((asset) => getMediaAssetMarketplaceState(asset).publishable).length;
+}
+
+export function countExplicitListingCandidateAssets(assets = []) {
+  return assets.filter((asset) => getMediaAssetMarketplaceState(asset).explicitListingCandidate)
+    .length;
+}
+
+export function sortMarketplaceReadyAssets(assets = []) {
+  return [...assets].sort((left, right) => {
+    const leftState = getMediaAssetMarketplaceState(left);
+    const rightState = getMediaAssetMarketplaceState(right);
+
+    if (leftState.explicitListingCandidate !== rightState.explicitListingCandidate) {
+      return leftState.explicitListingCandidate ? -1 : 1;
+    }
+
+    if (leftState.publishable !== rightState.publishable) {
+      return leftState.publishable ? -1 : 1;
+    }
+
+    if (Boolean(left?.selectedVariant) !== Boolean(right?.selectedVariant)) {
+      return left?.selectedVariant ? -1 : 1;
+    }
+
+    if (leftState.qualityScore !== rightState.qualityScore) {
+      return rightState.qualityScore - leftState.qualityScore;
+    }
+
+    return (
+      Number(right?.analysis?.overallQualityScore || 0) -
+      Number(left?.analysis?.overallQualityScore || 0)
+    );
+  });
 }
 
 function serializeMediaAsset(document, selectedVariant = null) {

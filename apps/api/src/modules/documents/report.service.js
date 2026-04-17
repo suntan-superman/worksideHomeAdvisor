@@ -6,7 +6,13 @@ import { env } from '../../config/env.js';
 import { generateImprovementInsights, generateMarketingInsights } from '../../services/aiWorkflowService.js';
 import { buildMediaVariantUrl } from '../../services/storageService.js';
 import { buildVariantStoryBlock } from '../media/media-ai.service.js';
-import { listMediaAssets } from '../media/media.service.js';
+import {
+  countExplicitListingCandidateAssets,
+  countMarketplaceReadyAssets,
+  getMediaAssetMarketplaceState,
+  listMediaAssets,
+  sortMarketplaceReadyAssets,
+} from '../media/media.service.js';
 import { MediaVariantModel } from '../media/media-variant.model.js';
 import { getLatestPricingAnalysis } from '../pricing/pricing.service.js';
 import { getPropertyById } from '../properties/property.service.js';
@@ -89,29 +95,28 @@ function normalizeDate(value) {
 }
 
 function sortPhotosForReport(assets) {
-  return [...(assets || [])].sort((left, right) => {
-    if (Boolean(left.listingCandidate) !== Boolean(right.listingCandidate)) {
-      return left.listingCandidate ? -1 : 1;
-    }
-
-    return Number(right.analysis?.overallQualityScore || 0) - Number(left.analysis?.overallQualityScore || 0);
-  });
+  return sortMarketplaceReadyAssets(assets || []);
 }
 
 function selectReportPhotos(assets) {
   return sortPhotosForReport(assets).slice(0, 4).map((asset) => {
     const selectedVariant = asset.selectedVariant || null;
+    const marketplaceState = getMediaAssetMarketplaceState(asset, {
+      preferredVariant: selectedVariant,
+    });
 
     return {
       assetId: asset.id,
       roomLabel: asset.roomLabel,
       imageUrl: selectedVariant?.imageUrl || asset.imageUrl || null,
       score: asset.analysis?.overallQualityScore || null,
-      listingCandidate: Boolean(asset.listingCandidate),
+      listingCandidate: marketplaceState.publishable,
       listingNote: asset.listingNote || '',
       usesPreferredVariant: Boolean(selectedVariant),
       variantLabel: selectedVariant?.label || '',
       variantType: selectedVariant?.variantType || '',
+      qualityLabel: marketplaceState.qualityLabel || '',
+      marketplaceStatus: marketplaceState.publishable ? 'Marketplace ready' : 'Review draft',
     };
   });
 }
@@ -135,17 +140,22 @@ function chooseReportPhotos(
   return [...manualSelection, ...fallbackSelection].slice(0, 4).map((asset) => {
     const selectedVariant =
       reportVariantByAssetId.get(asset.id) || asset.selectedVariant || null;
+    const marketplaceState = getMediaAssetMarketplaceState(asset, {
+      preferredVariant: selectedVariant,
+    });
 
     return {
       assetId: asset.id,
       roomLabel: asset.roomLabel,
       imageUrl: selectedVariant?.imageUrl || asset.imageUrl || null,
       score: asset.analysis?.overallQualityScore || null,
-      listingCandidate: Boolean(asset.listingCandidate),
+      listingCandidate: marketplaceState.publishable,
       listingNote: asset.listingNote || '',
       usesPreferredVariant: Boolean(selectedVariant),
       variantLabel: selectedVariant?.label || '',
       variantType: selectedVariant?.variantType || '',
+      qualityLabel: marketplaceState.qualityLabel || '',
+      marketplaceStatus: marketplaceState.publishable ? 'Marketplace ready' : 'Review draft',
     };
   });
 }
@@ -156,10 +166,17 @@ function buildPhotoSummary(mediaAssets, selectedPhotos) {
   const missingRooms = CORE_ROOM_LABELS.filter((roomLabel) => !coveredRooms.includes(roomLabel));
   const preferredVariantCount = mediaAssets.filter((asset) => asset.selectedVariant).length;
   const selectedPreferredVariantCount = selectedPhotos.filter((photo) => photo.usesPreferredVariant).length;
+  const marketplaceReadyCount = countMarketplaceReadyAssets(mediaAssets);
+  const explicitListingCandidateCount = countExplicitListingCandidateAssets(mediaAssets);
+  const savedVisionPublishableCount = mediaAssets.filter(
+    (asset) => getMediaAssetMarketplaceState(asset).savedVisionPublishable,
+  ).length;
 
   return {
     totalPhotos: mediaAssets.length,
-    listingCandidateCount: mediaAssets.filter((asset) => asset.listingCandidate).length,
+    listingCandidateCount: marketplaceReadyCount,
+    explicitListingCandidateCount,
+    savedVisionPublishableCount,
     selectedPhotoCount: selectedPhotos.length,
     preferredVariantCount,
     selectedPreferredVariantCount,
@@ -170,7 +187,7 @@ function buildPhotoSummary(mediaAssets, selectedPhotos) {
     roomCoverageCount: coveredRooms.length,
     missingRooms,
     summary: mediaAssets.length
-      ? `${selectedPhotos.length} top report photo${selectedPhotos.length === 1 ? '' : 's'} selected, including ${selectedPreferredVariantCount} preferred vision variant${selectedPreferredVariantCount === 1 ? '' : 's'}. ${coveredRooms.length}/${CORE_ROOM_LABELS.length} core rooms covered. ${mediaAssets.filter((asset) => asset.analysis?.retakeRecommended).length} retake recommendation${mediaAssets.filter((asset) => asset.analysis?.retakeRecommended).length === 1 ? '' : 's'} remaining.`
+      ? `${selectedPhotos.length} top report photo${selectedPhotos.length === 1 ? '' : 's'} selected, including ${selectedPreferredVariantCount} preferred vision variant${selectedPreferredVariantCount === 1 ? '' : 's'}. ${marketplaceReadyCount} marketplace-ready photo${marketplaceReadyCount === 1 ? '' : 's'} identified${savedVisionPublishableCount ? `, including ${savedVisionPublishableCount} publishable Vision save${savedVisionPublishableCount === 1 ? '' : 's'}` : ''}. ${coveredRooms.length}/${CORE_ROOM_LABELS.length} core rooms covered. ${mediaAssets.filter((asset) => asset.analysis?.retakeRecommended).length} retake recommendation${mediaAssets.filter((asset) => asset.analysis?.retakeRecommended).length === 1 ? '' : 's'} remaining.`
       : 'No saved property photos are available yet for a richer listing-ready photo review.',
   };
 }
@@ -216,7 +233,8 @@ function buildSourceSnapshot({ property, pricing, mediaAssets, checklist, flyer,
     pricingUpdatedAt: normalizeDate(pricing?.updatedAt || pricing?.createdAt),
     mediaUpdatedAt,
     mediaCount: mediaAssets.length,
-    listingCandidateCount: mediaAssets.filter((asset) => asset.listingCandidate).length,
+    listingCandidateCount: countMarketplaceReadyAssets(mediaAssets),
+    explicitListingCandidateCount: countExplicitListingCandidateAssets(mediaAssets),
     selectedVariantCount: mediaAssets.filter((asset) => asset.selectedVariant).length,
     variantUpdatedAt,
     checklistUpdatedAt: normalizeDate(checklist?.updatedAt || checklist?.createdAt),
@@ -237,6 +255,8 @@ function compareSourceSnapshots(saved = {}, current = {}) {
     saved.mediaUpdatedAt !== current.mediaUpdatedAt ||
     Number(saved.mediaCount || 0) !== Number(current.mediaCount || 0) ||
     Number(saved.listingCandidateCount || 0) !== Number(current.listingCandidateCount || 0) ||
+    Number(saved.explicitListingCandidateCount || 0) !==
+      Number(current.explicitListingCandidateCount || 0) ||
     Number(saved.selectedVariantCount || 0) !== Number(current.selectedVariantCount || 0) ||
     saved.variantUpdatedAt !== current.variantUpdatedAt
   ) {

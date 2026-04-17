@@ -16,6 +16,10 @@ const photoAnalysisSnapshotSchema = new mongoose.Schema(
     disclaimer: { type: String },
     source: { type: String },
     warning: { type: String },
+    visionQualityLabel: { type: String },
+    visionPipelineStage: { type: String },
+    visionPublishable: { type: Boolean },
+    recommendedNextStep: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { _id: false },
 );

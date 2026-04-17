@@ -35,6 +35,7 @@ import {
   requestOtp,
   resetForgottenPassword,
   savePhoto,
+  saveVariantToPhotos,
   selectMediaVariant,
   updateUserProfile,
   updateChecklistItem,
@@ -301,6 +302,46 @@ function getVisionActionRecommendation(asset, selectedVariant = null) {
   };
 }
 
+function getVisionSaveDefaults(variant) {
+  const metadata = variant?.metadata || {};
+  const pipelineDescriptor =
+    metadata?.pipelineDescriptor && typeof metadata.pipelineDescriptor === 'object'
+      ? metadata.pipelineDescriptor
+      : null;
+  const pipelineStage = String(
+    pipelineDescriptor?.stageKey || metadata?.pipelineStage || '',
+  ).trim();
+  const workflowStageKey = String(metadata?.workflowStageKey || '').trim();
+  const generationStage =
+    workflowStageKey === 'clean'
+      ? 'clean_room'
+      : workflowStageKey === 'finish'
+        ? 'finishes'
+        : workflowStageKey === 'style'
+          ? 'style'
+          : pipelineStage === 'listing_ready'
+            ? 'finishes'
+            : pipelineStage === 'first_impression'
+              ? 'clean_room'
+              : pipelineStage === 'smart_enhancement' &&
+                  variant?.variantCategory !== 'concept_preview'
+                ? 'finishes'
+                : 'style';
+
+  return {
+    generationStage,
+    listingCandidate: Boolean(
+      metadata?.publishable || pipelineDescriptor?.publishable,
+    ),
+    qualityLabel:
+      metadata?.qualityLabel ||
+      pipelineDescriptor?.statusLabel ||
+      metadata?.confidenceBadge ||
+      metadata?.listingReadyLabel ||
+      '',
+  };
+}
+
 function getRecommendedSection(nextStepKey) {
   switch (nextStepKey) {
     case 'capture_photos':
@@ -425,6 +466,10 @@ export function RootScreen() {
     mediaVariants.find((variant) => variant.isSelected) ||
     mediaVariants[0] ||
     null;
+  const savedAssetForSelectedVariant =
+    gallery.find((asset) => String(asset?.sourceVariantId || '') === String(selectedVariant?.id || '')) ||
+    null;
+  const currentVisionSaveDefaults = getVisionSaveDefaults(selectedVariant);
   const roomCoverage = ROOM_LABEL_OPTIONS.map((roomLabel) => ({
     roomLabel,
     captured: gallery.some((asset) => asset.roomLabel === roomLabel),
@@ -699,6 +744,13 @@ export function RootScreen() {
     mutationFn: async ({ assetId, variantId }) => selectMediaVariant(assetId, variantId),
   });
 
+  const saveVariantToPhotosMutation = useMutation({
+    mutationFn: async ({ variantId, payload }) => saveVariantToPhotos(variantId, payload),
+    onSuccess: async () => {
+      await invalidatePropertyWorkspace(propertyId);
+    },
+  });
+
   const busy =
     busyState ||
     savePhotoMutation.isPending ||
@@ -706,7 +758,8 @@ export function RootScreen() {
     updateChecklistStatusMutation.isPending ||
     createChecklistItemMutation.isPending ||
     createVariantMutation.isPending ||
-    selectVariantMutation.isPending;
+    selectVariantMutation.isPending ||
+    saveVariantToPhotosMutation.isPending;
   const refreshing =
     propertiesQuery.isFetching ||
     dashboardQuery.isFetching ||
@@ -1217,6 +1270,42 @@ export function RootScreen() {
       ]);
       setSelectedVariantId(variantId);
       setStatus('Preferred variant selected for future flyer and report output.');
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  }
+
+  async function handleSaveCurrentVariantToPhotos() {
+    if (!selectedAsset || !selectedVariant) {
+      return;
+    }
+
+    setError('');
+
+    try {
+      const response = await saveVariantToPhotosMutation.mutateAsync({
+        variantId: selectedVariant.id,
+        payload: {
+          propertyId,
+          roomLabel: selectedAsset.roomLabel,
+          generationStage: currentVisionSaveDefaults.generationStage,
+          generationLabel: selectedVariant.label,
+          listingCandidate: currentVisionSaveDefaults.listingCandidate,
+        },
+      });
+      await Promise.all([
+        invalidatePropertyWorkspace(propertyId),
+        invalidateAssetVariants(selectedAsset.id),
+      ]);
+      setStatus(
+        response.created === false
+          ? currentVisionSaveDefaults.listingCandidate
+            ? 'This result was already saved in Photos and is marked as a listing candidate.'
+            : 'This result was already saved in Photos as a review draft.'
+          : currentVisionSaveDefaults.listingCandidate
+            ? 'This result has been saved to Photos and marked as a listing candidate.'
+            : `This result has been saved to Photos as a review draft${currentVisionSaveDefaults.qualityLabel ? ` (${currentVisionSaveDefaults.qualityLabel})` : ''}.`,
+      );
     } catch (requestError) {
       setError(requestError.message);
     }
@@ -1828,6 +1917,18 @@ export function RootScreen() {
                     {selectedVariant.metadata?.warning ? (
                       <Text style={styles.body}>{selectedVariant.metadata.warning}</Text>
                     ) : null}
+                    {savedAssetForSelectedVariant ? (
+                      <Text style={styles.body}>
+                        This result is already saved in Photos as{' '}
+                        {savedAssetForSelectedVariant.listingCandidate ? 'a listing candidate' : 'a review draft'}.
+                      </Text>
+                    ) : (
+                      <Text style={styles.body}>
+                        {currentVisionSaveDefaults.listingCandidate
+                          ? 'Saving this result to Photos will also mark it as a listing candidate.'
+                          : 'Saving this result to Photos will keep it as a review draft until you promote it later.'}
+                      </Text>
+                    )}
                     <View style={styles.variantList}>
                       {mediaVariants.map((variant) => (
                         <Pressable
@@ -1848,6 +1949,19 @@ export function RootScreen() {
                         </Pressable>
                       ))}
                     </View>
+                    {!savedAssetForSelectedVariant ? (
+                      <Pressable
+                        onPress={handleSaveCurrentVariantToPhotos}
+                        style={[styles.button, styles.buttonPrimary]}
+                        disabled={busy}
+                      >
+                        <Text style={styles.buttonText}>
+                          {currentVisionSaveDefaults.listingCandidate
+                            ? 'Save as listing photo'
+                            : 'Save draft to Photos'}
+                        </Text>
+                      </Pressable>
+                    ) : null}
                     <Pressable
                       onPress={() => handleSelectVariant(selectedVariant.id)}
                       style={[styles.button, styles.buttonSecondary]}

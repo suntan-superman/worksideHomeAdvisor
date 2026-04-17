@@ -3,7 +3,12 @@ import mongoose from 'mongoose';
 import { demoDashboard } from '../../data/demoData.js';
 import { FlyerModel } from '../documents/flyer.model.js';
 import { ReportModel } from '../documents/report.model.js';
-import { listMediaAssets } from '../media/media.service.js';
+import {
+  countExplicitListingCandidateAssets,
+  countMarketplaceReadyAssets,
+  getMediaAssetMarketplaceState,
+  listMediaAssets,
+} from '../media/media.service.js';
 import { getLatestPricingAnalysis } from '../pricing/pricing.service.js';
 import {
   assertPropertyEditableById,
@@ -197,7 +202,11 @@ async function buildSuggestedChecklistItems(propertyId) {
     mediaAssets.some((asset) => asset.roomLabel === roomLabel),
   ).length;
   const retakeCount = mediaAssets.filter((asset) => asset.analysis?.retakeRecommended).length;
-  const listingCandidateCount = mediaAssets.filter((asset) => asset.listingCandidate).length;
+  const listingCandidateCount = countMarketplaceReadyAssets(mediaAssets);
+  const explicitListingCandidateCount = countExplicitListingCandidateAssets(mediaAssets);
+  const publishableVisionCount = mediaAssets.filter(
+    (asset) => getMediaAssetMarketplaceState(asset).savedVisionPublishable,
+  ).length;
 
   return [
     {
@@ -269,8 +278,10 @@ async function buildSuggestedChecklistItems(propertyId) {
           : 'Choose the best listing candidate photos',
       detail:
         listingCandidateCount >= 3
-          ? `${listingCandidateCount} photos have been marked as listing-ready candidates.`
-          : `${listingCandidateCount} photo${listingCandidateCount === 1 ? ' is' : 's are'} currently marked as a listing candidate. Aim for at least 3 strong hero photos.`,
+          ? `${listingCandidateCount} photos are currently marketplace-ready${publishableVisionCount ? `, including ${publishableVisionCount} publishable Vision save${publishableVisionCount === 1 ? '' : 's'}` : ''}.`
+          : explicitListingCandidateCount > 0
+            ? `${explicitListingCandidateCount} photo${explicitListingCandidateCount === 1 ? ' is' : 's are'} explicitly marked as a listing candidate, and ${listingCandidateCount} photo${listingCandidateCount === 1 ? '' : 's are'} currently marketplace-ready overall. Aim for at least 3 strong hero photos.`
+            : `${listingCandidateCount} photo${listingCandidateCount === 1 ? ' is' : 's are'} currently marketplace-ready. Aim for at least 3 strong hero photos.`,
       category: 'marketing',
       priority: 'high',
       status:

@@ -5,7 +5,11 @@ import { formatCurrency } from '@workside/utils';
 import { env } from '../../config/env.js';
 import { generateMarketingInsights } from '../../services/aiWorkflowService.js';
 import { buildMediaVariantUrl } from '../../services/storageService.js';
-import { listMediaAssets } from '../media/media.service.js';
+import {
+  getMediaAssetMarketplaceState,
+  listMediaAssets,
+  sortMarketplaceReadyAssets,
+} from '../media/media.service.js';
 import { MediaVariantModel } from '../media/media-variant.model.js';
 import { getLatestPricingAnalysis } from '../pricing/pricing.service.js';
 import { getPropertyById } from '../properties/property.service.js';
@@ -57,16 +61,7 @@ function serializeFlyer(document) {
 }
 
 function sortFlyerAssets(assets) {
-  return [...(assets || [])].sort((left, right) => {
-    if (Boolean(left.listingCandidate) !== Boolean(right.listingCandidate)) {
-      return left.listingCandidate ? -1 : 1;
-    }
-
-    return (
-      Number(right.analysis?.overallQualityScore || 0) -
-      Number(left.analysis?.overallQualityScore || 0)
-    );
-  });
+  return sortMarketplaceReadyAssets(assets || []);
 }
 
 function chooseFlyerPhotos(
@@ -90,17 +85,22 @@ function chooseFlyerPhotos(
     .map((asset) => {
       const selectedVariant =
         brochureVariantByAssetId.get(asset.id) || asset.selectedVariant || null;
+      const marketplaceState = getMediaAssetMarketplaceState(asset, {
+        preferredVariant: selectedVariant,
+      });
 
       return {
         assetId: asset.id,
         roomLabel: asset.roomLabel,
         imageUrl: selectedVariant?.imageUrl || asset.imageUrl || asset.imageDataUrl || null,
         score: asset.analysis?.overallQualityScore || null,
-        listingCandidate: Boolean(asset.listingCandidate),
+        listingCandidate: marketplaceState.publishable,
         listingNote: asset.listingNote || '',
         usesPreferredVariant: Boolean(selectedVariant),
         variantLabel: selectedVariant?.label || '',
         variantType: selectedVariant?.variantType || '',
+        qualityLabel: marketplaceState.qualityLabel || '',
+        marketplaceStatus: marketplaceState.publishable ? 'Marketplace ready' : 'Review draft',
       };
     });
 }

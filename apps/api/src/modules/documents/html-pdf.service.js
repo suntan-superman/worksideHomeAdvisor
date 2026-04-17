@@ -518,15 +518,26 @@ function renderPhotoTiles(photos = [], limit = 4) {
     <div class="photo-grid">
       ${selected
         .map(
-          (photo) => `
+          (photo) => {
+            const statusParts = [
+              photo.marketplaceStatus || '',
+              photo.qualityLabel || '',
+              photo.usesPreferredVariant ? 'Preferred enhancement selected' : '',
+            ].filter(Boolean);
+            const fallbackLabel = photo.usesPreferredVariant
+              ? 'Preferred enhancement selected'
+              : 'Original or current selection';
+
+            return `
             <figure class="photo-tile">
               <img src="${escapeHtml(photo.imageUrl)}" alt="${escapeHtml(photo.roomLabel || 'Property photo')}" />
               <figcaption>
                 <strong>${escapeHtml(photo.roomLabel || 'Property photo')}</strong>
-                <span>${photo.usesPreferredVariant ? 'Preferred enhancement selected' : 'Original or current selection'}</span>
+                <span>${escapeHtml(statusParts.join(' · ') || fallbackLabel)}</span>
               </figcaption>
             </figure>
-          `,
+          `;
+          },
         )
         .join('')}
     </div>
@@ -1118,7 +1129,7 @@ function buildPropertySummaryHtml({ property, report }) {
             <div class="compact-metric-card">
               <div class="compact-metric-label">Photo coverage</div>
               <div class="compact-metric-value">${escapeHtml(`${photoSummary.roomCoverageCount || 0}/5`)}</div>
-              <div class="compact-metric-support">${escapeHtml(`${photoSummary.listingCandidateCount || 0} listing-ready · ${photoSummary.retakeCount || 0} retakes`)}</div>
+              <div class="compact-metric-support">${escapeHtml(`${photoSummary.listingCandidateCount || 0} marketplace-ready${photoSummary.savedVisionPublishableCount ? ` · ${photoSummary.savedVisionPublishableCount} publishable Vision` : ''} · ${photoSummary.retakeCount || 0} retakes`)}</div>
             </div>
             <div class="compact-metric-card">
               <div class="compact-metric-label">Checklist</div>
@@ -1206,7 +1217,11 @@ function buildPropertySummaryHtml({ property, report }) {
       <div class="metric-grid">
         ${renderMetricCard('Selected price', property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set', report.pricingSummary?.mid ? `Suggested midpoint ${formatCurrency(report.pricingSummary.mid)}` : 'Pricing guidance available')}
         ${renderMetricCard('Suggested range', report.pricingSummary?.low && report.pricingSummary?.high ? `${formatCurrency(report.pricingSummary.low)} - ${formatCurrency(report.pricingSummary.high)}` : 'Unavailable', 'Market-aligned range')}
-        ${renderMetricCard('Photo coverage', `${photoSummary.roomCoverageCount || 0}/5`, `${photoSummary.listingCandidateCount || 0} listing-ready`)}
+        ${renderMetricCard(
+          'Photo coverage',
+          `${photoSummary.roomCoverageCount || 0}/5`,
+          `${photoSummary.listingCandidateCount || 0} marketplace-ready${photoSummary.savedVisionPublishableCount ? ` · ${photoSummary.savedVisionPublishableCount} publishable Vision` : ''}`,
+        )}
         ${renderMetricCard('Checklist', `${checklistSummary.completedCount || 0}/${checklistSummary.totalCount || 0}`, `${checklistSummary.openCount || 0} open items`)}
       </div>
       <div class="dense-two-col" style="margin-top:18px;">

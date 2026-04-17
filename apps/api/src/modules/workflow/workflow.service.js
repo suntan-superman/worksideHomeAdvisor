@@ -1,5 +1,6 @@
 import { getLatestPropertyFlyer } from '../documents/flyer.service.js';
 import { getLatestPropertyReport } from '../documents/report.service.js';
+import { countMarketplaceReadyAssets } from '../media/media.service.js';
 import { getPropertyWorkspaceSnapshot } from '../properties/property-workspace.service.js';
 import { listProviderLeadsForProperty } from '../providers/providers.service.js';
 
@@ -211,7 +212,7 @@ function coverageSummary(mediaAssets) {
   const roomCoverageCount = CORE_ROOM_LABELS.filter((roomLabel) =>
     mediaAssets.some((asset) => asset.roomLabel === roomLabel),
   ).length;
-  const listingCandidateCount = mediaAssets.filter((asset) => asset.listingCandidate).length;
+  const listingCandidateCount = countMarketplaceReadyAssets(mediaAssets);
   const preferredVariantCount = mediaAssets.filter((asset) => asset.selectedVariant).length;
   return {
     photoCount: mediaAssets.length,

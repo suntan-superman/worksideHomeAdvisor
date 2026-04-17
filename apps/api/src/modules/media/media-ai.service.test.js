@@ -42,9 +42,13 @@ import {
 } from './vision-orchestrator.helpers.js';
 import {
   buildGeneratedAssetAnalysisSnapshot,
+  countMarketplaceReadyAssets,
+  getMediaAssetMarketplaceState,
   resolveSavedVariantGenerationStage,
   resolveSavedVariantListingCandidate,
+  sortMarketplaceReadyAssets,
 } from './media.service.js';
+import { MediaAssetModel } from './media.model.js';
 import { orchestrateVisionJob } from './vision-orchestrator.service.js';
 import { resolveVisionPreset } from './vision-presets.js';
 
@@ -626,7 +630,99 @@ test('buildGeneratedAssetAnalysisSnapshot carries marketplace-quality summary fo
 
   assert.equal(analysis.visionPublishable, true);
   assert.equal(analysis.visionQualityLabel, 'Listing Ready');
+  assert.equal(analysis.bestUse, 'Listing candidate');
   assert.match(analysis.summary, /publishable listing candidate/i);
+});
+
+test('media asset analysis schema keeps saved vision marketplace fields', () => {
+  assert.ok(MediaAssetModel.schema.path('analysis.visionQualityLabel'));
+  assert.ok(MediaAssetModel.schema.path('analysis.visionPipelineStage'));
+  assert.ok(MediaAssetModel.schema.path('analysis.visionPublishable'));
+  assert.ok(MediaAssetModel.schema.path('analysis.recommendedNextStep'));
+});
+
+test('getMediaAssetMarketplaceState promotes publishable saved vision drafts into marketplace-ready state', () => {
+  const state = getMediaAssetMarketplaceState({
+    listingCandidate: false,
+    savedFromVision: true,
+    analysis: {
+      visionPublishable: true,
+      overallQualityScore: 81,
+    },
+  });
+
+  assert.equal(state.publishable, true);
+  assert.equal(state.savedVisionPublishable, true);
+  assert.equal(state.reviewDraft, false);
+  assert.equal(state.qualityScore, 81);
+});
+
+test('getMediaAssetMarketplaceState honors an overridden preferred variant when deriving publishable state', () => {
+  const state = getMediaAssetMarketplaceState(
+    {
+      listingCandidate: false,
+      analysis: { overallQualityScore: 61 },
+      selectedVariant: {
+        metadata: {
+          pipelineDescriptor: {
+            publishable: false,
+            statusLabel: 'Needs Review',
+          },
+        },
+      },
+    },
+    {
+      preferredVariant: {
+        metadata: {
+          review: { overallScore: 88 },
+          pipelineDescriptor: {
+            publishable: true,
+            statusLabel: 'Listing Ready',
+          },
+        },
+      },
+    },
+  );
+
+  assert.equal(state.publishable, true);
+  assert.equal(state.preferredVariantPublishable, true);
+  assert.equal(state.qualityScore, 88);
+  assert.equal(state.qualityLabel, 'Listing Ready');
+});
+
+test('sortMarketplaceReadyAssets prioritizes explicit picks, then publishable assets, then quality', () => {
+  const ranked = sortMarketplaceReadyAssets([
+    {
+      id: 'quality-only',
+      listingCandidate: false,
+      analysis: { overallQualityScore: 90 },
+    },
+    {
+      id: 'publishable-vision',
+      listingCandidate: false,
+      analysis: { overallQualityScore: 72, visionPublishable: true },
+    },
+    {
+      id: 'seller-pick',
+      listingCandidate: true,
+      analysis: { overallQualityScore: 65 },
+    },
+  ]);
+
+  assert.deepEqual(
+    ranked.map((asset) => asset.id),
+    ['seller-pick', 'publishable-vision', 'quality-only'],
+  );
+});
+
+test('countMarketplaceReadyAssets includes publishable vision saves even before manual seller-pick review', () => {
+  const count = countMarketplaceReadyAssets([
+    { listingCandidate: true, analysis: {} },
+    { listingCandidate: false, analysis: { visionPublishable: true } },
+    { listingCandidate: false, analysis: { overallQualityScore: 82 } },
+  ]);
+
+  assert.equal(count, 2);
 });
 
 test('classifyQuality keeps subtle but usable smart-enhancement candidates instead of hard rejecting them', () => {

@@ -175,6 +175,13 @@ export function selectMediaVariant(assetId, variantId) {
   });
 }
 
+export function saveVariantToPhotos(variantId, payload) {
+  return request(`/api/v1/media/variants/${variantId}/save-to-photos`, {
+    method: 'POST',
+    body: JSON.stringify(payload || {}),
+  });
+}
+
 export function savePhoto(propertyId, payload) {
   return request(`/api/v1/properties/${propertyId}/media`, {
     method: 'POST',
