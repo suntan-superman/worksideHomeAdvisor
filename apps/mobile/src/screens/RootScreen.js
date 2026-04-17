@@ -666,36 +666,6 @@ export function RootScreen() {
   }, [mediaVariants, selectedVariantId]);
 
   useEffect(() => {
-    if (
-      propertySection !== 'vision' ||
-      !selectedAsset?.id ||
-      selectedAsset.assetType === 'generated' ||
-      selectedAsset.selectedVariant ||
-      variantsQuery.isLoading ||
-      mediaVariants.length ||
-      selectedVariant ||
-      createVariantMutation.isPending
-    ) {
-      return;
-    }
-
-    if (firstImpressionAutoStartedAssetIdsRef.current.has(selectedAsset.id)) {
-      return;
-    }
-
-    firstImpressionAutoStartedAssetIdsRef.current.add(selectedAsset.id);
-    void handleGenerateVariant('enhance_listing_quality');
-  }, [
-    createVariantMutation.isPending,
-    handleGenerateVariant,
-    mediaVariants.length,
-    propertySection,
-    selectedAsset,
-    selectedVariant,
-    variantsQuery.isLoading,
-  ]);
-
-  useEffect(() => {
     let active = true;
 
     async function loadRememberedEmail() {
@@ -906,6 +876,36 @@ export function RootScreen() {
     checklistQuery.isFetching ||
     galleryQuery.isFetching ||
     variantsQuery.isFetching;
+
+  useEffect(() => {
+    if (
+      propertySection !== 'vision' ||
+      !selectedAsset?.id ||
+      selectedAsset.assetType === 'generated' ||
+      selectedAsset.selectedVariant ||
+      variantsQuery.isLoading ||
+      mediaVariants.length ||
+      selectedVariant ||
+      createVariantMutation.isPending
+    ) {
+      return;
+    }
+
+    if (firstImpressionAutoStartedAssetIdsRef.current.has(selectedAsset.id)) {
+      return;
+    }
+
+    firstImpressionAutoStartedAssetIdsRef.current.add(selectedAsset.id);
+    void handleGenerateVariant('enhance_listing_quality');
+  }, [
+    createVariantMutation.isPending,
+    handleGenerateVariant,
+    mediaVariants.length,
+    propertySection,
+    selectedAsset,
+    selectedVariant,
+    variantsQuery.isLoading,
+  ]);
 
   async function handleLogin() {
     setBusyState(true);
