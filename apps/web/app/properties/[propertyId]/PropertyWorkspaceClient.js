@@ -245,6 +245,122 @@ function getNextVisionWorkflowStageKey(stageKey) {
   return getVisionWorkflowStage(stageKey).nextKey || 'final';
 }
 
+function getVisionRecommendationLabel(presetKey, presets = []) {
+  const preset = presets.find((item) => item.key === presetKey);
+  if (preset?.displayName) {
+    return preset.displayName;
+  }
+
+  if (presetKey === 'enhance_listing_quality') {
+    return 'Enhance for Listing';
+  }
+  if (presetKey === 'combined_listing_refresh') {
+    return 'Listing Refresh';
+  }
+  if (presetKey === 'declutter_medium') {
+    return 'Medium Declutter';
+  }
+  if (presetKey === 'declutter_light') {
+    return 'Light Declutter';
+  }
+
+  return 'Vision enhancement';
+}
+
+function buildVisionWorkflowRecommendation(asset, selectedVariant = null, presets = []) {
+  const metadata = selectedVariant?.metadata || asset?.selectedVariant?.metadata || {};
+  const requestedPresetKey =
+    metadata?.requestedPresetKey || metadata?.presetKey || selectedVariant?.variantType || '';
+  const pipelineStage = String(metadata?.pipelineStage || '');
+  const smartPlan = Array.isArray(metadata?.smartEnhancementPlan)
+    ? metadata.smartEnhancementPlan
+    : [];
+  const sceneAnalysis = metadata?.sceneAnalysis || {};
+  const clutterLevel = Number(
+    sceneAnalysis?.clutterLevel || sceneAnalysis?.clutterScore || asset?.analysis?.clutterScore || 0,
+  );
+  const listingReadyLabel = String(metadata?.listingReadyLabel || '');
+  const fallbackApplied = Boolean(metadata?.fallbackApplied);
+  const summary = String(asset?.analysis?.summary || '').toLowerCase();
+  const hasDeclutterSignal =
+    smartPlan.includes('declutter') ||
+    asset?.analysis?.retakeRecommended ||
+    clutterLevel > 0.5 ||
+    /clutter|declutter|distraction|tidy|retake|busy|remove/i.test(summary);
+  const declutterPresetKey = clutterLevel >= 0.68 ? 'declutter_medium' : 'declutter_light';
+
+  if (listingReadyLabel === 'Listing Ready') {
+    return {
+      type: 'save_result',
+      label: 'Save this result',
+      reason:
+        'This preview is already reading as listing-ready, so the next move is to keep it and use it in Photos, brochure, or report output.',
+    };
+  }
+
+  if (!selectedVariant && !asset?.selectedVariant) {
+    return {
+      type: 'generate',
+      presetKey: 'enhance_listing_quality',
+      label: getVisionRecommendationLabel('enhance_listing_quality', presets),
+      reason:
+        'Start with the fast first-impression pass so the room gets a reliable visual improvement before heavier cleanup or listing polish.',
+    };
+  }
+
+  if (requestedPresetKey === 'combined_listing_refresh' && fallbackApplied && hasDeclutterSignal) {
+    return {
+      type: 'generate',
+      presetKey: declutterPresetKey,
+      label: getVisionRecommendationLabel(declutterPresetKey, presets),
+      reason:
+        'The listing-ready pass fell back safely, which usually means the room still needs a stronger cleanup step before final polish.',
+    };
+  }
+
+  if (pipelineStage === 'first_impression' && hasDeclutterSignal) {
+    return {
+      type: 'generate',
+      presetKey: declutterPresetKey,
+      label: getVisionRecommendationLabel(declutterPresetKey, presets),
+      reason:
+        'The first-impression pass is in place. Cleaning visual distractions next should create a stronger base for listing-ready polish.',
+    };
+  }
+
+  if (pipelineStage === 'first_impression' || pipelineStage === 'smart_enhancement') {
+    return {
+      type: 'generate',
+      presetKey: 'combined_listing_refresh',
+      label: getVisionRecommendationLabel('combined_listing_refresh', presets),
+      reason:
+        'The room now has a stable enough baseline for the stricter listing-ready pass that favors realism and publish confidence.',
+    };
+  }
+
+  if (requestedPresetKey === 'combined_listing_refresh' && listingReadyLabel !== 'Listing Ready') {
+    return {
+      type: 'generate',
+      presetKey: hasDeclutterSignal ? declutterPresetKey : 'combined_listing_refresh',
+      label: getVisionRecommendationLabel(
+        hasDeclutterSignal ? declutterPresetKey : 'combined_listing_refresh',
+        presets,
+      ),
+      reason: hasDeclutterSignal
+        ? 'The result is safer than final. A cleanup step should improve the next listing-ready attempt.'
+        : 'The room is close, but another listing-ready attempt may still produce a cleaner publishable result.',
+    };
+  }
+
+  return {
+    type: 'generate',
+    presetKey: 'enhance_listing_quality',
+    label: getVisionRecommendationLabel('enhance_listing_quality', presets),
+    reason:
+      'Use the fast enhancement pass to re-establish a strong first impression before trying another advanced transformation.',
+  };
+}
+
 function buildAddressQuery(property) {
   return [property?.addressLine1, property?.city, property?.state, property?.zip]
     .filter(Boolean)
@@ -1493,6 +1609,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }) {
     const nextVariantId = resolveVisionResultVariantId(job, variant);
     const isAdvisorOnly = job?.fallbackMode === 'advisor_only' || !nextVariantId;
+    const deliveryMode = job?.input?.orchestrationDeliveryMode || '';
+    const isSafeMarketplaceFallback = deliveryMode === 'safe_marketplace_fallback';
 
     if (isAdvisorOnly) {
       return {
@@ -1509,10 +1627,19 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
 
     return {
-      tone: job?.warning ? 'warning' : 'success',
-      title: job?.warning ? warningTitle : successTitle,
-      message: job?.warning || successMessage,
-      autoDismissMs: job?.warning ? 0 : 9000,
+      tone: isSafeMarketplaceFallback || job?.warning ? 'warning' : 'success',
+      title: isSafeMarketplaceFallback
+        ? 'Safe fallback preview ready'
+        : job?.warning
+          ? warningTitle
+          : successTitle,
+      message:
+        job?.warning ||
+        job?.message ||
+        (isSafeMarketplaceFallback
+          ? 'A reliable deterministic preview was returned because the advanced pass did not produce a trustworthy result.'
+          : successMessage),
+      autoDismissMs: isSafeMarketplaceFallback || job?.warning ? 0 : 9000,
       shouldScroll: true,
       nextVariantId,
     };
@@ -1957,6 +2084,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const activeVisionPreset = useMemo(
     () => visionPresets.find((preset) => preset.key === activeVisionPresetKey) || null,
     [activeVisionPresetKey, visionPresets],
+  );
+  const visionWorkflowRecommendation = useMemo(
+    () => buildVisionWorkflowRecommendation(selectedMediaAsset, selectedVariant, visionPresets),
+    [selectedMediaAsset, selectedVariant, visionPresets],
   );
   const activeVisionPresetTooltip = useMemo(() => {
     if (!activeVisionPreset) {
@@ -2577,6 +2708,18 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setActiveVisionPresetKey(nextPresetKey);
     }
   }, [selectedVariant?.metadata?.presetKey, selectedVariant?.metadata?.requestedPresetKey, selectedVariant?.variantType]);
+
+  useEffect(() => {
+    const nextPresetKey =
+      selectedVariant?.metadata?.requestedPresetKey ||
+      selectedVariant?.metadata?.presetKey ||
+      selectedVariant?.variantType;
+    if (!nextPresetKey) {
+      return;
+    }
+
+    setActiveVisionWorkflowStageKey(getVisionWorkflowStageForPreset(nextPresetKey));
+  }, [selectedVariant?.id]);
 
   useEffect(() => {
     const variants = latestSocialPack?.variants || [];
@@ -3786,6 +3929,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   }
 
   function handleSelectVisionPreset(presetKey) {
+    setActiveVisionWorkflowStageKey(getVisionWorkflowStageForPreset(presetKey));
     setActiveVisionPresetKey(presetKey);
     if (typeof window !== 'undefined') {
       window.setTimeout(() => {
@@ -5554,6 +5698,44 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     <p className="workspace-control-note">
                       Generate the next result here. Open attempt history only when you want to compare, keep, or permanently delete older attempts.
                     </p>
+                    {visionWorkflowRecommendation ? (
+                      <div className="workspace-inner-card">
+                        <span className="label">Recommended next step</span>
+                        <strong>{visionWorkflowRecommendation.label}</strong>
+                        <p>{visionWorkflowRecommendation.reason}</p>
+                        <div className="workspace-action-row">
+                          {visionWorkflowRecommendation.type === 'generate' ? (
+                            <button
+                              type="button"
+                              className={
+                                visionWorkflowRecommendation.presetKey === activeVisionPresetKey
+                                  ? 'button-secondary'
+                                  : 'button-primary'
+                              }
+                              onClick={() =>
+                                handleSelectVisionPreset(visionWorkflowRecommendation.presetKey)
+                              }
+                              disabled={!visionWorkflowRecommendation.presetKey}
+                            >
+                              {visionWorkflowRecommendation.presetKey === activeVisionPresetKey
+                                ? 'Recommended preset selected'
+                                : `Use ${visionWorkflowRecommendation.label}`}
+                            </button>
+                          ) : null}
+                          {visionWorkflowRecommendation.type === 'save_result' &&
+                          selectedVariant &&
+                          !savedAssetForSelectedVariant ? (
+                            <button
+                              type="button"
+                              className="button-primary"
+                              onClick={handleSaveCurrentVisionResultToPhotos}
+                            >
+                              Save this result to Photos
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="vision-current-action-buttons vision-current-action-buttons-secondary">
                       <button
                         type="button"

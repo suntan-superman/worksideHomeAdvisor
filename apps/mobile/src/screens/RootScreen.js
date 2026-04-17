@@ -142,11 +142,14 @@ function formatWorkflowStatus(status) {
 }
 
 function getVisionJobLabel(jobType) {
-  if (jobType === 'declutter_preview') {
+  if (jobType === 'declutter_preview' || jobType === 'declutter_light' || jobType === 'declutter_medium') {
     return 'Decluttering photo';
   }
   if (jobType === 'combined_listing_refresh') {
     return 'Preparing listing-ready photo';
+  }
+  if (jobType === 'enhance_listing_quality') {
+    return 'Preparing first-impression enhancement';
   }
 
   return 'Enhancing photo';
@@ -176,7 +179,24 @@ function summarizePricing(pricingSummary) {
     .slice(0, 3);
 }
 
-function getRecommendedVisionAction(asset, selectedVariant = null) {
+function getVisionActionLabel(jobType) {
+  if (jobType === 'enhance_listing_quality') {
+    return 'Enhance';
+  }
+  if (jobType === 'combined_listing_refresh') {
+    return 'Listing ready';
+  }
+  if (jobType === 'declutter_medium') {
+    return 'Declutter+';
+  }
+  if (jobType === 'declutter_light' || jobType === 'declutter_preview') {
+    return 'Declutter';
+  }
+
+  return 'Enhance';
+}
+
+function getVisionActionRecommendation(asset, selectedVariant = null) {
   const requestedPresetKey =
     selectedVariant?.metadata?.requestedPresetKey ||
     asset?.selectedVariant?.metadata?.requestedPresetKey ||
@@ -194,28 +214,76 @@ function getRecommendedVisionAction(asset, selectedVariant = null) {
     selectedVariant?.metadata?.smartEnhancementPlan ||
     asset?.selectedVariant?.metadata?.smartEnhancementPlan ||
     [];
+  const sceneAnalysis = selectedVariant?.metadata?.sceneAnalysis || {};
+  const clutterLevel = Number(
+    sceneAnalysis?.clutterLevel || sceneAnalysis?.clutterScore || asset?.analysis?.clutterScore || 0,
+  );
+  const listingReadyLabel =
+    selectedVariant?.metadata?.listingReadyLabel ||
+    asset?.selectedVariant?.metadata?.listingReadyLabel ||
+    '';
+  const fallbackApplied = Boolean(
+    selectedVariant?.metadata?.fallbackApplied || asset?.selectedVariant?.metadata?.fallbackApplied,
+  );
   const summary = String(asset?.analysis?.summary || '').toLowerCase();
   const hasDeclutterSignal =
     smartPlan.includes('declutter') ||
     asset?.analysis?.retakeRecommended ||
+    clutterLevel > 0.5 ||
     /clutter|declutter|distraction|tidy|retake|busy|remove/i.test(summary);
+  const declutterPresetKey = clutterLevel >= 0.68 ? 'declutter_medium' : 'declutter_light';
+
+  if (listingReadyLabel === 'Listing Ready') {
+    return {
+      presetKey: '',
+      label: 'Save this result',
+      reason: 'This preview is already reading as listing-ready.',
+    };
+  }
+
+  if (!selectedVariant && !asset?.selectedVariant) {
+    return {
+      presetKey: 'enhance_listing_quality',
+      label: getVisionActionLabel('enhance_listing_quality'),
+      reason: 'Start with the fast first-impression pass before heavier cleanup or listing polish.',
+    };
+  }
 
   if (hasDeclutterSignal) {
-    return 'declutter_preview';
+    return {
+      presetKey: declutterPresetKey,
+      label: getVisionActionLabel(declutterPresetKey),
+      reason:
+        requestedPresetKey === 'combined_listing_refresh' && fallbackApplied
+          ? 'The listing-ready pass fell back safely, so the room likely needs a stronger cleanup step first.'
+          : 'Cleaning distractions next should create a stronger base for listing-ready polish.',
+    };
   }
 
   if (
     requestedPresetKey === 'combined_listing_refresh' &&
     (executionPresetKey === 'declutter_light' || executionPresetKey === 'declutter_medium')
   ) {
-    return 'combined_listing_refresh';
+    return {
+      presetKey: 'combined_listing_refresh',
+      label: getVisionActionLabel('combined_listing_refresh'),
+      reason: 'The cleanup path has run, so the next step is the stricter listing-ready pass.',
+    };
   }
 
   if (pipelineStage === 'first_impression' || pipelineStage === 'smart_enhancement') {
-    return 'combined_listing_refresh';
+    return {
+      presetKey: 'combined_listing_refresh',
+      label: getVisionActionLabel('combined_listing_refresh'),
+      reason: 'The room now has a stable enough baseline for the listing-ready pass.',
+    };
   }
 
-  return 'enhance_listing_quality';
+  return {
+    presetKey: 'enhance_listing_quality',
+    label: getVisionActionLabel('enhance_listing_quality'),
+    reason: 'Use the fast enhancement pass to re-establish a strong first impression first.',
+  };
 }
 
 function getRecommendedSection(nextStepKey) {
@@ -367,7 +435,14 @@ export function RootScreen() {
   const nextMissingRoom = roomCoverage.find((item) => !item.captured)?.roomLabel || ROOM_LABEL_OPTIONS[0];
   const recommendedSection = getRecommendedSection(workflow?.nextStep?.key);
   const pricingHighlights = summarizePricing(dashboard?.pricingSummary);
-  const recommendedVisionAction = getRecommendedVisionAction(selectedAsset, selectedVariant);
+  const visionActionRecommendation = getVisionActionRecommendation(selectedAsset, selectedVariant);
+  const recommendedVisionAction = visionActionRecommendation.presetKey;
+  const recommendedDeclutterPresetKey =
+    recommendedVisionAction === 'declutter_medium' || recommendedVisionAction === 'declutter_light'
+      ? recommendedVisionAction
+      : 'declutter_light';
+  const isDeclutterRecommended =
+    recommendedVisionAction === 'declutter_medium' || recommendedVisionAction === 'declutter_light';
   const visibleVisionEffects = (selectedVariant?.metadata?.effects || []).slice(0, 2);
   const hiddenVisionEffectCount = Math.max((selectedVariant?.metadata?.effects || []).length - 2, 0);
   const openChecklistItems = checklistItems.filter((task) => task.status !== 'done');
@@ -1040,8 +1115,10 @@ export function RootScreen() {
     setError('');
     setPendingVisionJobType(jobType);
     setStatus(
-      jobType === 'declutter_preview'
+      jobType === 'declutter_preview' || jobType === 'declutter_light' || jobType === 'declutter_medium'
         ? 'Creating a declutter preview. This can take a moment.'
+        : jobType === 'combined_listing_refresh'
+          ? 'Creating a listing-ready preview. This can take a moment.'
         : 'Enhancing the selected photo. This can take a moment.',
     );
 
@@ -1056,10 +1133,12 @@ export function RootScreen() {
       ]);
       setSelectedVariantId(response.variant?.id || '');
       setStatus(
-        response.variant?.metadata?.smartEnhancementReason ||
+        response.job?.input?.orchestrationDeliveryMode === 'safe_marketplace_fallback'
+          ? response.job?.warning || response.job?.message || 'A safe fallback preview was returned.'
+          : response.variant?.metadata?.smartEnhancementReason ||
           response.job?.input?.smartEnhancementReason ||
           response.job?.warning ||
-          (jobType === 'declutter_preview'
+          (jobType === 'declutter_preview' || jobType === 'declutter_light' || jobType === 'declutter_medium'
             ? 'Declutter preview generated.'
             : jobType === 'combined_listing_refresh'
               ? 'Listing-ready path generated.'
@@ -1093,7 +1172,11 @@ export function RootScreen() {
         invalidateAssetVariants(selectedAsset.id),
       ]);
       setSelectedVariantId(response.variant?.id || '');
-      setStatus(response.job?.warning || 'Custom enhancement preview generated.');
+      setStatus(
+        response.job?.input?.orchestrationDeliveryMode === 'safe_marketplace_fallback'
+          ? response.job?.warning || response.job?.message || 'A safe fallback preview was returned.'
+          : response.job?.warning || 'Custom enhancement preview generated.',
+      );
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -1520,6 +1603,17 @@ export function RootScreen() {
                     </Text>
                   </View>
                 ) : null}
+                {visionActionRecommendation?.reason ? (
+                  <View style={styles.summaryBulletList}>
+                    <Text style={styles.label}>Recommended next step</Text>
+                    <Text style={styles.summaryBullet}>
+                      • {visionActionRecommendation.label}
+                    </Text>
+                    <Text style={styles.summaryBullet}>
+                      • {visionActionRecommendation.reason}
+                    </Text>
+                  </View>
+                ) : null}
                 <View style={[styles.actionRow, styles.visionActionRow]}>
                   <Pressable
                     onPress={() => handleGenerateVariant('enhance_listing_quality')}
@@ -1570,10 +1664,10 @@ export function RootScreen() {
                     </Text>
                   </Pressable>
                   <Pressable
-                    onPress={() => handleGenerateVariant('declutter_preview')}
+                    onPress={() => handleGenerateVariant(recommendedDeclutterPresetKey)}
                     style={[
                       styles.button,
-                      recommendedVisionAction === 'declutter_preview' ? styles.buttonPrimary : styles.buttonSecondary,
+                      isDeclutterRecommended ? styles.buttonPrimary : styles.buttonSecondary,
                       styles.flexButton,
                       styles.visionActionButton,
                     ]}
@@ -1581,16 +1675,21 @@ export function RootScreen() {
                   >
                     <Text
                       style={[
-                        recommendedVisionAction === 'declutter_preview' ? styles.buttonText : styles.buttonSecondaryText,
+                        isDeclutterRecommended ? styles.buttonText : styles.buttonSecondaryText,
                         styles.visionActionButtonText,
                       ]}
                       numberOfLines={1}
                       adjustsFontSizeToFit
                       minimumFontScale={0.85}
                     >
-                      {pendingVisionJobType === 'declutter_preview' && createVariantMutation.isPending
+                      {(pendingVisionJobType === 'declutter_light' ||
+                        pendingVisionJobType === 'declutter_medium' ||
+                        pendingVisionJobType === 'declutter_preview') &&
+                      createVariantMutation.isPending
                         ? 'Decluttering...'
-                        : 'Declutter'}
+                        : recommendedDeclutterPresetKey === 'declutter_medium'
+                          ? 'Declutter+'
+                          : 'Declutter'}
                     </Text>
                   </Pressable>
                 </View>
