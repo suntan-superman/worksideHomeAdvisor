@@ -1,6 +1,10 @@
 import { getLatestPropertyFlyer } from '../documents/flyer.service.js';
 import { getLatestPropertyReport } from '../documents/report.service.js';
-import { countMarketplaceReadyAssets } from '../media/media.service.js';
+import {
+  countExplicitListingCandidateAssets,
+  countMarketplaceReadyAssets,
+  getMediaAssetMarketplaceState,
+} from '../media/media.service.js';
 import { getPropertyWorkspaceSnapshot } from '../properties/property-workspace.service.js';
 import { listProviderLeadsForProperty } from '../providers/providers.service.js';
 
@@ -204,6 +208,10 @@ function clampScore(value) {
   return Math.max(0, Math.min(100, Math.round(Number(value || 0))));
 }
 
+function pluralize(count, singular, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 function normalizeRole(role) {
   return role === 'agent' ? 'agent' : 'seller';
 }
@@ -213,12 +221,22 @@ function coverageSummary(mediaAssets) {
     mediaAssets.some((asset) => asset.roomLabel === roomLabel),
   ).length;
   const listingCandidateCount = countMarketplaceReadyAssets(mediaAssets);
+  const explicitListingCandidateCount = countExplicitListingCandidateAssets(mediaAssets);
   const preferredVariantCount = mediaAssets.filter((asset) => asset.selectedVariant).length;
+  const publishableVisionCount = mediaAssets.filter(
+    (asset) => getMediaAssetMarketplaceState(asset).savedVisionPublishable,
+  ).length;
+  const reviewDraftCount = mediaAssets.filter(
+    (asset) => getMediaAssetMarketplaceState(asset).reviewDraft,
+  ).length;
   return {
     photoCount: mediaAssets.length,
     roomCoverageCount,
     listingCandidateCount,
+    explicitListingCandidateCount,
     preferredVariantCount,
+    publishableVisionCount,
+    reviewDraftCount,
     completePhotoCoverage: mediaAssets.length >= CORE_ROOM_LABELS.length || roomCoverageCount >= CORE_ROOM_LABELS.length,
   };
 }
@@ -273,6 +291,12 @@ function buildRawStepStates(context, role) {
   const photosReviewed = context.photoSummary.listingCandidateCount >= 3;
   const photosReviewStarted = context.photoSummary.listingCandidateCount > 0 || photosStarted;
   const enhancementsComplete = context.photoSummary.preferredVariantCount > 0 || context.variantCount > 0;
+  const marketplaceReadyCount = Number(context.photoSummary.listingCandidateCount || 0);
+  const explicitListingCandidateCount = Number(
+    context.photoSummary.explicitListingCandidateCount || 0,
+  );
+  const publishableVisionCount = Number(context.photoSummary.publishableVisionCount || 0);
+  const reviewDraftCount = Number(context.photoSummary.reviewDraftCount || 0);
   const checklistProgress = Number(context.checklist?.summary?.progressPercent || 0);
   const prepComplete = checklistProgress >= 70;
   const prepStarted = checklistProgress > 0;
@@ -318,10 +342,32 @@ function buildRawStepStates(context, role) {
     review_photos: {
       status: photosReviewed ? 'complete' : photosReviewStarted ? 'in_progress' : 'available',
       completedAt: photosReviewed ? context.latestMediaAt || null : null,
+      description:
+        photosReviewed
+          ? 'Your strongest marketplace-ready photo set is in place.'
+          : marketplaceReadyCount > 0
+            ? `${pluralize(marketplaceReadyCount, 'photo')} ${marketplaceReadyCount === 1 ? 'is' : 'are'} already marketplace-ready. Keep refining the hero sequence until you have at least three strong publishable images.`
+            : reviewDraftCount > 0
+              ? `${pluralize(reviewDraftCount, 'Vision review draft')} ${reviewDraftCount === 1 ? 'is' : 'are'} saved. Review them and push the strongest rooms toward publishable quality.`
+              : copy.review_photos.description,
+      helperText:
+        explicitListingCandidateCount > 0
+          ? `${pluralize(explicitListingCandidateCount, 'photo')} ${explicitListingCandidateCount === 1 ? 'is' : 'are'} already explicitly marked as a seller pick.`
+          : '',
     },
     enhance_photos: {
       status: enhancementsComplete ? 'complete' : photosStarted ? 'available' : 'locked',
       completedAt: enhancementsComplete ? context.latestVariantAt || null : null,
+      description:
+        publishableVisionCount > 0
+          ? `${pluralize(publishableVisionCount, 'publishable Vision save')} ${publishableVisionCount === 1 ? 'already exists' : 'already exist'}. Use enhancement selectively to improve weaker rooms instead of reworking the strongest ones.`
+          : reviewDraftCount > 0
+            ? `${pluralize(reviewDraftCount, 'Vision review draft')} ${reviewDraftCount === 1 ? 'is' : 'are'} available for inspection. Follow the recommended next step to turn them into stronger publishable results.`
+            : copy.enhance_photos.description,
+      helperText:
+        photosStarted
+          ? 'Start with first-impression cleanup, then use smart enhancement and final listing polish only where a room still needs help.'
+          : '',
     },
     prep_checklist: {
       status: prepComplete ? 'complete' : prepStarted ? 'in_progress' : 'available',
@@ -335,14 +381,33 @@ function buildRawStepStates(context, role) {
     report: {
       status: context.latestReport ? 'complete' : 'available',
       completedAt: context.latestReport?.createdAt || null,
+      description: context.latestReport
+        ? 'Refresh the seller report when pricing, checklist progress, or the hero-photo set changes.'
+        : marketplaceReadyCount >= 3
+          ? 'Generate the seller report now that pricing and marketplace-ready photos are coming together.'
+          : 'Generate the seller report after pricing is reviewed and at least three strong marketplace-ready photos are selected.',
     },
     brochure: {
       status: context.latestFlyer ? 'complete' : 'available',
       completedAt: context.latestFlyer?.createdAt || null,
+      description: context.latestFlyer
+        ? 'Refresh the brochure after pricing or hero-photo changes.'
+        : marketplaceReadyCount >= 3
+          ? 'Build the brochure now using the strongest marketplace-ready hero images.'
+          : 'Wait until the hero-photo sequence is stronger, then build the brochure from the best marketplace-ready set.',
     },
     final_review: {
       status: finalReviewComplete ? 'complete' : finalReviewStarted ? 'in_progress' : 'available',
       completedAt: finalReviewComplete ? context.latestReport?.updatedAt || context.latestFlyer?.updatedAt || null : null,
+      description: finalReviewComplete
+        ? 'Pricing, prep, photos, and marketing materials are aligned for launch.'
+        : !photosReviewed
+          ? 'The last major unlock is a stronger set of marketplace-ready photos.'
+          : !prepComplete
+            ? 'Finish the remaining prep work so the launch story matches the photography and pricing.'
+            : !context.latestFlyer || !context.latestReport
+              ? 'Generate the remaining materials to complete the launch package.'
+              : copy.final_review.description,
     },
   };
 
@@ -497,12 +562,16 @@ function buildStatusSummary(steps) {
   );
 }
 
-function buildReadinessSummary(marketReadyScore, completionPercent) {
+function buildReadinessSummary(marketReadyScore, completionPercent, photoSummary = {}) {
+  const marketplaceReadyCount = Number(photoSummary.listingCandidateCount || 0);
+  const publishableVisionCount = Number(photoSummary.publishableVisionCount || 0);
+  const reviewDraftCount = Number(photoSummary.reviewDraftCount || 0);
+
   if (marketReadyScore >= 85) {
     return {
       tone: 'strong',
       label: 'Market-ready momentum',
-      message: `You have ${completionPercent}% of the guided workflow complete and the property is in strong shape for final materials.`,
+      message: `You have ${completionPercent}% of the guided workflow complete and ${pluralize(marketplaceReadyCount, 'marketplace-ready photo')} in place${publishableVisionCount ? `, including ${pluralize(publishableVisionCount, 'publishable Vision save')}` : ''}. The property is in strong shape for final materials.`,
     };
   }
 
@@ -510,7 +579,7 @@ function buildReadinessSummary(marketReadyScore, completionPercent) {
     return {
       tone: 'steady',
       label: 'Good progress',
-      message: `You have ${completionPercent}% complete. Tightening the remaining prep and photo tasks should lift presentation quality quickly.`,
+      message: `You have ${completionPercent}% complete. ${marketplaceReadyCount ? `${pluralize(marketplaceReadyCount, 'marketplace-ready photo')} ${marketplaceReadyCount === 1 ? 'is' : 'are'} already working in your favor.` : 'The photo pipeline is moving, but it still needs stronger publishable results.'} Tightening the remaining prep and material tasks should lift presentation quality quickly.`,
     };
   }
 
@@ -518,7 +587,7 @@ function buildReadinessSummary(marketReadyScore, completionPercent) {
     return {
       tone: 'building',
       label: 'Foundation in place',
-      message: `You have ${completionPercent}% complete. The next few guided actions will noticeably improve pricing confidence and marketing quality.`,
+      message: `You have ${completionPercent}% complete. ${reviewDraftCount ? `${pluralize(reviewDraftCount, 'Vision review draft')} can help guide the next pass.` : 'The next few guided actions will turn the current photo set into a stronger first impression.'} The next guided actions should noticeably improve pricing confidence and marketing quality.`,
     };
   }
 
@@ -598,7 +667,11 @@ export async function getGuidedWorkflowState(propertyId, role = 'seller') {
   const currentPhase = nextStep?.phase || phases.find((phase) => phase.status !== 'complete')?.key || 'final_review';
   const currentStep = nextStep?.key || stepsWithUxState.at(-1)?.key || '';
   const statusSummary = buildStatusSummary(stepsWithUxState);
-  const readinessSummary = buildReadinessSummary(marketReadyScore, completionPercent);
+  const readinessSummary = buildReadinessSummary(
+    marketReadyScore,
+    completionPercent,
+    photoSummary,
+  );
 
   return {
     propertyId,
@@ -624,7 +697,10 @@ export async function getGuidedWorkflowState(propertyId, role = 'seller') {
       photoCount: photoSummary.photoCount,
       roomCoverageCount: photoSummary.roomCoverageCount,
       listingCandidateCount: photoSummary.listingCandidateCount,
+      explicitListingCandidateCount: photoSummary.explicitListingCandidateCount,
       preferredVariantCount: photoSummary.preferredVariantCount,
+      publishableVisionCount: photoSummary.publishableVisionCount,
+      reviewDraftCount: photoSummary.reviewDraftCount,
       checklistProgress: Number(checklist?.summary?.progressPercent || 0),
       providerLeadCount: providerLeads.items?.length || 0,
     },

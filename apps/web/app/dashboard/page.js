@@ -1377,6 +1377,11 @@ export default function DashboardPage() {
                     <span className="label">Readiness score</span>
                     <h3>{workflow.marketReadyScore ?? dashboard?.property?.readinessScore ?? 0}/100</h3>
                     <p>{workflow.readinessSummary?.message || 'Complete the guided steps to improve market readiness.'}</p>
+                    <div className="tag-row">
+                      <span>{workflow.metrics?.listingCandidateCount || 0} marketplace-ready</span>
+                      <span>{workflow.metrics?.publishableVisionCount || 0} publishable Vision</span>
+                      <span>{workflow.metrics?.reviewDraftCount || 0} review drafts</span>
+                    </div>
                     <div className="mini-stats">
                       <div className="stat-card">
                         <strong>Completion</strong>

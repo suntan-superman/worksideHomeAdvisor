@@ -1379,6 +1379,20 @@ export function RootScreen() {
             <Text style={styles.taskSummaryText}>
               Market-ready {workflow.marketReadyScore}/100
             </Text>
+            <View style={styles.summaryBulletList}>
+              <Text style={styles.summaryBullet}>
+                {workflow.metrics?.listingCandidateCount || 0} marketplace-ready photo
+                {(workflow.metrics?.listingCandidateCount || 0) === 1 ? '' : 's'}
+              </Text>
+              <Text style={styles.summaryBullet}>
+                {workflow.metrics?.publishableVisionCount || 0} publishable Vision save
+                {(workflow.metrics?.publishableVisionCount || 0) === 1 ? '' : 's'}
+              </Text>
+              <Text style={styles.summaryBullet}>
+                {workflow.metrics?.reviewDraftCount || 0} review draft
+                {(workflow.metrics?.reviewDraftCount || 0) === 1 ? '' : 's'}
+              </Text>
+            </View>
             {workflow.nextStep ? (
               <View style={styles.workflowNextCard}>
                 <Text style={styles.workflowNextLabel}>Next step</Text>

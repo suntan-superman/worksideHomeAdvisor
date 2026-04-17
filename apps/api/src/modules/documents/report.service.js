@@ -188,7 +188,7 @@ function buildPhotoSummary(mediaAssets, selectedPhotos) {
     missingRooms,
     summary: mediaAssets.length
       ? `${selectedPhotos.length} top report photo${selectedPhotos.length === 1 ? '' : 's'} selected, including ${selectedPreferredVariantCount} preferred vision variant${selectedPreferredVariantCount === 1 ? '' : 's'}. ${marketplaceReadyCount} marketplace-ready photo${marketplaceReadyCount === 1 ? '' : 's'} identified${savedVisionPublishableCount ? `, including ${savedVisionPublishableCount} publishable Vision save${savedVisionPublishableCount === 1 ? '' : 's'}` : ''}. ${coveredRooms.length}/${CORE_ROOM_LABELS.length} core rooms covered. ${mediaAssets.filter((asset) => asset.analysis?.retakeRecommended).length} retake recommendation${mediaAssets.filter((asset) => asset.analysis?.retakeRecommended).length === 1 ? '' : 's'} remaining.`
-      : 'No saved property photos are available yet for a richer listing-ready photo review.',
+      : 'No saved property photos are available yet for a richer marketplace-ready photo review.',
   };
 }
 

@@ -511,7 +511,7 @@ function renderSuggestedCategoryCards(items = []) {
 function renderPhotoTiles(photos = [], limit = 4) {
   const selected = photos.filter((photo) => photo?.imageUrl).slice(0, limit);
   if (!selected.length) {
-    return `<div class="empty-card">No listing-ready photos selected yet.</div>`;
+    return `<div class="empty-card">No marketplace-ready photos selected yet.</div>`;
   }
 
   return `
@@ -1663,7 +1663,7 @@ function buildMarketingReportHtml({ property, flyer }) {
             <div class="page-spacer"></div>
             <div class="section-kicker">Call to action</div>
             <h3>${escapeHtml(flyer.callToAction || 'Schedule a showing')}</h3>
-            <p class="muted" style="margin-top:8px;">Prepared by Workside Home Advisor to support listing-ready marketing collateral and brochure refinement.</p>
+            <p class="muted" style="margin-top:8px;">Prepared by Workside Home Advisor to support marketplace-ready marketing collateral and brochure refinement.</p>
             <div class="badge-row">
               <div class="badge badge-address">${escapeHtml(propertyAddress)}</div>
               <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
