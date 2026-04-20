@@ -78,6 +78,45 @@ function getRoleStatus(role, mode = 'login') {
   return 'Log in with your email and password to open your seller workspace.';
 }
 
+function buildSignupAttributionPayload(attribution, roleIntent) {
+  if (!attribution || typeof attribution !== 'object') {
+    return undefined;
+  }
+
+  const payload = {};
+
+  for (const [key, value] of Object.entries(attribution)) {
+    if (value === undefined || value === null) {
+      continue;
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        continue;
+      }
+      payload[key] = trimmed;
+      continue;
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      payload[key] = value;
+      continue;
+    }
+
+    if (typeof value === 'boolean') {
+      payload[key] = value;
+    }
+  }
+
+  const normalizedRoleIntent = String(roleIntent || '').trim();
+  if (normalizedRoleIntent) {
+    payload.roleIntent = normalizedRoleIntent;
+  }
+
+  return Object.keys(payload).length ? payload : undefined;
+}
+
 function buildAuthGuideSteps({ role, mode, email }) {
   const roleLabel = ROLE_OPTIONS.find((option) => option.value === role)?.label || 'Seller';
   const emailReady = isValidEmail(email);
@@ -368,12 +407,7 @@ export default function AuthPage() {
           mobilePhone: form.mobilePhone,
           smsOptIn: form.smsOptIn,
           role: form.role,
-          attribution: attribution
-            ? {
-                ...attribution,
-                anonymousId: attribution.anonymousId || '',
-              }
-            : undefined,
+          attribution: buildSignupAttributionPayload(attribution, form.role),
         });
         setStoredAttributionDraft(
           attribution
@@ -659,6 +693,7 @@ export default function AuthPage() {
                   placeholder="Jamie"
                   value={form.firstName}
                   onChange={(event) => updateField('firstName', event.target.value)}
+                  autoComplete="given-name"
                 />
               </label>
               <label>
@@ -668,6 +703,7 @@ export default function AuthPage() {
                   placeholder="Seller"
                   value={form.lastName}
                   onChange={(event) => updateField('lastName', event.target.value)}
+                  autoComplete="family-name"
                 />
               </label>
               <label>
@@ -677,6 +713,7 @@ export default function AuthPage() {
                   placeholder="(661) 555-1212"
                   value={form.mobilePhone}
                   onChange={(event) => updateField('mobilePhone', formatPhoneForDisplay(event.target.value))}
+                  autoComplete="tel-national"
                 />
               </label>
               <label className="workspace-checkbox-field">
@@ -700,6 +737,7 @@ export default function AuthPage() {
               placeholder="seller@example.com"
               value={form.email}
               onChange={(event) => updateField('email', event.target.value)}
+              autoComplete="email"
             />
             {form.email && !emailIsValid ? (
               <span className="field-hint field-error">Enter a valid email address.</span>
@@ -714,6 +752,7 @@ export default function AuthPage() {
                 value={form.password}
                 onChange={(event) => updateField('password', event.target.value)}
                 placeholder="Minimum 8 characters"
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               />
               {mode === 'signup' && form.password && !passwordLongEnough ? (
                 <span className="field-hint field-error">Use at least 8 characters.</span>
@@ -728,6 +767,7 @@ export default function AuthPage() {
                 value={form.confirmPassword}
                 onChange={(event) => updateField('confirmPassword', event.target.value)}
                 placeholder="Re-enter new password"
+                autoComplete="new-password"
               />
               {form.confirmPassword && form.password !== form.confirmPassword ? (
                 <span className="field-hint field-error">Passwords must match.</span>
@@ -743,6 +783,7 @@ export default function AuthPage() {
                 placeholder="6-digit OTP"
                 value={form.otpCode}
                 onChange={(event) => updateField('otpCode', event.target.value)}
+                autoComplete="one-time-code"
               />
             </label>
           ) : null}

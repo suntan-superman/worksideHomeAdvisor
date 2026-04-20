@@ -1071,11 +1071,19 @@ export function ProviderSignupClient({
                 <div className="split-fields">
                   <label>
                     First name
-                    <input value={form.firstName} onChange={(event) => updateField('firstName', event.target.value)} />
+                    <input
+                      value={form.firstName}
+                      onChange={(event) => updateField('firstName', event.target.value)}
+                      autoComplete="given-name"
+                    />
                   </label>
                   <label>
                     Last name
-                    <input value={form.lastName} onChange={(event) => updateField('lastName', event.target.value)} />
+                    <input
+                      value={form.lastName}
+                      onChange={(event) => updateField('lastName', event.target.value)}
+                      autoComplete="family-name"
+                    />
                   </label>
                 </div>
               ) : null}
@@ -1100,6 +1108,7 @@ export function ProviderSignupClient({
                   onChange={(event) => updateField('phone', event.target.value)}
                   placeholder="(555) 123-4567"
                   inputMode="tel"
+                  autoComplete="tel-national"
                 />
                 {form.phone && !businessPhoneIsValid ? (
                   <span className="field-hint field-error">Enter a full 10-digit phone number.</span>
@@ -1112,6 +1121,7 @@ export function ProviderSignupClient({
                   value={form.email}
                   onChange={(event) => updateField('email', event.target.value)}
                   placeholder="name@business.com"
+                  autoComplete="email"
                 />
                 {form.email && !businessEmailIsValid ? (
                   <span className="field-hint field-error">Enter a valid business email address.</span>
@@ -1125,6 +1135,7 @@ export function ProviderSignupClient({
                       value={form.password}
                       onChange={(event) => updateField('password', event.target.value)}
                       placeholder="Minimum 8 characters"
+                      autoComplete="new-password"
                     />
                     {form.password && !passwordLongEnough ? (
                       <span className="field-hint field-error">Use at least 8 characters.</span>
@@ -1136,6 +1147,7 @@ export function ProviderSignupClient({
                       value={form.confirmPassword}
                       onChange={(event) => updateField('confirmPassword', event.target.value)}
                       placeholder="Repeat password"
+                      autoComplete="new-password"
                     />
                     {form.confirmPassword && !passwordsMatch ? (
                       <span className="field-hint field-error">Passwords must match before continuing.</span>

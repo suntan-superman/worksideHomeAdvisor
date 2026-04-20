@@ -35,6 +35,8 @@ export function PasswordInput({
   onChange,
   placeholder = '',
   disabled = false,
+  autoComplete,
+  ...inputProps
 }) {
   const [visible, setVisible] = useState(false);
 
@@ -46,6 +48,8 @@ export function PasswordInput({
         onChange={onChange}
         placeholder={placeholder}
         disabled={disabled}
+        autoComplete={autoComplete}
+        {...inputProps}
       />
       <button
         type="button"
