@@ -2204,6 +2204,58 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         setToast({ tone: 'success', title: 'Pricing refreshed', message: 'The latest analysis and comp set are ready.' });
       }
     } catch (requestError) {
+      if (requestError.status === 402) {
+        const suggestedPlan = requestError.details?.suggestedPlan || '';
+        const starterPricingUsed = requestError.details?.reason === 'FREE_PRICING_STARTER_USED';
+        const upgradeMessage = starterPricingUsed
+          ? 'Free access includes one starter pricing analysis. Upgrade to run additional live pricing refreshes and unlock the full listing workflow.'
+          : requestError.message;
+
+        if (suggestedPlan) {
+          const session = getStoredSession();
+          if (session?.user?.id) {
+            setStatus('Opening Stripe checkout...');
+            try {
+              const checkout = await createBillingCheckoutSession(
+                { userId: session.user.id, planKey: suggestedPlan },
+                session.user.id,
+              );
+              if (checkout.url) {
+                window.location.href = checkout.url;
+                return;
+              }
+            } catch (checkoutError) {
+              setToast({
+                tone: 'warning',
+                title: 'Upgrade required',
+                message: `${upgradeMessage} ${checkoutError.message}`,
+                actionLabel: 'Open upgrade options',
+                onAction: () =>
+                  router.push(`/dashboard?upgrade=${encodeURIComponent(suggestedPlan)}`),
+                autoDismissMs: 0,
+              });
+              setStatus('');
+              return;
+            }
+          }
+        }
+
+        setToast({
+          tone: 'warning',
+          title: 'Upgrade required',
+          message: upgradeMessage,
+          actionLabel: 'Open upgrade options',
+          onAction: () =>
+            router.push(
+              suggestedPlan
+                ? `/dashboard?upgrade=${encodeURIComponent(suggestedPlan)}`
+                : '/dashboard',
+            ),
+          autoDismissMs: 0,
+        });
+        return;
+      }
+
       setToast({ tone: 'error', title: 'Pricing refresh failed', message: requestError.message });
     } finally {
       setStatus('');

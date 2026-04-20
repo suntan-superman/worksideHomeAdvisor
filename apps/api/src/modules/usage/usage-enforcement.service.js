@@ -341,6 +341,35 @@ function buildPricingPolicyMetadata(pricingQueryPolicy, pricingPropertyUsage) {
   };
 }
 
+function isFreeStarterPricingRequest(context, analysisType, featureKey) {
+  return (
+    context.planCode === 'free' &&
+    analysisType === 'pricing' &&
+    featureKey === 'pricing.full'
+  );
+}
+
+function applyFreeStarterPricingPolicy(policy) {
+  if (!policy) {
+    return {
+      pricingCooldownHours: 24,
+      maxRunsPerPropertyPerUser: 1,
+      runsUsedForProperty: 0,
+      runsRemainingForProperty: 1,
+      lastFreshRunAt: null,
+    };
+  }
+
+  const runsUsedForProperty = Math.max(0, Number(policy.runsUsedForProperty || 0));
+  const starterRunLimit = 1;
+
+  return {
+    ...policy,
+    maxRunsPerPropertyPerUser: starterRunLimit,
+    runsRemainingForProperty: Math.max(0, starterRunLimit - runsUsedForProperty),
+  };
+}
+
 export async function enforceAnalysisRequest({
   userId,
   propertyId,
@@ -358,12 +387,55 @@ export async function enforceAnalysisRequest({
     planCode: context.planCode,
   });
 
-  if (!context.plan.features.includes(featureKey)) {
-    await UsageTrackingModel.updateOne(
-      { _id: usage._id },
-      { $inc: { deniedRequests: 1 }, $set: { updatedAt: new Date() } },
+  let pricingPolicy = null;
+  if (analysisType === 'pricing') {
+    const [pricingQueryPolicy, pricingPropertyUsage] = await Promise.all([
+      getPricingQueryPolicy(),
+      getPricingPropertyUsage({ userId, propertyId }),
+    ]);
+
+    pricingPolicy = buildPricingPolicyMetadata(
+      pricingQueryPolicy,
+      pricingPropertyUsage,
     );
-    return buildUpgradeDecision(context, 'FEATURE_NOT_INCLUDED', analysisType);
+
+    if (isFreeStarterPricingRequest(context, analysisType, featureKey)) {
+      pricingPolicy = applyFreeStarterPricingPolicy(pricingPolicy);
+    }
+  }
+
+  const isFeatureIncluded = context.plan.features.includes(featureKey);
+  const isFreeStarterPricing = isFreeStarterPricingRequest(
+    context,
+    analysisType,
+    featureKey,
+  );
+
+  if (!isFeatureIncluded) {
+    const starterPricingAvailable =
+      isFreeStarterPricing &&
+      pricingPolicy &&
+      pricingPolicy.maxRunsPerPropertyPerUser > 0 &&
+      pricingPolicy.runsUsedForProperty < pricingPolicy.maxRunsPerPropertyPerUser;
+
+    if (!starterPricingAvailable) {
+      await UsageTrackingModel.updateOne(
+        { _id: usage._id },
+        { $inc: { deniedRequests: 1 }, $set: { updatedAt: new Date() } },
+      );
+
+      const reason =
+        isFreeStarterPricing &&
+        pricingPolicy &&
+        pricingPolicy.runsUsedForProperty >= pricingPolicy.maxRunsPerPropertyPerUser
+          ? 'FREE_PRICING_STARTER_USED'
+          : 'FEATURE_NOT_INCLUDED';
+      const decision = buildUpgradeDecision(context, reason, analysisType);
+      if (pricingPolicy) {
+        decision.policy = pricingPolicy;
+      }
+      return decision;
+    }
   }
 
   for (const [bucket, config] of Object.entries(ANALYSIS_RATE_LIMITS)) {
@@ -388,18 +460,8 @@ export async function enforceAnalysisRequest({
     return buildUpgradeDecision(context, 'MONTHLY_LIMIT_REACHED', analysisType);
   }
 
-  let pricingPolicy = null;
   if (analysisType === 'pricing') {
-    const [pricingQueryPolicy, pricingPropertyUsage] = await Promise.all([
-      getPricingQueryPolicy(),
-      getPricingPropertyUsage({ userId, propertyId }),
-    ]);
-
-    pricingPolicy = buildPricingPolicyMetadata(
-      pricingQueryPolicy,
-      pricingPropertyUsage,
-    );
-    cooldownHours = pricingPolicy.pricingCooldownHours;
+    cooldownHours = pricingPolicy?.pricingCooldownHours || 0;
 
     if (latestResult && withinCooldown(resultTimestamp, cooldownHours)) {
       return {
@@ -413,10 +475,10 @@ export async function enforceAnalysisRequest({
     }
 
     const hasPropertyLimit =
-      pricingPolicy.maxRunsPerPropertyPerUser > 0;
+      (pricingPolicy?.maxRunsPerPropertyPerUser || 0) > 0;
     const limitReached =
       hasPropertyLimit &&
-      pricingPolicy.runsUsedForProperty >= pricingPolicy.maxRunsPerPropertyPerUser;
+      (pricingPolicy?.runsUsedForProperty || 0) >= (pricingPolicy?.maxRunsPerPropertyPerUser || 0);
 
     if (limitReached) {
       if (latestResult) {

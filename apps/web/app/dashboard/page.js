@@ -247,6 +247,7 @@ export default function DashboardPage() {
   const queryClient = useQueryClient();
   const createPropertyFormRef = useRef(null);
   const createPropertyTitleInputRef = useRef(null);
+  const billingCheckoutCardRef = useRef(null);
   const [session, setSession] = useState(null);
   const [properties, setProperties] = useState([]);
   const [selectedPropertyId, setSelectedPropertyId] = useState('');
@@ -430,6 +431,10 @@ export default function DashboardPage() {
     const params = new URLSearchParams(window.location.search);
     setBillingFlowState(params.get('billing') || '');
     setBillingSessionId(params.get('session_id') || '');
+    const requestedUpgradePlan = params.get('upgrade') || '';
+    if (requestedUpgradePlan) {
+      setSelectedPlanKey(requestedUpgradePlan);
+    }
   }, []);
 
   useEffect(() => {
@@ -539,6 +544,7 @@ export default function DashboardPage() {
   });
 
   const billingSummary = billingSummaryQuery.data || null;
+  const isFreeAccessPlan = billingSummary?.access?.planKey === 'free';
   const propertyCapacity = billingSummary?.propertyCapacity || null;
   const selectedPropertyArchived = selectedProperty?.status === 'archived';
   const shouldShowFirstPropertyPrompt = Boolean(
@@ -943,6 +949,30 @@ export default function DashboardPage() {
         message: 'The latest RentCast and AI pricing snapshot is ready.',
       });
     } catch (requestError) {
+      if (requestError.status === 402) {
+        const suggestedPlan = requestError.details?.suggestedPlan || '';
+        const starterPricingUsed = requestError.details?.reason === 'FREE_PRICING_STARTER_USED';
+        if (suggestedPlan) {
+          setSelectedPlanKey(suggestedPlan);
+        }
+        setToast({
+          tone: 'warning',
+          title: starterPricingUsed ? 'Starter pricing run already used' : 'Pricing refresh requires upgrade',
+          message: starterPricingUsed
+            ? 'Free access includes one starter pricing analysis. Upgrade to run additional live pricing refreshes and unlock photos, brochure, report, and enhancement tools.'
+            : requestError.message,
+          actionLabel: suggestedPlan ? 'View upgrade options' : '',
+          onAction: suggestedPlan ? handleScrollToBillingUpgrade : null,
+          autoDismissMs: 0,
+        });
+        if (suggestedPlan) {
+          window.setTimeout(() => {
+            handleScrollToBillingUpgrade();
+          }, 120);
+        }
+        return;
+      }
+
       setToast({
         tone: 'error',
         title: 'Pricing refresh failed',
@@ -985,6 +1015,17 @@ export default function DashboardPage() {
     }
   }
 
+  function handleScrollToBillingUpgrade() {
+    if (!billingCheckoutCardRef.current) {
+      return;
+    }
+
+    billingCheckoutCardRef.current.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  }
+
   function handleScrollToCreateProperty() {
     if (!createPropertyFormRef.current) {
       return;
@@ -1007,6 +1048,9 @@ export default function DashboardPage() {
         tone={toast?.tone}
         title={toast?.title}
         message={toast?.message}
+        autoDismissMs={toast?.autoDismissMs}
+        actionLabel={toast?.actionLabel}
+        onAction={toast?.onAction}
         onClose={() => setToast(null)}
       />
       <section className="dashboard-header">
@@ -1146,6 +1190,21 @@ export default function DashboardPage() {
                   </Link>
                 ) : null}
               </div>
+              {isFreeAccessPlan ? (
+                <div className="dashboard-upgrade-hint">
+                  <strong>Free access includes one starter pricing analysis.</strong>
+                  <p>
+                    You can create a property and run one live pricing check. Upgrade after that to unlock broader listing workflow tools.
+                  </p>
+                  <button
+                    type="button"
+                    className="button-secondary inline-button"
+                    onClick={handleScrollToBillingUpgrade}
+                  >
+                    See upgrade options
+                  </button>
+                </div>
+              ) : null}
             </article>
           </section>
 
@@ -1273,7 +1332,10 @@ export default function DashboardPage() {
                 </div>
               </article>
 
-              <article className="feature-card dashboard-summary-card dashboard-checkout-card">
+              <article
+                ref={billingCheckoutCardRef}
+                className="feature-card dashboard-summary-card dashboard-checkout-card"
+              >
                 <div className="dashboard-card-header">
                   <div>
                     <span className="label">Stripe checkout</span>

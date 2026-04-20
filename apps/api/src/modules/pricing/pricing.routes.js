@@ -13,6 +13,14 @@ const paramsSchema = z.object({
   propertyId: z.string().min(1),
 });
 
+function resolveUpgradeRequiredMessage(reason) {
+  if (reason === 'FREE_PRICING_STARTER_USED') {
+    return 'Free access includes one starter pricing analysis. Upgrade to run additional live pricing refreshes and unlock the full workflow.';
+  }
+
+  return 'Plan limit reached or feature not included.';
+}
+
 export async function pricingRoutes(fastify) {
   fastify.post('/:propertyId/pricing/analyze', async (request, reply) => {
     try {
@@ -60,9 +68,9 @@ export async function pricingRoutes(fastify) {
 
       if (decision.action === 'DENY_UPGRADE_REQUIRED') {
         return reply.code(402).send({
-          message: 'Plan limit reached or feature not included.',
+          message: resolveUpgradeRequiredMessage(decision.reason),
           ...decision,
-          });
+        });
       }
 
       if (decision.action === 'DENY_PROPERTY_QUERY_LIMIT') {
