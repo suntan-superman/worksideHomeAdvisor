@@ -4,12 +4,14 @@ import { assertPropertyEditableById, getPropertyById } from '../properties/prope
 import {
   enforceAnalysisRequest,
   finalizeCachedAnalysisReturn,
-  finalizeFreshAnalysisRun,
-  releaseAnalysisLock,
 } from '../usage/usage-enforcement.service.js';
 import {
+  buildQueuedAnalysisPayload,
+  queuePropertyFlyerJob,
+  queuePropertyReportJob,
+} from '../jobs/jobs.service.js';
+import {
   exportPropertyFlyerPdf,
-  generatePropertyFlyer,
   getLatestPropertyFlyer,
 } from './flyer.service.js';
 import { exportProviderReferenceSheetPdf } from './provider-reference.service.js';
@@ -19,7 +21,6 @@ import {
 } from './social-pack.service.js';
 import {
   exportPropertyReportPdf,
-  generatePropertyReport,
   getPropertyReportInputSignature,
   getLatestPropertyReport,
 } from './report.service.js';
@@ -109,34 +110,25 @@ export async function documentsRoutes(fastify) {
           });
       }
 
-      let flyer;
-      try {
-        flyer = await generatePropertyFlyer({
+      const job = await queuePropertyFlyerJob(
+        buildQueuedAnalysisPayload({
           propertyId: request.params.propertyId,
-          flyerType: payload.flyerType,
-          customizations: payload.customizations,
-        });
-        await finalizeFreshAnalysisRun({
           userId: property.ownerUserId,
-          propertyId: request.params.propertyId,
-          analysisType: 'flyer',
+          inputHash: decision.inputHash,
           usageContext: decision.context,
-          inputHash: decision.inputHash,
-        });
-      } catch (error) {
-        await releaseAnalysisLock({
-          userId: property.ownerUserId,
-          propertyId: request.params.propertyId,
-          analysisType: 'flyer',
-          inputHash: decision.inputHash,
-        });
-        throw error;
-      }
+          extra: {
+            flyerType: payload.flyerType,
+            customizations: payload.customizations,
+          },
+        }),
+        { logger: request.log },
+      );
 
-      return reply.code(201).send({
-        flyer,
+      return reply.code(202).send({
+        job,
         metadata: {
           servedFromCache: false,
+          queued: true,
         },
       });
     } catch (error) {
@@ -234,33 +226,24 @@ export async function documentsRoutes(fastify) {
           });
       }
 
-      let report;
-      try {
-        report = await generatePropertyReport({
+      const job = await queuePropertyReportJob(
+        buildQueuedAnalysisPayload({
           propertyId: request.params.propertyId,
-          customizations: payload.customizations,
-        });
-        await finalizeFreshAnalysisRun({
           userId: property.ownerUserId,
-          propertyId: request.params.propertyId,
-          analysisType: 'report',
+          inputHash: decision.inputHash,
           usageContext: decision.context,
-          inputHash: decision.inputHash,
-        });
-      } catch (error) {
-        await releaseAnalysisLock({
-          userId: property.ownerUserId,
-          propertyId: request.params.propertyId,
-          analysisType: 'report',
-          inputHash: decision.inputHash,
-        });
-        throw error;
-      }
+          extra: {
+            customizations: payload.customizations,
+          },
+        }),
+        { logger: request.log },
+      );
 
-      return reply.code(201).send({
-        report,
+      return reply.code(202).send({
+        job,
         metadata: {
           servedFromCache: false,
+          queued: true,
         },
       });
     } catch (error) {

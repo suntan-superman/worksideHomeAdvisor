@@ -9,6 +9,7 @@ import { dashboardRoutes } from './modules/dashboard/dashboard.routes.js';
 import { documentsRoutes } from './modules/documents/documents.routes.js';
 import { reportsRoutes } from './modules/documents/reports.routes.js';
 import { aiRoutes } from './modules/ai/ai.routes.js';
+import { jobsRoutes } from './modules/jobs/jobs.routes.js';
 import { mediaRoutes } from './modules/media/media.routes.js';
 import { marketplaceSmsRoutes } from './modules/marketplace-sms/marketplace-sms.routes.js';
 import { providersRoutes } from './modules/providers/providers.routes.js';
@@ -42,6 +43,7 @@ export function buildApp() {
   app.register(billingRoutes, { prefix: '/api/v1/billing' });
   app.register(billingRoutes, { prefix: '/api/billing' });
   app.register(propertyRoutes, { prefix: '/api/v1/properties' });
+  app.register(jobsRoutes, { prefix: '/api/v1' });
   app.register(mediaRoutes, { prefix: '/api/v1' });
   app.register(marketplaceSmsRoutes, { prefix: '/api/v1' });
   app.register(providersRoutes, { prefix: '/api/v1' });

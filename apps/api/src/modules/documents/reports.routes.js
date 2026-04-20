@@ -1,12 +1,10 @@
 import { getPropertyById } from '../properties/property.service.js';
 import {
   exportPropertyFlyerPdf,
-  generatePropertyFlyer,
   getLatestPropertyFlyer,
 } from './flyer.service.js';
 import {
   exportPropertyReportPdf,
-  generatePropertyReport,
   getLatestPropertyReport,
 } from './report.service.js';
 
@@ -18,14 +16,13 @@ export async function reportsRoutes(fastify) {
         return reply.code(404).send({ message: 'Property not found.' });
       }
 
-      const report =
-        (await getLatestPropertyReport(request.params.propertyId)) ||
-        (await generatePropertyReport({ propertyId: request.params.propertyId }));
+      const report = await getLatestPropertyReport(request.params.propertyId);
 
       return reply.send({
         reportType: 'property_summary',
         propertyId: request.params.propertyId,
         report,
+        generationRequired: !report,
         exportUrl: `/api/v1/reports/property-summary/${request.params.propertyId}/export.pdf`,
       });
     } catch (error) {
@@ -38,6 +35,11 @@ export async function reportsRoutes(fastify) {
       const property = await getPropertyById(request.params.propertyId);
       if (!property) {
         return reply.code(404).send({ message: 'Property not found.' });
+      }
+
+      const latestReport = await getLatestPropertyReport(request.params.propertyId);
+      if (!latestReport) {
+        return reply.code(404).send({ message: 'Report not found. Generate a report first.' });
       }
 
       const { bytes, filename } = await exportPropertyReportPdf({
@@ -61,17 +63,13 @@ export async function reportsRoutes(fastify) {
         return reply.code(404).send({ message: 'Property not found.' });
       }
 
-      const flyer =
-        (await getLatestPropertyFlyer(request.params.propertyId, 'sale')) ||
-        (await generatePropertyFlyer({
-          propertyId: request.params.propertyId,
-          flyerType: 'sale',
-        }));
+      const flyer = await getLatestPropertyFlyer(request.params.propertyId, 'sale');
 
       return reply.send({
         reportType: 'marketing_report',
         propertyId: request.params.propertyId,
         flyer,
+        generationRequired: !flyer,
         exportUrl: `/api/v1/reports/marketing/${request.params.propertyId}/export.pdf`,
       });
     } catch (error) {
@@ -84,6 +82,11 @@ export async function reportsRoutes(fastify) {
       const property = await getPropertyById(request.params.propertyId);
       if (!property) {
         return reply.code(404).send({ message: 'Property not found.' });
+      }
+
+      const latestFlyer = await getLatestPropertyFlyer(request.params.propertyId, 'sale');
+      if (!latestFlyer) {
+        return reply.code(404).send({ message: 'Flyer not found. Generate a flyer first.' });
       }
 
       const { bytes, filename } = await exportPropertyFlyerPdf({

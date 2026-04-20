@@ -562,6 +562,16 @@ export function createBillingCheckoutSession(payload, userId) {
   });
 }
 
+export function getAsyncJob(jobId) {
+  return request(`/api/v1/jobs/${jobId}`);
+}
+
+export function cancelAsyncJob(jobId) {
+  return request(`/api/v1/jobs/${jobId}/cancel`, {
+    method: 'PATCH',
+  });
+}
+
 export function syncBillingSession(sessionId) {
   return request('/api/v1/billing/sync-session', {
     method: 'POST',

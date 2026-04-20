@@ -8179,6 +8179,7 @@ export async function createImageEnhancementJob({
   userPlan = '',
   sourceVariantId = '',
   workflowStageKey = '',
+  onJobCreated = null,
 }) {
   if (mongoose.connection.readyState !== 1) {
     throw new Error('Database connection is required to generate image variants.');
@@ -8361,6 +8362,10 @@ export async function createImageEnhancementJob({
       workflowStageKey: normalizedWorkflowStageKey,
     },
   });
+
+  if (typeof onJobCreated === 'function') {
+    await onJobCreated(serializeImageJob(job.toObject(), []));
+  }
 
   try {
     const baseRenderPlan =

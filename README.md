@@ -2,6 +2,12 @@
 
 AI guidance for pricing, prep, marketing, and sale readiness.
 
+Start here:
+
+- current product and architecture truth: `docs/LIVE_SYSTEM.md`
+- current vision scope: `docs/VISION_TIERS.md`
+- archived legacy foundation docs: `docs/archive/README.md`
+
 This monorepo is the production-oriented foundation for a web portal, Expo mobile app, admin console, API, AI orchestration service, and supporting workers. It is tailored to the current product decisions:
 
 - Next.js web app in JavaScript
@@ -72,7 +78,10 @@ pnpm dev:ai
 
 ## Current Backend Direction
 
-The docs in `docs/` originally outlined a Postgres/Prisma baseline. The active scaffold in this repo intentionally pivots to MongoDB Atlas because it fits the current product direction and your preferences better:
+The active implementation in this repo uses MongoDB Atlas as the live application database.
+The original Prisma/Postgres foundation docs have been archived under `docs/archive/legacy-foundation/` so they stay available for history without competing with the live system description.
+
+MongoDB Atlas fits the current product direction well because it supports:
 
 - flexible property and AI snapshot storage
 - simpler ingestion of comps and analysis artifacts
@@ -177,15 +186,17 @@ npm run clone:demo --workspace=@workside/api -- --source=demo@worksidesoftware.c
 ////////////////////////////////////////////////////////////
 To clean up photo variants
 
-From PowerShell in c:\Users\sjroy\Source\HomeAdvisor, use:
+From PowerShell in `c:\Users\sjroy\Source\HomeAdvisor`, use the script directly so npm does not swallow flags like `--confirm`:
 
-npm run cleanup:variants-before-date -- 2026-04-09
+node apps/api/scripts/delete-photo-variants-before-date.js --before=2026-04-09
 That shows what would be deleted.
 
 If the dry run looks right, run:
 
-npm run cleanup:variants-before-date -- 2026-04-09 --confirm
+node apps/api/scripts/delete-photo-variants-before-date.js --before=2026-04-09 --confirm
 
-If you are already inside apps/api, the same command works there too.
+If you are already inside `apps/api`, run:
+
+node scripts/delete-photo-variants-before-date.js --before=2026-04-09 --confirm
 
 ////////////////////////////////////////////////////////////

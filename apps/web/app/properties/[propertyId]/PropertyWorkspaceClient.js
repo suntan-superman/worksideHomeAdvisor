@@ -28,6 +28,8 @@ import {
   generateSocialPack,
   getImageEnhancementJob,
   getFlyerExportUrl,
+  getLatestFlyer,
+  getLatestReport,
   getLatestSocialPack,
   getPropertyFull,
   getProviderReferenceSheetExportUrl,
@@ -49,6 +51,59 @@ import {
   updateMediaAsset,
 } from '../../../lib/api';
 import { getStoredSession, setStoredSession } from '../../../lib/session';
+import {
+  ASYNC_DOCUMENT_JOB_TIMEOUT_MS,
+  pollAsyncDocumentJobUntilSettled,
+} from './asyncJobPolling';
+import {
+  VISION_WORKFLOW_STAGES,
+  buildPhotoCategoryGroups,
+  buildVisionWorkflowRecommendation,
+  formatFreeformPlanHighlights,
+  getAssetGenerationStageKey,
+  getDefaultVisionPresetKeyForStage,
+  getDefaultVisionStageForAsset,
+  getMediaAssetBadges,
+  getMediaAssetCreatedAtTimestamp,
+  getMediaAssetSummary,
+  getNewestVisionVariants,
+  getNextVisionWorkflowStageKey,
+  getVariantCreatedAtTimestamp,
+  getVariantDisclaimer,
+  getVariantReviewScore,
+  getVariantSummary,
+  getVisionPipelinePackageSummary,
+  getVisionRecommendationLabel,
+  getVisionSaveDefaults,
+  getVisionWorkflowStage,
+  getVisionWorkflowStageForPreset,
+  getVisionWorkflowStageKeyForVariant,
+  groupMediaAssetsByRoom,
+  pickVisionWorkspaceVariantId,
+} from './workspaceVisionHelpers';
+import {
+  buildAddressQuery,
+  buildDashboardFromSnapshot,
+  buildGoogleMapsRouteUrl,
+  buildPropertyAddressLabel,
+  buildProviderCoverageGuidance,
+  buildProviderFallbackQuery,
+  buildSocialPackVariantDetails,
+  formatChecklistCategory,
+  formatDateTimeLabel,
+  formatWorkflowStatus,
+  getSocialPackVariantKey,
+  readBooleanWorkspacePreference,
+  readFileAsDataUrl,
+  readWorkspaceSectionState,
+} from './workspaceClientHelpers';
+import { WorkspaceChecklistTab } from './workspaceChecklistTab';
+import { WorkspaceBrochureTab } from './workspaceBrochureTab';
+import { WorkspaceOverviewTab } from './workspaceOverviewTab';
+import { WorkspacePhotosTab } from './workspacePhotosTab';
+import { WorkspacePricingTab } from './workspacePricingTab';
+import { WorkspaceReportTab } from './workspaceReportTab';
+import { WorkspaceSellerPicksTab } from './workspaceSellerPicksTab';
 
 const WORKSPACE_TABS = [
   { id: 'overview', label: 'Overview' },
@@ -98,110 +153,11 @@ const REPORT_SECTION_OPTIONS = [
   { id: 'draft_listing_description', label: 'Draft Listing Description' },
 ];
 
-const VISION_WORKFLOW_STAGES = [
-  {
-    key: 'clean',
-    label: '1. First Impression',
-    title: 'First Impression',
-    description:
-      'Run the fast baseline pass first so the photo improves immediately and starts from a stronger, more trustworthy foundation.',
-    nextKey: 'finish',
-    groups: [
-      {
-        key: 'first_impression',
-        label: 'Fast baseline',
-        items: ['enhance_listing_quality'],
-      },
-    ],
-    allowFreeform: false,
-  },
-  {
-    key: 'finish',
-    label: '2. Smart Enhancement',
-    title: 'Smart Enhancement',
-    description:
-      'Apply targeted cleanup and selective buyer-friendly improvements before you run the stricter publish-confidence pass.',
-    nextKey: 'style',
-    groups: [
-      {
-        key: 'smart_cleanup',
-        label: 'High-confidence cleanup',
-        items: [
-          'declutter_light',
-          'declutter_medium',
-          'lighting_boost',
-          'remove_furniture',
-          'cleanup_empty_room',
-        ],
-      },
-      {
-        key: 'finish_concepts',
-        label: 'Optional concept directions',
-        items: [
-          'paint_warm_neutral',
-          'paint_bright_white',
-          'paint_soft_greige',
-          'floor_light_wood',
-          'floor_medium_wood',
-          'floor_dark_hardwood',
-          'floor_lvp_neutral',
-        ],
-      },
-      {
-        key: 'room_upgrades',
-        label: 'Additional room upgrades',
-        items: [
-          'kitchen_white_cabinets_granite',
-          'kitchen_white_cabinets_quartz',
-          'kitchen_green_cabinets_granite',
-          'kitchen_green_cabinets_quartz',
-          'exterior_curb_appeal_refresh',
-          'backyard_entertaining_refresh',
-          'backyard_pool_preview',
-        ],
-      },
-    ],
-    allowFreeform: true,
-  },
-  {
-    key: 'style',
-    label: '3. Listing Ready',
-    title: 'Listing Ready',
-    description:
-      'Run the strict publish-confidence pass. Save the winner if it reads clean and trustworthy, or step back to Smart Enhancement if it still needs work.',
-    nextKey: 'final',
-    groups: [
-      {
-        key: 'listing_ready',
-        label: 'Final publish pass',
-        items: ['combined_listing_refresh'],
-      },
-    ],
-    allowFreeform: false,
-  },
-  {
-    key: 'final',
-    label: '4. Finalize',
-    title: 'Finalize',
-    description: 'Keep the winner, set brochure/report usage, and delete earlier drafts when ready.',
-    nextKey: 'final',
-    groups: [],
-    allowFreeform: false,
-  },
-];
 const VISION_COMPLETION_SOUND_MIN_SECONDS = 15;
 const VISION_JOB_RECOVERY_LOOKBACK_MS = 90 * 1000;
 const VISION_JOB_RECOVERY_POLL_INTERVAL_MS = 4000;
 const VISION_JOB_RECOVERY_TIMEOUT_MS = 45 * 1000;
 const VISION_JOB_BACKGROUND_RECOVERY_TIMEOUT_MS = 10 * 60 * 1000;
-const PHOTO_LIBRARY_CATEGORY_DEFINITIONS = [
-  { key: 'kitchen', label: 'Kitchen' },
-  { key: 'living_room', label: 'Living Room' },
-  { key: 'master_bedroom', label: 'Master Bedroom' },
-  { key: 'master_bathroom', label: 'Master Bathroom' },
-  { key: 'other', label: 'Other' },
-  { key: 'exterior', label: 'Exterior' },
-];
 const DEFAULT_WORKSPACE_SECTION_STATE = {
   photos_import: true,
   photos_room_kitchen: true,
@@ -221,1065 +177,6 @@ const DEFAULT_WORKSPACE_SECTION_STATE = {
   checklist_custom: false,
   checklist_providers: false,
 };
-
-function getVisionWorkflowStage(stageKey) {
-  return (
-    VISION_WORKFLOW_STAGES.find((stage) => stage.key === stageKey) || VISION_WORKFLOW_STAGES[0]
-  );
-}
-
-function getVisionWorkflowStageForPreset(presetKey) {
-  const normalizedPresetKey = String(presetKey || '').trim();
-  if (!normalizedPresetKey) {
-    return 'clean';
-  }
-
-  const matchingStage = VISION_WORKFLOW_STAGES.find((stage) =>
-    stage.groups.some((group) => group.items.includes(normalizedPresetKey)),
-  );
-
-  return matchingStage?.key || 'style';
-}
-
-function getDefaultVisionPresetKeyForStage(stageKey) {
-  const stage = getVisionWorkflowStage(stageKey);
-  return stage.groups.flatMap((group) => group.items)[0] || 'enhance_listing_quality';
-}
-
-function getNextVisionWorkflowStageKey(stageKey) {
-  return getVisionWorkflowStage(stageKey).nextKey || 'final';
-}
-
-function getVisionRecommendationLabel(presetKey, presets = []) {
-  const preset = presets.find((item) => item.key === presetKey);
-  if (preset?.displayName) {
-    return preset.displayName;
-  }
-
-  if (presetKey === 'enhance_listing_quality') {
-    return 'First Impression';
-  }
-  if (presetKey === 'combined_listing_refresh') {
-    return 'Listing Ready';
-  }
-  if (presetKey === 'declutter_medium') {
-    return 'Smart Declutter+';
-  }
-  if (presetKey === 'declutter_light') {
-    return 'Smart Declutter';
-  }
-  if (presetKey === 'lighting_boost') {
-    return 'Lighting Recovery';
-  }
-
-  return 'Vision enhancement';
-}
-
-function buildVisionWorkflowRecommendation(asset, selectedVariant = null, presets = []) {
-  const metadata = selectedVariant?.metadata || asset?.selectedVariant?.metadata || {};
-  const recommendedNextStep =
-    metadata?.recommendedNextStep && typeof metadata.recommendedNextStep === 'object'
-      ? metadata.recommendedNextStep
-      : null;
-  const requestedPresetKey =
-    metadata?.requestedPresetKey || metadata?.presetKey || selectedVariant?.variantType || '';
-  const pipelineStage = String(metadata?.pipelineStage || '');
-  const smartPlan = Array.isArray(metadata?.smartEnhancementPlan)
-    ? metadata.smartEnhancementPlan
-    : [];
-  const sceneAnalysis = metadata?.sceneAnalysis || {};
-  const clutterLevel = Number(
-    sceneAnalysis?.clutterLevel || sceneAnalysis?.clutterScore || asset?.analysis?.clutterScore || 0,
-  );
-  const rawLightingQuality = Number(
-    sceneAnalysis?.lightingQuality ?? asset?.analysis?.lightingScore ?? 0,
-  );
-  const lightingQuality = rawLightingQuality > 1 ? rawLightingQuality / 100 : rawLightingQuality;
-  const listingReadyLabel = String(metadata?.listingReadyLabel || '');
-  const fallbackApplied = Boolean(metadata?.fallbackApplied);
-  const summary = String(asset?.analysis?.summary || '').toLowerCase();
-  const hasDeclutterSignal =
-    smartPlan.includes('declutter') ||
-    asset?.analysis?.retakeRecommended ||
-    clutterLevel > 0.5 ||
-    /clutter|declutter|distraction|tidy|retake|busy|remove/i.test(summary);
-  const needsLightingRecovery =
-    smartPlan.includes('lighting_boost') || (lightingQuality > 0 && lightingQuality < 0.6);
-  const declutterPresetKey = clutterLevel >= 0.68 ? 'declutter_medium' : 'declutter_light';
-
-  if (recommendedNextStep?.type === 'save_result') {
-    return {
-      type: 'save_result',
-      label: recommendedNextStep.label || 'Save this result',
-      reason:
-        recommendedNextStep.reason ||
-        'This preview is already reading as listing-ready, so the next move is to keep it and use it in Photos, brochure, or report output.',
-    };
-  }
-
-  if (recommendedNextStep?.presetKey) {
-    return {
-      type: 'generate',
-      presetKey: recommendedNextStep.presetKey,
-      label:
-        recommendedNextStep.label ||
-        getVisionRecommendationLabel(recommendedNextStep.presetKey, presets),
-      reason: recommendedNextStep.reason || 'This is the strongest next step based on the current result.',
-    };
-  }
-
-  if (listingReadyLabel === 'Listing Ready') {
-    return {
-      type: 'save_result',
-      label: 'Save this result',
-      reason:
-        'This preview is already reading as listing-ready, so the next move is to keep it and use it in Photos, brochure, or report output.',
-    };
-  }
-
-  if (!selectedVariant && !asset?.selectedVariant) {
-    return {
-      type: 'generate',
-      presetKey: 'enhance_listing_quality',
-      label: getVisionRecommendationLabel('enhance_listing_quality', presets),
-      reason:
-        'Start with the fast first-impression pass so the room gets a reliable visual improvement before heavier cleanup or listing polish.',
-    };
-  }
-
-  if (requestedPresetKey === 'combined_listing_refresh' && fallbackApplied && hasDeclutterSignal) {
-    return {
-      type: 'generate',
-      presetKey: declutterPresetKey,
-      label: getVisionRecommendationLabel(declutterPresetKey, presets),
-      reason:
-        'The listing-ready pass fell back safely, which usually means the room still needs a stronger cleanup step before final polish.',
-    };
-  }
-
-  if (pipelineStage === 'first_impression' && hasDeclutterSignal) {
-    return {
-      type: 'generate',
-      presetKey: declutterPresetKey,
-      label: getVisionRecommendationLabel(declutterPresetKey, presets),
-      reason:
-        'The first-impression pass is in place. Cleaning visual distractions next should create a stronger base for listing-ready polish.',
-    };
-  }
-
-  if (
-    (pipelineStage === 'first_impression' || requestedPresetKey === 'combined_listing_refresh') &&
-    needsLightingRecovery &&
-    !hasDeclutterSignal
-  ) {
-    return {
-      type: 'generate',
-      presetKey: 'lighting_boost',
-      label: getVisionRecommendationLabel('lighting_boost', presets),
-      reason:
-        requestedPresetKey === 'combined_listing_refresh' && fallbackApplied
-          ? 'The listing-ready pass backed off safely, which usually means the room needs a stronger lighting baseline before final polish.'
-          : 'The first-impression baseline is in place. A lighting recovery pass should improve brightness before the stricter listing-ready step.',
-    };
-  }
-
-  if (pipelineStage === 'first_impression' || pipelineStage === 'smart_enhancement') {
-    return {
-      type: 'generate',
-      presetKey: 'combined_listing_refresh',
-      label: getVisionRecommendationLabel('combined_listing_refresh', presets),
-      reason:
-        'The room now has a stable enough baseline for the stricter listing-ready pass that favors realism and publish confidence.',
-    };
-  }
-
-  if (requestedPresetKey === 'combined_listing_refresh' && listingReadyLabel !== 'Listing Ready') {
-    return {
-      type: 'generate',
-      presetKey: hasDeclutterSignal
-        ? declutterPresetKey
-        : needsLightingRecovery
-          ? 'lighting_boost'
-          : 'combined_listing_refresh',
-      label: getVisionRecommendationLabel(
-        hasDeclutterSignal
-          ? declutterPresetKey
-          : needsLightingRecovery
-            ? 'lighting_boost'
-            : 'combined_listing_refresh',
-        presets,
-      ),
-      reason: hasDeclutterSignal
-        ? 'The result is safer than final. A cleanup step should improve the next listing-ready attempt.'
-        : needsLightingRecovery
-          ? 'The result is safer than final. A lighting recovery step should improve the next listing-ready attempt.'
-          : 'The room is close, but another listing-ready attempt may still produce a cleaner publishable result.',
-    };
-  }
-
-  return {
-    type: 'generate',
-    presetKey: 'enhance_listing_quality',
-    label: getVisionRecommendationLabel('enhance_listing_quality', presets),
-    reason:
-      'Use the fast enhancement pass to re-establish a strong first impression before trying another advanced transformation.',
-  };
-}
-
-function getVisionSaveDefaults(variant, activeStageKey = 'style') {
-  const metadata = variant?.metadata || {};
-  const pipelineDescriptor =
-    metadata?.pipelineDescriptor && typeof metadata.pipelineDescriptor === 'object'
-      ? metadata.pipelineDescriptor
-      : null;
-  const pipelineStage = String(
-    pipelineDescriptor?.stageKey || metadata?.pipelineStage || '',
-  ).trim();
-  const workflowStageKey = String(metadata?.workflowStageKey || activeStageKey || '').trim();
-  const generationStage =
-    workflowStageKey === 'clean'
-      ? 'clean_room'
-      : workflowStageKey === 'finish'
-        ? 'finishes'
-        : workflowStageKey === 'style'
-          ? 'finishes'
-          : pipelineStage === 'listing_ready'
-            ? 'finishes'
-            : pipelineStage === 'first_impression'
-              ? 'clean_room'
-              : pipelineStage === 'smart_enhancement' &&
-                  variant?.variantCategory !== 'concept_preview'
-                ? 'finishes'
-                : 'style';
-
-  return {
-    generationStage,
-    listingCandidate: Boolean(
-      metadata?.publishable || pipelineDescriptor?.publishable,
-    ),
-    qualityLabel:
-      metadata?.qualityLabel ||
-      pipelineDescriptor?.statusLabel ||
-      metadata?.confidenceBadge ||
-      metadata?.listingReadyLabel ||
-      '',
-    publishable: Boolean(metadata?.publishable || pipelineDescriptor?.publishable),
-  };
-}
-
-function getVisionPipelinePackageSummary(variant, saveDefaults = null) {
-  if (!variant) {
-    return null;
-  }
-
-  const metadata = variant?.metadata || {};
-  const pipelineDescriptor =
-    metadata?.pipelineDescriptor && typeof metadata.pipelineDescriptor === 'object'
-      ? metadata.pipelineDescriptor
-      : null;
-  const stageLabel =
-    pipelineDescriptor?.stageLabel || metadata?.pipelineStageLabel || 'Vision result';
-  const statusLabel =
-    saveDefaults?.qualityLabel ||
-    pipelineDescriptor?.statusLabel ||
-    metadata?.confidenceBadge ||
-    metadata?.listingReadyLabel ||
-    'Review pending';
-  const publishable = Boolean(
-    saveDefaults?.publishable || metadata?.publishable || pipelineDescriptor?.publishable,
-  );
-  const reviewMessage =
-    pipelineDescriptor?.reviewMessage || metadata?.warning || getVariantSummary(variant);
-
-  let deliveryMessage =
-    'Review this result before using it in final marketing materials.';
-  if (pipelineDescriptor?.stageKey === 'first_impression') {
-    deliveryMessage =
-      'This is your fast baseline improvement. Use Smart Enhancement next for clutter, lighting, or selective cleanup.';
-  } else if (pipelineDescriptor?.stageKey === 'smart_enhancement') {
-    deliveryMessage =
-      'This result is ready for the stricter Listing Ready pass once the room feels clean and believable.';
-  } else if (publishable) {
-    deliveryMessage =
-      'This result is strong enough to save as a listing photo and use in brochure and report workflows.';
-  } else if (pipelineDescriptor?.stageKey === 'listing_ready') {
-    deliveryMessage =
-      'Treat this as a reviewed draft unless you want to step back into Smart Enhancement for another pass.';
-  }
-
-  return {
-    stageLabel,
-    statusLabel,
-    reviewMessage,
-    deliveryMessage,
-    publishable,
-  };
-}
-
-function buildAddressQuery(property) {
-  return [property?.addressLine1, property?.city, property?.state, property?.zip]
-    .filter(Boolean)
-    .join(', ');
-}
-
-function buildGoogleMapsRouteUrl(property, comps = []) {
-  const propertyAddress = buildAddressQuery(property);
-  const compAddresses = (comps || [])
-    .map((comp) => comp?.address)
-    .filter(Boolean)
-    .slice(0, 8);
-
-  if (!propertyAddress) {
-    return null;
-  }
-
-  if (!compAddresses.length) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(propertyAddress)}`;
-  }
-
-  const [destination, ...waypoints] = compAddresses;
-  const url = new URL('https://www.google.com/maps/dir/');
-  url.searchParams.set('api', '1');
-  url.searchParams.set('origin', propertyAddress);
-  url.searchParams.set('destination', destination);
-  url.searchParams.set('travelmode', 'driving');
-
-  if (waypoints.length) {
-    url.searchParams.set('waypoints', waypoints.join('|'));
-  }
-
-  return url.toString();
-}
-
-function formatChecklistStatus(status) {
-  if (status === 'in_progress') {
-    return 'In progress';
-  }
-
-  if (status === 'done') {
-    return 'Done';
-  }
-
-  return 'To do';
-}
-
-function formatChecklistCategory(category) {
-  return String(category || 'custom')
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-function formatChecklistPriority(priority) {
-  return `${String(priority || 'medium').replace(/\b\w/g, (character) => character.toUpperCase())} priority`;
-}
-
-function getPreferredVariantLabel(item) {
-  return item?.variantLabel || 'Preferred vision variant';
-}
-
-function getVariantSummary(variant) {
-  return (
-    variant?.metadata?.summary ||
-    variant?.metadata?.warning ||
-    'This variant can be reviewed, marked preferred, and optionally used in brochure or report outputs.'
-  );
-}
-
-function getVariantDisclaimer(variant) {
-  if (variant?.metadata?.disclaimerType === 'concept_preview') {
-    return 'AI visualizations are conceptual previews only. Actual condition, remodel results, and value impact may vary.';
-  }
-
-  return 'Enhanced images should stay truthful to the room and be reviewed before use in final marketing materials.';
-}
-
-function getVariantReviewScore(variant) {
-  return Number(variant?.metadata?.review?.overallScore || 0);
-}
-
-function getAssetGenerationStageKey(asset) {
-  const normalized = String(asset?.generationStage || '').trim().toLowerCase();
-  if (normalized === 'clean_room') {
-    return 'clean';
-  }
-  if (normalized === 'finishes' || normalized === 'finish') {
-    return 'finish';
-  }
-  if (normalized === 'style') {
-    return 'style';
-  }
-  return '';
-}
-
-function getVariantCreatedAtTimestamp(variant) {
-  const timestamp = new Date(
-    variant?.updatedAt || variant?.createdAt || variant?.selectedAt || 0,
-  ).getTime();
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
-function buildDashboardFromSnapshot(snapshot = {}) {
-  const latestPricing = snapshot?.pricingAnalyses?.latest || null;
-  const latestFlyer = snapshot?.reports?.latestFlyer || null;
-  const latestReport = snapshot?.reports?.latestReport || null;
-
-  return {
-    property: snapshot?.property || null,
-    comps: latestPricing?.selectedComps || [],
-    pricingSummary: latestPricing?.summary || '',
-    flyer: latestFlyer,
-    report: latestReport,
-  };
-}
-
-function getVisionWorkflowStageKeyForVariant(variant) {
-  return (
-    variant?.metadata?.workflowStageKey ||
-    getVisionWorkflowStageForPreset(variant?.metadata?.presetKey || variant?.variantType)
-  );
-}
-
-function getNewestVisionVariants(variants = []) {
-  return [...variants].sort(
-    (left, right) => getVariantCreatedAtTimestamp(right) - getVariantCreatedAtTimestamp(left),
-  );
-}
-
-function pickVisionWorkspaceVariantId(
-  variants = [],
-  { currentVariantId = '', stageKey = 'clean', sourceVariantId = '' } = {},
-) {
-  if (!variants.length) {
-    return '';
-  }
-
-  if (currentVariantId && variants.some((variant) => variant.id === currentVariantId)) {
-    return currentVariantId;
-  }
-
-  const nonHiddenVariants = variants.filter(
-    (variant) => !variant?.metadata?.review?.shouldHideByDefault,
-  );
-  const candidatePool = nonHiddenVariants.length ? nonHiddenVariants : variants;
-  const newestCandidates = getNewestVisionVariants(candidatePool);
-  const normalizedStageKey = String(stageKey || 'clean').trim() || 'clean';
-  const normalizedSourceVariantId = String(sourceVariantId || '').trim();
-
-  if (normalizedSourceVariantId) {
-    const sourceDescendants = newestCandidates.filter(
-      (variant) => String(variant?.metadata?.sourceVariantId || '') === normalizedSourceVariantId,
-    );
-    const sameStageSourceDescendants = sourceDescendants.filter(
-      (variant) => getVisionWorkflowStageKeyForVariant(variant) === normalizedStageKey,
-    );
-    if (sameStageSourceDescendants[0]?.id) {
-      return sameStageSourceDescendants[0].id;
-    }
-    if (sourceDescendants[0]?.id) {
-      return sourceDescendants[0].id;
-    }
-    const exactSourceVariant = newestCandidates.find(
-      (variant) => variant.id === normalizedSourceVariantId,
-    );
-    if (exactSourceVariant?.id) {
-      return exactSourceVariant.id;
-    }
-  }
-
-  const sameStageVariants = newestCandidates.filter(
-    (variant) => getVisionWorkflowStageKeyForVariant(variant) === normalizedStageKey,
-  );
-  if (sameStageVariants[0]?.id) {
-    return sameStageVariants[0].id;
-  }
-
-  return newestCandidates[0]?.id || variants[0]?.id || '';
-}
-
-function waitForDuration(milliseconds) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, milliseconds);
-  });
-}
-
-function getMediaAssetCreatedAtTimestamp(asset) {
-  const timestamp = new Date(asset?.updatedAt || asset?.createdAt || 0).getTime();
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
-function getDefaultVisionStageForAsset(asset) {
-  if (asset?.assetType !== 'generated') {
-    return 'clean';
-  }
-
-  const sourceStageKey = getAssetGenerationStageKey(asset);
-  if (!sourceStageKey) {
-    return 'clean';
-  }
-
-  return getNextVisionWorkflowStageKey(sourceStageKey);
-}
-
-function getMediaAssetPrimaryLabel(asset) {
-  if (asset?.assetType === 'generated') {
-    if (asset?.generationStage === 'clean_room') {
-      return 'AI Cleaned';
-    }
-    if (asset?.generationStage === 'finishes') {
-      return 'AI Finish Update';
-    }
-    if (asset?.generationStage === 'style') {
-      return 'AI Styled';
-    }
-    return 'AI Generated';
-  }
-
-  return 'Original';
-}
-
-function getMediaAssetBadges(asset) {
-  const badges = [getMediaAssetPrimaryLabel(asset)];
-  if (asset?.savedFromVision) {
-    badges.push('Saved from Vision');
-  }
-  if (asset?.listingCandidate) {
-    badges.push('Seller Pick');
-  }
-  return badges;
-}
-
-function getMediaAssetSummary(asset) {
-  if (asset?.assetType === 'generated') {
-    const stageLabel =
-      asset?.generationStage === 'clean_room'
-        ? 'room cleanup'
-        : asset?.generationStage === 'finishes'
-        ? 'finish update'
-        : asset?.generationStage === 'style'
-        ? 'style concept'
-        : 'Vision edit';
-    return asset?.generationLabel
-      ? `${asset.generationLabel}. Saved from Vision for ${stageLabel} review.`
-      : `Saved from Vision for ${stageLabel} review.`;
-  }
-
-  return asset?.analysis?.summary || 'Original photo saved to the shared property gallery.';
-}
-
-function groupMediaAssetsByRoom(assets = []) {
-  const roomMap = new Map();
-  for (const asset of assets) {
-    const roomKey = String(asset?.roomLabel || 'Unlabeled room').trim() || 'Unlabeled room';
-    if (!roomMap.has(roomKey)) {
-      roomMap.set(roomKey, []);
-    }
-    roomMap.get(roomKey).push(asset);
-  }
-
-  return [...roomMap.entries()]
-    .map(([roomLabel, roomAssets]) => ({
-      roomLabel,
-      assets: [...roomAssets].sort((left, right) => {
-        if ((left?.assetType || 'original') !== (right?.assetType || 'original')) {
-          return left?.assetType === 'original' ? -1 : 1;
-        }
-        return getMediaAssetCreatedAtTimestamp(right) - getMediaAssetCreatedAtTimestamp(left);
-      }),
-    }))
-    .sort((left, right) => left.roomLabel.localeCompare(right.roomLabel));
-}
-
-function resolvePhotoLibraryCategoryKey(roomLabel = '') {
-  const normalizedLabel = String(roomLabel || '').trim().toLowerCase();
-  if (!normalizedLabel) {
-    return 'other';
-  }
-
-  if (
-    normalizedLabel.includes('living') ||
-    normalizedLabel.includes('family') ||
-    normalizedLabel.includes('great room') ||
-    normalizedLabel.includes('den')
-  ) {
-    return 'living_room';
-  }
-  if (normalizedLabel.includes('kitchen') || normalizedLabel.includes('pantry')) {
-    return 'kitchen';
-  }
-  if (
-    normalizedLabel.includes('primary bedroom') ||
-    normalizedLabel.includes('master bedroom') ||
-    normalizedLabel.includes('owner bedroom')
-  ) {
-    return 'master_bedroom';
-  }
-  if (normalizedLabel.includes('bath')) {
-    return 'master_bathroom';
-  }
-  if (
-    normalizedLabel.includes('exterior') ||
-    normalizedLabel.includes('yard') ||
-    normalizedLabel.includes('patio') ||
-    normalizedLabel.includes('backyard') ||
-    normalizedLabel.includes('front yard') ||
-    normalizedLabel.includes('curb')
-  ) {
-    return 'exterior';
-  }
-
-  return 'other';
-}
-
-function buildPhotoCategoryGroups(assets = []) {
-  const categoryMap = new Map(
-    PHOTO_LIBRARY_CATEGORY_DEFINITIONS.map((definition) => [definition.key, []]),
-  );
-
-  for (const asset of assets) {
-    const categoryKey = resolvePhotoLibraryCategoryKey(asset?.roomLabel);
-    categoryMap.get(categoryKey)?.push(asset);
-  }
-
-  return PHOTO_LIBRARY_CATEGORY_DEFINITIONS.map((definition) => ({
-    ...definition,
-    assets: [...(categoryMap.get(definition.key) || [])].sort(
-      (left, right) => getMediaAssetCreatedAtTimestamp(right) - getMediaAssetCreatedAtTimestamp(left),
-    ),
-  }));
-}
-
-function readWorkspaceSectionState(storageKey) {
-  if (typeof window === 'undefined' || !storageKey) {
-    return {};
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(storageKey);
-    if (!rawValue) {
-      return {};
-    }
-
-    const parsed = JSON.parse(rawValue);
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function readBooleanWorkspacePreference(storageKey, fallbackValue = false) {
-  if (typeof window === 'undefined' || !storageKey) {
-    return fallbackValue;
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(storageKey);
-    if (rawValue == null) {
-      return fallbackValue;
-    }
-
-    return rawValue === 'true';
-  } catch {
-    return fallbackValue;
-  }
-}
-
-function formatFreeformPlanHighlights(normalizedPlan) {
-  if (!normalizedPlan) {
-    return [];
-  }
-
-  const highlights = [];
-
-  if (normalizedPlan.removeObjects?.includes('furniture')) {
-    highlights.push('Furniture removal requested');
-  }
-  if (normalizedPlan.removeObjects?.includes('clutter')) {
-    highlights.push('Declutter requested');
-  }
-  if (normalizedPlan.flooring) {
-    highlights.push(`Flooring: ${normalizedPlan.flooring}`);
-  }
-  if (normalizedPlan.wallColor) {
-    highlights.push(`Wall color: ${normalizedPlan.wallColor}`);
-  }
-  if (normalizedPlan.cabinetColor) {
-    highlights.push(`Cabinet color: ${normalizedPlan.cabinetColor}`);
-  }
-  if (normalizedPlan.countertopMaterial) {
-    highlights.push(`Countertops: ${normalizedPlan.countertopMaterial}`);
-  }
-  if ((normalizedPlan.exteriorFeatures || []).length) {
-    highlights.push(`Exterior: ${(normalizedPlan.exteriorFeatures || []).join(', ')}`);
-  }
-  if (normalizedPlan.lighting) {
-    highlights.push(`${normalizedPlan.lighting === 'brighter' ? 'Brighter' : normalizedPlan.lighting} lighting`);
-  }
-
-  return highlights;
-}
-
-function getSocialPackVariantKey(variant, index = 0) {
-  return `${variant?.format || 'variant'}-${variant?.width || 0}-${variant?.height || 0}-${index}`;
-}
-
-function getSocialPackVariantLabel(variant) {
-  if (!variant) {
-    return 'Social pack view';
-  }
-
-  return variant.width && variant.height
-    ? `${variant.format} ${variant.width}x${variant.height}`
-    : variant.format;
-}
-
-function buildSocialPackVariantDetails(pack, variant) {
-  if (!pack || !variant) {
-    return null;
-  }
-
-  const normalizedFormat = String(variant.format || '').toLowerCase();
-  const sections = [];
-  const highlights = [];
-
-  if (variant.width && variant.height) {
-    highlights.push(`${variant.width}x${variant.height} canvas`);
-  }
-
-  if (normalizedFormat.includes('square')) {
-    highlights.push('Feed-ready layout');
-    sections.push(
-      { label: 'Headline', value: pack.headline },
-      { label: 'Short caption', value: pack.shortCaption },
-      { label: 'CTA', value: pack.cta },
-    );
-    return {
-      title: getSocialPackVariantLabel(variant),
-      summary: 'Use this for square feed placements, static ads, and simple hero-image posts.',
-      guidance: variant.guidance,
-      highlights,
-      sections,
-    };
-  }
-
-  if (normalizedFormat.includes('story') || normalizedFormat.includes('reel')) {
-    highlights.push('Vertical motion-friendly');
-    sections.push(
-      { label: 'Headline', value: pack.headline },
-      { label: 'Short caption', value: pack.shortCaption },
-      { label: 'CTA', value: pack.cta },
-    );
-    return {
-      title: getSocialPackVariantLabel(variant),
-      summary: 'Use this for story, reel, or vertical placements where the opening frame and CTA need to land quickly.',
-      guidance: variant.guidance,
-      highlights,
-      sections,
-    };
-  }
-
-  if (normalizedFormat.includes('ad copy')) {
-    highlights.push('Long-form copy block');
-    sections.push(
-      { label: 'Headline', value: pack.headline },
-      { label: 'Primary text', value: pack.primaryText },
-      { label: 'Short caption', value: pack.shortCaption },
-      { label: 'Disclaimers', value: (pack.disclaimers || []).join(' ') },
-    );
-    return {
-      title: getSocialPackVariantLabel(variant),
-      summary: 'This is the copy reference view for ad drafting, approvals, and export review.',
-      guidance: variant.guidance,
-      highlights,
-      sections,
-    };
-  }
-
-  highlights.push('Call-to-action guidance');
-  sections.push(
-    { label: 'Primary CTA', value: pack.cta },
-    { label: 'Short caption', value: pack.shortCaption },
-    {
-      label: 'Compliance reminder',
-      value:
-        pack.disclaimers?.[0] ||
-        'Review generated copy and imagery before public advertising use.',
-    },
-  );
-  return {
-    title: getSocialPackVariantLabel(variant),
-    summary: 'Use this to choose the CTA language and the supporting line you want to pair with it.',
-    guidance: variant.guidance,
-    highlights,
-    sections,
-  };
-}
-
-function formatWorkflowStatus(status) {
-  if (status === 'in_progress') {
-    return 'In progress';
-  }
-  if (status === 'complete') {
-    return 'Complete';
-  }
-  if (status === 'blocked') {
-    return 'Blocked';
-  }
-  if (status === 'locked') {
-    return 'Locked';
-  }
-  return 'Available';
-}
-
-function buildPropertyAddressLabel(property) {
-  return [property?.addressLine1, property?.city, property?.state, property?.zip]
-    .filter(Boolean)
-    .join(', ');
-}
-
-function buildProviderFallbackQuery(task, property) {
-  const categoryQueryByKey = {
-    inspector: 'home inspector',
-    title_company: 'title company',
-    real_estate_attorney: 'real estate attorney',
-    photographer: 'real estate photographer',
-    cleaning_service: 'house cleaning service',
-    termite_inspection: 'termite inspection',
-    notary: 'mobile notary',
-    nhd_report: 'natural hazard disclosure report provider',
-    staging_company: 'home staging company',
-  };
-  const categoryLabel =
-    categoryQueryByKey[task?.providerCategoryKey] || task?.providerCategoryLabel || task?.title || 'home services';
-  const addressLabel = buildPropertyAddressLabel(property);
-  const fallbackLocationLabel = [property?.city, property?.state, property?.zip].filter(Boolean).join(', ');
-  return [categoryLabel, addressLabel || fallbackLocationLabel || 'this property']
-    .filter(Boolean)
-    .join(' ');
-}
-
-function formatProviderStatusLabel(status) {
-  return String(status || 'unavailable')
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-function formatProviderLeadStatusLabel(status) {
-  return formatProviderStatusLabel(status || 'open');
-}
-
-function formatDateTimeLabel(value) {
-  if (!value) {
-    return '—';
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return '—';
-  }
-
-  return parsed.toLocaleString();
-}
-
-function formatProviderReferenceAccessLabel(reference) {
-  if (reference?.websiteUrl) {
-    try {
-      return new URL(reference.websiteUrl).hostname.replace(/^www\./, '');
-    } catch {
-      return 'Website available';
-    }
-  }
-
-  if (reference?.mapsUrl) {
-    return reference?.source === 'google_maps' ? 'Google Maps reference saved' : 'Maps link available';
-  }
-
-  return 'Contact details not listed';
-}
-
-function buildProviderCoverageGuidance(providerSuggestionTask, providerSource) {
-  if (!providerSuggestionTask) {
-    return null;
-  }
-
-  const categoryLabel =
-    providerSource?.categoryLabel ||
-    providerSuggestionTask.providerCategoryLabel ||
-    providerSuggestionTask.title ||
-    'providers';
-  const categoryLabelLower = categoryLabel.toLowerCase();
-  const liveCount = Number(providerSource?.internalProviders || 0);
-  const unavailableCount = Number(providerSource?.unavailableProviders || 0);
-  const externalCount = Number(providerSource?.externalProviders || 0);
-  const totalMatches = Number(providerSource?.totalCategoryProviders || 0);
-  const fallback = providerSource?.googleFallback || null;
-  const fallbackEnabled = Boolean(providerSource?.googleFallbackEnabled || fallback?.enabled);
-
-  if (liveCount > 0) {
-    return null;
-  }
-
-  if (unavailableCount > 0) {
-    const statusCounts = Object.entries(providerSource?.unavailableStatusCounts || {})
-      .map(([status, count]) => `${count} ${formatProviderStatusLabel(status).toLowerCase()}`)
-      .join(', ');
-
-    return {
-      tone: 'setup',
-      eyebrow: 'Coverage status',
-      title: `No live ${categoryLabelLower} yet`,
-      message: `Workside found matching providers for this property, but they are still completing onboarding and marketplace setup.`,
-      highlights: [
-        `${unavailableCount} matching provider${unavailableCount === 1 ? '' : 's'} still in setup`,
-        statusCounts || null,
-        fallbackEnabled ? 'Google fallback is ready for backup search' : 'Google fallback is not available in this session',
-      ].filter(Boolean),
-      nextStep: fallbackEnabled
-        ? 'Use Google fallback or the live map search below if you need an outside option before these providers go live.'
-        : 'These providers should appear here automatically once they are approved and fully live.',
-    };
-  }
-
-  if (fallback?.triggered && fallback.status === 'results' && externalCount > 0) {
-    return {
-      tone: 'fallback',
-      eyebrow: 'Marketplace gap',
-      title: `No live Workside ${categoryLabelLower} for this property`,
-      message: `There is not yet active marketplace coverage for this category at this address, so the workspace loaded outside local options from Google fallback below.`,
-      highlights: [
-        `${externalCount} Google fallback result${externalCount === 1 ? '' : 's'} loaded`,
-        fallback.locationLabel ? `Search area: ${fallback.locationLabel}` : null,
-        fallback.queryUsed ? `Query: ${fallback.queryUsed}` : null,
-      ].filter(Boolean),
-      nextStep: 'Review the fallback contacts below, save the best ones to the provider sheet, and keep the task moving while marketplace coverage grows.',
-    };
-  }
-
-  if (fallback?.triggered && fallback.status === 'no_results') {
-    return {
-      tone: 'empty',
-      eyebrow: 'Search result',
-      title: `No nearby ${categoryLabelLower} were found in fallback search`,
-      message: `Workside does not have live coverage here yet, and Google fallback did not return structured nearby results for this request.`,
-      highlights: [
-        fallback.locationLabel ? `Search area: ${fallback.locationLabel}` : null,
-        fallback.queryUsed ? `Query: ${fallback.queryUsed}` : null,
-        'Open the live map search below for a broader manual search',
-      ].filter(Boolean),
-      nextStep: 'If you still need coverage, open the map search below and save any promising outside contacts to the provider reference sheet.',
-    };
-  }
-
-  if (fallback?.triggered && fallback.status === 'error') {
-    return {
-      tone: 'warning',
-      eyebrow: 'Search issue',
-      title: `Google fallback could not finish for ${categoryLabelLower}`,
-      message:
-        fallback.diagnostic ||
-        'The workspace could not complete the outside-provider search right now, so only marketplace coverage is shown.',
-      highlights: [
-        totalMatches > 0
-          ? `${totalMatches} Workside provider record${totalMatches === 1 ? '' : 's'} matched overall`
-          : 'No matching Workside provider records in coverage yet',
-        'You can still open the live map search below',
-      ],
-      nextStep: 'Try the fallback search again or continue with the live map search while we improve marketplace coverage.',
-    };
-  }
-
-  if (fallbackEnabled) {
-    return {
-      tone: 'coverage',
-      eyebrow: 'Marketplace gap',
-      title: `No live Workside ${categoryLabelLower} for this property`,
-      message: `This task does not yet have active marketplace coverage at the property location, but you can broaden the search with Google fallback or the live map search below.`,
-      highlights: [
-        totalMatches > 0
-          ? `${totalMatches} Workside provider record${totalMatches === 1 ? '' : 's'} matched, but none are live here`
-          : 'No matching Workside provider records in this coverage area yet',
-        'Google fallback is available on demand',
-      ],
-      nextStep: 'Use the fallback actions below to keep the checklist moving while Workside coverage fills in.',
-    };
-  }
-
-  return {
-    tone: 'coverage',
-    eyebrow: 'Marketplace gap',
-    title: `No live ${categoryLabelLower} are available here yet`,
-    message: `This property does not currently have marketplace coverage for this task, and Google fallback is not configured for this session.`,
-    highlights: [
-      totalMatches > 0
-        ? `${totalMatches} Workside provider record${totalMatches === 1 ? '' : 's'} matched, but none are live here`
-        : 'No matching Workside provider records in this coverage area yet',
-    ],
-    nextStep: 'You can keep moving with the rest of the checklist now, then revisit this step when provider coverage expands.',
-  };
-}
-
-function buildProviderSourceSummary(providerSource) {
-  if (!providerSource) {
-    return '';
-  }
-
-  const totalMatches = Number(providerSource.totalCategoryProviders || 0);
-  const liveMatches = Number(providerSource.internalProviders || 0);
-  const unavailableMatches = Number(providerSource.unavailableProviders || 0);
-  const externalMatches = Number(providerSource.externalProviders || 0);
-  const parts = [];
-
-  if (totalMatches > 0) {
-    parts.push(
-      `${totalMatches} matching Workside provider record(s): ${liveMatches} live${unavailableMatches ? ` · ${unavailableMatches} still in setup` : ''}`,
-    );
-  } else {
-    parts.push('No Workside provider records match this category and coverage yet');
-  }
-
-  if (externalMatches > 0) {
-    parts.push(`${externalMatches} external Google fallback result(s) loaded separately`);
-  } else if (providerSource.googleFallbackEnabled) {
-    parts.push('Google fallback available if you want broader local search');
-  } else {
-    parts.push('Google fallback unavailable for this browser session');
-  }
-
-  return parts.join(' · ');
-}
-
-function buildGoogleFallbackSummary(providerSource) {
-  const fallback = providerSource?.googleFallback || null;
-  if (!fallback?.enabled) {
-    return 'Google fallback is not configured yet, so this workspace can only show Workside marketplace coverage.';
-  }
-
-  if (!fallback.triggered) {
-    return 'Google fallback is available if you want to broaden the search beyond Workside providers.';
-  }
-
-  if (fallback.status === 'results') {
-    return `Google fallback found ${fallback.resultCount || 0} result(s) using ${fallback.searchMode === 'places_legacy_textsearch' ? 'legacy text search' : 'Places search'}${fallback.queryUsed ? ` for "${fallback.queryUsed}"` : ''}.`;
-  }
-
-  if (fallback.status === 'no_results') {
-    return `Google fallback did not return structured results${fallback.locationLabel ? ` near ${fallback.locationLabel}` : ''}${fallback.queryUsed ? ` for "${fallback.queryUsed}"` : ''}.`;
-  }
-
-  if (fallback.status === 'error') {
-    return fallback.diagnostic || 'Google fallback search could not be completed at this time.';
-  }
-
-  return providerSource?.googleFallbackDiagnostic || 'Google fallback is available on demand.';
-}
-
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error(`Could not read ${file?.name || 'file'}.`));
-    reader.readAsDataURL(file);
-  });
-}
 
 export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const router = useRouter();
@@ -3382,7 +2279,31 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         callToAction: flyerCallToActionDraft,
         selectedPhotoAssetIds: flyerSelectedPhotoIds,
       });
-      setLatestFlyer(response.flyer);
+
+      if (response.flyer) {
+        setLatestFlyer(response.flyer);
+        await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
+        setToast({ tone: 'success', title: 'Flyer generated', message: 'The flyer is ready. You can review it here or download the PDF now.' });
+        openGenerationPrompt('flyer');
+        return;
+      }
+
+      if (!response.job?.id) {
+        throw new Error('Flyer generation did not return a result or a background job.');
+      }
+
+      setStatus('Generating flyer in the background...');
+      const settledJob = await pollAsyncDocumentJobUntilSettled(response.job.id);
+      if (settledJob.status !== 'completed') {
+        throw new Error(
+          settledJob.warning ||
+            settledJob.message ||
+            'The flyer job did not complete successfully.',
+        );
+      }
+
+      const latestFlyerResponse = await getLatestFlyer(propertyId);
+      setLatestFlyer(latestFlyerResponse.flyer || settledJob.result?.flyer || null);
       await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
       setToast({ tone: 'success', title: 'Flyer generated', message: 'The flyer is ready. You can review it here or download the PDF now.' });
       openGenerationPrompt('flyer');
@@ -3425,7 +2346,31 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         selectedPhotoAssetIds: reportSelectedPhotoIds,
         includedSections: reportIncludedSections,
       });
-      setLatestReport(response.report);
+
+      if (response.report) {
+        setLatestReport(response.report);
+        await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
+        setToast({ tone: 'success', title: 'Report generated', message: 'The seller intelligence report is ready. You can review it here or download the PDF now.' });
+        openGenerationPrompt('report');
+        return;
+      }
+
+      if (!response.job?.id) {
+        throw new Error('Report generation did not return a result or a background job.');
+      }
+
+      setStatus('Generating seller intelligence report in the background...');
+      const settledJob = await pollAsyncDocumentJobUntilSettled(response.job.id);
+      if (settledJob.status !== 'completed') {
+        throw new Error(
+          settledJob.warning ||
+            settledJob.message ||
+            'The report job did not complete successfully.',
+        );
+      }
+
+      const latestReportResponse = await getLatestReport(propertyId);
+      setLatestReport(latestReportResponse.report || settledJob.result?.report || null);
       await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
       setToast({ tone: 'success', title: 'Report generated', message: 'The seller intelligence report is ready. You can review it here or download the PDF now.' });
       openGenerationPrompt('report');
@@ -3737,83 +2682,6 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     };
   }
 
-  function renderPhotoLibrarySection(group) {
-    const isSelectedCategory = selectedMediaAssetPhotoCategory?.key === group.key;
-    const defaultOpen = isSelectedCategory || group.key === firstPopulatedPhotoCategoryKey;
-    const sellerPickCount = group.assets.filter((asset) => asset.listingCandidate).length;
-    const photoCountLabel = `${group.assets.length} photo${group.assets.length === 1 ? '' : 's'}`;
-    const sellerPickLabel = `${sellerPickCount} seller pick${sellerPickCount === 1 ? '' : 's'}`;
-
-    return renderCollapsibleSection({
-      sectionKey: `photos_room_${group.key}`,
-      label: 'Photo category',
-      title: group.label,
-      meta: `${photoCountLabel} · ${sellerPickLabel}`,
-      defaultOpen,
-      className: 'content-card workspace-collapsible-section photo-library-section',
-      children: group.assets.length ? (
-        <div className="photo-room-grid">
-          {group.assets.map((asset) => (
-            <article
-              key={asset.id}
-              className={asset.id === selectedMediaAsset?.id ? 'photo-library-card active' : 'photo-library-card'}
-            >
-              <button
-                type="button"
-                className="photo-library-card-preview"
-                onClick={() => {
-                  setSelectedMediaAssetId(asset.id);
-                  setActivePhotoDetailsAsset(asset);
-                }}
-              >
-                <img src={asset.imageUrl} alt={asset.roomLabel || 'Property photo'} />
-              </button>
-              <div className="photo-library-card-body">
-                <div className="photo-card-badge-row">
-                  <span className="photo-card-status-pill">{getMediaAssetPrimaryLabel(asset)}</span>
-                  {asset.savedFromVision ? <span className="photo-card-status-pill">Saved from Vision</span> : null}
-                  <button
-                    type="button"
-                    className={asset.listingCandidate ? 'photo-card-action-pill active' : 'photo-card-action-pill'}
-                    onClick={() => handleToggleListingCandidateForAsset(asset)}
-                    disabled={Boolean(status) || isArchivedProperty}
-                  >
-                    {asset.listingCandidate ? 'Seller Pick' : 'Add Seller Pick'}
-                  </button>
-                </div>
-                <strong>{asset.roomLabel}</strong>
-                <p className="photo-card-summary">{getMediaAssetSummary(asset)}</p>
-                <div className="photo-library-card-actions">
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={() => handleOpenPhotoVariations(asset)}
-                  >
-                    Variations
-                  </button>
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={() => {
-                      setSelectedMediaAssetId(asset.id);
-                      setActivePhotoDetailsAsset(asset);
-                    }}
-                  >
-                    Details
-                  </button>
-                </div>
-              </div>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <p className="workspace-control-note photo-library-empty-state">
-          No photos have been added to {group.label.toLowerCase()} yet.
-        </p>
-      ),
-    });
-  }
-
   function toggleFlyerPhotoSelection(assetId) {
     setFlyerSelectedPhotoIds((current) => {
       if (current.includes(assetId)) {
@@ -3990,6 +2858,29 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         sourceVariantId: workflowSourceVariantId || undefined,
         workflowStageKey: stageKey,
       });
+
+      if (
+        response.job &&
+        response.job.status !== 'completed' &&
+        response.job.status !== 'failed' &&
+        response.job.status !== 'cancelled'
+      ) {
+        beginVisionRecovery({
+          job: response.job,
+          assetId: selectedMediaAsset.id,
+          mode: 'preset',
+          presetKey,
+          workflowStageKey: stageKey,
+          startedAt: generationStartedAt,
+          successTitle: 'Vision job completed',
+          successMessage:
+            'The new image is now shown in the Vision compare area and the Generated options panel.',
+          failureTitle: 'Variant generation failed',
+        });
+        keepVisionGenerationState = true;
+        return;
+      }
+
       await Promise.all([refreshMediaAssets(selectedMediaAsset.id), refreshMediaVariants(selectedMediaAsset.id), refreshWorkflow()]);
       const completionToast = buildVisionCompletionToast({
         job: response.job,
@@ -4186,6 +3077,33 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         sourceVariantId: workflowSourceVariantId || undefined,
         workflowStageKey: 'finish',
       });
+
+      if (
+        response.job &&
+        response.job.status !== 'completed' &&
+        response.job.status !== 'failed' &&
+        response.job.status !== 'cancelled'
+      ) {
+        beginVisionRecovery({
+          job: response.job,
+          assetId: selectedMediaAsset.id,
+          mode: 'freeform',
+          presetKey:
+            response.job?.requestedPresetKey ||
+            response.job?.input?.requestedPresetKey ||
+            response.job?.presetKey ||
+            'combined_listing_refresh',
+          workflowStageKey: 'finish',
+          startedAt: generationStartedAt,
+          successTitle: 'Custom enhancement ready',
+          successMessage:
+            'The new image is now shown in the Vision compare area and the Generated options panel.',
+          failureTitle: 'Custom enhancement failed',
+        });
+        keepVisionGenerationState = true;
+        return;
+      }
+
       await Promise.all([
         refreshMediaAssets(selectedMediaAsset.id),
         refreshMediaVariants(selectedMediaAsset.id),
@@ -4980,430 +3898,78 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   );
 
   const renderOverviewTab = () => (
-    <div className="workspace-tab-stack">
-      <div className="content-card workspace-hero-card">
-        <span className="label">Overview</span>
-        <h2>Snapshot for this property</h2>
-        <p>{latestReport?.executiveSummary || latestPricing?.summary || dashboard?.pricingSummary || 'Use the workspace tabs to move from pricing to photos, brochure, report, and checklist work.'}</p>
-        <div className="mini-stats">
-          <div className="stat-card">
-            <strong>Price band</strong>
-            <span>{latestPricing ? `${formatCurrency(latestPricing.recommendedListLow)} to ${formatCurrency(latestPricing.recommendedListHigh)}` : 'Run pricing analysis'}</span>
-          </div>
-          <div className="stat-card">
-            <strong>Chosen list price</strong>
-            <span>{property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set yet'}</span>
-          </div>
-          <div className="stat-card">
-            <strong>Confidence</strong>
-            <span>{latestPricing?.confidenceScore ? `${Math.round(latestPricing.confidenceScore * 100)}%` : 'Pending'}</span>
-          </div>
-          <div className="stat-card">
-            <strong>Readiness</strong>
-            <span>{readinessScore}/100</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="content-card">
-        <span className="label">AI summary</span>
-        <h2>What the workspace is signaling</h2>
-        <p>{latestReport?.payload?.marketingGuidance?.shortDescription || latestPricing?.pricingStrategy || 'The strongest next step is to turn pricing and photo selection into brochure and report output.'}</p>
-        <ul className="plain-list">
-          <li>{listingCandidateAssets.length} seller-selected photo pick(s)</li>
-          <li>{mediaAssets.filter((asset) => asset.selectedVariant).length} preferred vision variant(s)</li>
-          <li>{checklist?.summary?.completedCount ?? 0} checklist task(s) complete</li>
-        </ul>
-      </div>
-
-      <div className="content-card">
-        <span className="label">Recent outputs</span>
-        <h2>Latest deliverables</h2>
-        {recentOutputs.length ? (
-          <div className="workspace-output-list">
-            {recentOutputs.map((output) => (
-              <button key={output.key} type="button" className="workspace-output-card" onClick={() => setActiveTab(output.tab)}>
-                <span className="label">{output.label}</span>
-                <strong>{output.title}</strong>
-                <span>{output.detail}</span>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <p>No brochure or report output has been generated yet.</p>
-        )}
-      </div>
-    </div>
+    <WorkspaceOverviewTab
+      property={property}
+      latestReport={latestReport}
+      latestPricing={latestPricing}
+      dashboard={dashboard}
+      readinessScore={readinessScore}
+      listingCandidateAssets={listingCandidateAssets}
+      mediaAssets={mediaAssets}
+      checklist={checklist}
+      recentOutputs={recentOutputs}
+      setActiveTab={setActiveTab}
+    />
   );
 
   const renderPricingTab = () => (
-    <div className="workspace-tab-stack">
-      <div className="workspace-two-column workspace-pricing-grid">
-        <div className="content-card property-map-card">
-          <div className="property-map-header">
-            <div>
-              <span className="label">Pricing map</span>
-              <h2>Neighborhood context</h2>
-              <p>Review the home and nearby comps side by side instead of in a long stack.</p>
-            </div>
-            {addressQuery ? (
-              <div className="property-map-actions">
-                <button
-                  type="button"
-                  className="button-secondary inline-button button-no-wrap property-map-link"
-                  onClick={() => setShowExpandedMap(true)}
-                  title="Open a larger in-app map with the property and selected comps."
-                >
-                  Expand map
-                </button>
-                {googleMapsUrl ? (
-                  <a
-                    href={googleMapsUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="button-secondary inline-button button-no-wrap property-map-link"
-                    title="Open the subject property and selected comps in Google Maps."
-                  >
-                    View comps in Maps
-                  </a>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-          {addressQuery ? (
-            <PropertyLocationMap property={property} comps={selectedComps} mapsApiKey={mapsApiKey} googleMapsUrl={googleMapsUrl} />
-          ) : (
-            <p>No map available until the property address is complete.</p>
-          )}
-        </div>
-
-        <div className="content-card workspace-side-panel">
-          <div className="section-header-tight">
-            <div>
-              <span className="label">Selected comps</span>
-              <h2>Nearby sales</h2>
-            </div>
-            <span className="section-header-meta">{selectedComps.length} comps shown</span>
-          </div>
-          <div className="comp-grid comp-grid-scroll workspace-scroll-panel">
-            {selectedComps.length ? (
-              selectedComps.map((comp) => (
-                <article key={comp.externalId || comp._id || comp.address} className="comp-card">
-                  <strong>{comp.address}</strong>
-                  <span>{formatCurrency(comp.price)}</span>
-                  <span>{(comp.distanceMiles || 0).toFixed(2)} mi away</span>
-                  <span>{comp.beds || '--'} bd · {comp.baths || '--'} ba · {comp.sqft || '--'} sqft</span>
-                  {comp.saleDate ? <span>Sold/listed: {new Date(comp.saleDate).toLocaleDateString()}</span> : null}
-                  {typeof comp.score === 'number' ? <span>Comp score: {Math.round(comp.score * 100)}</span> : null}
-                </article>
-              ))
-            ) : (
-              <p>No comps are stored yet. Refresh pricing to build the comp set.</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="content-card">
-        <span className="label">Selected list price</span>
-        <h2>Choose the price you want to market</h2>
-        <p>
-          The pricing analysis gives you a suggested range. This is where you confirm the actual list
-          price that should carry into future brochure and report generation.
-        </p>
-        <div className="pricing-summary-grid">
-          <div className="stat-card pricing-summary-stat">
-            <strong>Suggested range</strong>
-            <span>
-              {latestPricing
-                ? `${formatCurrency(latestPricing.recommendedListLow)} to ${formatCurrency(
-                    latestPricing.recommendedListHigh,
-                  )}`
-                : 'Run pricing first'}
-            </span>
-          </div>
-          <div className="stat-card pricing-summary-stat">
-            <strong>Recommended midpoint</strong>
-            <span>
-              {latestPricing?.recommendedListMid
-                ? formatCurrency(latestPricing.recommendedListMid)
-                : 'Not available yet'}
-            </span>
-          </div>
-          <div className="stat-card pricing-summary-stat">
-            <strong>Chosen list price</strong>
-            <span>
-              {property?.selectedListPrice
-                ? formatCurrency(property.selectedListPrice)
-                : 'Not set yet'}
-            </span>
-          </div>
-        </div>
-        <div className="workspace-inner-card pricing-decision-card">
-          <div className="pricing-decision-layout">
-            <div className="pricing-decision-copy">
-              <span className="label">Quick picks</span>
-              <h3>Choose a starting point</h3>
-              <p>Pick one of the recommendations or enter your own custom price.</p>
-              <div className="pricing-decision-chip-row">
-                {pricingQuickPickOptions.map((option) => (
-                  <button
-                    key={option.key}
-                    type="button"
-                    className={
-                      selectedListPriceSourceDraft === option.key
-                        ? 'checklist-action-chip active'
-                        : 'checklist-action-chip'
-                    }
-                    onClick={() => {
-                      setSelectedListPriceDraft(String(option.value));
-                      setSelectedListPriceSourceDraft(option.key);
-                    }}
-                  >
-                    {option.label}: {formatCurrency(option.value)}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className={
-                    selectedListPriceSourceDraft === 'custom'
-                      ? 'checklist-action-chip active'
-                      : 'checklist-action-chip'
-                  }
-                  onClick={() => setSelectedListPriceSourceDraft('custom')}
-                >
-                  Custom
-                </button>
-              </div>
-            </div>
-            <div className="pricing-decision-form">
-              <label className="workspace-control-field workspace-control-field-full">
-                <span>Chosen list price</span>
-                <input
-                  type="number"
-                  min="1"
-                  step="1000"
-                  value={selectedListPriceDraft}
-                  onChange={(event) => {
-                    setSelectedListPriceDraft(event.target.value);
-                    setSelectedListPriceSourceDraft('custom');
-                  }}
-                  placeholder="389000"
-                />
-              </label>
-              <button
-                type="button"
-                className="button-primary pricing-save-button"
-                onClick={handleSaveSelectedListPrice}
-                disabled={Boolean(status) || !selectedListPriceDraft || isArchivedProperty}
-              >
-                Save chosen price
-              </button>
-              <p className="workspace-control-note">
-                This does not change the suggested range. It stores the price you intend to use in future materials.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="content-card">
-        <span className="label">Pricing narrative</span>
-        <h2>Latest analysis</h2>
-        <p>{latestPricing?.summary || dashboard?.pricingSummary || 'No stored narrative yet.'}</p>
-        {latestPricing?.pricingStrategy ? <p><strong>Strategy:</strong> {latestPricing.pricingStrategy}</p> : null}
-      </div>
-    </div>
+    <WorkspacePricingTab
+      addressQuery={addressQuery}
+      setShowExpandedMap={setShowExpandedMap}
+      googleMapsUrl={googleMapsUrl}
+      property={property}
+      selectedComps={selectedComps}
+      mapsApiKey={mapsApiKey}
+      latestPricing={latestPricing}
+      dashboard={dashboard}
+      pricingQuickPickOptions={pricingQuickPickOptions}
+      selectedListPriceSourceDraft={selectedListPriceSourceDraft}
+      setSelectedListPriceDraft={setSelectedListPriceDraft}
+      setSelectedListPriceSourceDraft={setSelectedListPriceSourceDraft}
+      selectedListPriceDraft={selectedListPriceDraft}
+      handleSaveSelectedListPrice={handleSaveSelectedListPrice}
+      status={status}
+      isArchivedProperty={isArchivedProperty}
+    />
   );
 
   const renderPhotosTab = () => (
-    <div className="workspace-tab-stack">
-        {renderCollapsibleSection({
-          sectionKey: 'photos_import',
-          label: 'Photos',
-          title: 'Import photos',
-          meta: `${mediaAssets.length} saved`,
-          defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.photos_import,
-          className: 'content-card workspace-collapsible-section photo-import-section',
-          children: (
-            <div
-              className="workspace-inner-card brochure-control-card photo-import-card-compact"
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                handleImportPhotoFiles(event.dataTransfer?.files);
-              }}
-            >
-              <div className="brochure-control-grid brochure-control-grid-form">
-                <label className="workspace-control-field">
-                  <span>Import source</span>
-                  <select
-                    className="select-input"
-                    value={photoImportSource}
-                    onChange={(event) => setPhotoImportSource(event.target.value)}
-                  >
-                    {PHOTO_IMPORT_SOURCE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="workspace-control-field">
-                  <span>Room label</span>
-                  <input
-                    type="text"
-                    value={photoImportRoomLabel}
-                    onChange={(event) => setPhotoImportRoomLabel(event.target.value)}
-                    placeholder="Kitchen"
-                  />
-                </label>
-                <label className="workspace-control-field workspace-control-field-full">
-                  <span>Notes</span>
-                  <textarea
-                    value={photoImportNotes}
-                    onChange={(event) => setPhotoImportNotes(event.target.value)}
-                    placeholder="Add optional context for imported third-party or web-uploaded photos."
-                    maxLength={500}
-                  />
-                </label>
-              </div>
-              <label className="button-secondary inline-button" style={{ display: 'inline-flex', cursor: 'pointer' }}>
-                Upload or drop photos
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  style={{ display: 'none' }}
-                  onChange={(event) => handleImportPhotoFiles(event.target.files)}
-                />
-              </label>
-              <p className="workspace-control-note">
-                Drag-and-drop works here too. Import first, then choose one room photo and continue into Vision.
-              </p>
-            </div>
-          ),
-        })}
-
-        <section className="photo-library-workspace-card">
-          {photoCategoryGroups.map((group) => renderPhotoLibrarySection(group))}
-        </section>
-    </div>
+    <WorkspacePhotosTab
+      renderCollapsibleSection={renderCollapsibleSection}
+      defaultSectionState={DEFAULT_WORKSPACE_SECTION_STATE}
+      mediaAssets={mediaAssets}
+      handleImportPhotoFiles={handleImportPhotoFiles}
+      photoImportSource={photoImportSource}
+      setPhotoImportSource={setPhotoImportSource}
+      photoImportRoomLabel={photoImportRoomLabel}
+      setPhotoImportRoomLabel={setPhotoImportRoomLabel}
+      photoImportNotes={photoImportNotes}
+      setPhotoImportNotes={setPhotoImportNotes}
+      photoImportSourceOptions={PHOTO_IMPORT_SOURCE_OPTIONS}
+      photoCategoryGroups={photoCategoryGroups}
+      selectedMediaAssetPhotoCategory={selectedMediaAssetPhotoCategory}
+      firstPopulatedPhotoCategoryKey={firstPopulatedPhotoCategoryKey}
+      selectedMediaAsset={selectedMediaAsset}
+      setSelectedMediaAssetId={setSelectedMediaAssetId}
+      setActivePhotoDetailsAsset={setActivePhotoDetailsAsset}
+      handleToggleListingCandidateForAsset={handleToggleListingCandidateForAsset}
+      status={status}
+      isArchivedProperty={isArchivedProperty}
+      handleOpenPhotoVariations={handleOpenPhotoVariations}
+    />
   );
 
   const renderSellerPicksTab = () => (
-    <div className="workspace-tab-stack">
-      {renderCollapsibleSection({
-        sectionKey: 'seller_picks_summary',
-        label: 'Seller picks',
-        title: 'Current listing candidates',
-        meta: `${listingCandidateAssets.length} selected`,
-        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.seller_picks_summary,
-        className: 'content-card workspace-collapsible-section',
-        children: listingCandidateAssets.length ? (
-          <div className="workspace-tab-stack">
-            <p className="workspace-control-note">
-              These are the photos currently prioritized for the flyer, report, and listing flow.
-              Open details for a closer review or continue editing one in the Vision workspace.
-            </p>
-            <div className="mini-stats">
-              <div className="stat-card">
-                <strong>Seller picks</strong>
-                <span>{listingCandidateAssets.length} chosen</span>
-              </div>
-              <div className="stat-card">
-                <strong>Originals</strong>
-                <span>
-                  {listingCandidateAssets.filter((asset) => asset.assetType !== 'generated').length}
-                </span>
-              </div>
-              <div className="stat-card">
-                <strong>Saved from Vision</strong>
-                <span>
-                  {listingCandidateAssets.filter((asset) => asset.savedFromVision).length}
-                </span>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="workspace-tab-stack">
-            <p>No seller picks have been chosen yet.</p>
-            <button
-              type="button"
-              className="button-primary"
-              onClick={() => setActiveTab('photos')}
-            >
-              Go to Photos
-            </button>
-          </div>
-        ),
-      })}
-
-      {sellerPickCategoryGroups.map((group) =>
-        renderCollapsibleSection({
-          sectionKey: `seller_picks_room_${group.key}`,
-          label: 'Seller picks',
-          title: group.label,
-          meta: `${group.assets.length} photo${group.assets.length === 1 ? '' : 's'}`,
-          defaultOpen: true,
-          className: 'content-card workspace-collapsible-section photo-library-section',
-          children: (
-            <div className="photo-room-grid">
-              {group.assets.map((asset) => (
-                <article
-                  key={`seller-pick-${asset.id}`}
-                  className={
-                    asset.id === selectedMediaAsset?.id
-                      ? 'photo-library-card active'
-                      : 'photo-library-card'
-                  }
-                >
-                  <button
-                    type="button"
-                    className="photo-library-card-preview"
-                    onClick={() => {
-                      setSelectedMediaAssetId(asset.id);
-                      setActivePhotoDetailsAsset(asset);
-                    }}
-                  >
-                    <img src={asset.imageUrl} alt={asset.roomLabel || 'Seller pick'} />
-                  </button>
-                  <div className="photo-library-card-body">
-                    <div className="photo-card-badge-row">
-                      <span className="photo-card-status-pill">
-                        {getMediaAssetPrimaryLabel(asset)}
-                      </span>
-                      <span className="photo-card-action-pill active">Seller Pick</span>
-                    </div>
-                    <strong>{asset.roomLabel}</strong>
-                    <p className="photo-card-summary">{getMediaAssetSummary(asset)}</p>
-                    <div className="photo-library-card-actions">
-                      <button
-                        type="button"
-                        className="button-secondary"
-                        onClick={() => {
-                          setSelectedMediaAssetId(asset.id);
-                          setActivePhotoDetailsAsset(asset);
-                        }}
-                      >
-                        Details
-                      </button>
-                      <button
-                        type="button"
-                        className="button-secondary"
-                        onClick={() => handleOpenAssetInVision(asset)}
-                      >
-                        Open in Vision
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              ))}
-            </div>
-          ),
-        }),
-      )}
-    </div>
+    <WorkspaceSellerPicksTab
+      renderCollapsibleSection={renderCollapsibleSection}
+      listingCandidateAssets={listingCandidateAssets}
+      sellerPickCategoryGroups={sellerPickCategoryGroups}
+      selectedMediaAsset={selectedMediaAsset}
+      setSelectedMediaAssetId={setSelectedMediaAssetId}
+      setActivePhotoDetailsAsset={setActivePhotoDetailsAsset}
+      handleOpenAssetInVision={handleOpenAssetInVision}
+      setActiveTab={setActiveTab}
+    />
   );
 
   const renderVisionTab = () => (
@@ -6208,1035 +4774,118 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   );
 
   const renderBrochureTab = () => (
-    <div className="workspace-tab-stack">
-      {renderCollapsibleSection({
-        sectionKey: 'brochure_controls',
-        label: 'Brochure',
-        title: 'Brochure controls',
-        meta: latestFlyer ? 'Draft ready' : 'No draft yet',
-        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.brochure_controls,
-        className: 'content-card flyer-generator-card',
-        children: (
-          <div className="workspace-tab-stack">
-            <p>Generate a brochure-style flyer from live pricing, selected photos, and the strongest seller-ready language.</p>
-            <div className="mode-switch">
-              <button type="button" className={flyerType === 'sale' ? 'mode-chip active' : 'mode-chip'} onClick={() => setFlyerType('sale')}>Sale flyer</button>
-              <button type="button" className={flyerType === 'rental' ? 'mode-chip active' : 'mode-chip'} onClick={() => setFlyerType('rental')}>Rental flyer</button>
-            </div>
-            <div className="mini-stats">
-              <div className="stat-card"><strong>Listing picks</strong><span>{listingCandidateAssets.length} chosen</span></div>
-              <div className="stat-card"><strong>Vision-ready</strong><span>{mediaAssets.filter((asset) => asset.selectedVariant).length} preferred variants</span></div>
-              <div className="stat-card"><strong>Price source</strong><span>{latestPricing ? 'Live pricing attached' : 'Using latest saved pricing'}</span></div>
-            </div>
-            <div className="workspace-inner-card brochure-control-card">
-              <span className="label">Headline + copy plan</span>
-              <div className="brochure-control-grid brochure-control-grid-form">
-                <label className="workspace-control-field">
-                  <span>Headline</span>
-                  <input type="text" value={flyerHeadlineDraft} onChange={(event) => setFlyerHeadlineDraft(event.target.value)} placeholder="Seller-ready headline" maxLength={140} />
-                </label>
-                <label className="workspace-control-field">
-                  <span>Subheadline</span>
-                  <input type="text" value={flyerSubheadlineDraft} onChange={(event) => setFlyerSubheadlineDraft(event.target.value)} placeholder="Short positioning line" maxLength={220} />
-                </label>
-                <label className="workspace-control-field workspace-control-field-full">
-                  <span>Summary</span>
-                  <textarea value={flyerSummaryDraft} onChange={(event) => setFlyerSummaryDraft(event.target.value)} placeholder="How should this brochure frame the property?" maxLength={600} />
-                </label>
-                <label className="workspace-control-field workspace-control-field-full">
-                  <span>Call to action</span>
-                  <input type="text" value={flyerCallToActionDraft} onChange={(event) => setFlyerCallToActionDraft(event.target.value)} placeholder="What should the seller or buyer do next?" maxLength={180} />
-                </label>
-              </div>
-            </div>
-            <div className="workspace-inner-card brochure-control-card">
-              <span className="label">Image selection</span>
-              {brochurePhotoPool.length ? (
-                <div className="brochure-photo-plan">
-                  {brochurePhotoPool.slice(0, 6).map((asset) => (
-                    <button
-                      key={`brochure-photo-${asset.id}`}
-                      type="button"
-                      className={flyerSelectedPhotoIds.includes(asset.id) ? 'brochure-photo-plan-card active' : 'brochure-photo-plan-card'}
-                      onClick={() => toggleFlyerPhotoSelection(asset.id)}
-                    >
-                      <img src={asset.imageUrl} alt={asset.roomLabel || 'Brochure candidate'} />
-                      <div>
-                        <strong>{asset.roomLabel}</strong>
-                        <span>
-                          {asset.listingNote ||
-                            (asset.selectedVariant
-                              ? `${asset.selectedVariant.label || 'Vision-ready'} selected`
-                              : 'Available for brochure use')}
-                        </span>
-                        <em>{flyerSelectedPhotoIds.includes(asset.id) ? 'Included in brochure' : 'Click to include'}</em>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p>No photos are available yet. Add them in mobile, then return here to shape the brochure.</p>
-              )}
-              <p className="workspace-control-note">
-                Up to 4 photos are used. Seller picks stay prioritized, and preferred vision variants still flow through automatically.
-              </p>
-            </div>
-            <div className="button-stack flyer-generator-actions">
-              <button type="button" className={status.includes('Generating') ? 'button-primary button-busy' : 'button-primary'} onClick={handleGenerateFlyer} disabled={Boolean(status) || isArchivedProperty}>
-                {status.includes('Generating') ? 'Generating flyer...' : 'Generate flyer'}
-              </button>
-              <button type="button" className="button-secondary" onClick={handleDownloadFlyerPdf} disabled={Boolean(status)}>Download PDF</button>
-            </div>
-          </div>
-        ),
-      })}
-
-      {renderCollapsibleSection({
-        sectionKey: 'brochure_preview',
-        label: 'Brochure',
-        title: 'Live preview',
-        meta: latestFlyer ? latestFlyer.flyerType : 'No preview',
-        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.brochure_preview,
-        className: 'content-card',
-        children: latestFlyer ? (
-          <div ref={flyerPreviewRef} className="flyer-preview">
-            <div className="flyer-hero">
-              <span className="label">{latestFlyer.flyerType} flyer</span>
-              <h2>{latestFlyer.headline}</h2>
-              <p>{latestFlyer.subheadline}</p>
-              <div className="mini-stats">
-                <div className="stat-card"><strong>Price</strong><span>{latestFlyer.priceText}</span></div>
-                <div className="stat-card"><strong>Location</strong><span>{latestFlyer.locationLine}</span></div>
-              </div>
-            </div>
-            <div className="report-preview-section">
-              <strong>Builder selections</strong>
-              <div className="tag-row">
-                <span>{latestFlyer.customizations?.selectedPhotoAssetIds?.length || latestFlyer.selectedPhotos?.length || 0} selected photos</span>
-                <span>{latestFlyer.customizations?.headline ? 'Custom headline' : 'AI headline'}</span>
-                <span>{latestFlyer.customizations?.summary ? 'Custom summary' : 'AI summary'}</span>
-              </div>
-            </div>
-            {latestFlyer.selectedPhotos?.length ? (
-              <div className="flyer-photo-grid">
-                {latestFlyer.selectedPhotos.slice(0, 4).map((photo) => (
-                  <div key={photo.assetId || photo.imageUrl} className="flyer-photo-card">
-                    {photo.imageUrl ? <img src={photo.imageUrl} alt={photo.roomLabel || 'Property photo'} /> : null}
-                    <span>{photo.roomLabel || 'Selected photo'}</span>
-                    <div className="flyer-photo-badges">
-                      {photo.listingCandidate ? <strong className="flyer-photo-badge">Seller selected</strong> : null}
-                      {photo.usesPreferredVariant ? <strong className="flyer-photo-badge flyer-photo-badge-vision">{getPreferredVariantLabel(photo)}</strong> : null}
-                    </div>
-                    {photo.listingNote ? <em className="flyer-photo-note">{photo.listingNote}</em> : null}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            <p>{latestFlyer.summary}</p>
-            <ul className="plain-list">{(latestFlyer.highlights || []).map((item) => <li key={item}>{item}</li>)}</ul>
-            <p><strong>CTA:</strong> {latestFlyer.callToAction}</p>
-            <div className="brochure-preview-sections">
-              <div className="brochure-preview-card">
-                <span className="label">Headline</span>
-                <strong>{latestFlyer.headline}</strong>
-                <p>{latestFlyer.subheadline}</p>
-              </div>
-              <div className="brochure-preview-card">
-                <span className="label">Highlights</span>
-                <ul className="plain-list">
-                  {(latestFlyer.highlights || []).slice(0, 4).map((item) => <li key={`highlight-${item}`}>{item}</li>)}
-                </ul>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <p>No flyer draft yet. Generate one to preview brochure output.</p>
-        ),
-      })}
-
-      {renderCollapsibleSection({
-        sectionKey: 'brochure_social',
-        label: 'Brochure',
-        title: 'Social ad pack',
-        meta: latestSocialPack ? 'Available' : 'Not generated',
-        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.brochure_social,
-        className: 'content-card',
-        children: (
-          <div className="workspace-tab-stack">
-            <div className="workspace-action-column">
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={handleExportSocialPack}
-                disabled={Boolean(status) || isArchivedProperty}
-              >
-                Export social ad pack
-              </button>
-            </div>
-            {latestSocialPack ? (
-              <div className="workspace-tab-stack">
-                <p className="workspace-control-note">
-                  Select a format chip to inspect the copy, CTA, and guidance for that specific social placement.
-                </p>
-                <div className="tag-row">
-                  {(latestSocialPack.variants || []).map((variant, index) => {
-                    const variantKey = getSocialPackVariantKey(variant, index);
-                    const isActive = variantKey === activeSocialPackVariantKey;
-                    return (
-                      <button
-                        key={variantKey}
-                        type="button"
-                        className={isActive ? 'social-pack-chip active' : 'social-pack-chip'}
-                        onClick={() => setActiveSocialPackVariantKey(variantKey)}
-                      >
-                        {getSocialPackVariantLabel(variant)}
-                      </button>
-                    );
-                  })}
-                </div>
-                {activeSocialPackVariantDetails ? (
-                  <div className="social-pack-detail-card">
-                    <div className="workspace-tab-stack">
-                      <div>
-                        <span className="label">Selected format</span>
-                        <h3>{activeSocialPackVariantDetails.title}</h3>
-                      </div>
-                      <p>{activeSocialPackVariantDetails.summary}</p>
-                      {activeSocialPackVariantDetails.highlights.length ? (
-                        <div className="tag-row">
-                          {activeSocialPackVariantDetails.highlights.map((item) => (
-                            <span key={`social-pack-highlight-${item}`}>{item}</span>
-                          ))}
-                        </div>
-                      ) : null}
-                      <p className="workspace-control-note">
-                        <strong>Guidance:</strong> {activeSocialPackVariantDetails.guidance}
-                      </p>
-                      <div className="social-pack-detail-grid">
-                        {activeSocialPackVariantDetails.sections.map((section) => (
-                          <div key={`${activeSocialPackVariantDetails.title}-${section.label}`} className="social-pack-detail-block">
-                            <strong>{section.label}</strong>
-                            <span>{section.value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-                <p><strong>Headline:</strong> {latestSocialPack.headline}</p>
-                <p><strong>Primary text:</strong> {latestSocialPack.primaryText}</p>
-                <p><strong>Short caption:</strong> {latestSocialPack.shortCaption}</p>
-                <p><strong>CTA:</strong> {latestSocialPack.cta}</p>
-                {(latestSocialPack.disclaimers || []).length ? (
-                  <ul className="plain-list">
-                    {(latestSocialPack.disclaimers || []).map((item) => <li key={`social-disclaimer-${item}`}>{item}</li>)}
-                  </ul>
-                ) : null}
-                <pre className="workspace-control-note" style={{ whiteSpace: 'pre-wrap' }}>{latestSocialPack.markdown}</pre>
-              </div>
-            ) : (
-              <p className="workspace-control-note">Generate a social pack to get square/story guidance plus ad-ready headline, caption, CTA, and markdown copy.</p>
-            )}
-          </div>
-        ),
-      })}
-    </div>
+    <WorkspaceBrochureTab
+      renderCollapsibleSection={renderCollapsibleSection}
+      defaultSectionState={DEFAULT_WORKSPACE_SECTION_STATE}
+      latestFlyer={latestFlyer}
+      flyerType={flyerType}
+      setFlyerType={setFlyerType}
+      listingCandidateAssets={listingCandidateAssets}
+      mediaAssets={mediaAssets}
+      latestPricing={latestPricing}
+      flyerHeadlineDraft={flyerHeadlineDraft}
+      setFlyerHeadlineDraft={setFlyerHeadlineDraft}
+      flyerSubheadlineDraft={flyerSubheadlineDraft}
+      setFlyerSubheadlineDraft={setFlyerSubheadlineDraft}
+      flyerSummaryDraft={flyerSummaryDraft}
+      setFlyerSummaryDraft={setFlyerSummaryDraft}
+      flyerCallToActionDraft={flyerCallToActionDraft}
+      setFlyerCallToActionDraft={setFlyerCallToActionDraft}
+      brochurePhotoPool={brochurePhotoPool}
+      flyerSelectedPhotoIds={flyerSelectedPhotoIds}
+      toggleFlyerPhotoSelection={toggleFlyerPhotoSelection}
+      status={status}
+      isArchivedProperty={isArchivedProperty}
+      handleGenerateFlyer={handleGenerateFlyer}
+      handleDownloadFlyerPdf={handleDownloadFlyerPdf}
+      flyerPreviewRef={flyerPreviewRef}
+      handleExportSocialPack={handleExportSocialPack}
+      latestSocialPack={latestSocialPack}
+      activeSocialPackVariantKey={activeSocialPackVariantKey}
+      setActiveSocialPackVariantKey={setActiveSocialPackVariantKey}
+      activeSocialPackVariantDetails={activeSocialPackVariantDetails}
+    />
   );
 
   const renderReportTab = () => (
-    <div className="workspace-tab-stack">
-      {renderCollapsibleSection({
-        sectionKey: 'report_builder',
-        label: 'Report',
-        title: 'Report builder',
-        meta: latestReport ? 'Draft ready' : 'No report yet',
-        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.report_builder,
-        className: 'content-card report-generator-card',
-        children: (
-          <div className="workspace-tab-stack">
-            <p>Make the report feel premium by combining pricing, comps, photos, checklist progress, and marketing guidance into one place.</p>
-            <div className="workspace-action-column">
-              <button type="button" className={status.includes('report') ? 'button-primary button-busy' : 'button-primary'} onClick={handleGenerateReport} disabled={Boolean(status) || isArchivedProperty}>
-                {status.includes('report') ? 'Generating report...' : 'Generate report'}
-              </button>
-              <button type="button" className="button-secondary" onClick={handleDownloadReportPdf} disabled={Boolean(status)}>Download report PDF</button>
-            </div>
-            <div className="mini-stats">
-              <div className="stat-card"><strong>Status</strong><span>{latestReport ? (latestReport.freshness?.isStale ? 'Refresh recommended' : 'Current report ready') : 'No report generated yet'}</span></div>
-              <div className="stat-card"><strong>Photos</strong><span>{latestReport?.selectedPhotos?.length ? `${latestReport.selectedPhotos.length} in latest report` : `${listingCandidateAssets.length || mediaAssets.length} available`}</span></div>
-              <div className="stat-card"><strong>Checklist</strong><span>{checklist?.summary?.completedCount ?? 0} complete</span></div>
-              <div className="stat-card"><strong>Comps</strong><span>{selectedComps.length} included</span></div>
-            </div>
-            <div className="workspace-inner-card report-outline-card">
-              <span className="label">Title + summary</span>
-              <div className="brochure-control-grid brochure-control-grid-form">
-                <label className="workspace-control-field workspace-control-field-full">
-                  <span>Report title</span>
-                  <input type="text" value={reportTitleDraft} onChange={(event) => setReportTitleDraft(event.target.value)} placeholder="Seller-facing report title" maxLength={180} />
-                </label>
-                <label className="workspace-control-field workspace-control-field-full">
-                  <span>Executive summary</span>
-                  <textarea value={reportExecutiveSummaryDraft} onChange={(event) => setReportExecutiveSummaryDraft(event.target.value)} placeholder="Lead with the main pricing, readiness, and launch story." maxLength={1200} />
-                </label>
-                <label className="workspace-control-field workspace-control-field-full">
-                  <span>Draft listing description</span>
-                  <textarea value={reportListingDescriptionDraft} onChange={(event) => setReportListingDescriptionDraft(event.target.value)} placeholder="Optional seller-facing listing-description draft." maxLength={1200} />
-                </label>
-              </div>
-            </div>
-            <div className="workspace-inner-card report-outline-card">
-              <span className="label">Section toggles</span>
-              <div className="report-outline-grid">
-                {REPORT_SECTION_OPTIONS.map((section) => (
-                  <button
-                    key={`outline-${section.id}`}
-                    type="button"
-                    className={reportIncludedSections.includes(section.id) ? 'report-outline-item active' : 'report-outline-item'}
-                    onClick={() => toggleReportSection(section.id)}
-                  >
-                    <strong>{section.label}</strong>
-                    <span>
-                      {reportIncludedSections.includes(section.id)
-                        ? 'Included in the generated report'
-                        : 'Click to include this section'}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="workspace-inner-card brochure-control-card">
-              <span className="label">Photo set</span>
-              {reportPhotoPool.length ? (
-                <div className="brochure-photo-plan">
-                  {reportPhotoPool.slice(0, 6).map((asset) => (
-                    <button
-                      key={`report-photo-${asset.id}`}
-                      type="button"
-                      className={reportSelectedPhotoIds.includes(asset.id) ? 'brochure-photo-plan-card active' : 'brochure-photo-plan-card'}
-                      onClick={() => toggleReportPhotoSelection(asset.id)}
-                    >
-                      <img src={asset.imageUrl} alt={asset.roomLabel || 'Report candidate'} />
-                      <div>
-                        <strong>{asset.roomLabel}</strong>
-                        <span>
-                          {asset.listingNote ||
-                            (asset.selectedVariant
-                              ? `${asset.selectedVariant.label || 'Vision-ready'} selected`
-                              : 'Available for report use')}
-                        </span>
-                        <em>{reportSelectedPhotoIds.includes(asset.id) ? 'Included in report' : 'Click to include'}</em>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p>No photos are available yet for report review.</p>
-              )}
-            </div>
-          </div>
-        ),
-      })}
-
-      {renderCollapsibleSection({
-        sectionKey: 'report_preview',
-        label: 'Report',
-        title: 'Live preview',
-        meta: latestReport ? 'Report ready' : 'No preview',
-        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.report_preview,
-        className: 'content-card',
-        children: latestReport ? (
-          <div ref={reportPreviewRef} className="report-preview">
-            <div className="flyer-hero">
-              <span className="label">{latestReport.reportType}</span>
-              <h2>{latestReport.title}</h2>
-              <p>{latestReport.executiveSummary}</p>
-              <div className="tag-row">
-                <span>{latestReport.freshness?.isStale ? 'Stale report' : 'Current report'}</span>
-                <span>Version {latestReport.reportVersion || 1}</span>
-                <span>{latestReport.payload?.readinessSummary?.label || 'Readiness summary pending'}</span>
-              </div>
-            </div>
-            <div className="report-preview-section">
-              <strong>Builder selections</strong>
-              <div className="tag-row">
-                {(latestReport.payload?.sectionOutline || []).map((item) => <span key={`section-${item}`}>{item}</span>)}
-                <span>{latestReport.selectedPhotos?.length || 0} selected photos</span>
-              </div>
-            </div>
-            <div className="mini-stats">
-              <div className="stat-card"><strong>Price band</strong><span>{latestReport.pricingSummary?.low ? `${formatCurrency(latestReport.pricingSummary.low)} to ${formatCurrency(latestReport.pricingSummary.high)}` : 'Pricing pending'}</span></div>
-              <div className="stat-card"><strong>Chosen list price</strong><span>{latestReport.pricingSummary?.selectedListPrice ? formatCurrency(latestReport.pricingSummary.selectedListPrice) : property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set yet'}</span></div>
-              <div className="stat-card"><strong>Readiness</strong><span>{latestReport.payload?.readinessSummary?.overallScore ? `${latestReport.payload.readinessSummary.overallScore}/100` : 'Not included'}</span></div>
-            </div>
-            {latestReport.freshness?.isStale ? <div className="report-preview-section"><strong>Refresh recommended</strong><ul className="plain-list">{(latestReport.freshness.staleReasons || []).map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
-            {latestReport.payload?.photoSummary ? <div className="report-preview-section"><strong>Photo review summary</strong><p>{latestReport.payload.photoSummary.summary || 'No photo-review summary is available yet.'}</p></div> : null}
-            {latestReport.selectedPhotos?.length ? (
-              <div className="report-preview-section">
-                <strong>Selected photo set</strong>
-                <div className="flyer-photo-grid">
-                  {latestReport.selectedPhotos.slice(0, 4).map((photo) => (
-                    <div key={`report-preview-photo-${photo.assetId || photo.imageUrl}`} className="flyer-photo-card">
-                      {photo.imageUrl ? <img src={photo.imageUrl} alt={photo.roomLabel || 'Report photo'} /> : null}
-                      <span>{photo.roomLabel || 'Selected report photo'}</span>
-                      <div className="flyer-photo-badges">
-                        {photo.listingCandidate ? <strong className="flyer-photo-badge">Seller selected</strong> : null}
-                        {photo.usesPreferredVariant ? <strong className="flyer-photo-badge flyer-photo-badge-vision">{getPreferredVariantLabel(photo)}</strong> : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            {(latestReport.payload?.visionStoryBlocks || []).length ? (
-              <div className="report-preview-section">
-                <strong>Visual improvement previews</strong>
-                <div className="vision-story-grid">
-                  {(latestReport.payload?.visionStoryBlocks || []).slice(0, 3).map((story) => (
-                    <article key={`vision-story-${story.variantId || story.title}`} className="vision-story-card">
-                      <div className="vision-story-images">
-                        {story.originalImageUrl ? (
-                          <div>
-                            <span className="label">Before</span>
-                            <img src={story.originalImageUrl} alt={`${story.title || 'Vision preview'} before`} />
-                          </div>
-                        ) : null}
-                        {story.variantImageUrl ? (
-                          <div>
-                            <span className="label">After</span>
-                            <img src={story.variantImageUrl} alt={story.title || 'Vision preview'} />
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="workspace-tab-stack">
-                        <strong>{story.title}</strong>
-                        <p><strong>What changed:</strong> {story.whatChanged}</p>
-                        <p><strong>Why it matters:</strong> {story.whyItMatters}</p>
-                        <p><strong>Suggested action:</strong> {story.suggestedAction}</p>
-                        <p className="workspace-control-note">{story.disclaimer}</p>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            <div className="report-preview-grid">
-              {(latestReport.marketingHighlights || []).length ? (
-                <div className="report-preview-section">
-                  <strong>Marketing highlights</strong>
-                  <div className="tag-row">
-                    {(latestReport.marketingHighlights || []).slice(0, 6).map((item) => <span key={`marketing-${item}`}>{item}</span>)}
-                  </div>
-                </div>
-              ) : null}
-              {(latestReport.checklistItems || []).length ? (
-                <div className="report-preview-section">
-                  <strong>Top checklist items</strong>
-                  <ul className="plain-list">
-                    {(latestReport.checklistItems || []).slice(0, 4).map((item) => <li key={`task-${item}`}>{item}</li>)}
-                  </ul>
-                </div>
-              ) : null}
-              {(latestReport.improvementItems || []).length ? (
-                <div className="report-preview-section">
-                  <strong>Top improvements</strong>
-                  <ul className="plain-list">
-                    {(latestReport.improvementItems || []).slice(0, 4).map((item) => <li key={`improvement-${item}`}>{item}</li>)}
-                  </ul>
-                </div>
-              ) : null}
-              {latestReport.payload?.listingDescriptions?.shortDescription || latestReport.payload?.marketingGuidance?.shortDescription ? (
-                <div className="report-preview-section">
-                  <strong>Draft listing description</strong>
-                  <p>{latestReport.payload?.listingDescriptions?.shortDescription || latestReport.payload?.marketingGuidance?.shortDescription}</p>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        ) : (
-          <p>No seller report has been generated yet. Create one to preview the premium report flow.</p>
-        ),
-      })}
-    </div>
+    <WorkspaceReportTab
+      renderCollapsibleSection={renderCollapsibleSection}
+      defaultSectionState={DEFAULT_WORKSPACE_SECTION_STATE}
+      latestReport={latestReport}
+      status={status}
+      isArchivedProperty={isArchivedProperty}
+      handleGenerateReport={handleGenerateReport}
+      handleDownloadReportPdf={handleDownloadReportPdf}
+      listingCandidateAssets={listingCandidateAssets}
+      mediaAssets={mediaAssets}
+      checklist={checklist}
+      selectedComps={selectedComps}
+      reportTitleDraft={reportTitleDraft}
+      setReportTitleDraft={setReportTitleDraft}
+      reportExecutiveSummaryDraft={reportExecutiveSummaryDraft}
+      setReportExecutiveSummaryDraft={setReportExecutiveSummaryDraft}
+      reportListingDescriptionDraft={reportListingDescriptionDraft}
+      setReportListingDescriptionDraft={setReportListingDescriptionDraft}
+      reportSectionOptions={REPORT_SECTION_OPTIONS}
+      reportIncludedSections={reportIncludedSections}
+      toggleReportSection={toggleReportSection}
+      reportPhotoPool={reportPhotoPool}
+      reportSelectedPhotoIds={reportSelectedPhotoIds}
+      toggleReportPhotoSelection={toggleReportPhotoSelection}
+      reportPreviewRef={reportPreviewRef}
+      property={property}
+    />
   );
 
   const renderChecklistTab = () => (
-    <div className="workspace-tab-stack">
-      {renderCollapsibleSection({
-        sectionKey: 'checklist_tasks',
-        label: 'Checklist',
-        title: 'Listing-prep phases',
-        meta: `${checklist?.summary?.progressPercent ?? 0}% ready`,
-        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.checklist_tasks,
-        className: 'content-card checklist-card',
-        children: checklistGroups.length ? (
-          <div className="workspace-accordion-list">
-            {checklistGroups.map(([groupName, items]) => {
-              const groupSectionKey = `checklist_group_${groupName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
-              const groupOpen = isWorkspaceSectionOpen(groupSectionKey, true);
-              return (
-                <details
-                  key={groupName}
-                  className="workspace-accordion"
-                  open={groupOpen}
-                  onToggle={(event) => setWorkspaceSectionOpen(groupSectionKey, event.currentTarget.open, true)}
-                >
-                  <summary><span>{groupName}</span><span>{items.length} task(s)</span></summary>
-                  <div className="checklist-list">
-                    {items.map((item) => (
-                      <article key={item.id} className="checklist-item-card">
-                        <div className="checklist-item-meta">
-                          <span className={`checklist-status checklist-status-${item.status}`}>{formatChecklistStatus(item.status)}</span>
-                          <span className={`checklist-chip checklist-chip-${item.priority}`}>{formatChecklistPriority(item.priority)}</span>
-                        </div>
-                        <h3>{item.title}</h3>
-                        <p>{item.detail || 'No additional guidance is attached to this task yet.'}</p>
-                        {item.providerCategoryLabel ? (
-                          <div className="checklist-provider-inline">
-                            <div>
-                              <strong>{item.providerCategoryLabel}</strong>
-                              <span>{item.providerPrompt || 'Local provider recommendations are available for this task.'}</span>
-                            </div>
-                            <button
-                              type="button"
-                              className="button-secondary"
-                              onClick={() => focusProviderSuggestions(item.id)}
-                            >
-                              Show providers
-                            </button>
-                          </div>
-                        ) : null}
-                        <div className="checklist-action-row">
-                          {['todo', 'in_progress', 'done'].map((nextStatus) => (
-                            <button key={`${item.id}-${nextStatus}`} type="button" className={item.status === nextStatus ? 'checklist-action-chip active' : 'checklist-action-chip'} onClick={() => handleSetChecklistItemStatus(item.id, nextStatus)} disabled={Boolean(status) || isArchivedProperty}>{formatChecklistStatus(nextStatus)}</button>
-                          ))}
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </details>
-              );
-            })}
-          </div>
-        ) : (
-          <p>No checklist items yet. The shared seller-prep workflow will appear here.</p>
-        ),
-      })}
-
-      {renderCollapsibleSection({
-        sectionKey: 'checklist_summary',
-        label: 'Checklist',
-        title: 'Progress summary',
-        meta: `${readinessScore}/100 readiness`,
-        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.checklist_summary,
-        className: 'content-card workspace-side-panel',
-        children: (
-          <div className="workspace-tab-stack">
-            <div className="mini-stats">
-              <button
-                type="button"
-                className={checklistSummaryMode === 'completed' ? 'stat-card stat-card-button active' : 'stat-card stat-card-button'}
-                onClick={() => setChecklistSummaryMode('completed')}
-              >
-                <strong>Completed</strong>
-                <span>{checklist?.summary?.completedCount ?? 0}</span>
-              </button>
-              <button
-                type="button"
-                className={checklistSummaryMode === 'open' ? 'stat-card stat-card-button active' : 'stat-card stat-card-button'}
-                onClick={() => setChecklistSummaryMode('open')}
-              >
-                <strong>Open</strong>
-                <span>{checklist?.summary?.openCount ?? 0}</span>
-              </button>
-            </div>
-            <p><strong>Next task:</strong> {checklist?.nextTask?.title || 'No open tasks right now'}</p>
-            <div className="workspace-inner-card checklist-summary-card">
-              <strong>{checklistSummaryMode === 'completed' ? 'Completed items' : 'Open items'}</strong>
-              {(checklistSummaryMode === 'completed' ? completedChecklistItems : openChecklistItems).length ? (
-                <ul className="plain-list checklist-summary-list">
-                  {(checklistSummaryMode === 'completed' ? completedChecklistItems : openChecklistItems)
-                    .slice(0, 6)
-                    .map((item) => (
-                      <li key={`summary-${item.id}`}>
-                        <strong>{item.title}</strong>
-                        <span>{formatChecklistCategory(item.category)}</span>
-                      </li>
-                    ))}
-                </ul>
-              ) : (
-                <p className="workspace-control-note">
-                  {checklistSummaryMode === 'completed'
-                    ? 'Completed tasks will appear here as you finish them.'
-                    : 'Open tasks will appear here until they are completed.'}
-                </p>
-              )}
-            </div>
-          </div>
-        ),
-      })}
-
-      {renderCollapsibleSection({
-        sectionKey: 'checklist_custom',
-        label: 'Checklist',
-        title: 'Add custom task',
-        meta: 'Optional',
-        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.checklist_custom,
-        className: 'content-card checklist-form',
-        children: (
-          <form className="workspace-tab-stack" onSubmit={handleCreateChecklistTask}>
-            <input type="text" value={customChecklistTitle} onChange={(event) => setCustomChecklistTitle(event.target.value)} placeholder="Example: book pre-listing cleaner" maxLength={80} />
-            <input type="text" value={customChecklistDetail} onChange={(event) => setCustomChecklistDetail(event.target.value)} placeholder="Optional context or reminder" maxLength={180} />
-            <button type="submit" className="button-secondary" disabled={Boolean(status) || isArchivedProperty}>Save task</button>
-          </form>
-        ),
-      })}
-
-      {renderCollapsibleSection({
-        sectionKey: 'checklist_providers',
-        label: 'Checklist',
-        title: 'Provider suggestions',
-        meta: providerSuggestionTask?.providerCategoryLabel || 'No linked task',
-        defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.checklist_providers,
-        className: 'content-card workspace-side-panel',
-        children: (
-          <div ref={providerSuggestionsRef} className="workspace-tab-stack">
-            <p>
-              {providerSuggestionTask?.providerPrompt ||
-                'Provider recommendations appear here when a checklist task has a linked marketplace category.'}
-            </p>
-            {providerSearchStatus ? (
-              <p className="workspace-control-note">{providerSearchStatus}</p>
-            ) : null}
-            {providerRecommendations.length ? (
-              <div className="provider-card-list">
-                <div className="section-header-tight">
-                  <div>
-                    <strong>Workside marketplace providers</strong>
-                    <p className="workspace-control-note">
-                      Ranked internal providers matched by category, coverage, and marketplace readiness.
-                    </p>
-                  </div>
-                </div>
-                {providerRecommendations.map((provider) => (
-                <article key={provider.id} className="provider-card">
-                  <div className="provider-card-header">
-                    <div>
-                      <strong>{provider.businessName}</strong>
-                      <span>{provider.coverageLabel || [provider.city, provider.state].filter(Boolean).join(', ')}</span>
-                    </div>
-                    {provider.isSponsored ? <span className="checklist-chip checklist-chip-medium">Sponsored</span> : null}
-                  </div>
-                  <p>{provider.description || 'No provider description has been added yet.'}</p>
-                  <div className="provider-quality-row">
-                    <span>{provider.turnaroundLabel || 'Turnaround not listed'}</span>
-                    <span>{provider.pricingSummary || 'Pricing summary not listed'}</span>
-                    <span>
-                      {provider.verification?.review?.level === 'verified'
-                        ? 'Verified credentials'
-                        : provider.verification?.review?.level === 'details_provided'
-                          ? 'Trust details provided'
-                          : 'Self-reported trust profile'}
-                    </span>
-                    <span>
-                      {provider.compliance?.licenseStatus === 'verified'
-                        ? 'License verified'
-                        : provider.verification?.license?.hasLicense
-                          ? 'License self-reported'
-                        : provider.compliance?.licenseStatus === 'not_required'
-                          ? 'License not required'
-                          : 'License unverified'}
-                    </span>
-                    <span>
-                      {provider.compliance?.insuranceStatus === 'verified'
-                        ? 'Insurance verified'
-                        : provider.verification?.insurance?.hasInsurance
-                          ? 'Insurance self-reported'
-                        : provider.compliance?.insuranceStatus === 'not_required'
-                          ? 'Insurance not required'
-                          : 'Insurance unverified'}
-                    </span>
-                  </div>
-                  <div className="tag-row">
-                    {(provider.rankingBadges || []).map((badge) => (
-                      <span key={`${provider.id}-${badge}`}>{badge}</span>
-                    ))}
-                    {(provider.serviceHighlights || []).map((highlight) => (
-                      <span key={`${provider.id}-${highlight}`}>{highlight}</span>
-                    ))}
-                  </div>
-                  <div className="provider-card-actions">
-                    <button type="button" className="button-secondary" onClick={() => handleSaveProvider(provider.id)} disabled={Boolean(status) || isArchivedProperty || provider.saved}>
-                      {provider.saved ? 'Saved' : 'Save provider'}
-                    </button>
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      onClick={() => handleSaveProviderReference(provider, 'internal')}
-                      disabled={
-                        Boolean(status) ||
-                        isArchivedProperty ||
-                        providerReferenceIds.has(`internal:${provider.id}`) ||
-                        providerReferences.length >= 5
-                      }
-                    >
-                      {providerReferenceIds.has(`internal:${provider.id}`) ? 'On sheet' : 'Add to sheet'}
-                    </button>
-                    <button type="button" className="button-primary" onClick={() => handleRequestProviderLead(provider)} disabled={Boolean(status) || isArchivedProperty}>
-                      Request provider
-                    </button>
-                    <button type="button" className="button-secondary" onClick={() => setActiveProviderDetails({ ...provider, categoryLabel: providerSource?.categoryLabel || provider.categoryKey?.replace(/_/g, ' ') })}>
-                      Details
-                    </button>
-                    {provider.websiteUrl ? (
-                      <a href={provider.websiteUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button">
-                        Visit website
-                      </a>
-                    ) : null}
-                  </div>
-                </article>
-                ))}
-              </div>
-            ) : null}
-            {unavailableProviderRecommendations.length ? (
-              <div className="provider-card-list">
-                <div className="section-header-tight">
-                  <div>
-                    <strong>Matching providers still in setup</strong>
-                    <p className="workspace-control-note">
-                      These providers match the category and coverage, but they are not fully live in the marketplace yet.
-                    </p>
-                  </div>
-                </div>
-                {unavailableProviderRecommendations.map((provider) => (
-                <article key={provider.id} className="provider-card provider-card-unavailable">
-                  <div className="provider-card-header">
-                    <div>
-                      <strong>{provider.businessName}</strong>
-                      <span>{provider.coverageLabel || [provider.city, provider.state].filter(Boolean).join(', ')}</span>
-                    </div>
-                    <span className="checklist-chip checklist-chip-medium">
-                      {formatProviderStatusLabel(provider.status)}
-                    </span>
-                  </div>
-                  <p>{provider.description || 'This provider matches the category, but their marketplace profile is not fully live yet.'}</p>
-                  <div className="provider-quality-row">
-                    <span>{provider.turnaroundLabel || 'Turnaround not listed'}</span>
-                    <span>{provider.pricingSummary || 'Pricing summary not listed'}</span>
-                    <span>
-                      {provider.verification?.review?.level === 'verified'
-                        ? 'Verified credentials'
-                        : provider.verification?.review?.level === 'details_provided'
-                          ? 'Trust details provided'
-                          : 'Self-reported trust profile'}
-                    </span>
-                  </div>
-                  <div className="tag-row">
-                    {(provider.rankingBadges || []).map((badge) => (
-                      <span key={`${provider.id}-${badge}`}>{badge}</span>
-                    ))}
-                  </div>
-                  <div className="provider-card-actions">
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      onClick={() =>
-                        setActiveProviderDetails({
-                          ...provider,
-                          categoryLabel:
-                            providerSource?.categoryLabel || provider.categoryKey?.replace(/_/g, ' '),
-                        })
-                      }
-                    >
-                      Details
-                    </button>
-                    {provider.websiteUrl ? (
-                      <a href={provider.websiteUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button">
-                        Visit website
-                      </a>
-                    ) : null}
-                  </div>
-                </article>
-                ))}
-              </div>
-            ) : null}
-            {providerSource?.googleFallbackEnabled || providerGoogleSearchUrl || providerMapProviders.length ? (
-              <div className="provider-card-actions">
-                {providerMapProviders.length ? (
-                  <button
-                    type="button"
-                    className="button-primary"
-                    onClick={() => {
-                      setProviderMapScope(hasInternalProviderResults ? 'internal' : 'all');
-                      setShowProviderMap(true);
-                    }}
-                    disabled={Boolean(status)}
-                  >
-                    Open provider map
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="button-secondary"
-                  onClick={handleBrowseGoogleFallback}
-                  disabled={Boolean(status) || Boolean(providerSearchStatus)}
-                >
-                  {externalProviderRecommendations.length || showExternalProviderFallback
-                    ? 'Refresh Google fallback'
-                    : 'Browse Google fallback'}
-                </button>
-                {providerGoogleSearchUrl ? (
-                  <a
-                    href={providerGoogleSearchUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="button-secondary inline-button"
-                  >
-                    Open map search
-                  </a>
-                ) : null}
-              </div>
-            ) : null}
-            {providerCoverageGuidance ? (
-              <div className={`workspace-inner-card provider-coverage-card provider-coverage-card-${providerCoverageGuidance.tone}`}>
-                <div className="provider-coverage-card-header">
-                  <span className="label">{providerCoverageGuidance.eyebrow}</span>
-                  <strong>{providerCoverageGuidance.title}</strong>
-                </div>
-                <p>{providerCoverageGuidance.message}</p>
-                {providerCoverageGuidance.highlights?.length ? (
-                  <div className="provider-quality-row provider-coverage-highlights">
-                    {providerCoverageGuidance.highlights.map((highlight) => (
-                      <span key={highlight}>{highlight}</span>
-                    ))}
-                  </div>
-                ) : null}
-                {providerCoverageGuidance.nextStep ? (
-                  <p className="workspace-control-note provider-coverage-next-step">{providerCoverageGuidance.nextStep}</p>
-                ) : null}
-              </div>
-            ) : null}
-            {providerSearchStatus ? <p className="workspace-control-note">{providerSearchStatus}</p> : null}
-            {renderExternalProviderList()}
-            {providerSource ? (
-              <p className="workspace-control-note">
-                {buildProviderSourceSummary(providerSource)}
-              </p>
-            ) : null}
-            {providerSource?.googleFallback && !providerCoverageGuidance ? (
-              <p className="workspace-control-note">
-                {buildGoogleFallbackSummary(providerSource)}
-              </p>
-            ) : null}
-            {hasInternalProviderResults ? (
-              <p className="workspace-control-note provider-disclaimer">
-                {providerRecommendations[0]?.verification?.disclaimer ||
-                  unavailableProviderRecommendations[0]?.verification?.disclaimer ||
-                  'Provider credentials are self-reported or verified where indicated. Workside does not guarantee accuracy.'}
-              </p>
-            ) : null}
-            <div className="workspace-inner-card provider-reference-sheet-card">
-              <div className="section-header-tight">
-                <div>
-                  <strong>Provider reference sheet</strong>
-                  <p className="workspace-control-note">
-                    Save up to 5 internal or Google-discovered contacts here, then export a printable reference sheet.
-                  </p>
-                </div>
-                <span className="section-header-meta">{providerReferences.length}/5 saved</span>
-              </div>
-              {providerReferences.length ? (
-                <div className="provider-reference-list">
-                  {providerReferences.map((reference) => (
-                  <article key={reference.id} className="provider-reference-item">
-                    <div className="provider-reference-copy">
-                      <strong>{reference.businessName}</strong>
-                      <span>
-                        {[reference.categoryLabel || reference.categoryKey, reference.city, reference.state]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </span>
-                      <span>
-                        {reference.phone ||
-                          reference.email ||
-                          formatProviderReferenceAccessLabel(reference)}
-                      </span>
-                      {reference.source === 'google_maps' ? (
-                        <span className="provider-reference-source">Google-discovered reference</span>
-                      ) : null}
-                    </div>
-                    <div className="provider-reference-actions">
-                      {reference.websiteUrl ? (
-                        <a
-                          href={reference.websiteUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="button-secondary inline-button"
-                        >
-                          Visit website
-                        </a>
-                      ) : null}
-                      {reference.mapsUrl ? (
-                        <a
-                          href={reference.mapsUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="button-secondary inline-button"
-                        >
-                          Open in Maps
-                        </a>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="button-secondary"
-                        onClick={() => handleRemoveProviderReference(reference.id)}
-                        disabled={Boolean(status) || isArchivedProperty}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </article>
-                  ))}
-                </div>
-              ) : (
-                <p className="workspace-control-note">
-                  Save providers from the recommendations above to build a printable shortlist for this property.
-                </p>
-              )}
-              <div className="provider-card-actions">
-                <button
-                  type="button"
-                  className="button-primary"
-                  onClick={handleDownloadProviderReferenceSheet}
-                  disabled={!providerReferences.length}
-                >
-                  Download reference sheet
-                </button>
-              </div>
-            </div>
-            {providerLeads.length ? (
-              <div className="provider-lead-list">
-                <strong>Recent lead requests</strong>
-                {providerLeads.slice(0, 3).map((lead) => (
-                <article key={lead.id} className="provider-card provider-lead-card">
-                  <div className="provider-card-header">
-                    <div>
-                      <strong>{String(lead.categoryKey || 'provider').replace(/_/g, ' ')}</strong>
-                      <span>
-                        {formatProviderLeadStatusLabel(lead.status)}
-                        {lead.selectedProviderName ? ` · matched with ${lead.selectedProviderName}` : ''}
-                      </span>
-                    </div>
-                    <span className="checklist-chip">
-                      {lead.dispatchSummary?.contacted || lead.dispatches?.length || 0} contacted
-                    </span>
-                  </div>
-                  <div className="provider-quality-row">
-                    <span>
-                      Latest dispatch: {formatProviderLeadStatusLabel(lead.activity?.latestDispatchStatus || 'queued')}
-                    </span>
-                    <span>
-                      Latest reply: {formatProviderLeadStatusLabel(lead.activity?.latestResponseStatus || 'awaiting response')}
-                    </span>
-                    <span>
-                      Seller notified:{' '}
-                      {lead.sellerNotifiedAt
-                        ? `${formatDateTimeLabel(lead.sellerNotifiedAt)}`
-                        : 'Not yet'}
-                    </span>
-                  </div>
-                  <p className="workspace-control-note">
-                    {lead.selectedProviderName
-                      ? `${lead.selectedProviderName} currently holds this lead.`
-                      : 'Provider outreach is still in progress.'}{' '}
-                    {lead.sellerNotificationChannels?.length
-                      ? `Notification channels: ${lead.sellerNotificationChannels.join(', ')}.`
-                      : ''}
-                  </p>
-                </article>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ),
-      })}
-    </div>
+    <WorkspaceChecklistTab
+      renderCollapsibleSection={renderCollapsibleSection}
+      defaultSectionState={DEFAULT_WORKSPACE_SECTION_STATE}
+      isWorkspaceSectionOpen={isWorkspaceSectionOpen}
+      setWorkspaceSectionOpen={setWorkspaceSectionOpen}
+      checklist={checklist}
+      checklistGroups={checklistGroups}
+      checklistSummaryMode={checklistSummaryMode}
+      setChecklistSummaryMode={setChecklistSummaryMode}
+      completedChecklistItems={completedChecklistItems}
+      openChecklistItems={openChecklistItems}
+      readinessScore={readinessScore}
+      customChecklistTitle={customChecklistTitle}
+      setCustomChecklistTitle={setCustomChecklistTitle}
+      customChecklistDetail={customChecklistDetail}
+      setCustomChecklistDetail={setCustomChecklistDetail}
+      handleCreateChecklistTask={handleCreateChecklistTask}
+      handleSetChecklistItemStatus={handleSetChecklistItemStatus}
+      status={status}
+      isArchivedProperty={isArchivedProperty}
+      focusProviderSuggestions={focusProviderSuggestions}
+      providerSuggestionsRef={providerSuggestionsRef}
+      providerSuggestionTask={providerSuggestionTask}
+      providerSearchStatus={providerSearchStatus}
+      providerRecommendations={providerRecommendations}
+      unavailableProviderRecommendations={unavailableProviderRecommendations}
+      providerSource={providerSource}
+      providerGoogleSearchUrl={providerGoogleSearchUrl}
+      providerMapProviders={providerMapProviders}
+      setProviderMapScope={setProviderMapScope}
+      setShowProviderMap={setShowProviderMap}
+      handleBrowseGoogleFallback={handleBrowseGoogleFallback}
+      externalProviderRecommendations={externalProviderRecommendations}
+      showExternalProviderFallback={showExternalProviderFallback}
+      providerCoverageGuidance={providerCoverageGuidance}
+      shouldShowExternalProviderSection={shouldShowExternalProviderSection}
+      hasInternalProviderResults={hasInternalProviderResults}
+      handleSaveProvider={handleSaveProvider}
+      handleSaveProviderReference={handleSaveProviderReference}
+      handleRequestProviderLead={handleRequestProviderLead}
+      providerReferenceIds={providerReferenceIds}
+      providerReferences={providerReferences}
+      setActiveProviderDetails={setActiveProviderDetails}
+      handleRemoveProviderReference={handleRemoveProviderReference}
+      handleDownloadProviderReferenceSheet={handleDownloadProviderReferenceSheet}
+      providerLeads={providerLeads}
+    />
   );
-
-  function renderExternalProviderList() {
-    if (!shouldShowExternalProviderSection) {
-      return null;
-    }
-
-    return (
-      <div className="provider-card-list">
-        <div className="section-header-tight">
-          <div>
-            <strong>External Google fallback results</strong>
-            <p className="workspace-control-note">
-              Broaden the search outside the Workside marketplace when you need extra local options or backup contacts.
-            </p>
-          </div>
-        </div>
-        {externalProviderRecommendations.map((provider) => (
-          <article key={provider.id} className="provider-card provider-card-external">
-            <div className="provider-card-header">
-              <div>
-                <strong>{provider.businessName}</strong>
-                <span>{provider.description}</span>
-              </div>
-              <span className="checklist-chip checklist-chip-medium">Google result</span>
-            </div>
-            <div className="provider-quality-row">
-              {provider.rating ? (
-                <span>
-                  {provider.rating.toFixed(1)} stars{provider.reviewCount ? ` · ${provider.reviewCount} reviews` : ''}
-                </span>
-              ) : null}
-              {provider.phone ? <span>{provider.phone}</span> : null}
-              <span>External discovery</span>
-            </div>
-            <div className="provider-card-actions">
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={() => handleSaveProviderReference(provider, 'google_maps')}
-                disabled={
-                  Boolean(status) ||
-                  isArchivedProperty ||
-                  providerReferenceIds.has(`google_maps:${provider.id}`) ||
-                  providerReferences.length >= 5
-                }
-              >
-                {providerReferenceIds.has(`google_maps:${provider.id}`) ? 'On sheet' : 'Add to sheet'}
-              </button>
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={() =>
-                  setActiveProviderDetails({
-                    ...provider,
-                    categoryLabel: providerSource?.categoryLabel || provider.categoryKey?.replace(/_/g, ' '),
-                  })
-                }
-              >
-                Details
-              </button>
-              {provider.mapsUrl ? (
-                <a href={provider.mapsUrl} target="_blank" rel="noreferrer" className="button-primary inline-button">
-                  Open in Maps
-                </a>
-              ) : null}
-              {provider.websiteUrl ? (
-                <a href={provider.websiteUrl} target="_blank" rel="noreferrer" className="button-secondary inline-button">
-                  Visit website
-                </a>
-              ) : null}
-            </div>
-          </article>
-        ))}
-      </div>
-    );
-  }
 
   const renderActiveTab = () => {
     if (activeTab === 'pricing') return renderPricingTab();

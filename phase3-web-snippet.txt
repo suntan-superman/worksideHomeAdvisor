@@ -1,0 +1,1180 @@
+
+  const renderPricingTab = () => (
+    <div className="workspace-tab-stack">
+      <div className="workspace-two-column workspace-pricing-grid">
+        <div className="content-card property-map-card">
+          <div className="property-map-header">
+            <div>
+              <span className="label">Pricing map</span>
+              <h2>Neighborhood context</h2>
+              <p>Review the home and nearby comps side by side instead of in a long stack.</p>
+            </div>
+            {addressQuery ? (
+              <div className="property-map-actions">
+                <button
+                  type="button"
+                  className="button-secondary inline-button button-no-wrap property-map-link"
+                  onClick={() => setShowExpandedMap(true)}
+                  title="Open a larger in-app map with the property and selected comps."
+                >
+                  Expand map
+                </button>
+                {googleMapsUrl ? (
+                  <a
+                    href={googleMapsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="button-secondary inline-button button-no-wrap property-map-link"
+                    title="Open the subject property and selected comps in Google Maps."
+                  >
+                    View comps in Maps
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          {addressQuery ? (
+            <PropertyLocationMap property={property} comps={selectedComps} mapsApiKey={mapsApiKey} googleMapsUrl={googleMapsUrl} />
+          ) : (
+            <p>No map available until the property address is complete.</p>
+          )}
+        </div>
+
+        <div className="content-card workspace-side-panel">
+          <div className="section-header-tight">
+            <div>
+              <span className="label">Selected comps</span>
+              <h2>Nearby sales</h2>
+            </div>
+            <span className="section-header-meta">{selectedComps.length} comps shown</span>
+          </div>
+          <div className="comp-grid comp-grid-scroll workspace-scroll-panel">
+            {selectedComps.length ? (
+              selectedComps.map((comp) => (
+                <article key={comp.externalId || comp._id || comp.address} className="comp-card">
+                  <strong>{comp.address}</strong>
+                  <span>{formatCurrency(comp.price)}</span>
+                  <span>{(comp.distanceMiles || 0).toFixed(2)} mi away</span>
+                  <span>{comp.beds || '--'} bd · {comp.baths || '--'} ba · {comp.sqft || '--'} sqft</span>
+                  {comp.saleDate ? <span>Sold/listed: {new Date(comp.saleDate).toLocaleDateString()}</span> : null}
+                  {typeof comp.score === 'number' ? <span>Comp score: {Math.round(comp.score * 100)}</span> : null}
+                </article>
+              ))
+            ) : (
+              <p>No comps are stored yet. Refresh pricing to build the comp set.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="content-card">
+        <span className="label">Selected list price</span>
+        <h2>Choose the price you want to market</h2>
+        <p>
+          The pricing analysis gives you a suggested range. This is where you confirm the actual list
+          price that should carry into future brochure and report generation.
+        </p>
+        <div className="pricing-summary-grid">
+          <div className="stat-card pricing-summary-stat">
+            <strong>Suggested range</strong>
+            <span>
+              {latestPricing
+                ? `${formatCurrency(latestPricing.recommendedListLow)} to ${formatCurrency(
+                    latestPricing.recommendedListHigh,
+                  )}`
+                : 'Run pricing first'}
+            </span>
+          </div>
+          <div className="stat-card pricing-summary-stat">
+            <strong>Recommended midpoint</strong>
+            <span>
+              {latestPricing?.recommendedListMid
+                ? formatCurrency(latestPricing.recommendedListMid)
+                : 'Not available yet'}
+            </span>
+          </div>
+          <div className="stat-card pricing-summary-stat">
+            <strong>Chosen list price</strong>
+            <span>
+              {property?.selectedListPrice
+                ? formatCurrency(property.selectedListPrice)
+                : 'Not set yet'}
+            </span>
+          </div>
+        </div>
+        <div className="workspace-inner-card pricing-decision-card">
+          <div className="pricing-decision-layout">
+            <div className="pricing-decision-copy">
+              <span className="label">Quick picks</span>
+              <h3>Choose a starting point</h3>
+              <p>Pick one of the recommendations or enter your own custom price.</p>
+              <div className="pricing-decision-chip-row">
+                {pricingQuickPickOptions.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    className={
+                      selectedListPriceSourceDraft === option.key
+                        ? 'checklist-action-chip active'
+                        : 'checklist-action-chip'
+                    }
+                    onClick={() => {
+                      setSelectedListPriceDraft(String(option.value));
+                      setSelectedListPriceSourceDraft(option.key);
+                    }}
+                  >
+                    {option.label}: {formatCurrency(option.value)}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className={
+                    selectedListPriceSourceDraft === 'custom'
+                      ? 'checklist-action-chip active'
+                      : 'checklist-action-chip'
+                  }
+                  onClick={() => setSelectedListPriceSourceDraft('custom')}
+                >
+                  Custom
+                </button>
+              </div>
+            </div>
+            <div className="pricing-decision-form">
+              <label className="workspace-control-field workspace-control-field-full">
+                <span>Chosen list price</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1000"
+                  value={selectedListPriceDraft}
+                  onChange={(event) => {
+                    setSelectedListPriceDraft(event.target.value);
+                    setSelectedListPriceSourceDraft('custom');
+                  }}
+                  placeholder="389000"
+                />
+              </label>
+              <button
+                type="button"
+                className="button-primary pricing-save-button"
+                onClick={handleSaveSelectedListPrice}
+                disabled={Boolean(status) || !selectedListPriceDraft || isArchivedProperty}
+              >
+                Save chosen price
+              </button>
+              <p className="workspace-control-note">
+                This does not change the suggested range. It stores the price you intend to use in future materials.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="content-card">
+        <span className="label">Pricing narrative</span>
+        <h2>Latest analysis</h2>
+        <p>{latestPricing?.summary || dashboard?.pricingSummary || 'No stored narrative yet.'}</p>
+        {latestPricing?.pricingStrategy ? <p><strong>Strategy:</strong> {latestPricing.pricingStrategy}</p> : null}
+      </div>
+    </div>
+  );
+
+  const renderPhotosTab = () => (
+    <div className="workspace-tab-stack">
+        {renderCollapsibleSection({
+          sectionKey: 'photos_import',
+          label: 'Photos',
+          title: 'Import photos',
+          meta: `${mediaAssets.length} saved`,
+          defaultOpen: DEFAULT_WORKSPACE_SECTION_STATE.photos_import,
+          className: 'content-card workspace-collapsible-section photo-import-section',
+          children: (
+            <div
+              className="workspace-inner-card brochure-control-card photo-import-card-compact"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                handleImportPhotoFiles(event.dataTransfer?.files);
+              }}
+            >
+              <div className="brochure-control-grid brochure-control-grid-form">
+                <label className="workspace-control-field">
+                  <span>Import source</span>
+                  <select
+                    className="select-input"
+                    value={photoImportSource}
+                    onChange={(event) => setPhotoImportSource(event.target.value)}
+                  >
+                    {PHOTO_IMPORT_SOURCE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="workspace-control-field">
+                  <span>Room label</span>
+                  <input
+                    type="text"
+                    value={photoImportRoomLabel}
+                    onChange={(event) => setPhotoImportRoomLabel(event.target.value)}
+                    placeholder="Kitchen"
+                  />
+                </label>
+                <label className="workspace-control-field workspace-control-field-full">
+                  <span>Notes</span>
+                  <textarea
+                    value={photoImportNotes}
+                    onChange={(event) => setPhotoImportNotes(event.target.value)}
+                    placeholder="Add optional context for imported third-party or web-uploaded photos."
+                    maxLength={500}
+                  />
+                </label>
+              </div>
+              <label className="button-secondary inline-button" style={{ display: 'inline-flex', cursor: 'pointer' }}>
+                Upload or drop photos
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={(event) => handleImportPhotoFiles(event.target.files)}
+                />
+              </label>
+              <p className="workspace-control-note">
+                Drag-and-drop works here too. Import first, then choose one room photo and continue into Vision.
+              </p>
+            </div>
+          ),
+        })}
+
+        <section className="photo-library-workspace-card">
+          {photoCategoryGroups.map((group) => renderPhotoLibrarySection(group))}
+        </section>
+    </div>
+  );
+
+  const renderSellerPicksTab = () => (
+    <WorkspaceSellerPicksTab
+      renderCollapsibleSection={renderCollapsibleSection}
+      listingCandidateAssets={listingCandidateAssets}
+      sellerPickCategoryGroups={sellerPickCategoryGroups}
+      selectedMediaAsset={selectedMediaAsset}
+      setSelectedMediaAssetId={setSelectedMediaAssetId}
+      setActivePhotoDetailsAsset={setActivePhotoDetailsAsset}
+      handleOpenAssetInVision={handleOpenAssetInVision}
+      setActiveTab={setActiveTab}
+    />
+  );
+
+  const renderVisionTab = () => (
+    <div className="workspace-tab-stack">
+      <div ref={visionCompareRef} className="content-card">
+        <div className="section-header-tight">
+          <div>
+            <span className="label">Single-photo vision workspace</span>
+            <h2>Before and after</h2>
+          </div>
+          <span className="section-header-meta">
+            {selectedVariant ? `Current workflow draft: ${selectedVariant.label}` : 'No draft selected yet'}
+          </span>
+        </div>
+        {selectedMediaAsset ? (
+          <div className="property-media-variant-panel">
+            <div className="vision-context-header">
+              <div className="vision-context-item">
+                <span className="label">Editing</span>
+                <strong>
+                  {selectedMediaAsset.assetType === 'generated'
+                    ? `${selectedMediaAsset.roomLabel || 'Selected photo'} · ${selectedMediaAsset.generationLabel || getMediaAssetPrimaryLabel(selectedMediaAsset)}`
+                    : selectedMediaAsset.roomLabel || 'Selected photo'}
+                </strong>
+              </div>
+              <div className="vision-context-item">
+                <span className="label">Source</span>
+                <strong>
+                  {workflowSourceVariant
+                    ? workflowSourceVariant.label
+                    : selectedGeneratedAssetAsResult
+                    ? selectedMediaAssetSourceAsset?.roomLabel || 'Original photo'
+                    : 'Original photo'}
+                </strong>
+              </div>
+              <div className="vision-context-item">
+                <span className="label">Current stage</span>
+                <strong>{activeVisionWorkflowStage.title}</strong>
+              </div>
+              <div className="vision-context-item">
+                <span className="label">Current result</span>
+                <strong>{effectiveVisionResultLabel}</strong>
+              </div>
+            </div>
+            {selectedVariant || selectedGeneratedAssetAsResult ? (
+              <div className="property-media-slider-card">
+                <span className="label">Before / after slider</span>
+                <p className="property-media-variant-caption">{effectiveVisionResultSummary}</p>
+                <div className="property-media-slider-shell">
+                  <ReactCompareSlider
+                    itemOne={
+                      <ReactCompareSliderImage
+                        src={compareSourceImageUrl}
+                        alt={compareSourceLabel || 'Current workflow source'}
+                      />
+                    }
+                    itemTwo={
+                      <ReactCompareSliderImage
+                        src={effectiveVisionResultImageUrl}
+                        alt={effectiveVisionResultLabel || 'Generated image variant'}
+                      />
+                    }
+                  />
+                </div>
+                <div className="tag-row">
+                  <span>{compareSourceVariant || selectedGeneratedAssetAsResult ? 'Stage source' : 'Original'}</span>
+                  <span>{selectedVariant?.variantCategory === 'concept_preview' ? 'Concept Preview' : 'Enhanced'}</span>
+                  <span>{activeVisionWorkflowStage.title}</span>
+                </div>
+              </div>
+            ) : null}
+            <div className="property-media-variant-compare">
+              <div>
+                <span className="label">{compareSourceVariant ? 'Current stage input' : 'Original'}</span>
+                <p className="property-media-variant-caption">
+                  {compareSourceVariant
+                    ? `The selected output was generated from ${compareSourceLabel}.`
+                    : 'Untouched mobile capture.'}
+                </p>
+                <img src={compareSourceImageUrl} alt={compareSourceLabel || 'Original property photo'} className="property-media-variant-image" />
+              </div>
+              <div>
+                <span className="label">Vision output</span>
+                <p className="property-media-variant-caption">
+                  {effectiveVisionResultSummary}
+                </p>
+                {effectiveVisionResultImageUrl ? (
+                  <img src={effectiveVisionResultImageUrl} alt={effectiveVisionResultLabel || 'Generated image result'} className="property-media-variant-image" />
+                ) : (
+                  <div className="property-media-variant-empty">Generate your first stage action to start the workspace history for this photo.</div>
+                )}
+              </div>
+            </div>
+            {selectedVariant?.metadata?.effects?.length ? (
+              <div className="property-media-variant-effects">
+                {selectedVariant.metadata.effects.map((effect) => <span key={effect}>{effect}</span>)}
+              </div>
+            ) : null}
+            {selectedVariant?.metadata?.confidenceBadge || selectedVariant?.metadata?.listingReadyLabel ? (
+              <div className="property-media-variant-effects">
+                {selectedVariant.metadata?.confidenceBadge ? (
+                  <span>{selectedVariant.metadata.confidenceBadge}</span>
+                ) : null}
+                {selectedVariant.metadata?.listingReadyLabel ? (
+                  <span>{selectedVariant.metadata.listingReadyLabel}</span>
+                ) : null}
+                {selectedVariant.metadata?.sourceReadinessScore && selectedVariant.metadata?.renderedReadinessScore ? (
+                  <span>{`Readiness ${selectedVariant.metadata.sourceReadinessScore} -> ${selectedVariant.metadata.renderedReadinessScore}`}</span>
+                ) : null}
+                {selectedVariant.metadata?.readinessDelta ? (
+                  <span>{`Estimated +${selectedVariant.metadata.readinessDelta} readiness`}</span>
+                ) : null}
+              </div>
+            ) : null}
+            {selectedVariant?.metadata?.pipelineDescriptor ? (
+              <div className="workspace-inner-card">
+                <span className="label">Marketplace status</span>
+                <p>
+                  {selectedVariant.metadata.pipelineDescriptor.stageLabel || 'Vision result'} ·{' '}
+                  {selectedVariant.metadata.pipelineDescriptor.statusLabel || 'Review pending'}
+                </p>
+                {selectedVariant.metadata.pipelineDescriptor.reviewMessage ? (
+                  <p className="workspace-control-note">
+                    {selectedVariant.metadata.pipelineDescriptor.reviewMessage}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            {currentVisionPipelinePackage ? (
+              <div className="workspace-inner-card">
+                <span className="label">Pipeline package</span>
+                <p>
+                  {currentVisionPipelinePackage.stageLabel} · {currentVisionPipelinePackage.statusLabel}
+                </p>
+                <p className="workspace-control-note">
+                  {currentVisionPipelinePackage.reviewMessage}
+                </p>
+                <p className="workspace-control-note">
+                  {currentVisionPipelinePackage.deliveryMessage}
+                </p>
+              </div>
+            ) : null}
+            {selectedVariant?.metadata?.differenceHint ? <p className="property-media-variant-hint">{selectedVariant.metadata.differenceHint}</p> : null}
+            {selectedVariant?.metadata?.smartEnhancementPathLabel || selectedVariant?.metadata?.smartEnhancementReason ? (
+              <div className="workspace-inner-card">
+                <span className="label">Execution Path</span>
+                <p>
+                  {selectedVariant.metadata?.smartEnhancementPathLabel || 'Direct execution'}
+                </p>
+                {selectedVariant.metadata?.smartEnhancementReason ? (
+                  <p className="workspace-control-note">{selectedVariant.metadata.smartEnhancementReason}</p>
+                ) : null}
+              </div>
+            ) : null}
+            {selectedVariant?.metadata?.improvementsApplied?.length ? (
+              <div className="workspace-inner-card">
+                <span className="label">Improvements Applied</span>
+                <ul className="plain-list">
+                  {selectedVariant.metadata.improvementsApplied.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {selectedVariant?.metadata?.recommendations?.length ? (
+              <div className="workspace-inner-card">
+                <span className="label">Top Improvements</span>
+                <ul className="plain-list">
+                  {selectedVariant.metadata.recommendations.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {selectedVariant?.metadata?.nextActions?.length ? (
+              <div className="workspace-inner-card">
+                <span className="label">Next Actions</span>
+                <ul className="plain-list">
+                  {selectedVariant.metadata.nextActions.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {selectedVariant?.metadata?.review?.shouldHideByDefault ? (
+              <div className="property-media-review-note">
+                <strong>Needs extra review</strong>
+                <p>{selectedVariant.metadata.review.summary || 'This output ranked lower due to realism or artifact risk.'}</p>
+              </div>
+            ) : null}
+            {selectedVariant ? <p className="workspace-control-note">{getVariantDisclaimer(selectedVariant)}</p> : null}
+            {selectedVariant ? (
+              <div className="mini-stats">
+                <div className="stat-card">
+                  <strong>Stage</strong>
+                  <span>{getVisionWorkflowStage(selectedVariant.metadata?.workflowStageKey || getVisionWorkflowStageForPreset(selectedVariant.metadata?.presetKey || selectedVariant.variantType)).title}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Source</strong>
+                  <span>{selectedVariant.metadata?.sourceLabel || compareSourceLabel}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Quality review</strong>
+                  <span>{getVariantReviewScore(selectedVariant) ? `${getVariantReviewScore(selectedVariant)}/100` : 'Pending'}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Confidence</strong>
+                  <span>{selectedVariant.metadata?.confidenceBadge || selectedVariant.metadata?.listingReadyLabel || 'Pending'}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Readiness</strong>
+                  <span>
+                    {selectedVariant.metadata?.sourceReadinessScore && selectedVariant.metadata?.renderedReadinessScore
+                      ? `${selectedVariant.metadata.sourceReadinessScore} -> ${selectedVariant.metadata.renderedReadinessScore}`
+                      : selectedVariant.metadata?.listingReadyScore
+                        ? `${selectedVariant.metadata.listingReadyScore}/100`
+                        : selectedVariant.metadata?.readinessDelta
+                          ? `+${selectedVariant.metadata.readinessDelta}`
+                          : 'Pending'}
+                  </span>
+                </div>
+                <div className="stat-card">
+                  <strong>Applied</strong>
+                  <span>
+                    {selectedVariant.metadata?.improvementsApplied?.length
+                      ? `${selectedVariant.metadata.improvementsApplied.length} updates`
+                      : selectedVariant.metadata?.readinessDelta
+                        ? 'Readiness shift tracked'
+                        : 'Pending'}
+                  </span>
+                </div>
+                <div className="stat-card">
+                  <strong>Structural realism</strong>
+                  <span>{selectedVariant.metadata?.review?.structuralIntegrityScore ? `${selectedVariant.metadata.review.structuralIntegrityScore}/100` : 'Pending'}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Preset</strong>
+                  <span>{selectedVariant.metadata?.presetKey || selectedVariant.variantType}</span>
+                </div>
+                <div className="stat-card">
+                  <strong>Created</strong>
+                  <span>{selectedVariant.createdAt ? new Date(selectedVariant.createdAt).toLocaleString() : 'Just now'}</span>
+                </div>
+              </div>
+            ) : null}
+            {selectedVariant ? (
+              <div className="vision-result-actions-card">
+                <div className="workspace-tab-stack">
+                  <span className="label">Current result</span>
+                  <strong>{selectedVariant.label || 'Generated result'}</strong>
+                  <p>
+                    {getVariantSummary(selectedVariant)}
+                  </p>
+                  {savedAssetForSelectedVariant ? (
+                    <p className="workspace-control-note">
+                      This result is already saved in Photos as <strong>{savedAssetForSelectedVariant.roomLabel}</strong>.
+                    </p>
+                  ) : selectedVariant ? (
+                    <p className="workspace-control-note">
+                      {currentVisionSaveDefaults.listingCandidate
+                        ? 'Saving this result to Photos will also mark it as a listing candidate.'
+                        : 'Saving this result to Photos will keep it as a review draft until you explicitly mark it as a seller pick.'}
+                    </p>
+                  ) : null}
+                  {currentVisionPipelinePackage ? (
+                    <p className="workspace-control-note">
+                      {currentVisionPipelinePackage.publishable
+                        ? 'This result is ready to flow into brochure and report materials once you keep it.'
+                        : currentVisionPipelinePackage.deliveryMessage}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="vision-result-actions">
+                  <button
+                    type="button"
+                    className={savedAssetForSelectedVariant ? 'button-secondary' : 'button-primary'}
+                    onClick={savedAssetForSelectedVariant ? () => {
+                      setSelectedMediaAssetId(savedAssetForSelectedVariant.id);
+                      setActiveTab('photos');
+                    } : handleSaveCurrentVisionResultToPhotos}
+                    disabled={Boolean(status) || isArchivedProperty}
+                  >
+                    {savedAssetForSelectedVariant
+                      ? 'View in Photos'
+                      : currentVisionSaveDefaults.listingCandidate
+                        ? 'Save as Listing Photo'
+                        : 'Save Draft to Photos'}
+                  </button>
+                  {activeVisionWorkflowStage.key !== 'final' ? (
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={handlePromoteVariantToNextStage}
+                      disabled={Boolean(status) || isArchivedProperty}
+                    >
+                      {`Use this result for ${getVisionWorkflowStage(getNextVisionWorkflowStageKey(activeVisionWorkflowStageKey)).title.toLowerCase()}`}
+                    </button>
+                  ) : null}
+                  {(currentVisionSaveDefaults.publishable ||
+                    savedAssetForSelectedVariant ||
+                    activeVisionWorkflowStage.key === 'final') ? (
+                    <>
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => setActiveTab('brochure')}
+                      >
+                        Open Brochure
+                      </button>
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => setActiveTab('report')}
+                      >
+                        Open Report
+                      </button>
+                    </>
+                  ) : null}
+                  {latestGeneratedVariant && selectedVariant && latestGeneratedVariant.id !== selectedVariant.id ? (
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => {
+                        setSelectedVariantId(latestGeneratedVariant.id);
+                        requestAnimationFrame(() => {
+                          scrollWorkspaceSectionIntoView(visionCompareRef);
+                        });
+                      }}
+                    >
+                      Return to latest generated result
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : selectedGeneratedAssetAsResult ? (
+              <div className="vision-result-actions-card">
+                <div className="workspace-tab-stack">
+                  <span className="label">Current result</span>
+                  <strong>{effectiveVisionResultLabel}</strong>
+                  <p>{effectiveVisionResultSummary}</p>
+                  <p className="workspace-control-note">
+                    This saved Vision result is the current source for the next stage. Generate the next step when you are ready, or reopen the original photo if you want to branch from the beginning.
+                  </p>
+                </div>
+                <div className="vision-result-actions">
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={() => setActiveTab('photos')}
+                  >
+                    View in Photos
+                  </button>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => setActivePhotoDetailsAsset(selectedMediaAsset)}
+                  >
+                    View details
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {selectedVariant || selectedGeneratedAssetAsResult ? (
+              <p className="workspace-control-note">
+                Work on one photo at a time here. The current result stays in focus, and older drafts live in the workflow history drawer below.
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <p>Select a photo in the Photos tab first to use the Vision workspace.</p>
+        )}
+      </div>
+
+      <div className="workspace-two-column vision-workflow-layout">
+        <div className="content-card vision-workspace-card">
+          <span className="label">Workspace steps</span>
+          <h2>Guide this photo stage by stage</h2>
+          {selectedMediaAsset ? (
+            <>
+              <div className="workspace-tab-stack">
+                <div className="workspace-inner-card brochure-control-card vision-source-card">
+                  <span className="label">Editing photo</span>
+                  <strong>{selectedMediaAsset.roomLabel || 'Property photo'}</strong>
+                  <p>
+                    Work on one source photo at a time. Other property photos stay hidden unless you open the photo picker.
+                  </p>
+                  <div className="tag-row">
+                    <span>{workflowSourceVariant ? `Current source: ${workflowSourceVariant.label}` : 'Current source: Original photo'}</span>
+                    <span>{activeVisionWorkflowStage.title}</span>
+                  </div>
+                  <div className="workspace-action-column vision-workflow-actions">
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => setShowVisionPhotoPicker((current) => !current)}
+                    >
+                      {showVisionPhotoPicker ? 'Hide photo picker' : 'Choose a different photo'}
+                    </button>
+                    {selectedVariant ? (
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={handlePromoteVariantToNextStage}
+                        disabled={Boolean(status) || isArchivedProperty}
+                      >
+                        {activeVisionWorkflowStage.key === 'final'
+                          ? 'Keep selected result for final review'
+                          : `Use this result for ${getVisionWorkflowStage(getNextVisionWorkflowStageKey(activeVisionWorkflowStageKey)).title.toLowerCase()}`}
+                      </button>
+                    ) : null}
+                    {workflowSourceVariant ? (
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={handleResetVisionWorkflowSource}
+                        disabled={Boolean(status) || isArchivedProperty}
+                      >
+                        Reset to original photo
+                      </button>
+                    ) : null}
+                  </div>
+                  {showVisionPhotoPicker ? (
+                    <div className="vision-photo-picker property-media-rail property-photo-grid compact">
+                      {mediaAssets.map((asset) => (
+                        <button
+                          key={`vision-source-${asset.id}`}
+                          type="button"
+                          className={asset.id === selectedMediaAsset?.id ? 'property-media-thumb active' : 'property-media-thumb'}
+                          onClick={() => setSelectedMediaAssetId(asset.id)}
+                        >
+                          <img src={asset.imageUrl} alt={asset.roomLabel || 'Property photo'} />
+                          <div>
+                            <strong>{asset.roomLabel}</strong>
+                            <small>{asset.generationLabel || getMediaAssetPrimaryLabel(asset)}</small>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="vision-stage-rail">
+                  {VISION_WORKFLOW_STAGES.map((stage) => (
+                    <button
+                      key={stage.key}
+                      type="button"
+                      className={
+                        stage.key === activeVisionWorkflowStageKey
+                          ? 'vision-stage-chip active'
+                          : 'vision-stage-chip'
+                      }
+                      onClick={() => {
+                        setActiveVisionWorkflowStageKey(stage.key);
+                        if (stage.key !== 'final') {
+                          setActiveVisionPresetKey(getDefaultVisionPresetKeyForStage(stage.key));
+                        }
+                      }}
+                    >
+                      <strong>{stage.label}</strong>
+                      <span>{stage.title}</span>
+                    </button>
+                  ))}
+                </div>
+                {activeVisionWorkflowStage.key !== 'final'
+                  ? activeVisionWorkflowPresetGroups.map((group) => (
+                  <div key={group.key} className="workspace-inner-card brochure-control-card">
+                    <span className="label">{group.label}</span>
+                    <div className="property-media-variant-list">
+                      {group.items.map((preset) => (
+                        <button
+                          key={preset.key}
+                          type="button"
+                          className={
+                            activeVisionPresetKey === preset.key
+                              ? 'property-media-variant-chip active'
+                              : 'property-media-variant-chip'
+                          }
+                          onClick={() => handleSelectVisionPreset(preset.key)}
+                          title={[
+                            preset.displayName,
+                            preset.helperText,
+                            preset.upgradeTier === 'premium' ? 'Premium workflow step.' : 'Included workflow step.',
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
+                        >
+                          {preset.displayName}
+                          {preset.upgradeTier === 'premium' ? ' · Premium' : ''}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                    ))
+                  : null}
+                <div className="workspace-inner-card brochure-control-card">
+                  <span className="label">Stage guidance</span>
+                  <strong>{activeVisionWorkflowStage.title}</strong>
+                  <p>{activeVisionWorkflowStage.description}</p>
+                  <div className="tag-row">
+                    <span>{workflowSourceVariant ? 'Using selected draft as the source' : 'Using the original photo as the source'}</span>
+                    {selectedVariant || selectedGeneratedAssetAsResult ? <span>Current result: {effectiveVisionResultLabel}</span> : null}
+                    {latestGeneratedVariant ? <span>Latest generated: {latestGeneratedVariant.label}</span> : null}
+                  </div>
+                  {preferredVisionVariant && selectedVariant && preferredVisionVariant.id !== selectedVariant.id ? (
+                    <p className="workspace-control-note">
+                      Marketing-preferred output: <strong>{preferredVisionVariant.label}</strong>. The workspace is keeping <strong>{selectedVariant.label}</strong> in focus for this step so you can continue editing without losing the preferred pick.
+                    </p>
+                  ) : null}
+                  {latestGeneratedVariant && selectedVariant && latestGeneratedVariant.id !== selectedVariant.id ? (
+                    <p className="workspace-control-note">
+                      You are viewing an older attempt right now. The newest generated result is <strong>{latestGeneratedVariant.label}</strong> from {formatDateTimeLabel(latestGeneratedVariant.createdAt)}.
+                    </p>
+                  ) : null}
+                  <p className="workspace-control-note">
+                    This stage currently has {stageScopedVisionVariants.length} previous attempt{stageScopedVisionVariants.length === 1 ? '' : 's'} for this photo. Open attempt history only when you want to compare, keep, or permanently delete them.
+                  </p>
+                </div>
+              </div>
+              {activeVisionWorkflowStage.key !== 'final' ? (
+                <>
+                  <div
+                    ref={visionCurrentActionRef}
+                    className="workspace-inner-card brochure-control-card vision-current-action-card"
+                  >
+                    <span className="label">Current action</span>
+                    <strong>{activeVisionPreset?.displayName || 'Select a preset'}</strong>
+                    <p>
+                      {activeVisionPreset?.helperText ||
+                        'Choose the next step for this photo and keep the workspace moving forward one stage at a time.'}
+                    </p>
+                    <div className="tag-row vision-status-badge-row">
+                      <span
+                        className="vision-status-badge"
+                        title={
+                          activeVisionPreset?.category === 'concept_preview'
+                            ? 'Concept preview: intended for planning and discussion, not as a representation of completed work.'
+                            : 'Listing enhancement: intended as a stronger presentation-oriented improvement.'
+                        }
+                      >
+                        {activeVisionPreset?.category === 'concept_preview'
+                          ? 'Concept Preview'
+                          : 'Listing Enhancement'}
+                      </span>
+                      <span
+                        className="vision-status-badge"
+                        title={
+                          activeVisionPreset?.upgradeTier === 'premium'
+                            ? 'Premium workflow step. This preset uses the premium vision path when available.'
+                            : 'Included workflow step.'
+                        }
+                      >
+                        {activeVisionPreset?.upgradeTier === 'premium'
+                          ? 'Premium workflow step'
+                          : 'Included workflow'}
+                      </span>
+                    </div>
+                    <div className="vision-current-action-buttons vision-current-action-buttons-primary">
+                      <button
+                        type="button"
+                        className={
+                          visionGenerationState
+                            ? 'button-primary button-busy vision-generate-button'
+                            : 'button-primary vision-generate-button'
+                        }
+                        onClick={() => handleGenerateVariant(activeVisionPresetKey)}
+                        disabled={Boolean(status) || isArchivedProperty || !activeVisionPreset}
+                        title={activeVisionPresetTooltip}
+                      >
+                        {visionGenerationState
+                          ? `Generating... ${visionGenerationElapsedSeconds}s`
+                          : `Generate ${activeVisionPreset?.displayName || 'enhancement'}`}
+                      </button>
+                    </div>
+                    <p className="workspace-control-note">
+                      Generate the next result here. Open attempt history only when you want to compare, keep, or permanently delete older attempts.
+                    </p>
+                    {visionWorkflowRecommendation ? (
+                      <div className="workspace-inner-card">
+                        <span className="label">Recommended next step</span>
+                        <strong>{visionWorkflowRecommendation.label}</strong>
+                        <p>{visionWorkflowRecommendation.reason}</p>
+                        <div className="workspace-action-row">
+                          {visionWorkflowRecommendation.type === 'generate' ? (
+                            <button
+                              type="button"
+                              className={
+                                visionWorkflowRecommendation.presetKey === activeVisionPresetKey
+                                  ? 'button-secondary'
+                                  : 'button-primary'
+                              }
+                              onClick={() =>
+                                handleSelectVisionPreset(visionWorkflowRecommendation.presetKey)
+                              }
+                              disabled={!visionWorkflowRecommendation.presetKey}
+                            >
+                              {visionWorkflowRecommendation.presetKey === activeVisionPresetKey
+                                ? 'Recommended preset selected'
+                                : `Use ${visionWorkflowRecommendation.label}`}
+                            </button>
+                          ) : null}
+                          {visionWorkflowRecommendation.type === 'save_result' &&
+                          selectedVariant &&
+                          !savedAssetForSelectedVariant ? (
+                            <button
+                              type="button"
+                              className="button-primary"
+                              onClick={handleSaveCurrentVisionResultToPhotos}
+                            >
+                              {currentVisionSaveDefaults.listingCandidate
+                                ? 'Save this result as a listing photo'
+                                : 'Save this result as a draft'}
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className="vision-current-action-buttons vision-current-action-buttons-secondary">
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => setShowVisionHistory(true)}
+                        disabled={!stageScopedVisionVariants.length}
+                      >
+                        {`View attempt history (${stageScopedVisionVariants.length})`}
+                      </button>
+                    </div>
+                  </div>
+                  {visionGenerationState ? (
+                    <div className="vision-generation-status" role="status" aria-live="polite">
+                      <div className="vision-generation-status-header">
+                        <div>
+                          <span className="label">Vision generation in progress</span>
+                          <strong>{visionGenerationState.title}</strong>
+                        </div>
+                        <span className="vision-generation-status-time">{visionGenerationElapsedSeconds}s elapsed</span>
+                      </div>
+                      <div className="vision-generation-progress" aria-hidden="true">
+                        <span className="vision-generation-progress-bar" />
+                      </div>
+                      <p>{visionGenerationState.detail}</p>
+                      <p className="workspace-control-note">
+                        Timing varies by preset and whether the job needs a stronger AI fallback, so this indicator tracks elapsed time rather than pretending to know an exact percent complete. A short chime will play when longer runs finish.
+                      </p>
+                      {visionRecoveryState?.jobId ? (
+                        <div className="workspace-action-row">
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            onClick={handleCancelVisionGeneration}
+                            disabled={visionCancellationPending}
+                          >
+                            {visionCancellationPending ? 'Cancelling...' : 'Cancel generation'}
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {activeVisionWorkflowStage.allowFreeform ? (
+                    <div className="workspace-inner-card brochure-control-card">
+                      <span className="label">Natural-language enhancement</span>
+                      <textarea
+                        value={freeformEnhancementInstructions}
+                        onChange={(event) => setFreeformEnhancementInstructions(event.target.value)}
+                        placeholder="Please make this cleaned room feel modern and bright while preserving the architecture."
+                        maxLength={600}
+                      />
+                      <div className="workspace-action-column">
+                        <button
+                          type="button"
+                          className={visionGenerationState?.kind === 'freeform' ? 'button-secondary button-busy' : 'button-secondary'}
+                          onClick={handleGenerateFreeformVariant}
+                          disabled={Boolean(status) || isArchivedProperty || !freeformEnhancementInstructions.trim()}
+                        >
+                          {visionGenerationState?.kind === 'freeform'
+                            ? `Generating... ${visionGenerationElapsedSeconds}s`
+                            : 'Generate custom preview'}
+                        </button>
+                      </div>
+                      <p className="workspace-control-note">
+                        Use this after the room is cleaned and the major finish changes are in place. It works best inside Smart Enhancement for directed styling, not as a substitute for cleanup.
+                      </p>
+                      {selectedVariant?.metadata?.mode === 'freeform' ? (
+                        <div className="vision-freeform-result-card">
+                          <div className="section-header-tight">
+                            <div>
+                              <span className="label">Latest custom result</span>
+                              <strong>{selectedVariant.label || 'Custom enhancement preview'}</strong>
+                            </div>
+                            <button
+                              type="button"
+                              className="button-secondary"
+                              onClick={() => visionCompareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                            >
+                              Show compare view
+                            </button>
+                          </div>
+                          <div className="vision-freeform-result-grid">
+                            <img
+                              src={selectedVariant.imageUrl}
+                              alt={selectedVariant.label || 'Generated custom enhancement'}
+                              className="vision-freeform-result-thumb"
+                            />
+                            <div className="workspace-tab-stack">
+                              <p className="workspace-control-note">
+                                This result is now loaded in the compare view above.
+                              </p>
+                              {selectedVariant.metadata?.instructions ? (
+                                <p>
+                                  <strong>Request:</strong> {selectedVariant.metadata.instructions}
+                                </p>
+                              ) : null}
+                              {selectedVariantFreeformHighlights.length ? (
+                                <div className="tag-row">
+                                  {selectedVariantFreeformHighlights.map((item) => (
+                                    <span key={`freeform-highlight-${item}`}>{item}</span>
+                                  ))}
+                                </div>
+                              ) : null}
+                              {selectedVariant.metadata?.differenceHint ? (
+                                <p className="workspace-control-note">
+                                  <strong>What to look for:</strong> {selectedVariant.metadata.differenceHint}
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="workspace-inner-card brochure-control-card">
+                      <span className="label">Advanced requests</span>
+                      <p>
+                        Natural-language styling unlocks in Smart Enhancement, after the room has been cleaned and the major finish changes are in place.
+                      </p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="workspace-inner-card brochure-control-card">
+                  <span className="label">Finalize this photo</span>
+                  <strong>{selectedVariant?.label || 'Select the result you want to keep'}</strong>
+                  <p>
+                    Once this version is the winner, keep it as the preferred output and remove earlier drafts for a clean final workspace.
+                  </p>
+                  <div className="workspace-action-column">
+                    {selectedVariant ? (
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => handleSelectVariant(selectedVariant.id)}
+                        disabled={Boolean(status) || isArchivedProperty || selectedVariant.isSelected}
+                      >
+                        {selectedVariant.isSelected ? 'Preferred variant selected' : 'Set as preferred variant'}
+                      </button>
+                    ) : null}
+                    {savedAssetForSelectedVariant ? (
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => {
+                          setSelectedMediaAssetId(savedAssetForSelectedVariant.id);
+                          setActiveTab('photos');
+                        }}
+                      >
+                        View saved photo
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => setActiveTab('brochure')}
+                    >
+                      Open Brochure
+                    </button>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => setActiveTab('report')}
+                    >
+                      Open Report
+                    </button>
+                    <button
+                      type="button"
+                      className="button-secondary button-danger"
+                      onClick={handlePruneVisionDraftHistory}
+                      disabled={Boolean(status) || isArchivedProperty || !selectedVariant}
+                    >
+                      Delete earlier saved versions
+                    </button>
+                  </div>
+                  <p className="workspace-control-note">
+                    This keeps the selected result and permanently removes the other saved image versions for this photo.
+                  </p>
+                </div>
+              )}
+            </>
+          ) : (
+            <p>No photo is selected yet.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderBrochureTab = () => (
+    <WorkspaceBrochureTab
+      renderCollapsibleSection={renderCollapsibleSection}
+      defaultSectionState={DEFAULT_WORKSPACE_SECTION_STATE}
+      latestFlyer={latestFlyer}
+      flyerType={flyerType}
+      setFlyerType={setFlyerType}
+      listingCandidateAssets={listingCandidateAssets}
+      mediaAssets={mediaAssets}
+      latestPricing={latestPricing}
+      flyerHeadlineDraft={flyerHeadlineDraft}
+      setFlyerHeadlineDraft={setFlyerHeadlineDraft}
+      flyerSubheadlineDraft={flyerSubheadlineDraft}
+      setFlyerSubheadlineDraft={setFlyerSubheadlineDraft}
+      flyerSummaryDraft={flyerSummaryDraft}
+      setFlyerSummaryDraft={setFlyerSummaryDraft}
+      flyerCallToActionDraft={flyerCallToActionDraft}
+      setFlyerCallToActionDraft={setFlyerCallToActionDraft}
+      brochurePhotoPool={brochurePhotoPool}
+      flyerSelectedPhotoIds={flyerSelectedPhotoIds}
+      toggleFlyerPhotoSelection={toggleFlyerPhotoSelection}
+      status={status}
+      isArchivedProperty={isArchivedProperty}
+      handleGenerateFlyer={handleGenerateFlyer}
+      handleDownloadFlyerPdf={handleDownloadFlyerPdf}
+      flyerPreviewRef={flyerPreviewRef}
+      handleExportSocialPack={handleExportSocialPack}
+      latestSocialPack={latestSocialPack}
+      activeSocialPackVariantKey={activeSocialPackVariantKey}
+      setActiveSocialPackVariantKey={setActiveSocialPackVariantKey}
+      activeSocialPackVariantDetails={activeSocialPackVariantDetails}
+    />
+  );
+
+  const renderReportTab = () => (
+    <WorkspaceReportTab
+      renderCollapsibleSection={renderCollapsibleSection}
+      defaultSectionState={DEFAULT_WORKSPACE_SECTION_STATE}
+      latestReport={latestReport}
+      status={status}
+      isArchivedProperty={isArchivedProperty}
+      handleGenerateReport={handleGenerateReport}
+      handleDownloadReportPdf={handleDownloadReportPdf}
+      listingCandidateAssets={listingCandidateAssets}
+      mediaAssets={mediaAssets}
+      checklist={checklist}
+      selectedComps={selectedComps}
+      reportTitleDraft={reportTitleDraft}
+      setReportTitleDraft={setReportTitleDraft}
+      reportExecutiveSummaryDraft={reportExecutiveSummaryDraft}
+      setReportExecutiveSummaryDraft={setReportExecutiveSummaryDraft}
+      reportListingDescriptionDraft={reportListingDescriptionDraft}
+      setReportListingDescriptionDraft={setReportListingDescriptionDraft}
+      reportSectionOptions={REPORT_SECTION_OPTIONS}
+      reportIncludedSections={reportIncludedSections}
+      toggleReportSection={toggleReportSection}
+      reportPhotoPool={reportPhotoPool}
+      reportSelectedPhotoIds={reportSelectedPhotoIds}
+      toggleReportPhotoSelection={toggleReportPhotoSelection}
+      reportPreviewRef={reportPreviewRef}
+      property={property}
+    />
+  );
+
+  const renderChecklistTab = () => (
+    <WorkspaceChecklistTab
+      renderCollapsibleSection={renderCollapsibleSection}
+      defaultSectionState={DEFAULT_WORKSPACE_SECTION_STATE}
+      isWorkspaceSectionOpen={isWorkspaceSectionOpen}
+      setWorkspaceSectionOpen={setWorkspaceSectionOpen}
+      checklist={checklist}
+      checklistGroups={checklistGroups}
+      checklistSummaryMode={checklistSummaryMode}
+      setChecklistSummaryMode={setChecklistSummaryMode}
+      completedChecklistItems={completedChecklistItems}
+      openChecklistItems={openChecklistItems}
+      readinessScore={readinessScore}
+      customChecklistTitle={customChecklistTitle}
+      setCustomChecklistTitle={setCustomChecklistTitle}
+      customChecklistDetail={customChecklistDetail}
+      setCustomChecklistDetail={setCustomChecklistDetail}
+      handleCreateChecklistTask={handleCreateChecklistTask}
+      handleSetChecklistItemStatus={handleSetChecklistItemStatus}
+      status={status}
+      isArchivedProperty={isArchivedProperty}
+      focusProviderSuggestions={focusProviderSuggestions}
+      providerSuggestionsRef={providerSuggestionsRef}
+      providerSuggestionTask={providerSuggestionTask}
+      providerSearchStatus={providerSearchStatus}
+      providerRecommendations={providerRecommendations}
+      unavailableProviderRecommendations={unavailableProviderRecommendations}
+      providerSource={providerSource}
+      providerGoogleSearchUrl={providerGoogleSearchUrl}
+      providerMapProviders={providerMapProviders}
+      setProviderMapScope={setProviderMapScope}
+      setShowProviderMap={setShowProviderMap}
+      handleBrowseGoogleFallback={handleBrowseGoogleFallback}
+      externalProviderRecommendations={externalProviderRecommendations}
+      showExternalProviderFallback={showExternalProviderFallback}
+      providerCoverageGuidance={providerCoverageGuidance}
+      shouldShowExternalProviderSection={shouldShowExternalProviderSection}
+      hasInternalProviderResults={hasInternalProviderResults}
+      handleSaveProvider={handleSaveProvider}
+      handleSaveProviderReference={handleSaveProviderReference}
+      handleRequestProviderLead={handleRequestProviderLead}
+      providerReferenceIds={providerReferenceIds}
+      providerReferences={providerReferences}
+      setActiveProviderDetails={setActiveProviderDetails}
+      handleRemoveProviderReference={handleRemoveProviderReference}
+      handleDownloadProviderReferenceSheet={handleDownloadProviderReferenceSheet}

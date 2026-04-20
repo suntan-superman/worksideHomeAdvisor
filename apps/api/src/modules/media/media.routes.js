@@ -5,16 +5,18 @@ import { analyzePropertyPhoto } from '../../services/photoAnalysisService.js';
 import { readStoredAsset, verifyTemporaryStoredAssetToken } from '../../services/storageService.js';
 import { assertPropertyEditableById, getPropertyById } from '../properties/property.service.js';
 import {
-  cancelImageJob,
-  createImageEnhancementJob,
   getVisionPresetCatalog,
-  getImageJobById,
-  listImageJobsForAsset,
   getMediaVariantById,
   listMediaVariants,
   selectMediaVariant,
   updateMediaVariantUsage,
 } from './media-ai.service.js';
+import {
+  cancelVisionProxyJob,
+  getVisionProxyJobById,
+  listVisionJobsForAsset,
+  queueVisionEnhancementJob,
+} from '../jobs/jobs.service.js';
 import { VISION_PLAN_VALUES } from './vision-orchestrator.helpers.js';
 import {
   createMediaAssetAndAnalysis,
@@ -246,19 +248,25 @@ export async function mediaRoutes(fastify) {
       }
       await assertPropertyEditableById(asset.propertyId);
       const payload = imageJobRequestSchema.parse(request.body ?? {});
-      const result = await createImageEnhancementJob({
-        assetId,
-        jobType: payload.jobType,
-        presetKey: payload.presetKey,
-        sourceVariantId: payload.sourceVariantId,
-        roomType: payload.roomType,
-        workflowStageKey: payload.workflowStageKey,
-        mode: payload.mode,
-        instructions: payload.instructions,
-        forceRegenerate: payload.forceRegenerate,
-        userPlan: payload.userPlan,
-      });
-      return reply.code(201).send(result);
+      const job = await queueVisionEnhancementJob(
+        {
+          assetId,
+          propertyId: asset.propertyId,
+          userId: null,
+          jobType: payload.jobType,
+          presetKey: payload.presetKey,
+          sourceVariantId: payload.sourceVariantId,
+          roomType: payload.roomType,
+          workflowStageKey: payload.workflowStageKey,
+          mode: payload.mode,
+          instructions: payload.instructions,
+          forceRegenerate: payload.forceRegenerate,
+          userPlan: payload.userPlan,
+        },
+        { logger: request.log },
+      );
+      const proxyJob = await getVisionProxyJobById(job.id);
+      return reply.code(202).send({ job: proxyJob || job, queued: true });
     } catch (error) {
       const statusCode = error.message === 'Media asset not found.' ? 404 : 400;
       return reply.code(statusCode).send({ message: error.message });
@@ -274,19 +282,25 @@ export async function mediaRoutes(fastify) {
       }
       await assertPropertyEditableById(asset.propertyId);
       const payload = imageJobRequestSchema.parse(request.body ?? {});
-      const result = await createImageEnhancementJob({
-        assetId,
-        jobType: payload.jobType,
-        presetKey: payload.presetKey,
-        sourceVariantId: payload.sourceVariantId,
-        roomType: payload.roomType,
-        workflowStageKey: payload.workflowStageKey,
-        mode: payload.mode,
-        instructions: payload.instructions,
-        forceRegenerate: payload.forceRegenerate,
-        userPlan: payload.userPlan,
-      });
-      return reply.code(201).send(result);
+      const job = await queueVisionEnhancementJob(
+        {
+          assetId,
+          propertyId: asset.propertyId,
+          userId: null,
+          jobType: payload.jobType,
+          presetKey: payload.presetKey,
+          sourceVariantId: payload.sourceVariantId,
+          roomType: payload.roomType,
+          workflowStageKey: payload.workflowStageKey,
+          mode: payload.mode,
+          instructions: payload.instructions,
+          forceRegenerate: payload.forceRegenerate,
+          userPlan: payload.userPlan,
+        },
+        { logger: request.log },
+      );
+      const proxyJob = await getVisionProxyJobById(job.id);
+      return reply.code(202).send({ job: proxyJob || job, queued: true });
     } catch (error) {
       const statusCode = error.message === 'Media asset not found.' ? 404 : 400;
       const isValidationError = error instanceof z.ZodError;
@@ -318,19 +332,25 @@ export async function mediaRoutes(fastify) {
         return reply.code(404).send({ message: 'Media asset not found.' });
       }
       await assertPropertyEditableById(asset.propertyId);
-      const result = await createImageEnhancementJob({
-        assetId: payload.assetId,
-        jobType: payload.jobType,
-        presetKey: payload.presetKey,
-        sourceVariantId: payload.sourceVariantId,
-        roomType: payload.roomType,
-        workflowStageKey: payload.workflowStageKey,
-        mode: payload.mode,
-        instructions: payload.instructions,
-        forceRegenerate: payload.forceRegenerate,
-        userPlan: payload.userPlan,
-      });
-      return reply.code(201).send(result);
+      const job = await queueVisionEnhancementJob(
+        {
+          assetId: payload.assetId,
+          propertyId: asset.propertyId,
+          userId: null,
+          jobType: payload.jobType,
+          presetKey: payload.presetKey,
+          sourceVariantId: payload.sourceVariantId,
+          roomType: payload.roomType,
+          workflowStageKey: payload.workflowStageKey,
+          mode: payload.mode,
+          instructions: payload.instructions,
+          forceRegenerate: payload.forceRegenerate,
+          userPlan: payload.userPlan,
+        },
+        { logger: request.log },
+      );
+      const proxyJob = await getVisionProxyJobById(job.id);
+      return reply.code(202).send({ job: proxyJob || job, queued: true });
     } catch (error) {
       const statusCode = error.message === 'Media asset not found.' ? 404 : 400;
       const isValidationError = error instanceof z.ZodError;
@@ -497,7 +517,7 @@ export async function mediaRoutes(fastify) {
   fastify.get('/image-jobs/:jobId', async (request, reply) => {
     try {
       const { jobId } = jobParamsSchema.parse(request.params);
-      const job = await getImageJobById(jobId);
+      const job = await getVisionProxyJobById(jobId);
 
       if (!job) {
         return reply.code(404).send({ message: 'Image job not found.' });
@@ -512,7 +532,7 @@ export async function mediaRoutes(fastify) {
   fastify.get('/vision/jobs/:jobId', async (request, reply) => {
     try {
       const { jobId } = jobParamsSchema.parse(request.params);
-      const job = await getImageJobById(jobId);
+      const job = await getVisionProxyJobById(jobId);
 
       if (!job) {
         return reply.code(404).send({ message: 'Image job not found.' });
@@ -527,7 +547,7 @@ export async function mediaRoutes(fastify) {
   fastify.patch('/vision/jobs/:jobId/cancel', async (request, reply) => {
     try {
       const { jobId } = jobParamsSchema.parse(request.params);
-      const job = await cancelImageJob(jobId);
+      const job = await cancelVisionProxyJob(jobId);
 
       if (!job) {
         return reply.code(404).send({ message: 'Image job not found.' });
@@ -543,7 +563,7 @@ export async function mediaRoutes(fastify) {
     try {
       const { assetId } = assetParamsSchema.parse(request.params);
       const limit = Math.max(1, Math.min(20, Number(request.query?.limit || 10)));
-      const jobs = await listImageJobsForAsset(assetId, { limit });
+      const jobs = await listVisionJobsForAsset(assetId, { limit });
       return reply.send({ jobs });
     } catch (error) {
       return reply.code(400).send({ message: error.message });
