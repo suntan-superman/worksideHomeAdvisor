@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatCurrency, formatPhoneForDisplay } from '@workside/utils';
@@ -245,6 +245,8 @@ function buildProviderHighlights(providers = []) {
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
+  const createPropertyFormRef = useRef(null);
+  const createPropertyTitleInputRef = useRef(null);
   const [session, setSession] = useState(null);
   const [properties, setProperties] = useState([]);
   const [selectedPropertyId, setSelectedPropertyId] = useState('');
@@ -259,6 +261,7 @@ export default function DashboardPage() {
   const [showCompletedWorkflowSteps, setShowCompletedWorkflowSteps] = useState(false);
   const [focusedWorkflowStepKey, setFocusedWorkflowStepKey] = useState('');
   const [pendingDeleteProperty, setPendingDeleteProperty] = useState(null);
+  const [spotlightCreateProperty, setSpotlightCreateProperty] = useState(false);
   const [accountForm, setAccountForm] = useState({
     firstName: '',
     lastName: '',
@@ -538,6 +541,11 @@ export default function DashboardPage() {
   const billingSummary = billingSummaryQuery.data || null;
   const propertyCapacity = billingSummary?.propertyCapacity || null;
   const selectedPropertyArchived = selectedProperty?.status === 'archived';
+  const shouldShowFirstPropertyPrompt = Boolean(
+    session?.user &&
+      !loading &&
+      activeProperties.length === 0,
+  );
 
   useEffect(() => {
     if (billingPlansQuery.isSuccess) {
@@ -602,6 +610,20 @@ export default function DashboardPage() {
       message: providerHighlightsQuery.error.message,
     });
   }, [providerHighlightsQuery.error]);
+
+  useEffect(() => {
+    if (!spotlightCreateProperty) {
+      return undefined;
+    }
+
+    const spotlightTimeout = window.setTimeout(() => {
+      setSpotlightCreateProperty(false);
+    }, 3500);
+
+    return () => {
+      window.clearTimeout(spotlightTimeout);
+    };
+  }, [spotlightCreateProperty]);
 
   useEffect(() => {
     if (
@@ -963,6 +985,22 @@ export default function DashboardPage() {
     }
   }
 
+  function handleScrollToCreateProperty() {
+    if (!createPropertyFormRef.current) {
+      return;
+    }
+
+    setSpotlightCreateProperty(true);
+    createPropertyFormRef.current.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+
+    window.setTimeout(() => {
+      createPropertyTitleInputRef.current?.focus({ preventScroll: true });
+    }, 500);
+  }
+
   return (
     <AppFrame busy={Boolean(actionState)}>
       <Toast
@@ -997,6 +1035,26 @@ export default function DashboardPage() {
         </section>
       ) : (
         <>
+          {shouldShowFirstPropertyPrompt ? (
+            <section className="content-card dashboard-first-property-card">
+              <span className="label">First step</span>
+              <h2>Create your first property</h2>
+              <p>
+                You are all set to start, and the next action is to create a property workspace.
+                Use the button below and we will take you directly to that form.
+              </p>
+              <div className="dashboard-first-property-actions">
+                <button
+                  type="button"
+                  className="button-primary inline-button dashboard-first-property-button"
+                  onClick={handleScrollToCreateProperty}
+                >
+                  Create first property
+                </button>
+              </div>
+            </section>
+          ) : null}
+
           <section className="dashboard-grid">
             <article className="feature-card">
               <span className="label">Signed in as</span>
@@ -1451,7 +1509,12 @@ export default function DashboardPage() {
           {actionState ? <p className="status-copy">{actionState}</p> : null}
 
           <section className="content-grid dashboard-content-grid">
-            <form className="form-card" onSubmit={handleCreateProperty}>
+            <form
+              id="create-property-section"
+              ref={createPropertyFormRef}
+              className={`form-card${spotlightCreateProperty ? ' dashboard-create-property-spotlight' : ''}`}
+              onSubmit={handleCreateProperty}
+            >
               <span className="label">Create property</span>
               {propertyCapacity && !propertyCapacity.canCreateActiveProperty ? (
                 <div className="signup-decision-card signup-decision-card-warning">
@@ -1466,6 +1529,7 @@ export default function DashboardPage() {
                 <input
                   type="text"
                   placeholder="1234 Ridgeview Lane"
+                  ref={createPropertyTitleInputRef}
                   value={createForm.title}
                   onChange={(event) =>
                     setCreateForm((current) => ({ ...current, title: event.target.value }))
