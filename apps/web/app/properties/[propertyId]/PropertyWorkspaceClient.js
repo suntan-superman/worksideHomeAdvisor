@@ -2416,6 +2416,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setToast(null);
     setGenerationPrompt(null);
     try {
+      const isFreeTeaserAccess = billingAccess?.planKey === 'free';
       const response = await generateFlyer(propertyId, flyerType, {
         headline: flyerHeadlineDraft,
         subheadline: flyerSubheadlineDraft,
@@ -2427,7 +2428,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       if (response.flyer) {
         setLatestFlyer(response.flyer);
         await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
-        setToast({ tone: 'success', title: 'Flyer generated', message: 'The flyer is ready. You can review it here or download the PDF now.' });
+        setToast({
+          tone: isFreeTeaserAccess ? 'warning' : 'success',
+          title: isFreeTeaserAccess ? 'Teaser brochure ready' : 'Flyer generated',
+          message: isFreeTeaserAccess
+            ? 'Your teaser brochure is ready using the uploaded photos. Upgrade to unlock Vision-enhanced photo selection and additional brochure attempts.'
+            : 'The flyer is ready. You can review it here or download the PDF now.',
+          autoDismissMs: isFreeTeaserAccess ? 0 : undefined,
+        });
         openGenerationPrompt('flyer');
         return;
       }
@@ -2449,25 +2457,38 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       const latestFlyerResponse = await getLatestFlyer(propertyId);
       setLatestFlyer(latestFlyerResponse.flyer || settledJob.result?.flyer || null);
       await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
-      setToast({ tone: 'success', title: 'Flyer generated', message: 'The flyer is ready. You can review it here or download the PDF now.' });
+      setToast({
+        tone: isFreeTeaserAccess ? 'warning' : 'success',
+        title: isFreeTeaserAccess ? 'Teaser brochure ready' : 'Flyer generated',
+        message: isFreeTeaserAccess
+          ? 'Your teaser brochure is ready using the uploaded photos. Upgrade to unlock Vision-enhanced photo selection and additional brochure attempts.'
+          : 'The flyer is ready. You can review it here or download the PDF now.',
+        autoDismissMs: isFreeTeaserAccess ? 0 : undefined,
+      });
       openGenerationPrompt('flyer');
     } catch (requestError) {
-      if (requestError.status === 402 && requestError.details?.suggestedPlan) {
-        const session = getStoredSession();
-        if (session?.user?.id) {
-          setStatus('Opening Stripe checkout...');
-          try {
-            const checkout = await createBillingCheckoutSession({ userId: session.user.id, planKey: requestError.details.suggestedPlan }, session.user.id);
-            if (checkout.url) {
-              window.location.href = checkout.url;
-              return;
-            }
-          } catch (checkoutError) {
-            setToast({ tone: 'error', title: 'Billing required', message: checkoutError.message });
-            setStatus('');
-            return;
-          }
-        }
+      if (requestError.status === 402) {
+        const isTeaserLimitReason =
+          requestError.details?.reason === 'FREE_FLYER_TEASER_USED';
+        const suggestedPlan = requestError.details?.suggestedPlan || '';
+        setToast({
+          tone: 'warning',
+          title: isTeaserLimitReason
+            ? 'Free teaser brochure already used'
+            : 'Upgrade required for brochure generation',
+          message: isTeaserLimitReason
+            ? 'Your free teaser brochure is ready with your uploaded photos. Upgrade to unlock Vision-enhanced selections and additional brochure attempts.'
+            : requestError.message,
+          actionLabel: suggestedPlan ? 'View upgrade options' : '',
+          onAction: suggestedPlan
+            ? () =>
+                router.push(
+                  `/dashboard?upgrade=${encodeURIComponent(suggestedPlan)}`,
+                )
+            : null,
+          autoDismissMs: 0,
+        });
+        return;
       }
       setToast({ tone: 'error', title: 'Flyer generation failed', message: requestError.message });
     } finally {
@@ -2483,6 +2504,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setToast(null);
     setGenerationPrompt(null);
     try {
+      const isFreeTeaserAccess = billingAccess?.planKey === 'free';
       const response = await generateReport(propertyId, {
         title: reportTitleDraft,
         executiveSummary: reportExecutiveSummaryDraft,
@@ -2494,7 +2516,14 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       if (response.report) {
         setLatestReport(response.report);
         await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
-        setToast({ tone: 'success', title: 'Report generated', message: 'The seller intelligence report is ready. You can review it here or download the PDF now.' });
+        setToast({
+          tone: isFreeTeaserAccess ? 'warning' : 'success',
+          title: isFreeTeaserAccess ? 'Teaser report ready' : 'Report generated',
+          message: isFreeTeaserAccess
+            ? 'Your teaser seller report is ready using the uploaded photos. Upgrade to unlock Vision-enhanced photo selection and additional report attempts.'
+            : 'The seller intelligence report is ready. You can review it here or download the PDF now.',
+          autoDismissMs: isFreeTeaserAccess ? 0 : undefined,
+        });
         openGenerationPrompt('report');
         return;
       }
@@ -2516,25 +2545,38 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       const latestReportResponse = await getLatestReport(propertyId);
       setLatestReport(latestReportResponse.report || settledJob.result?.report || null);
       await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
-      setToast({ tone: 'success', title: 'Report generated', message: 'The seller intelligence report is ready. You can review it here or download the PDF now.' });
+      setToast({
+        tone: isFreeTeaserAccess ? 'warning' : 'success',
+        title: isFreeTeaserAccess ? 'Teaser report ready' : 'Report generated',
+        message: isFreeTeaserAccess
+          ? 'Your teaser seller report is ready using the uploaded photos. Upgrade to unlock Vision-enhanced photo selection and additional report attempts.'
+          : 'The seller intelligence report is ready. You can review it here or download the PDF now.',
+        autoDismissMs: isFreeTeaserAccess ? 0 : undefined,
+      });
       openGenerationPrompt('report');
     } catch (requestError) {
-      if (requestError.status === 402 && requestError.details?.suggestedPlan) {
-        const session = getStoredSession();
-        if (session?.user?.id) {
-          setStatus('Opening Stripe checkout...');
-          try {
-            const checkout = await createBillingCheckoutSession({ userId: session.user.id, planKey: requestError.details.suggestedPlan }, session.user.id);
-            if (checkout.url) {
-              window.location.href = checkout.url;
-              return;
-            }
-          } catch (checkoutError) {
-            setToast({ tone: 'error', title: 'Billing required', message: checkoutError.message });
-            setStatus('');
-            return;
-          }
-        }
+      if (requestError.status === 402) {
+        const isTeaserLimitReason =
+          requestError.details?.reason === 'FREE_REPORT_TEASER_USED';
+        const suggestedPlan = requestError.details?.suggestedPlan || '';
+        setToast({
+          tone: 'warning',
+          title: isTeaserLimitReason
+            ? 'Free teaser report already used'
+            : 'Upgrade required for report generation',
+          message: isTeaserLimitReason
+            ? 'Your free teaser seller report is ready with your uploaded photos. Upgrade to unlock Vision-enhanced selections and additional report attempts.'
+            : requestError.message,
+          actionLabel: suggestedPlan ? 'View upgrade options' : '',
+          onAction: suggestedPlan
+            ? () =>
+                router.push(
+                  `/dashboard?upgrade=${encodeURIComponent(suggestedPlan)}`,
+                )
+            : null,
+          autoDismissMs: 0,
+        });
+        return;
       }
       setToast({ tone: 'error', title: 'Report generation failed', message: requestError.message });
     } finally {

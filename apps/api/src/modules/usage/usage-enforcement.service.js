@@ -370,6 +370,58 @@ function applyFreeStarterPricingPolicy(policy) {
   };
 }
 
+function resolveFreeTeaserAllowance({ context, analysisType, featureKey, usage }) {
+  if (context.planCode !== 'free') {
+    return {
+      isApplicable: false,
+      isAvailable: false,
+      usedAttempts: 0,
+      maxAttempts: 0,
+      remainingAttempts: 0,
+      exhaustedReason: '',
+      teaserType: '',
+    };
+  }
+
+  if (analysisType === 'flyer' && featureKey === 'flyer.generate') {
+    const usedAttempts = Math.max(0, Number(usage?.flyersGenerated || 0));
+    const maxAttempts = 1;
+    return {
+      isApplicable: true,
+      teaserType: 'flyer',
+      isAvailable: usedAttempts < maxAttempts,
+      usedAttempts,
+      maxAttempts,
+      remainingAttempts: Math.max(0, maxAttempts - usedAttempts),
+      exhaustedReason: 'FREE_FLYER_TEASER_USED',
+    };
+  }
+
+  if (analysisType === 'report' && featureKey === 'reports.client_ready') {
+    const usedAttempts = Math.max(0, Number(usage?.documentGenerations || 0));
+    const maxAttempts = 1;
+    return {
+      isApplicable: true,
+      teaserType: 'report',
+      isAvailable: usedAttempts < maxAttempts,
+      usedAttempts,
+      maxAttempts,
+      remainingAttempts: Math.max(0, maxAttempts - usedAttempts),
+      exhaustedReason: 'FREE_REPORT_TEASER_USED',
+    };
+  }
+
+  return {
+    isApplicable: false,
+    isAvailable: false,
+    usedAttempts: 0,
+    maxAttempts: 0,
+    remainingAttempts: 0,
+    exhaustedReason: '',
+    teaserType: '',
+  };
+}
+
 export async function enforceAnalysisRequest({
   userId,
   propertyId,
@@ -410,6 +462,12 @@ export async function enforceAnalysisRequest({
     analysisType,
     featureKey,
   );
+  const freeTeaserAllowance = resolveFreeTeaserAllowance({
+    context,
+    analysisType,
+    featureKey,
+    usage,
+  });
 
   if (!isFeatureIncluded) {
     const starterPricingAvailable =
@@ -417,22 +475,35 @@ export async function enforceAnalysisRequest({
       pricingPolicy &&
       pricingPolicy.maxRunsPerPropertyPerUser > 0 &&
       pricingPolicy.runsUsedForProperty < pricingPolicy.maxRunsPerPropertyPerUser;
+    const freeTeaserAvailable =
+      freeTeaserAllowance.isApplicable &&
+      freeTeaserAllowance.isAvailable;
 
-    if (!starterPricingAvailable) {
+    if (!starterPricingAvailable && !freeTeaserAvailable) {
       await UsageTrackingModel.updateOne(
         { _id: usage._id },
         { $inc: { deniedRequests: 1 }, $set: { updatedAt: new Date() } },
       );
 
       const reason =
-        isFreeStarterPricing &&
-        pricingPolicy &&
-        pricingPolicy.runsUsedForProperty >= pricingPolicy.maxRunsPerPropertyPerUser
+        freeTeaserAllowance.isApplicable
+          ? freeTeaserAllowance.exhaustedReason
+          : isFreeStarterPricing &&
+            pricingPolicy &&
+            pricingPolicy.runsUsedForProperty >= pricingPolicy.maxRunsPerPropertyPerUser
           ? 'FREE_PRICING_STARTER_USED'
           : 'FEATURE_NOT_INCLUDED';
       const decision = buildUpgradeDecision(context, reason, analysisType);
       if (pricingPolicy) {
         decision.policy = pricingPolicy;
+      }
+      if (freeTeaserAllowance.isApplicable) {
+        decision.teaser = {
+          type: freeTeaserAllowance.teaserType,
+          usedAttempts: freeTeaserAllowance.usedAttempts,
+          maxAttempts: freeTeaserAllowance.maxAttempts,
+          remainingAttempts: freeTeaserAllowance.remainingAttempts,
+        };
       }
       return decision;
     }

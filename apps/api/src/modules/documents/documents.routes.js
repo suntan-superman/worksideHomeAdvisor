@@ -50,6 +50,18 @@ const reportRequestSchema = z.object({
     .default({}),
 });
 
+function resolveDocumentsUpgradeRequiredMessage(reason) {
+  if (reason === 'FREE_FLYER_TEASER_USED') {
+    return 'Your free teaser brochure is already generated. Upgrade to create additional brochure versions and unlock advanced photo workflows.';
+  }
+
+  if (reason === 'FREE_REPORT_TEASER_USED') {
+    return 'Your free teaser seller report is already generated. Upgrade to create additional report versions and unlock advanced photo workflows.';
+  }
+
+  return 'Plan limit reached or feature not included.';
+}
+
 export async function documentsRoutes(fastify) {
   fastify.post('/:propertyId/flyer/generate', async (request, reply) => {
     try {
@@ -95,7 +107,7 @@ export async function documentsRoutes(fastify) {
 
       if (decision.action === 'DENY_UPGRADE_REQUIRED') {
         return reply.code(402).send({
-          message: 'Plan limit reached or feature not included.',
+          message: resolveDocumentsUpgradeRequiredMessage(decision.reason),
           ...decision,
         });
       }
@@ -211,7 +223,7 @@ export async function documentsRoutes(fastify) {
 
       if (decision.action === 'DENY_UPGRADE_REQUIRED') {
         return reply.code(402).send({
-          message: 'Plan limit reached or feature not included.',
+          message: resolveDocumentsUpgradeRequiredMessage(decision.reason),
           ...decision,
         });
       }
