@@ -1791,6 +1791,58 @@ export async function renderMarketingReportPdf({ property, flyer, filename }) {
   return renderHtmlPdf({ html, filename });
 }
 
+function getPuppeteerLaunchOptions({ protocolTimeout = 120000 } = {}) {
+  return {
+    headless: 'new',
+    executablePath: env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    protocolTimeout,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--font-render-hinting=medium',
+    ],
+  };
+}
+
+export async function probePdfBrowserAvailability({ timeoutMs = 12000 } = {}) {
+  let browser;
+  const startedAt = Date.now();
+  try {
+    browser = await puppeteer.launch(
+      getPuppeteerLaunchOptions({
+        protocolTimeout: Math.max(5000, Number(timeoutMs) || 12000),
+      }),
+    );
+    const page = await browser.newPage();
+    await page.setViewport({ width: 900, height: 640, deviceScaleFactor: 1 });
+    await page.setContent(
+      '<!doctype html><html><head><meta charset="utf-8"></head><body>pdf-health-check</body></html>',
+      { waitUntil: 'domcontentloaded' },
+    );
+    const browserVersion = await browser.version();
+    await page.close();
+
+    return {
+      ok: true,
+      durationMs: Date.now() - startedAt,
+      browserVersion,
+      executablePath: env.PUPPETEER_EXECUTABLE_PATH || 'bundled',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      durationMs: Date.now() - startedAt,
+      executablePath: env.PUPPETEER_EXECUTABLE_PATH || 'bundled',
+      message: error?.message || String(error),
+    };
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
+  }
+}
+
 async function renderHtmlPdf({ html, filename }) {
   let browser;
   const startedAt = Date.now();
@@ -1800,17 +1852,7 @@ async function renderHtmlPdf({ html, filename }) {
       executablePath: env.PUPPETEER_EXECUTABLE_PATH || 'bundled',
       nodeEnv: env.NODE_ENV,
     });
-    browser = await puppeteer.launch({
-      headless: 'new',
-      executablePath: env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      protocolTimeout: 120000,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--font-render-hinting=medium',
-      ],
-    });
+    browser = await puppeteer.launch(getPuppeteerLaunchOptions());
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(120000);
     page.setDefaultTimeout(120000);

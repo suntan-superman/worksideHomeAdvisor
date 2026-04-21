@@ -8,6 +8,7 @@ import { billingRoutes } from './modules/billing/billing.routes.js';
 import { dashboardRoutes } from './modules/dashboard/dashboard.routes.js';
 import { documentsRoutes } from './modules/documents/documents.routes.js';
 import { reportsRoutes } from './modules/documents/reports.routes.js';
+import { probePdfBrowserAvailability } from './modules/documents/html-pdf.service.js';
 import { aiRoutes } from './modules/ai/ai.routes.js';
 import { jobsRoutes } from './modules/jobs/jobs.routes.js';
 import { mediaRoutes } from './modules/media/media.routes.js';
@@ -36,6 +37,29 @@ export function buildApp() {
     service: 'workside-api',
     timestamp: new Date().toISOString(),
   }));
+  app.get('/health/pdf', async (_request, reply) => {
+    const probe = await probePdfBrowserAvailability({
+      timeoutMs: 12000,
+    });
+
+    if (!probe.ok) {
+      return reply.code(503).send({
+        ok: false,
+        service: 'workside-api',
+        subsystem: 'pdf_renderer',
+        timestamp: new Date().toISOString(),
+        ...probe,
+      });
+    }
+
+    return {
+      ok: true,
+      service: 'workside-api',
+      subsystem: 'pdf_renderer',
+      timestamp: new Date().toISOString(),
+      ...probe,
+    };
+  });
 
   app.register(authRoutes, { prefix: '/api/v1/auth' });
   app.register(publicRoutes, { prefix: '/api/v1/public' });

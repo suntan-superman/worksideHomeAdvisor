@@ -221,12 +221,31 @@ Expected shape:
 }
 ```
 
+PDF renderer health check:
+
+```powershell
+curl https://YOUR_CLOUD_RUN_URL/health/pdf
+```
+
+Expected when Puppeteer + Chrome are available:
+
+```json
+{
+  "ok": true,
+  "service": "workside-api",
+  "subsystem": "pdf_renderer"
+}
+```
+
+If this endpoint returns HTTP `503`, treat the revision as unhealthy for browser-PDF rendering and redeploy after fixing Chrome/Puppeteer availability.
+
 Useful runtime checks:
 
 - sign up or log in from the web app
 - request an OTP
 - load a seller dashboard
 - run a pricing analysis
+- download one brochure PDF and one seller report PDF
 
 If any of those fail, check logs immediately.
 
