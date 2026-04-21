@@ -27,6 +27,12 @@
     "react": "19.0.0",
     "react-dom": "19.0.0"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "puppeteer",
+      "sharp"
+    ]
+  },
   "devDependencies": {
     "concurrently": "^9.1.2",
     "eslint": "^9.23.0",

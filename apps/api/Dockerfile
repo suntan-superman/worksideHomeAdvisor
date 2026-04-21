@@ -8,7 +8,9 @@ ENV NODE_ENV=production
 ENV PUPPETEER_CACHE_DIR="/opt/puppeteer"
 
 # ---------- INSTALL PNPM ----------
-RUN corepack enable && corepack prepare pnpm@10.0.0 --activate
+# Keep Docker aligned with the repo's packageManager version to avoid Corepack
+# switching versions at install time.
+RUN corepack enable && corepack prepare pnpm@10.7.1 --activate
 
 # ---------- WORKDIR ----------
 WORKDIR /app
@@ -18,8 +20,9 @@ WORKDIR /app
 COPY . .
 
 # ---------- INSTALL DEPENDENCIES ----------
-# Install all workspace deps
-RUN pnpm install --frozen-lockfile --allow-build=puppeteer,sharp
+# Install all workspace deps. Build-script approvals are configured in the
+# workspace root package.json under `pnpm.onlyBuiltDependencies`.
+RUN pnpm install --frozen-lockfile
 
 # ---------- INSTALL PUPPETEER CHROME ----------
 # Ensure Chrome is present in the image (Cloud Run has no persistent disk).
