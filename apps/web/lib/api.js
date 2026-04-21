@@ -597,8 +597,11 @@ export function getLatestFlyer(propertyId) {
   return request(`/api/v1/properties/${propertyId}/flyer/latest`);
 }
 
-export function getFlyerExportUrl(propertyId, flyerType = 'sale') {
+export function getFlyerExportUrl(propertyId, flyerType = 'sale', options = {}) {
   const search = new URLSearchParams({ flyerType });
+  if (options.disposition) {
+    search.set('disposition', options.disposition);
+  }
   return `${API_BASE_URL}/api/v1/properties/${propertyId}/flyer/export.pdf?${search.toString()}`;
 }
 
@@ -613,24 +616,36 @@ export function getLatestReport(propertyId) {
   return request(`/api/v1/properties/${propertyId}/report/latest`);
 }
 
-export function getReportExportUrl(propertyId) {
-  return `${API_BASE_URL}/api/v1/properties/${propertyId}/report/export.pdf`;
+export function getReportExportUrl(propertyId, options = {}) {
+  const search = new URLSearchParams();
+  if (options.disposition) {
+    search.set('disposition', options.disposition);
+  }
+  return `${API_BASE_URL}/api/v1/properties/${propertyId}/report/export.pdf${search.toString() ? `?${search.toString()}` : ''}`;
 }
 
 export function getPropertySummaryReport(propertyId) {
   return request(`/api/v1/reports/property-summary/${propertyId}`);
 }
 
-export function getPropertySummaryReportExportUrl(propertyId) {
-  return `${API_BASE_URL}/api/v1/reports/property-summary/${propertyId}/export.pdf`;
+export function getPropertySummaryReportExportUrl(propertyId, options = {}) {
+  const search = new URLSearchParams();
+  if (options.disposition) {
+    search.set('disposition', options.disposition);
+  }
+  return `${API_BASE_URL}/api/v1/reports/property-summary/${propertyId}/export.pdf${search.toString() ? `?${search.toString()}` : ''}`;
 }
 
 export function getMarketingReport(propertyId) {
   return request(`/api/v1/reports/marketing/${propertyId}`);
 }
 
-export function getMarketingReportExportUrl(propertyId) {
-  return `${API_BASE_URL}/api/v1/reports/marketing/${propertyId}/export.pdf`;
+export function getMarketingReportExportUrl(propertyId, options = {}) {
+  const search = new URLSearchParams();
+  if (options.disposition) {
+    search.set('disposition', options.disposition);
+  }
+  return `${API_BASE_URL}/api/v1/reports/marketing/${propertyId}/export.pdf${search.toString() ? `?${search.toString()}` : ''}`;
 }
 
 export function generateSocialPack(propertyId) {

@@ -8,6 +8,10 @@ import {
   getLatestPropertyReport,
 } from './report.service.js';
 
+function resolvePdfDisposition(query) {
+  return query?.disposition === 'inline' ? 'inline' : 'attachment';
+}
+
 export async function reportsRoutes(fastify) {
   fastify.get('/property-summary/:propertyId', async (request, reply) => {
     try {
@@ -45,10 +49,11 @@ export async function reportsRoutes(fastify) {
       const { bytes, filename } = await exportPropertyReportPdf({
         propertyId: request.params.propertyId,
       });
+      const disposition = resolvePdfDisposition(request.query);
 
       reply
         .header('Content-Type', 'application/pdf')
-        .header('Content-Disposition', `attachment; filename="${filename}"`);
+        .header('Content-Disposition', `${disposition}; filename="${filename}"`);
 
       return reply.send(Buffer.from(bytes));
     } catch (error) {
@@ -93,10 +98,11 @@ export async function reportsRoutes(fastify) {
         propertyId: request.params.propertyId,
         flyerType: 'sale',
       });
+      const disposition = resolvePdfDisposition(request.query);
 
       reply
         .header('Content-Type', 'application/pdf')
-        .header('Content-Disposition', `attachment; filename="${filename}"`);
+        .header('Content-Disposition', `${disposition}; filename="${filename}"`);
 
       return reply.send(Buffer.from(bytes));
     } catch (error) {

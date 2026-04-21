@@ -4234,7 +4234,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setGenerationPrompt({
         kind,
         title: 'Flyer ready',
-        message: 'Your flyer finished generating. You can stay here or download the PDF now.',
+        message: 'Your flyer finished generating. You can stay here, view the PDF, or download it now.',
         downloadLabel: 'Download PDF',
       });
       return;
@@ -4243,9 +4243,18 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setGenerationPrompt({
       kind,
       title: 'Seller report ready',
-      message: 'Your seller intelligence report finished generating. You can stay here or download the PDF now.',
+      message:
+        'Your seller intelligence report finished generating. You can stay here, view the PDF, or download it now.',
       downloadLabel: 'Download report PDF',
     });
+  }
+
+  function getGeneratedDocumentExportUrl(kind, { disposition } = {}) {
+    if (kind === 'flyer') {
+      return getFlyerExportUrl(propertyId, flyerType, { disposition });
+    }
+
+    return getReportExportUrl(propertyId, { disposition });
   }
 
   async function handleDownloadGeneratedDocument() {
@@ -4257,6 +4266,25 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       await handleDownloadFlyerPdf();
     } else {
       await handleDownloadReportPdf();
+    }
+
+    setGenerationPrompt(null);
+  }
+
+  function handleViewGeneratedDocument() {
+    if (!generationPrompt) {
+      return;
+    }
+
+    const viewUrl = getGeneratedDocumentExportUrl(generationPrompt.kind, { disposition: 'inline' });
+    const openedWindow = window.open(viewUrl, '_blank', 'noopener,noreferrer');
+    if (!openedWindow) {
+      setToast({
+        tone: 'error',
+        title: 'Could not open PDF preview',
+        message: 'Your browser blocked the new tab. Allow pop-ups and try again.',
+      });
+      return;
     }
 
     setGenerationPrompt(null);
@@ -6038,6 +6066,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             <div className="workspace-modal-actions">
               <button type="button" className="button-secondary" onClick={() => setGenerationPrompt(null)}>
                 Stay here
+              </button>
+              <button type="button" className="button-secondary" onClick={handleViewGeneratedDocument}>
+                View PDF
               </button>
               <button type="button" className="button-primary" onClick={handleDownloadGeneratedDocument}>
                 {generationPrompt.downloadLabel}

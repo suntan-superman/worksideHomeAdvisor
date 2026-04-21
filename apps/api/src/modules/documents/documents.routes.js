@@ -57,6 +57,10 @@ const reportRequestSchema = z.object({
     .default({}),
 });
 
+function resolvePdfDisposition(query) {
+  return query?.disposition === 'inline' ? 'inline' : 'attachment';
+}
+
 function resolveDocumentsUpgradeRequiredMessage(reason) {
   if (reason === 'FREE_FLYER_TEASER_USED') {
     return 'Your free teaser brochure is already generated. Upgrade to create additional brochure versions and unlock advanced photo workflows.';
@@ -201,10 +205,11 @@ export async function documentsRoutes(fastify) {
         propertyId: request.params.propertyId,
         flyerType: payload.flyerType,
       });
+      const disposition = resolvePdfDisposition(request.query);
 
       reply
         .header('Content-Type', 'application/pdf')
-        .header('Content-Disposition', `attachment; filename="${filename}"`);
+        .header('Content-Disposition', `${disposition}; filename="${filename}"`);
 
       return reply.send(Buffer.from(bytes));
     } catch (error) {
@@ -314,10 +319,11 @@ export async function documentsRoutes(fastify) {
       const { bytes, filename } = await exportPropertyReportPdf({
         propertyId: request.params.propertyId,
       });
+      const disposition = resolvePdfDisposition(request.query);
 
       reply
         .header('Content-Type', 'application/pdf')
-        .header('Content-Disposition', `attachment; filename="${filename}"`);
+        .header('Content-Disposition', `${disposition}; filename="${filename}"`);
 
       return reply.send(Buffer.from(bytes));
     } catch (error) {
