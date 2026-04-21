@@ -27,7 +27,7 @@ RUN pnpm install --frozen-lockfile
 # ---------- INSTALL PUPPETEER CHROME ----------
 # Ensure Chrome is present in the image (Cloud Run has no persistent disk).
 RUN mkdir -p /opt/puppeteer
-RUN pnpm --filter @workside/api exec puppeteer browsers install chrome
+RUN pnpm --filter @workside/api exec puppeteer browsers install chrome --install-deps
 
 # ---------- VERIFY PUPPETEER ----------
 # Fail the build if browser launch is broken.
