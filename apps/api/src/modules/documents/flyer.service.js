@@ -87,9 +87,11 @@ function chooseFlyerPhotos(
   brochureVariantByAssetId = new Map(),
 ) {
   const rankedAssets = sortFlyerAssets(assets);
-  const selectedAssets = chooseEnhancedFlyerAssets(rankedAssets, selectedPhotoAssetIds);
+  const selectedAssets = chooseEnhancedFlyerAssets(rankedAssets, selectedPhotoAssetIds, {
+    maxCount: 8,
+  });
   return selectedAssets
-    .slice(0, 4)
+    .slice(0, 8)
     .map((asset) => {
       const selectedVariant =
         brochureVariantByAssetId.get(asset.id) || asset.selectedVariant || null;

@@ -46,7 +46,8 @@ function sortAssetsForFlyer(assets = []) {
   return [...(assets || [])].sort((left, right) => buildPhotoScore(right) - buildPhotoScore(left));
 }
 
-function selectBalancedAssets(rankedAssets = [], selectedPhotoAssetIds = []) {
+function selectBalancedAssets(rankedAssets = [], selectedPhotoAssetIds = [], maxCount = 8) {
+  const safeMaxCount = Math.max(1, Number(maxCount) || 8);
   const requestedIds = (selectedPhotoAssetIds || []).filter(Boolean);
   const byId = new Map((rankedAssets || []).map((asset) => [asset.id, asset]));
   const manualSelection = requestedIds.map((id) => byId.get(id)).filter(Boolean);
@@ -56,8 +57,8 @@ function selectBalancedAssets(rankedAssets = [], selectedPhotoAssetIds = []) {
   const orderedPool = [...manualSelection, ...fallbackPool];
 
   const selected = [];
-  const usedBuckets = new Set();
-  const prioritizedBuckets = ['exterior', 'kitchen', 'living', 'bedroom', 'bathroom'];
+  const prioritizedBuckets = ['exterior', 'kitchen', 'living'];
+  const secondaryBuckets = ['bedroom', 'bathroom', 'other'];
 
   for (const bucket of prioritizedBuckets) {
     const candidate = orderedPool.find(
@@ -69,14 +70,28 @@ function selectBalancedAssets(rankedAssets = [], selectedPhotoAssetIds = []) {
       continue;
     }
     selected.push(candidate);
-    usedBuckets.add(bucket);
-    if (selected.length >= 4) {
-      return selected.slice(0, 4);
+    if (selected.length >= safeMaxCount) {
+      return selected.slice(0, safeMaxCount);
+    }
+  }
+
+  for (const bucket of secondaryBuckets) {
+    const candidate = orderedPool.find(
+      (asset) =>
+        !selected.some((picked) => picked.id === asset.id) &&
+        roomBucket(asset.roomLabel) === bucket,
+    );
+    if (!candidate) {
+      continue;
+    }
+    selected.push(candidate);
+    if (selected.length >= safeMaxCount) {
+      return selected.slice(0, safeMaxCount);
     }
   }
 
   for (const asset of orderedPool) {
-    if (selected.length >= 4) {
+    if (selected.length >= safeMaxCount) {
       break;
     }
     if (selected.some((picked) => picked.id === asset.id)) {
@@ -88,10 +103,9 @@ function selectBalancedAssets(rankedAssets = [], selectedPhotoAssetIds = []) {
       continue;
     }
     selected.push(asset);
-    usedBuckets.add(bucket);
   }
 
-  return selected.slice(0, 4);
+  return selected.slice(0, safeMaxCount);
 }
 
 function average(values = []) {
@@ -280,7 +294,7 @@ export function buildFlyerCtaMetadata({
   };
 }
 
-export function chooseEnhancedFlyerAssets(assets = [], selectedPhotoAssetIds = []) {
+export function chooseEnhancedFlyerAssets(assets = [], selectedPhotoAssetIds = [], options = {}) {
   const rankedAssets = sortAssetsForFlyer(assets);
-  return selectBalancedAssets(rankedAssets, selectedPhotoAssetIds);
+  return selectBalancedAssets(rankedAssets, selectedPhotoAssetIds, options.maxCount || 8);
 }

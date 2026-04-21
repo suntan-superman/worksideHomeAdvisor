@@ -231,6 +231,97 @@ function pickMeaningfulLines(items = [], limit = 5) {
     .slice(0, limit);
 }
 
+function normalizeRoomText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function flyerRoomBucket(roomLabel = '') {
+  const room = normalizeRoomText(roomLabel);
+  if (!room) {
+    return 'other';
+  }
+  if (room.includes('exterior') || room.includes('front') || room.includes('backyard') || room.includes('yard')) {
+    return 'exterior';
+  }
+  if (room.includes('kitchen')) {
+    return 'kitchen';
+  }
+  if (room.includes('living') || room.includes('family') || room.includes('great room') || room.includes('main area')) {
+    return 'living';
+  }
+  if (room.includes('primary') || room.includes('bedroom')) {
+    return 'bedroom';
+  }
+  if (room.includes('bath')) {
+    return 'bathroom';
+  }
+  return 'other';
+}
+
+function selectFlyerGalleryPhotos(photos = [], maxCount = 4) {
+  const withImages = (photos || []).filter((photo) => photo?.imageUrl);
+  if (!withImages.length) {
+    return [];
+  }
+
+  const safeMaxCount = Math.max(1, Number(maxCount) || 4);
+  const selected = [];
+  const requiredBuckets = ['exterior', 'kitchen', 'living'];
+  const priorityBuckets = [...requiredBuckets, 'bedroom', 'bathroom', 'other'];
+
+  for (const bucket of priorityBuckets) {
+    const candidate = withImages.find(
+      (photo) =>
+        !selected.some((picked) => picked.imageUrl === photo.imageUrl) &&
+        flyerRoomBucket(photo.roomLabel) === bucket,
+    );
+    if (!candidate) {
+      continue;
+    }
+    selected.push(candidate);
+    if (selected.length >= safeMaxCount) {
+      return selected.slice(0, safeMaxCount);
+    }
+  }
+
+  for (const photo of withImages) {
+    if (selected.length >= safeMaxCount) {
+      break;
+    }
+    if (selected.some((picked) => picked.imageUrl === photo.imageUrl)) {
+      continue;
+    }
+    selected.push(photo);
+  }
+
+  return selected.slice(0, safeMaxCount);
+}
+
+function renderFlyerGalleryTiles(photos = []) {
+  const galleryPhotos = (photos || []).filter((photo) => photo?.imageUrl);
+  if (!galleryPhotos.length) {
+    return '';
+  }
+
+  return `
+    <div class="gallery-strip gallery-strip-polished">
+      ${galleryPhotos
+        .map(
+          (photo) => `
+            <figure class="gallery-item">
+              <img src="${escapeHtml(photo.imageUrl)}" alt="${escapeHtml(photo.roomLabel || 'Gallery photo')}" />
+              <figcaption class="gallery-item-label">${escapeHtml(photo.roomLabel || 'Property photo')}</figcaption>
+            </figure>
+          `,
+        )
+        .join('')}
+    </div>
+  `;
+}
+
 function resolveInsightTheme(line = '') {
   const normalized = String(line || '').toLowerCase();
   if (!normalized) {
@@ -1062,11 +1153,10 @@ function renderPhotoTiles(photos = [], limit = 4) {
             <figure class="photo-tile">
               <img src="${escapeHtml(photo.imageUrl)}" alt="${escapeHtml(photo.roomLabel || 'Property photo')}" />
               <div class="photo-tile-overlay">
-                <span class="photo-score-chip">${escapeHtml(scoreLabel)}</span>
-                <span class="${quality.badgeClass}">${escapeHtml(`${quality.label} · ${quality.priority.shortLabel}`)}</span>
+                <span class="photo-overlay-chip">${escapeHtml(photo.roomLabel || 'Property photo')}</span>
+                <span class="photo-overlay-chip secondary">${escapeHtml(`${quality.label} · ${scoreLabel}`)}</span>
               </div>
               <figcaption>
-                <strong>${escapeHtml(photo.roomLabel || 'Property photo')}</strong>
                 <span class="photo-meta">${escapeHtml(photo.marketplaceStatus || 'Needs review for launch readiness')}</span>
                 <span class="photo-feedback">${escapeHtml(feedback)}</span>
               </figcaption>
@@ -1274,6 +1364,7 @@ function renderHtmlDocument({ title, body }) {
         --moss-soft: #dce8df;
         --risk: #b06254;
         --risk-soft: #f4dfda;
+        --layout-gap: 18px;
       }
       * { box-sizing: border-box; }
       body {
@@ -1285,8 +1376,10 @@ function renderHtmlDocument({ title, body }) {
         word-break: keep-all;
         overflow-wrap: normal;
         hyphens: none;
+        line-height: 1.58;
       }
       p, span, div, li, strong, h1, h2, h3, h4 { white-space: normal; word-break: keep-all; overflow-wrap: normal; hyphens: none; }
+      p { max-width: 72ch; }
       .page {
         width: 8.5in;
         min-height: 11in;
@@ -1318,8 +1411,8 @@ function renderHtmlDocument({ title, body }) {
       h2 { font-family: Georgia, "Times New Roman", serif; font-size: 28px; line-height: 1.1; margin-bottom: 8px; }
       h3 { font-size: 19px; margin-bottom: 8px; }
       h4 { font-size: 15px; margin-bottom: 6px; }
-      .lede { font-size: 15px; line-height: 1.65; color: var(--muted); }
-      .muted { color: var(--muted); font-size: 12px; line-height: 1.5; }
+      .lede { font-size: 15px; line-height: 1.68; color: var(--muted); max-width: 72ch; }
+      .muted { color: var(--muted); font-size: 12px; line-height: 1.58; max-width: 72ch; }
       .hero-photo, .map-frame {
         width: 100%;
         border-radius: 22px;
@@ -1335,6 +1428,13 @@ function renderHtmlDocument({ title, body }) {
       }
       .hero-photo { min-height: 280px; }
       .map-frame { min-height: 280px; }
+      .layout-grid-12 { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--layout-gap); align-items: start; }
+      .col-span-4 { grid-column: span 4; }
+      .col-span-5 { grid-column: span 5; }
+      .col-span-6 { grid-column: span 6; }
+      .col-span-7 { grid-column: span 7; }
+      .col-span-8 { grid-column: span 8; }
+      .col-span-12 { grid-column: span 12; }
       .summary-grid, .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
       .metric-card, .content-card, .sidebar-card, .provider-card, .feature-pill, .empty-card {
         border: 1px solid var(--line);
@@ -1356,23 +1456,23 @@ function renderHtmlDocument({ title, body }) {
       .metric-value-wrap { white-space: normal; overflow-wrap: anywhere; line-height: 1.2; font-size: 19px; }
       .metric-support { margin-top: 8px; font-size: 12px; color: var(--muted); line-height: 1.4; }
       .section-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 14px; }
-      .content-card, .sidebar-card { padding: 18px 20px; }
+      .content-card, .sidebar-card { padding: 20px 22px; display: grid; gap: 10px; }
       .section-stack { display: flex; flex-direction: column; gap: 18px; }
       .bullet-list { margin: 10px 0 0; padding-left: 18px; }
       .bullet-list li { margin: 0 0 8px; color: var(--muted); line-height: 1.5; }
       .feature-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
       .feature-pill { padding: 10px 12px; font-size: 12px; color: var(--ink); background: rgba(255,255,255,0.78); }
-      .photo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-      .photo-tile { margin: 0; border: 1px solid var(--line); background: rgba(255,255,255,0.88); border-radius: 18px; overflow: hidden; position: relative; }
-      .photo-tile img { width: 100%; height: 190px; display: block; object-fit: cover; }
-      .photo-tile-overlay { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
-      .photo-score-chip { display: inline-block; padding: 6px 10px; border-radius: 999px; background: rgba(15,23,42,0.78); color: #fff; font-size: 11px; font-weight: 700; }
+      .photo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+      .photo-tile { margin: 0; border: 1px solid var(--line); background: rgba(255,255,255,0.9); border-radius: 18px; overflow: hidden; position: relative; box-shadow: 0 10px 20px rgba(19,32,43,0.07); }
+      .photo-tile img { width: 100%; height: 205px; display: block; object-fit: cover; }
+      .photo-tile-overlay { position: absolute; top: 10px; left: 10px; display: grid; gap: 6px; align-items: start; justify-items: start; }
+      .photo-overlay-chip { display: inline-block; padding: 5px 10px; border-radius: 999px; background: rgba(15,23,42,0.78); color: #fff; font-size: 10px; font-weight: 700; line-height: 1.2; }
+      .photo-overlay-chip.secondary { background: rgba(47,95,143,0.88); }
       .photo-quality-badge { display: inline-block; padding: 6px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; color: #fff; }
       .photo-quality-retake { background: rgba(176,98,84,0.92); }
       .photo-quality-usable { background: rgba(170,120,36,0.9); }
       .photo-quality-strong { background: rgba(61,120,88,0.9); }
       .photo-tile figcaption { padding: 12px 14px 14px; display: grid; gap: 6px; }
-      .photo-tile figcaption strong { font-size: 14px; }
       .photo-tile figcaption span { font-size: 12px; color: var(--muted); }
       .photo-meta { font-size: 11px; color: #6f7c7a; }
       .photo-feedback { font-size: 12px; color: var(--ink); line-height: 1.45; }
@@ -1459,15 +1559,12 @@ function renderHtmlDocument({ title, body }) {
         border: 1px solid rgba(79,123,98,0.2);
         background: rgba(255,255,255,0.9);
       }
-      .gallery-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-      .gallery-strip img {
-        width: 100%;
-        height: 210px;
-        object-fit: cover;
-        display: block;
-        border-radius: 16px;
-        border: 1px solid var(--line);
-      }
+      .gallery-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+      .gallery-strip img { width: 100%; height: 220px; object-fit: cover; display: block; border-radius: 16px; border: 1px solid var(--line); }
+      .gallery-strip-polished { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+      .gallery-item { margin: 0; position: relative; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 10px 20px rgba(19,32,43,0.08); background: rgba(255,255,255,0.95); }
+      .gallery-item img { width: 100%; height: 220px; object-fit: cover; display: block; border-radius: 0; border: 0; }
+      .gallery-item-label { position: absolute; top: 10px; left: 10px; margin: 0; padding: 6px 10px; border-radius: 999px; background: rgba(15,23,42,0.74); color: #fff; font-size: 10px; font-weight: 700; line-height: 1.2; max-width: calc(100% - 20px); }
       .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
       .map-frame.compact { min-height: 220px; }
       .badge-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
@@ -1490,7 +1587,9 @@ function renderHtmlDocument({ title, body }) {
       .brochure-bottom-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 16px; }
       .highlight-list li { margin-bottom: 10px; }
       .gallery-strip.two-up { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-      .compact-copy { font-size: 12px; line-height: 1.52; color: var(--muted); }
+      .compact-copy { font-size: 12px; line-height: 1.58; color: var(--muted); max-width: 72ch; }
+      .brochure-main-grid, .brochure-conversion-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--layout-gap); align-items: start; }
+      .brochure-main-grid > .content-card, .brochure-main-grid > .brochure-cta-card, .brochure-conversion-grid > .content-card, .brochure-conversion-grid > .brochure-cta-card { margin: 0; }
       .page-spacer { height: 10px; }
       .insight-list { display: grid; gap: 10px; margin-top: 10px; }
       .insight-row { display: grid; grid-template-columns: 12px 1fr; gap: 10px; align-items: start; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,0.72); border: 1px solid rgba(79,123,98,0.14); }
@@ -1842,52 +1941,6 @@ function buildPropertySummaryHtml({ property, report }) {
     <section class="page">
       <div class="brand-bar">
         <div>
-          <div class="section-kicker">Quick summary</div>
-          <h2>At a glance</h2>
-          <p class="muted">Readiness, top issues, top actions, and ROI in one page.</p>
-        </div>
-      </div>
-      <div class="metric-grid">
-        ${renderMetricCard('Overall readiness', `${readinessSummary.overallScore || 0}/100`, readinessSummary.label || 'Needs work', readinessTone)}
-        ${renderMetricCard('Photo quality score', `${photoSummary.averageQualityScore || 0}/100`, `${photoSummary.retakeCount || 0} retakes needed`)}
-        ${renderMetricCard('Checklist completion', `${checklistSummary.progressPercent || 0}%`, `${checklistSummary.completedCount || 0}/${checklistSummary.totalCount || 0} complete`)}
-        ${renderMetricCard('Launch status', readinessSummary.label || 'Needs work', topThreeIssues[0] || 'Address top action items before launch.', readinessTone)}
-      </div>
-      <div class="quick-summary-grid" style="margin-top:14px;">
-        <div class="content-card">
-          <div class="section-kicker">Top issues</div>
-          <h3>What may hold launch back</h3>
-          ${renderChecklistItems(topThreeIssues, 'No major issues are currently dominant.')}
-        </div>
-        <div class="content-card">
-          <div class="section-kicker">Top actions</div>
-          <h3>What to do next</h3>
-          ${renderChecklistItems(topThreeActionLines.length ? topThreeActionLines : orderedNextSteps.slice(0, 3), 'Use the guided workflow to keep the launch plan moving.')}
-        </div>
-      </div>
-      <div class="roi-hero-card" style="margin-top:14px;">
-        <div class="section-kicker">ROI snapshot</div>
-        <div class="roi-hero-value">${escapeHtml(roiUpside ? `~${formatCurrency(roiUpside)} potential upside` : 'Potential upside pending')}</div>
-        <div class="roi-hero-sub">${escapeHtml(roiCost ? `Estimated prep cost: ${formatCurrency(roiCost)}` : 'Estimated prep cost pending')}</div>
-        ${roiComparisonLine ? `<div class="roi-hero-sub"><strong>${escapeHtml(roiComparisonLine)}</strong></div>` : ''}
-        <div class="roi-hero-sub">${escapeHtml(`Estimated value at risk: ${roiUpside ? formatCurrency(roiUpside) : 'Pending'}`)}</div>
-        <div class="roi-bar-shell">
-          <div>
-            <div class="metric-label">Potential upside</div>
-            <div class="roi-bar"><div class="roi-bar-fill-upside" style="width:${roiUpsideWidth}%;"></div></div>
-          </div>
-          <div>
-            <div class="metric-label">Estimated prep cost</div>
-            <div class="roi-bar"><div class="roi-bar-fill-cost" style="width:${roiCostWidth}%;"></div></div>
-          </div>
-        </div>
-      </div>
-      ${renderFooter('Property Summary Report · Quick Summary')}
-    </section>
-
-    <section class="page">
-      <div class="brand-bar">
-        <div>
           <div class="section-kicker">Summary</div>
           <h2>Executive summary, insights, and recommendations</h2>
           <p class="muted">A seller-facing readout of the strongest signals, risks, and next opportunities.</p>
@@ -2064,26 +2117,6 @@ function buildPropertySummaryHtml({ property, report }) {
     <section class="page">
       <div class="brand-bar">
         <div>
-          <div class="section-kicker">Preparation action cards</div>
-          <h2>Ranked recommendations by category</h2>
-          <p class="muted">Recommendations are grouped by category and ordered by estimated ROI and urgency.</p>
-        </div>
-      </div>
-      ${renderPriorityLegend()}
-      <div class="content-card">
-        <div class="section-kicker">Structured recommendations</div>
-        <h3>Action cards</h3>
-        ${renderRecommendationActionCards(
-          sortedRecommendationActions,
-          'Action cards were auto-generated from available recommendations.',
-        )}
-      </div>
-      ${renderFooter('Property Summary Report · Prep Action Cards')}
-    </section>
-
-    <section class="page">
-      <div class="brand-bar">
-        <div>
           <div class="section-kicker">Photo analysis</div>
           <h2>Scored photo gallery</h2>
           <p class="muted">Each selected photo includes quality score, readiness label, and one-line feedback.</p>
@@ -2185,17 +2218,11 @@ function buildPropertySummaryHtml({ property, report }) {
           )}
         </div>
         <div class="content-card">
-          <div class="section-kicker">Seller guidance</div>
-          <h3>Final reminder before launch</h3>
-          ${renderBulletList(
-            pickMeaningfulLines([
-              'Review pricing, photos, and checklist progress together before launch.',
-              'Use nearby provider support if any prep item is slowing the listing launch.',
-              consequenceFraming.summary || '',
-              'Regenerate the brochure and seller report after major pricing or photo updates.',
-              'Treat this report as the operating plan for the next showing-ready phase.',
-            ], 6),
-            '',
+          <div class="section-kicker">Priority action cards</div>
+          <h3>Highest-impact prep moves</h3>
+          ${renderRecommendationActionCards(
+            sortedRecommendationActions.slice(0, 4),
+            'Use these structured actions to keep launch readiness improving.',
           )}
         </div>
       </div>
@@ -2260,10 +2287,19 @@ function buildMarketingReportHtml({ property, flyer }) {
       ? 'Premium mode: polished presentation designed to convert high-intent buyer interest.'
       : 'Launch-ready mode: private showings and property-package requests available now.';
   const selectedPhotos = (flyer.selectedPhotos || []).filter((photo) => photo?.imageUrl);
-  const coverPhotos = selectedPhotos.slice(0, 4);
+  const prioritizedPhotos = selectFlyerGalleryPhotos(selectedPhotos, 8);
+  const coverPhotos = prioritizedPhotos.slice(0, 4);
   const hasFourPhotoCover = coverPhotos.length >= 4;
   const heroPhoto = coverPhotos[0];
-  const galleryPhotos = hasFourPhotoCover ? selectedPhotos.slice(4, 8) : selectedPhotos.slice(1, 5);
+  const gallerySeed = hasFourPhotoCover ? prioritizedPhotos.slice(4, 8) : prioritizedPhotos.slice(1, 5);
+  const galleryPhotos = gallerySeed.length
+    ? gallerySeed
+    : selectFlyerGalleryPhotos(prioritizedPhotos.slice(1), 4);
+  const resolvedGalleryPhotos = galleryPhotos.length ? galleryPhotos : selectFlyerGalleryPhotos(prioritizedPhotos, 4);
+  const galleryStatusNote =
+    flyerMode === 'preview' || resolvedGalleryPhotos.length < 4
+      ? 'Current preview gallery — final images coming soon'
+      : '';
   const featureTags = pickMeaningfulLines(flyer.highlights || [], 6);
   const topReasonsToBuy = [
     ...(featureTags || []),
@@ -2281,7 +2317,7 @@ function buildMarketingReportHtml({ property, flyer }) {
     property?.selectedListPrice ? `Seller-confirmed list price ${formatCurrency(property.selectedListPrice)}` : '',
     lifestyleContext,
   ], 6);
-  const shouldRenderMapPage = Boolean(neighborhoodMapImageUrl && galleryPhotos.length >= 4);
+  const shouldRenderMapPage = Boolean(neighborhoodMapImageUrl && prioritizedPhotos.length >= 4);
   const brochureFactBadges = pickMeaningfulLines([
     property?.bedrooms ? `${property.bedrooms} bedrooms` : '',
     property?.bathrooms ? `${property.bathrooms} bathrooms` : '',
@@ -2353,70 +2389,71 @@ function buildMarketingReportHtml({ property, flyer }) {
           <p class="muted">A buyer-facing layout designed to support interest, clarity, and showing requests.</p>
         </div>
       </div>
-      <div class="single-column">
-        <div class="content-card marketing-gallery-card">
+      <div class="brochure-main-grid layout-grid-12">
+        <div class="content-card col-span-5">
+          <div class="section-kicker">Key highlights</div>
+          <h3>Most marketable features</h3>
+          ${renderFeatureIconGrid(
+            featureTags.length ? featureTags : topReasonsToBuy,
+            'This section captures the strongest reasons a buyer would choose this home right now.',
+          )}
+          ${flyerMode === 'preview' ? `<p class="compact-copy"><strong>${escapeHtml(previewUrgencyLine)}</strong></p>` : ''}
+        </div>
+        <div class="content-card marketing-gallery-card col-span-7">
           <div class="section-kicker">Photo gallery</div>
           <h3>Curated image sequence</h3>
-          <div class="page-spacer"></div>
           ${
-            galleryPhotos.length
-              ? `
-                <div class="gallery-strip">
-                  ${galleryPhotos
-                    .map(
-                      (photo) =>
-                        `<img src="${escapeHtml(photo.imageUrl)}" alt="${escapeHtml(photo.roomLabel || 'Gallery photo')}" />`,
-                    )
-                    .join('')}
-                </div>
-              `
-              : `<div class="empty-card">The brochure is currently using the strongest available photo set while additional gallery selections are still being curated.</div>`
+            galleryStatusNote
+              ? `<p class="muted"><strong>${escapeHtml(galleryStatusNote)}</strong></p>`
+              : ''
+          }
+          ${
+            resolvedGalleryPhotos.length
+              ? renderFlyerGalleryTiles(resolvedGalleryPhotos)
+              : `<div class="empty-card">Current preview gallery — final images coming soon</div>`
           }
         </div>
-        <div class="brochure-bottom-grid">
-          <div class="content-card">
-            <div class="section-kicker">Key features</div>
-            <h3>Most marketable highlights</h3>
-            ${renderFeatureIconGrid(featureTags.length ? featureTags : topReasonsToBuy, 'This section captures the strongest reasons a buyer would choose this home right now.')}
+      </div>
+      <div class="brochure-conversion-grid layout-grid-12" style="margin-top:16px;">
+        <div class="content-card col-span-7">
+          <div class="section-kicker">Pricing positioning</div>
+          <h3>${escapeHtml(flyer.priceText || 'Pricing on request')}</h3>
+          ${renderInsightList(
+            pickMeaningfulLines([
+              property?.selectedListPrice
+                ? `Competitively positioned at ${formatCurrency(property.selectedListPrice)} to balance value perception and buyer demand.`
+                : 'Positioned to align with recent comparable sales and current buyer demand.',
+              topReasonsToBuy[0] ? `Buyer signal: ${topReasonsToBuy[0]}` : '',
+              'Use this brochure format to turn early interest into qualified showing requests.',
+            ], 3),
+            '',
+          )}
+          <div class="page-spacer"></div>
+          <div class="section-kicker">Neighborhood context</div>
+          <p class="compact-copy">${escapeHtml(lifestyleContext)}</p>
+          ${
+            neighborhoodMapImageUrl
+              ? `
+                <div class="map-frame compact" style="margin-top:12px;">
+                  <img src="${escapeHtml(neighborhoodMapImageUrl)}" alt="Neighborhood map" onerror="this.closest('.map-frame').style.display='none';" />
+                </div>
+              `
+              : ''
+          }
+        </div>
+        <div class="brochure-cta-card col-span-5">
+          <div class="section-kicker">Call to action</div>
+          <h3>${escapeHtml(ctaLabel)}</h3>
+          ${flyerMode === 'preview' ? `<p class="compact-copy" style="margin-top:8px;"><strong>${escapeHtml(previewUrgencyLine)}</strong></p>` : ''}
+          <p class="muted" style="margin-top:8px;">Prepared by Workside Home Advisor to support marketplace-ready marketing collateral and brochure refinement.</p>
+          <div class="badge-row">
+            <div class="badge badge-address">${escapeHtml(propertyAddress)}</div>
+            <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
+            <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
           </div>
-          <div class="content-card">
-            <div class="section-kicker">Pricing positioning</div>
-            <h3>${escapeHtml(flyer.priceText || 'Pricing on request')}</h3>
-            ${renderInsightList(
-              pickMeaningfulLines([
-                property?.selectedListPrice
-                  ? `Competitively positioned at ${formatCurrency(property.selectedListPrice)} to balance value perception and buyer demand.`
-                  : 'Positioned to align with recent comparable sales and current buyer demand.',
-                topReasonsToBuy[0] ? `Buyer signal: ${topReasonsToBuy[0]}` : '',
-              ], 3),
-              '',
-            )}
-            <div class="page-spacer"></div>
-            <div class="section-kicker">Neighborhood context</div>
-            <p class="compact-copy" style="margin-top:8px;">${escapeHtml(lifestyleContext)}</p>
-            ${
-              neighborhoodMapImageUrl
-                ? `
-                  <div class="map-frame compact" style="margin-top:14px;">
-                    <img src="${escapeHtml(neighborhoodMapImageUrl)}" alt="Neighborhood map" onerror="this.closest('.map-frame').style.display='none';" />
-                  </div>
-                `
-                : ''
-            }
-            <div class="page-spacer"></div>
-            <div class="section-kicker">Call to action</div>
-            <h3>${escapeHtml(ctaLabel)}</h3>
-            ${flyerMode === 'preview' ? `<p class="compact-copy" style="margin-top:8px;"><strong>${escapeHtml(previewUrgencyLine)}</strong></p>` : ''}
-            <p class="muted" style="margin-top:8px;">Prepared by Workside Home Advisor to support marketplace-ready marketing collateral and brochure refinement.</p>
-            <div class="badge-row">
-              <div class="badge badge-address">${escapeHtml(propertyAddress)}</div>
-              <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
-              <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
-            </div>
-            <div class="cta-button-row">
-              <div class="brochure-cta-button">${escapeHtml(ctaButtonLabel)}</div>
-              <div class="brochure-cta-button secondary">${escapeHtml(ctaSecondaryLabel)}</div>
-            </div>
+          <div class="cta-button-row">
+            <div class="brochure-cta-button">${escapeHtml(ctaButtonLabel)}</div>
+            <div class="brochure-cta-button secondary">${escapeHtml(ctaSecondaryLabel)}</div>
           </div>
         </div>
       </div>
