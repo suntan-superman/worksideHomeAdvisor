@@ -33,6 +33,14 @@ import {
   sanitizeFilePart,
   wrapText,
 } from './pdf-theme.js';
+import {
+  buildFlyerCtaMetadata,
+  buildFlyerModeCopy,
+  chooseEnhancedFlyerAssets,
+  deriveFlyerReadiness,
+  flyerModeLabel,
+  selectFlyerMode,
+} from './flyer-enhancement-helpers.js';
 
 function serializeFlyer(document) {
   if (!document) {
@@ -54,6 +62,11 @@ function serializeFlyer(document) {
     summary: document.summary,
     highlights: document.highlights || [],
     selectedPhotos: document.selectedPhotos || [],
+    mode: document.mode || 'launch_ready',
+    modeLabel: document.modeLabel || '',
+    readinessScore: Number(document.readinessScore || 0),
+    readinessSignals: document.readinessSignals || {},
+    ctaMetadata: document.ctaMetadata || {},
     callToAction: document.callToAction,
     disclaimer: document.disclaimer,
     customizations: document.customizations || {},
@@ -73,17 +86,8 @@ function chooseFlyerPhotos(
   brochureVariantByAssetId = new Map(),
 ) {
   const rankedAssets = sortFlyerAssets(assets);
-  const requestedPhotoIds = (selectedPhotoAssetIds || []).filter(Boolean);
-  const manualSelection = requestedPhotoIds.length
-    ? requestedPhotoIds
-        .map((assetId) => rankedAssets.find((asset) => asset.id === assetId))
-        .filter(Boolean)
-    : [];
-  const fallbackSelection = rankedAssets.filter(
-    (asset) => !manualSelection.some((selectedAsset) => selectedAsset.id === asset.id),
-  );
-
-  return [...manualSelection, ...fallbackSelection]
+  const selectedAssets = chooseEnhancedFlyerAssets(rankedAssets, selectedPhotoAssetIds);
+  return selectedAssets
     .slice(0, 4)
     .map((asset) => {
       const selectedVariant =
@@ -125,19 +129,33 @@ function buildPriceText(property, pricing, flyerType) {
 }
 
 function buildFallbackFlyer({ property, pricing, flyerType, selectedPhotos }) {
+  const readinessSignals = deriveFlyerReadiness(selectedPhotos);
+  const mode = selectFlyerMode(readinessSignals);
+  const modeLabel = flyerModeLabel(mode);
+  const locationLine = `${property.addressLine1}, ${property.city}, ${property.state} ${property.zip}`;
+  const modeCopy = buildFlyerModeCopy({
+    flyerType,
+    mode,
+    propertyTitle: property.title,
+    locationLine,
+  });
+  const ctaMetadata = buildFlyerCtaMetadata({
+    flyerType,
+    mode,
+    propertyId: property?.id || property?._id?.toString?.() || '',
+  });
+
   return {
     flyerType,
+    mode,
+    modeLabel,
+    readinessScore: readinessSignals.readinessScore,
+    readinessSignals,
     headline: property.title,
-    subheadline:
-      flyerType === 'rental'
-        ? 'A move-in-ready rental opportunity with strong everyday livability.'
-        : 'A seller-ready home with pricing, presentation, and prep guidance already in motion.',
+    subheadline: modeCopy.subheadline,
     priceText: buildPriceText(property, pricing, flyerType),
-    locationLine: `${property.addressLine1}, ${property.city}, ${property.state} ${property.zip}`,
-    summary:
-      flyerType === 'rental'
-        ? 'This home offers a practical layout, strong curb appeal, and a set of features that should market well to qualified renters.'
-        : 'This home combines a practical layout, neighborhood alignment, and seller-ready prep opportunities that support a confident launch.',
+    locationLine,
+    summary: modeCopy.summary,
     highlights: [
       `${property.bedrooms || '--'} bedrooms`,
       `${property.bathrooms || '--'} bathrooms`,
@@ -145,10 +163,8 @@ function buildFallbackFlyer({ property, pricing, flyerType, selectedPhotos }) {
       property.propertyType || 'single family',
     ],
     selectedPhotos,
-    callToAction:
-      flyerType === 'rental'
-        ? 'Schedule a tour or request rental details.'
-        : 'Schedule a showing or request the full property package.',
+    ctaMetadata,
+    callToAction: modeCopy.callToAction || ctaMetadata.label,
     disclaimer:
       'Information is believed to be reliable but should be independently verified. Generated marketing content should be reviewed before public use.',
     source: 'fallback',
@@ -435,6 +451,25 @@ export async function generatePropertyFlyer({
     flyerType,
     selectedPhotos,
   });
+  const modeCopy = buildFlyerModeCopy({
+    flyerType,
+    mode: fallbackFlyer.mode,
+    propertyTitle: property.title,
+    locationLine: fallbackFlyer.locationLine,
+  });
+  const baseCtaMetadata = buildFlyerCtaMetadata({
+    flyerType,
+    mode: fallbackFlyer.mode,
+    propertyId,
+  });
+  const ctaMetadata = {
+    ...baseCtaMetadata,
+    ...(fallbackFlyer.ctaMetadata || {}),
+    label:
+      normalizedCustomizations.callToAction ||
+      fallbackFlyer.ctaMetadata?.label ||
+      baseCtaMetadata.label,
+  };
 
   let marketing;
   try {
@@ -460,24 +495,29 @@ export async function generatePropertyFlyer({
   const flyerPayload = marketing
     ? {
         flyerType,
+        mode: fallbackFlyer.mode,
+        modeLabel: fallbackFlyer.modeLabel,
+        readinessScore: fallbackFlyer.readinessScore,
+        readinessSignals: fallbackFlyer.readinessSignals,
         headline:
           normalizedCustomizations.headline || marketing.headline || fallbackFlyer.headline,
         subheadline:
           normalizedCustomizations.subheadline ||
-          marketing.shortDescription ||
+          (fallbackFlyer.mode === 'preview' ? modeCopy.subheadline : marketing.shortDescription) ||
           fallbackFlyer.subheadline,
         priceText: buildPriceText(property, pricing, flyerType),
         locationLine: fallbackFlyer.locationLine,
         summary:
           normalizedCustomizations.summary ||
-          marketing.shortDescription ||
+          (fallbackFlyer.mode === 'preview' ? modeCopy.summary : marketing.shortDescription) ||
           fallbackFlyer.summary,
         highlights: marketing.featureHighlights?.length
           ? marketing.featureHighlights
           : fallbackFlyer.highlights,
         selectedPhotos,
+        ctaMetadata,
         callToAction:
-          normalizedCustomizations.callToAction || fallbackFlyer.callToAction,
+          normalizedCustomizations.callToAction || modeCopy.callToAction || fallbackFlyer.callToAction,
         disclaimer: marketing.disclaimer || fallbackFlyer.disclaimer,
         customizations: normalizedCustomizations,
         source: marketing.source || 'fallback',
@@ -485,10 +525,14 @@ export async function generatePropertyFlyer({
       }
     : {
         ...fallbackFlyer,
+        ctaMetadata,
         headline: normalizedCustomizations.headline || fallbackFlyer.headline,
         subheadline: normalizedCustomizations.subheadline || fallbackFlyer.subheadline,
         summary: normalizedCustomizations.summary || fallbackFlyer.summary,
-        callToAction: normalizedCustomizations.callToAction || fallbackFlyer.callToAction,
+        callToAction:
+          normalizedCustomizations.callToAction ||
+          modeCopy.callToAction ||
+          fallbackFlyer.callToAction,
         customizations: normalizedCustomizations,
         rawMarketing: null,
       };
@@ -635,7 +679,10 @@ async function renderFallbackMarketingFlyerPdf({ property, flyer, filename }) {
     width: 160,
     label: 'Home details',
     value: `${property?.bedrooms || '--'} bd • ${property?.bathrooms || '--'} ba`,
-    supportText: property?.squareFeet ? `${property.squareFeet} sqft` : '',
+    supportText: [
+      property?.squareFeet ? `${property.squareFeet} sqft` : '',
+      flyer?.modeLabel ? `${flyer.modeLabel} mode` : '',
+    ].filter(Boolean).join(' · '),
     colors,
   });
   drawMetricCard(page, { headingFont, bodyFont }, {
@@ -650,7 +697,7 @@ async function renderFallbackMarketingFlyerPdf({ property, flyer, filename }) {
   const ctaCardX = PDF_PAGE_MARGIN + 352;
   const ctaCardY = 332;
   const ctaCardWidth = 176;
-  const ctaText = flyer.callToAction || 'Schedule a showing';
+  const ctaText = flyer.callToAction || flyer?.ctaMetadata?.label || 'Schedule a showing';
   const ctaLines = wrapText(ctaText, 20);
   const ctaVisibleLines = ctaLines.slice(0, 3);
   if (ctaLines.length > ctaVisibleLines.length && ctaVisibleLines.length) {

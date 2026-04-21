@@ -36,6 +36,11 @@ import {
   PDF_PAGE_MARGIN,
   sanitizeFilePart,
 } from './pdf-theme.js';
+import {
+  buildConsequenceFraming,
+  buildDecisionDrivenEconomics,
+  buildRecommendationActions,
+} from './report-improvement-helpers.js';
 import { ReportModel } from './report.model.js';
 
 const CORE_ROOM_LABELS = ['Living room', 'Kitchen', 'Primary bedroom', 'Bathroom', 'Exterior'];
@@ -323,7 +328,13 @@ function buildPropertyDetails(property, marketingHighlights = []) {
   };
 }
 
-function buildImprovementEconomics({ property, improvementItems = [], photoSummary, checklist }) {
+function buildImprovementEconomics({
+  property,
+  improvementItems = [],
+  photoSummary,
+  checklist,
+  readinessSummary,
+}) {
   const budgetCeiling = Number(property?.sellerProfile?.budgetMax || 0);
   const openChecklistCount = Number(checklist?.summary?.openCount || 0);
   const retakeCount = Number(photoSummary?.retakeCount || 0);
@@ -334,10 +345,17 @@ function buildImprovementEconomics({ property, improvementItems = [], photoSumma
       : Math.round(Math.max(750, roughImprovementCount * 425));
   const estimatedRoi =
     estimatedCost > 0 ? Math.round(estimatedCost * 1.6) : 0;
+  const decisionDrivenEconomics = buildDecisionDrivenEconomics({
+    estimatedCost,
+    estimatedRoi,
+    readinessSummary,
+  });
 
   return {
     estimatedCost,
     estimatedRoi,
+    netUpside: decisionDrivenEconomics.netUpside,
+    decisionMessage: decisionDrivenEconomics.decisionMessage,
     summary:
       estimatedCost > 0
         ? `A focused pre-listing investment of about ${formatCurrency(estimatedCost)} could support roughly ${formatCurrency(estimatedRoi)} in presentation-driven value protection or upside.`
@@ -345,7 +363,13 @@ function buildImprovementEconomics({ property, improvementItems = [], photoSumma
   };
 }
 
-function buildRiskOpportunitySummary({ pricing, photoSummary, improvementItems = [], checklist }) {
+function buildRiskOpportunitySummary({
+  pricing,
+  photoSummary,
+  improvementItems = [],
+  checklist,
+  consequenceFraming,
+}) {
   const biggestRisk = photoSummary?.retakeCount
     ? `${photoSummary.retakeCount} photo retake recommendation${photoSummary.retakeCount === 1 ? '' : 's'} still need attention before launch.`
     : pricing?.risks?.[0] || 'The launch plan still needs review before going to market.';
@@ -359,6 +383,9 @@ function buildRiskOpportunitySummary({ pricing, photoSummary, improvementItems =
     biggestRisk,
     biggestOpportunity,
     narrative: `Primary risk: ${biggestRisk} Primary opportunity: ${biggestOpportunity}`,
+    consequence:
+      consequenceFraming?.summary ||
+      'Incomplete prep may reduce buyer confidence and delay launch momentum.',
   };
 }
 
@@ -381,7 +408,23 @@ function buildBuyerPersonaSummary({ property, marketingGuidance, pricing }) {
   };
 }
 
-function buildNextStepPlan({ checklist, improvementItems = [], providerRecommendations = [], photoSummary }) {
+function buildNextStepPlan({
+  checklist,
+  improvementItems = [],
+  providerRecommendations = [],
+  photoSummary,
+  recommendationActions = [],
+}) {
+  const actionPlanSteps = (recommendationActions || []).slice(0, 3).map((action, index) => ({
+    order: index + 1,
+    title: action.title,
+    eta: action.urgency === 'high' ? '1-2 days' : '2-5 days',
+    owner: action.recommendedActionType === 'provider_booking' ? 'seller + provider' : 'seller',
+  }));
+  if (actionPlanSteps.length) {
+    return actionPlanSteps.slice(0, 5);
+  }
+
   const openChecklistItems = (checklist?.items || [])
     .filter((item) => item.status !== 'done')
     .slice(0, 3)
@@ -441,21 +484,48 @@ async function buildProviderRecommendations(propertyId) {
   );
 
   return results
-    .flatMap(({ config, result }) =>
-      (result?.items || []).slice(0, 1).map((provider) => ({
+    .flatMap(({ config, result }) => {
+      const internalProvider = (result?.items || [])[0] || null;
+      const fallbackProvider = (result?.externalItems || [])[0] || null;
+      const selectedProvider = internalProvider || fallbackProvider;
+      if (!selectedProvider) {
+        return [];
+      }
+
+      const sourceType = internalProvider ? 'marketplace' : 'nearby_discovery';
+      const sourceLabel = sourceType === 'marketplace' ? 'Workside marketplace' : 'Nearby discovery';
+      const ratingScore = Number(selectedProvider.qualityScore || 0);
+      const hasRating = ratingScore > 0;
+      const confidenceNote = sourceType === 'marketplace'
+        ? hasRating
+          ? `${ratingScore}/100 Workside quality score.`
+          : 'Matched from curated marketplace coverage.'
+        : selectedProvider.rating
+          ? `${Number(selectedProvider.rating).toFixed(1)} Google rating from nearby discovery.`
+          : 'Nearby discovery fallback match.';
+
+      return [{
         categoryKey: config.categoryKey,
-        categoryLabel: result?.source?.categoryLabel || provider.categoryKey,
-        businessName: provider.businessName,
-        coverageLabel: provider.coverageLabel || '',
-        phone: provider.phone || '',
-        email: provider.email || '',
-        ratingLabel: provider.qualityScore ? `${provider.qualityScore}/100 Workside score` : '',
-        turnaroundLabel: provider.turnaroundLabel || '',
-        pricingSummary: provider.pricingSummary || '',
+        categoryLabel: result?.source?.categoryLabel || selectedProvider.categoryKey || config.categoryKey,
+        businessName: selectedProvider.businessName,
+        coverageLabel: selectedProvider.coverageLabel || '',
+        phone: selectedProvider.phone || '',
+        email: selectedProvider.email || '',
+        mapsUrl: selectedProvider.mapsUrl || '',
+        websiteUrl: selectedProvider.websiteUrl || '',
+        ratingLabel: hasRating ? `${ratingScore}/100 Workside score` : '',
+        turnaroundLabel: selectedProvider.turnaroundLabel || '',
+        pricingSummary: selectedProvider.pricingSummary || '',
         reason: config.reason,
-      })),
-    )
-    .slice(0, 3);
+        reasonMatched: internalProvider
+          ? `Matched in ${sourceLabel} for ${result?.source?.categoryLabel || config.categoryKey}.`
+          : `No curated match was available, so ${sourceLabel.toLowerCase()} was used for ${result?.source?.categoryLabel || config.categoryKey}.`,
+        sourceType,
+        sourceLabel,
+        confidenceNote,
+      }];
+    })
+    .slice(0, 4);
 }
 
 function normalizeReportCustomizations(customizations = {}) {
@@ -472,7 +542,16 @@ function normalizeReportCustomizations(customizations = {}) {
   };
 }
 
-function buildExecutiveSummary({ property, pricing, photoSummary, checklist, readinessSummary, strongestOpportunity, biggestRisk }) {
+function buildExecutiveSummary({
+  property,
+  pricing,
+  photoSummary,
+  checklist,
+  readinessSummary,
+  strongestOpportunity,
+  biggestRisk,
+  consequenceFraming,
+}) {
   return [
     `${property.title} is currently rated ${readinessSummary.label.toLowerCase()} at ${readinessSummary.overallScore}/100.`,
     property?.selectedListPrice
@@ -486,6 +565,7 @@ function buildExecutiveSummary({ property, pricing, photoSummary, checklist, rea
       : 'Checklist guidance is included for launch planning.',
     strongestOpportunity ? `Top opportunity: ${strongestOpportunity}.` : 'There is room to strengthen launch readiness.',
     biggestRisk ? `Top risk: ${biggestRisk}.` : 'No single launch risk currently dominates the report.',
+    consequenceFraming?.summary || 'Delays on top prep items may weaken first impressions and launch momentum.',
   ].join(' ');
 }
 
@@ -566,7 +646,7 @@ async function buildReportPayload({
     pricing,
     readinessSummary,
   });
-  const improvementItems = improvementGuidance?.recommendations?.length
+  const draftImprovementItems = improvementGuidance?.recommendations?.length
     ? improvementGuidance.recommendations.slice(0, 5).map((item) => item.title)
     : (checklist?.items || []).filter((item) => item.status !== 'done').slice(0, 5).map((item) => item.title);
   const checklistItems = (checklist?.items || []).map((item) => item.title);
@@ -583,10 +663,6 @@ async function buildReportPayload({
     score: comp.score,
   }));
   const generatedAt = new Date().toISOString();
-  const strongestOpportunity = improvementItems[0] || checklist?.nextTask?.title || null;
-  const biggestRisk = photoSummary.retakeCount
-    ? `${photoSummary.retakeCount} photo retake recommendation${photoSummary.retakeCount === 1 ? '' : 's'} remain`
-    : pricing?.risks?.[0] || null;
   const includedSectionSet = new Set(customizations.includedSections);
   const customizedListingDescriptions = {
     ...listingDescriptions,
@@ -600,17 +676,46 @@ async function buildReportPayload({
   const providerRecommendations = includedSectionSet.has('provider_recommendations')
     ? await buildProviderRecommendations(propertyId)
     : [];
+  const consequenceFraming = buildConsequenceFraming({
+    photoSummary,
+    checklist,
+    pricing,
+    readinessSummary,
+    providerRecommendations,
+  });
+  const recommendationActions = includedSectionSet.has('improvement_recommendations')
+    ? buildRecommendationActions({
+        propertyId,
+        improvementGuidance,
+        checklist,
+        photoSummary,
+        pricing,
+        providerRecommendations,
+        readinessSummary,
+      })
+    : [];
+  const improvementItems = recommendationActions.length
+    ? recommendationActions.map((action) => action.title).slice(0, 5)
+    : draftImprovementItems;
+  const strongestOpportunity = improvementItems[0] || checklist?.nextTask?.title || null;
+  const biggestRisk = consequenceFraming?.lines?.[0] || (
+    photoSummary.retakeCount
+      ? `${photoSummary.retakeCount} photo retake recommendation${photoSummary.retakeCount === 1 ? '' : 's'} remain`
+      : pricing?.risks?.[0] || null
+  );
   const improvementEconomics = buildImprovementEconomics({
     property,
     improvementItems,
     photoSummary,
     checklist,
+    readinessSummary,
   });
   const riskOpportunity = buildRiskOpportunitySummary({
     pricing,
     photoSummary,
     improvementItems,
     checklist,
+    consequenceFraming,
   });
   const buyerPersonaSummary = buildBuyerPersonaSummary({
     property,
@@ -622,6 +727,7 @@ async function buildReportPayload({
     improvementItems,
     providerRecommendations,
     photoSummary,
+    recommendationActions,
   });
   const visionStoryBlocks = includedSectionSet.has('visual_improvement_previews')
     ? buildVisionStoryBlocks({
@@ -646,6 +752,7 @@ async function buildReportPayload({
         readinessSummary,
         strongestOpportunity,
         biggestRisk,
+        consequenceFraming,
       }),
     pricingSummary: includedSectionSet.has('pricing_analysis')
       ? {
@@ -664,9 +771,9 @@ async function buildReportPayload({
     selectedComps: includedSectionSet.has('comparable_properties') ? selectedComps : [],
     selectedPhotos: includedSectionSet.has('photo_review') ? selectedPhotos : [],
     checklistItems: includedSectionSet.has('seller_checklist') ? checklistItems : [],
-    improvementItems: includedSectionSet.has('improvement_recommendations')
-      ? improvementItems
-      : [],
+      improvementItems: includedSectionSet.has('improvement_recommendations')
+        ? improvementItems
+        : [],
     marketingHighlights: includedSectionSet.has('marketing_guidance')
       ? marketingHighlights
       : [],
@@ -697,6 +804,15 @@ async function buildReportPayload({
       nextTask: includedSectionSet.has('seller_checklist') ? checklist?.nextTask || null : null,
       photoSummary: includedSectionSet.has('photo_review') ? photoSummary : null,
       visionStoryBlocks,
+      consequenceFraming: includedSectionSet.has('improvement_recommendations')
+        ? consequenceFraming
+        : null,
+      recommendationActions: includedSectionSet.has('improvement_recommendations')
+        ? recommendationActions
+        : [],
+      ctaMetadata: includedSectionSet.has('improvement_recommendations')
+        ? recommendationActions.map((action) => action.cta).filter(Boolean)
+        : [],
       readinessSummary: includedSectionSet.has('readiness_score')
         ? readinessSummary
         : null,
@@ -1143,9 +1259,9 @@ async function renderFallbackPropertyReportPdf({ property, report, filename }) {
     (report.payload?.providerRecommendations || []).length
       ? report.payload.providerRecommendations.map(
           (provider) =>
-            `${provider.businessName}${provider.categoryLabel ? ` (${provider.categoryLabel})` : ''}${provider.coverageLabel ? ` - ${provider.coverageLabel}` : ''}`,
+            `${provider.businessName}${provider.categoryLabel ? ` (${provider.categoryLabel})` : ''}${provider.sourceLabel ? ` · ${provider.sourceLabel}` : ''}${provider.coverageLabel ? ` - ${provider.coverageLabel}` : ''}`,
         )
-      : ['No internal provider recommendations were available in this report.'],
+      : ['No provider recommendations were available from marketplace or nearby discovery for this run.'],
     {
       x: PDF_PAGE_MARGIN,
       y: Math.max(280, compCursorY - 30),

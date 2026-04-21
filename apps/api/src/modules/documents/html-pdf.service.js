@@ -557,7 +557,7 @@ function renderPhotoTiles(photos = [], limit = 4) {
 
 function renderProviderCards(items = []) {
   if (!items.length) {
-    return `<div class="empty-card">No nearby provider recommendations are currently attached to this property. Use saved referrals or marketplace discovery to build a support shortlist.</div>`;
+    return `<div class="empty-card">No provider recommendations were available from marketplace or nearby discovery for this run. Continue checklist progress and regenerate after provider data updates.</div>`;
   }
 
   return `
@@ -575,9 +575,11 @@ function renderProviderCards(items = []) {
               </div>
               <p class="provider-reason">${escapeHtml(provider.reason || provider.coverageLabel || '')}</p>
               <div class="provider-meta">
+                ${provider.sourceLabel ? `<span>${escapeHtml(provider.sourceLabel)}</span>` : ''}
                 ${provider.coverageLabel ? `<span>${escapeHtml(provider.coverageLabel)}</span>` : ''}
                 ${provider.turnaroundLabel ? `<span>${escapeHtml(provider.turnaroundLabel)}</span>` : ''}
                 ${provider.pricingSummary ? `<span>${escapeHtml(provider.pricingSummary)}</span>` : ''}
+                ${provider.confidenceNote ? `<span>${escapeHtml(provider.confidenceNote)}</span>` : ''}
               </div>
               <div class="provider-contact">
                 ${provider.phone ? `<span>${escapeHtml(provider.phone)}</span>` : ''}
@@ -1006,6 +1008,8 @@ function buildPropertySummaryHtml({ property, report }) {
   const nextSteps = report.payload?.nextSteps || [];
   const riskOpportunity = report.payload?.riskOpportunity || {};
   const improvementEconomics = report.payload?.improvementEconomics || {};
+  const consequenceFraming = report.payload?.consequenceFraming || {};
+  const recommendationActions = report.payload?.recommendationActions || [];
   const buyerPersonaSummary = report.payload?.buyerPersonaSummary || {};
   const checklistSummary = report.payload?.checklistSummary || {};
   const compMapImageUrl = report._resolvedCompMapImageUrl || buildComparableMapImageUrl(property, report.selectedComps || []);
@@ -1036,12 +1040,17 @@ function buildPropertySummaryHtml({ property, report }) {
   const marketingMomentum = pickMeaningfulLines(report.marketingHighlights || [], 5);
   const orderedNextSteps = nextSteps.length
     ? nextSteps.map((step) => `${step.title}${step.eta ? ` · ${step.eta}` : ''}${step.owner ? ` · ${step.owner}` : ''}`)
-    : buildDefaultLaunchChecklist({
-        checklistSummary,
-        photoSummary,
-        improvementItems: report.improvementItems || [],
-        hasSelectedPrice: Boolean(property?.selectedListPrice),
-      });
+    : recommendationActions.length
+      ? recommendationActions.map(
+          (action) =>
+            `${action.title}${action.urgency ? ` · ${titleCaseLabel(action.urgency)} urgency` : ''}`,
+        )
+      : buildDefaultLaunchChecklist({
+          checklistSummary,
+          photoSummary,
+          improvementItems: report.improvementItems || [],
+          hasSelectedPrice: Boolean(property?.selectedListPrice),
+        });
   const propertyFacts = [
     { label: 'Address', value: buildPropertyAddress(property) },
     { label: 'Home type', value: formatPropertyTypeLabel(property?.propertyType) },
@@ -1097,15 +1106,24 @@ function buildPropertySummaryHtml({ property, report }) {
   ], 3);
   const summaryRecommendations = pickMeaningfulLines([
     report.payload?.improvementGuidance?.summary,
+    ...recommendationActions.map((action) => action.title),
     ...(report.improvementItems || []).slice(0, 3),
     summaryOpportunity,
     pricingNarrative,
   ], 5);
+  const recommendationActionLines = pickMeaningfulLines(
+    recommendationActions.map(
+      (action) =>
+        `${action.title}${action.urgency ? ` (${titleCaseLabel(action.urgency)} urgency)` : ''}${action.expectedOutcome ? ` - ${action.expectedOutcome}` : ''}`,
+    ),
+    5,
+  );
   const launchStatusHighlights = pickMeaningfulLines([
     photoSummary.summary,
     checklistSummary.totalCount ? `${checklistSummary.completedCount || 0} of ${checklistSummary.totalCount} checklist items are complete.` : '',
     property?.selectedListPrice ? `Chosen list price ${formatCurrency(property.selectedListPrice)}.` : '',
     pricingInsightLines[0] || '',
+    consequenceFraming.summary || '',
   ], 4);
   const pricingMetricCards = [
     renderMetricCard('Suggested range', report.pricingSummary?.low && report.pricingSummary?.high ? `${formatCurrency(report.pricingSummary.low)} - ${formatCurrency(report.pricingSummary.high)}` : 'Unavailable', report.pricingSummary?.strategy || 'Market-aligned pricing recommendation'),
@@ -1422,14 +1440,20 @@ function buildPropertySummaryHtml({ property, report }) {
           <div class="sidebar-card">
             <div class="section-kicker">Preparation recommendations</div>
             <h3>Highest-impact improvements</h3>
-            ${renderBulletList(pickMeaningfulLines(report.improvementItems || [], 5), 'Use the checklist and photo review to identify the next preparation priorities.')}
+            ${renderBulletList(
+              recommendationActionLines.length
+                ? recommendationActionLines
+                : pickMeaningfulLines(report.improvementItems || [], 5),
+              'Use the checklist and photo review to identify the next preparation priorities.',
+            )}
           </div>
           <div class="sidebar-card">
             <div class="section-kicker">Cost and ROI</div>
-            <h3>${escapeHtml(improvementEconomics.summary || 'Estimated prep investment and value-protection range')}</h3>
+            <h3>${escapeHtml(improvementEconomics.decisionMessage || improvementEconomics.summary || 'Estimated prep investment and value-protection range')}</h3>
             <div class="badge-row">
               ${improvementEconomics.estimatedCost ? `<div class="badge">Est. cost ${escapeHtml(formatCurrency(improvementEconomics.estimatedCost))}</div>` : ''}
               ${improvementEconomics.estimatedRoi ? `<div class="badge">Potential ROI ${escapeHtml(formatCurrency(improvementEconomics.estimatedRoi))}</div>` : ''}
+              ${improvementEconomics.netUpside ? `<div class="badge">Potential net upside ${escapeHtml(formatCurrency(improvementEconomics.netUpside))}</div>` : ''}
               ${improvementEconomics.estimatedCost && improvementEconomics.estimatedRoi ? `<div class="badge">${escapeHtml(`Potential upside ${formatCurrency(improvementEconomics.estimatedRoi)} vs. est. prep ${formatCurrency(improvementEconomics.estimatedCost)}`)}</div>` : ''}
             </div>
           </div>
@@ -1480,7 +1504,7 @@ function buildPropertySummaryHtml({ property, report }) {
             <h3>Marketplace support nearby</h3>
             <div class="page-spacer"></div>
             ${shouldRenderProviders ? renderProviderCards(providerRecommendations) : `
-              <div class="empty-card">No providers matched yet. Add local provider relationships or use the marketplace discovery tools to build your recommended vendor sheet.</div>
+              <div class="empty-card">No provider recommendations were available from marketplace or nearby discovery for this run. Continue checklist progress and regenerate after provider data updates.</div>
               ${renderSuggestedCategoryCards(suggestedProviderCategories)}
             `}
           </div>
@@ -1526,6 +1550,7 @@ function buildPropertySummaryHtml({ property, report }) {
             pickMeaningfulLines([
               'Review pricing, photos, and checklist progress together before launch.',
               'Use nearby provider support if any prep item is slowing the listing launch.',
+              consequenceFraming.summary || '',
               'Regenerate the brochure and seller report after major pricing or photo updates.',
               'Treat this report as the operating plan for the next showing-ready phase.',
             ], 6),
@@ -1551,6 +1576,19 @@ function buildPropertySummaryHtml({ property, report }) {
 function buildMarketingReportHtml({ property, flyer }) {
   const propertyAddress = buildPropertyAddress(property);
   const neighborhoodMapImageUrl = flyer._resolvedNeighborhoodMapImageUrl || buildNeighborhoodMapImageUrl(property);
+  const flyerMode = String(flyer.mode || 'launch_ready').toLowerCase();
+  const modeLabel = flyer.modeLabel || titleCaseLabel(flyerMode.replace(/_/g, ' '));
+  const ctaLabel = flyer.callToAction || flyer?.ctaMetadata?.label || 'Schedule a showing or request the full property package.';
+  const ctaButtonLabel = flyer?.ctaMetadata?.label || (flyerMode === 'preview'
+    ? 'Request the property packet'
+    : flyerMode === 'premium'
+      ? 'Book a private showing'
+      : 'Request showing details');
+  const modeHeroSignal = flyerMode === 'preview'
+    ? 'Preview mode: positioning this property as an early opportunity while final prep is completed.'
+    : flyerMode === 'premium'
+      ? 'Premium mode: polished presentation designed to convert high-intent buyer interest.'
+      : 'Launch-ready mode: private showings and property-package requests available now.';
   const selectedPhotos = (flyer.selectedPhotos || []).filter((photo) => photo?.imageUrl);
   const coverPhotos = selectedPhotos.slice(0, 4);
   const hasFourPhotoCover = coverPhotos.length >= 4;
@@ -1579,6 +1617,7 @@ function buildMarketingReportHtml({ property, flyer }) {
     property?.bathrooms ? `${property.bathrooms} bathrooms` : '',
     formatSqftValue(property?.squareFeet),
     formatPropertyTypeLabel(property?.propertyType),
+    modeLabel ? `${modeLabel} mode` : '',
   ], 4);
 
   const body = `
@@ -1603,7 +1642,7 @@ function buildMarketingReportHtml({ property, flyer }) {
           <h1>${escapeHtml(flyer.headline || property.title || 'Marketing brochure')}</h1>
           <p class="lede" style="margin-top:12px;">${escapeHtml(flyer.subheadline || brochureSummary)}</p>
           <div class="hero-signal-row" style="margin-top:14px;">
-            <div class="hero-signal-chip hero-signal-chip-orange">${escapeHtml('Private showings and property-package requests available now.')}</div>
+            <div class="hero-signal-chip hero-signal-chip-orange">${escapeHtml(modeHeroSignal)}</div>
           </div>
           <div class="brochure-cover-facts">
             ${brochureFactBadges.map((item) => `<div class="brochure-cover-fact">${escapeHtml(item)}</div>`).join('')}
@@ -1618,13 +1657,13 @@ function buildMarketingReportHtml({ property, flyer }) {
         </div>
         <div class="brochure-cta-card">
           <div class="section-kicker">Call to action</div>
-          <h3>${escapeHtml(flyer.callToAction || 'Schedule a showing or request the full property package.')}</h3>
+          <h3>${escapeHtml(ctaLabel)}</h3>
           <p class="compact-copy" style="margin-top:10px;">Prepared by Workside Home Advisor to support a polished listing launch, clearer buyer positioning, and smoother showing conversations.</p>
           <div class="badge-row">
             <div class="badge badge-address">${escapeHtml(propertyAddress)}</div>
             <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
           </div>
-          <div class="brochure-cta-button">Request showing details</div>
+          <div class="brochure-cta-button">${escapeHtml(ctaButtonLabel)}</div>
         </div>
       </div>
       ${renderFooter('Marketing Report · Cover')}
@@ -1690,7 +1729,7 @@ function buildMarketingReportHtml({ property, flyer }) {
             }
             <div class="page-spacer"></div>
             <div class="section-kicker">Call to action</div>
-            <h3>${escapeHtml(flyer.callToAction || 'Schedule a showing')}</h3>
+            <h3>${escapeHtml(ctaLabel)}</h3>
             <p class="muted" style="margin-top:8px;">Prepared by Workside Home Advisor to support marketplace-ready marketing collateral and brochure refinement.</p>
             <div class="badge-row">
               <div class="badge badge-address">${escapeHtml(propertyAddress)}</div>
@@ -1739,7 +1778,7 @@ function buildMarketingReportHtml({ property, flyer }) {
                 )}
                 <div class="page-spacer"></div>
                 <div class="section-kicker">Urgency and contact</div>
-                <h3>${escapeHtml(flyer.callToAction || 'Schedule a showing or request the full property package.')}</h3>
+                <h3>${escapeHtml(ctaLabel)}</h3>
                 <p class="compact-copy" style="margin-top:8px;">Prepared by Workside Home Advisor to help this listing launch with stronger buyer clarity, cleaner positioning, and a more polished first impression.</p>
                 <div class="badge-row">
                   <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
@@ -1749,7 +1788,7 @@ function buildMarketingReportHtml({ property, flyer }) {
                   <div class="section-kicker">Final push</div>
                   <p class="compact-copy" style="margin-top:6px;">Homes that combine clear pricing, polished photography, and a strong first showing impression create more confident buyer momentum. Schedule the showing window while buyer interest is fresh.</p>
                 </div>
-                <div class="brochure-cta-button">Request the full property package</div>
+                <div class="brochure-cta-button">${escapeHtml(ctaButtonLabel)}</div>
               </div>
             </div>
             ${renderFooter('Marketing Report · Neighborhood & Positioning')}
