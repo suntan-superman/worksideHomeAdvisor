@@ -266,6 +266,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [pendingPruneVisionDrafts, setPendingPruneVisionDrafts] = useState(null);
   const [showExpandedMap, setShowExpandedMap] = useState(false);
   const [generationPrompt, setGenerationPrompt] = useState(null);
+  const [documentGenerationState, setDocumentGenerationState] = useState(null);
   const [pendingDeleteProperty, setPendingDeleteProperty] = useState(null);
   const [activePhotoDetailsAsset, setActivePhotoDetailsAsset] = useState(null);
   const [activePhotoVariationsAssetId, setActivePhotoVariationsAssetId] = useState('');
@@ -288,6 +289,73 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [visionGenerationElapsedSeconds, setVisionGenerationElapsedSeconds] = useState(0);
   const [visionRecoveryState, setVisionRecoveryState] = useState(null);
   const [visionCancellationPending, setVisionCancellationPending] = useState(false);
+
+  function resolveDocumentGenerationPhase(kind, job = null) {
+    const kindLabel = kind === 'report' ? 'Report' : 'Brochure';
+    const message = String(job?.message || '').trim();
+    if (message) {
+      return message;
+    }
+
+    const stage = String(job?.currentStage || '').toLowerCase();
+    if (stage === 'queued') {
+      return `${kindLabel} queued. Starting shortly...`;
+    }
+    if (stage === 'generating_flyer') {
+      return 'Generating brochure content...';
+    }
+    if (stage === 'generating_report') {
+      return 'Generating seller report content...';
+    }
+    if (stage === 'running') {
+      return `${kindLabel} generation is running...`;
+    }
+
+    return `${kindLabel} generation is in progress...`;
+  }
+
+  function beginDocumentGeneration(kind, initialPhase = '') {
+    setDocumentGenerationState({
+      kind,
+      startedAtMs: Date.now(),
+      elapsedSeconds: 0,
+      progressPercent: 0,
+      phase: initialPhase || resolveDocumentGenerationPhase(kind, null),
+    });
+  }
+
+  function updateDocumentGeneration(kind, job, elapsedMs = 0) {
+    const nextProgress = Number.isFinite(Number(job?.progressPercent))
+      ? Number(job.progressPercent)
+      : 0;
+    setDocumentGenerationState((current) => {
+      if (!current || current.kind !== kind) {
+        return current;
+      }
+
+      return {
+        ...current,
+        elapsedSeconds: Math.max(
+          current.elapsedSeconds || 0,
+          Math.floor(Math.max(0, Number(elapsedMs) || 0) / 1000),
+        ),
+        progressPercent: Math.max(current.progressPercent || 0, nextProgress),
+        phase: resolveDocumentGenerationPhase(kind, job),
+      };
+    });
+  }
+
+  function clearDocumentGeneration(kind) {
+    setDocumentGenerationState((current) => {
+      if (!current) {
+        return current;
+      }
+      if (kind && current.kind !== kind) {
+        return current;
+      }
+      return null;
+    });
+  }
   const viewerRole = useMemo(() => {
     const session = getStoredSession();
     return session?.user?.role === 'agent' ? 'agent' : 'seller';
@@ -1867,6 +1935,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   useEffect(() => {
     setActiveTab('overview');
+    setDocumentGenerationState(null);
   }, [propertyId]);
 
   useEffect(() => {
@@ -2482,8 +2551,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (blockArchivedMutation()) {
       return;
     }
+    beginDocumentGeneration('flyer', 'Preparing brochure generation...');
     setStatus(`Generating ${flyerType} flyer...`);
-    setToast(null);
+    setToast({
+      tone: 'info',
+      title: 'Brochure generation started',
+      message: 'We are preparing your brochure now. This can take a little time.',
+    });
     setGenerationPrompt(null);
     try {
       const isFreeTeaserAccess = billingAccess?.planKey === 'free';
@@ -2498,6 +2572,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       if (response.flyer) {
         setLatestFlyer(response.flyer);
         await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
+        clearDocumentGeneration('flyer');
         setToast({
           tone: isFreeTeaserAccess ? 'warning' : 'success',
           title: isFreeTeaserAccess ? 'Teaser brochure ready' : 'Flyer generated',
@@ -2515,7 +2590,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       }
 
       setStatus('Generating flyer in the background...');
-      const settledJob = await pollAsyncDocumentJobUntilSettled(response.job.id);
+      updateDocumentGeneration('flyer', response.job, 0);
+      const settledJob = await pollAsyncDocumentJobUntilSettled(response.job.id, {
+        onProgress: ({ job, elapsedMs }) => {
+          updateDocumentGeneration('flyer', job, elapsedMs);
+        },
+      });
       if (settledJob.status !== 'completed') {
         throw new Error(
           settledJob.warning ||
@@ -2527,6 +2607,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       const latestFlyerResponse = await getLatestFlyer(propertyId);
       setLatestFlyer(latestFlyerResponse.flyer || settledJob.result?.flyer || null);
       await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
+      clearDocumentGeneration('flyer');
       setToast({
         tone: isFreeTeaserAccess ? 'warning' : 'success',
         title: isFreeTeaserAccess ? 'Teaser brochure ready' : 'Flyer generated',
@@ -2537,6 +2618,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       });
       openGenerationPrompt('flyer');
     } catch (requestError) {
+      clearDocumentGeneration('flyer');
       if (requestError.status === 402) {
         const isTeaserLimitReason =
           requestError.details?.reason === 'FREE_FLYER_TEASER_USED';
@@ -2570,8 +2652,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (blockArchivedMutation()) {
       return;
     }
+    beginDocumentGeneration('report', 'Preparing seller report generation...');
     setStatus('Generating seller intelligence report...');
-    setToast(null);
+    setToast({
+      tone: 'info',
+      title: 'Report generation started',
+      message: 'We are preparing your seller report now. This can take a little time.',
+    });
     setGenerationPrompt(null);
     try {
       const isFreeTeaserAccess = billingAccess?.planKey === 'free';
@@ -2586,6 +2673,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       if (response.report) {
         setLatestReport(response.report);
         await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
+        clearDocumentGeneration('report');
         setToast({
           tone: isFreeTeaserAccess ? 'warning' : 'success',
           title: isFreeTeaserAccess ? 'Teaser report ready' : 'Report generated',
@@ -2603,7 +2691,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       }
 
       setStatus('Generating seller intelligence report in the background...');
-      const settledJob = await pollAsyncDocumentJobUntilSettled(response.job.id);
+      updateDocumentGeneration('report', response.job, 0);
+      const settledJob = await pollAsyncDocumentJobUntilSettled(response.job.id, {
+        onProgress: ({ job, elapsedMs }) => {
+          updateDocumentGeneration('report', job, elapsedMs);
+        },
+      });
       if (settledJob.status !== 'completed') {
         throw new Error(
           settledJob.warning ||
@@ -2615,6 +2708,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       const latestReportResponse = await getLatestReport(propertyId);
       setLatestReport(latestReportResponse.report || settledJob.result?.report || null);
       await Promise.all([refreshDashboardSnapshot(), refreshChecklist(), refreshWorkflow()]);
+      clearDocumentGeneration('report');
       setToast({
         tone: isFreeTeaserAccess ? 'warning' : 'success',
         title: isFreeTeaserAccess ? 'Teaser report ready' : 'Report generated',
@@ -2625,6 +2719,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       });
       openGenerationPrompt('report');
     } catch (requestError) {
+      clearDocumentGeneration('report');
       if (requestError.status === 402) {
         const isTeaserLimitReason =
           requestError.details?.reason === 'FREE_REPORT_TEASER_USED';
@@ -5116,6 +5211,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       flyerSelectedPhotoIds={flyerSelectedPhotoIds}
       toggleFlyerPhotoSelection={toggleFlyerPhotoSelection}
       status={status}
+      documentGenerationState={documentGenerationState}
       isArchivedProperty={isArchivedProperty}
       handleGenerateFlyer={handleGenerateFlyer}
       handleDownloadFlyerPdf={handleDownloadFlyerPdf}
@@ -5134,6 +5230,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       defaultSectionState={DEFAULT_WORKSPACE_SECTION_STATE}
       latestReport={latestReport}
       status={status}
+      documentGenerationState={documentGenerationState}
       isArchivedProperty={isArchivedProperty}
       handleGenerateReport={handleGenerateReport}
       handleDownloadReportPdf={handleDownloadReportPdf}

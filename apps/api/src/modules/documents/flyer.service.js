@@ -19,6 +19,7 @@ import { renderMarketingReportPdf } from './html-pdf.service.js';
 import {
   createPdfPalette,
   drawBrandHeader,
+  drawBulletList,
   drawContainedImageFrame,
   drawDocumentFooter,
   drawDocumentFrame,
@@ -625,12 +626,13 @@ export async function exportPropertyFlyerPdf({ propertyId, flyerType = 'sale' })
       filename,
     }));
   } catch (error) {
-    if (env.NODE_ENV === 'production') {
-      throw new Error(
-        `Marketing brochure browser render failed in production: ${error?.message || String(error)}`,
-      );
-    }
-    console.warn('Falling back to pdf-lib marketing export:', error?.message || error);
+    const renderFailureMessage = error?.message || String(error);
+    console.warn(
+      `Marketing brochure browser render failed${
+        env.NODE_ENV === 'production' ? ' in production' : ''
+      }; using pdf-lib fallback export.`,
+      renderFailureMessage,
+    );
     ({ bytes } = await renderFallbackMarketingFlyerPdf({
       property,
       flyer,

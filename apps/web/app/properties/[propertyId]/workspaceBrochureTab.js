@@ -30,6 +30,7 @@ export function WorkspaceBrochureTab({
   flyerSelectedPhotoIds,
   toggleFlyerPhotoSelection,
   status,
+  documentGenerationState,
   isArchivedProperty,
   handleGenerateFlyer,
   handleDownloadFlyerPdf,
@@ -227,6 +228,19 @@ export function WorkspaceBrochureTab({
                 Download PDF
               </button>
             </div>
+            {documentGenerationState?.kind === 'flyer' ? (
+              <p className="workspace-control-note">
+                <strong>Brochure generation in progress:</strong>{' '}
+                {documentGenerationState.phase || 'Working on your brochure...'}{' '}
+                {Number.isFinite(documentGenerationState.elapsedSeconds)
+                  ? `(${documentGenerationState.elapsedSeconds}s elapsed)`
+                  : ''}
+                {Number.isFinite(documentGenerationState.progressPercent) &&
+                documentGenerationState.progressPercent > 0
+                  ? ` • ${Math.round(documentGenerationState.progressPercent)}%`
+                  : ''}
+              </p>
+            ) : null}
           </div>
         ),
       })}

@@ -7,6 +7,7 @@ export function WorkspaceReportTab({
   defaultSectionState,
   latestReport,
   status,
+  documentGenerationState,
   isArchivedProperty,
   handleGenerateReport,
   handleDownloadReportPdf,
@@ -62,6 +63,19 @@ export function WorkspaceReportTab({
                 Download report PDF
               </button>
             </div>
+            {documentGenerationState?.kind === 'report' ? (
+              <p className="workspace-control-note">
+                <strong>Report generation in progress:</strong>{' '}
+                {documentGenerationState.phase || 'Working on your seller report...'}{' '}
+                {Number.isFinite(documentGenerationState.elapsedSeconds)
+                  ? `(${documentGenerationState.elapsedSeconds}s elapsed)`
+                  : ''}
+                {Number.isFinite(documentGenerationState.progressPercent) &&
+                documentGenerationState.progressPercent > 0
+                  ? ` • ${Math.round(documentGenerationState.progressPercent)}%`
+                  : ''}
+              </p>
+            ) : null}
             <div className="mini-stats">
               <div className="stat-card">
                 <strong>Status</strong>
