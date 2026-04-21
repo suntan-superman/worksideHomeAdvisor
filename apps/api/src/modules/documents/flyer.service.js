@@ -39,6 +39,7 @@ import {
   chooseEnhancedFlyerAssets,
   deriveFlyerReadiness,
   flyerModeLabel,
+  resolveFlyerModeDecision,
   selectFlyerMode,
 } from './flyer-enhancement-helpers.js';
 
@@ -130,7 +131,8 @@ function buildPriceText(property, pricing, flyerType) {
 
 function buildFallbackFlyer({ property, pricing, flyerType, selectedPhotos }) {
   const readinessSignals = deriveFlyerReadiness(selectedPhotos);
-  const mode = selectFlyerMode(readinessSignals);
+  const modeDecision = resolveFlyerModeDecision(readinessSignals);
+  const mode = modeDecision.mode || selectFlyerMode(readinessSignals);
   const modeLabel = flyerModeLabel(mode);
   const locationLine = `${property.addressLine1}, ${property.city}, ${property.state} ${property.zip}`;
   const modeCopy = buildFlyerModeCopy({
@@ -144,13 +146,20 @@ function buildFallbackFlyer({ property, pricing, flyerType, selectedPhotos }) {
     mode,
     propertyId: property?.id || property?._id?.toString?.() || '',
   });
+  const propertyId = property?.id || property?._id?.toString?.() || '';
+  console.info(
+    `[flyer] mode_selected propertyId=${propertyId} mode=${mode} reason="${modeDecision.reason || 'none'}" readiness=${readinessSignals.readinessScore} marketplaceReady=${readinessSignals.marketplaceReadyCount}`,
+  );
 
   return {
     flyerType,
     mode,
     modeLabel,
     readinessScore: readinessSignals.readinessScore,
-    readinessSignals,
+    readinessSignals: {
+      ...readinessSignals,
+      modeDecisionReason: modeDecision.reason || '',
+    },
     headline:
       mode === 'preview'
         ? 'Coming Soon Opportunity'

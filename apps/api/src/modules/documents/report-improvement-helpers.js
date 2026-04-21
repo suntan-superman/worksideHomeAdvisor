@@ -276,7 +276,7 @@ export function buildRecommendationActions({
 }) {
   const actions = [];
   const openChecklistItems = (checklist?.items || []).filter((item) => item.status !== 'done');
-  const guidanceItems = (improvementGuidance?.recommendations || []).slice(0, 4);
+  const guidanceItems = improvementGuidance?.recommendations || [];
 
   if (Number(photoSummary?.retakeCount || 0) > 0) {
     const actionType = 'photo_retake';
@@ -382,7 +382,7 @@ export function buildRecommendationActions({
     linkedProviderCategory: '',
   });
 
-  const normalized = dedupeByTitle(actions).slice(0, 7);
+  const normalized = dedupeByTitle(actions).slice(0, 20);
   return normalized.map((action, index) => {
     const cta = buildActionCta({
       actionType: action.actionType,

@@ -474,7 +474,7 @@ async function buildProviderRecommendations(propertyId) {
         const result = await listProvidersForProperty(propertyId, {
           categoryKey: config.categoryKey,
           limit: 2,
-          includeExternal: false,
+          includeExternal: true,
         });
         return { config, result };
       } catch {
@@ -483,7 +483,7 @@ async function buildProviderRecommendations(propertyId) {
     }),
   );
 
-  return results
+  const mapped = results
     .flatMap(({ config, result }) => {
       const internalProvider = (result?.items || [])[0] || null;
       const fallbackProvider = (result?.externalItems || [])[0] || null;
@@ -526,6 +526,143 @@ async function buildProviderRecommendations(propertyId) {
       }];
     })
     .slice(0, 4);
+
+  if (mapped.length) {
+    return mapped;
+  }
+
+  return [
+    {
+      categoryKey: 'photographer',
+      categoryLabel: 'Photography',
+      businessName: 'Local Professional Photographer',
+      coverageLabel: 'Nearby service area',
+      phone: '',
+      email: '',
+      mapsUrl: '',
+      websiteUrl: '',
+      ratingLabel: '',
+      turnaroundLabel: 'Same-week availability typical',
+      pricingSummary: 'Rates vary by package',
+      reason: 'Use for final listing photography and cleaner hero images.',
+      reasonMatched: 'No curated or nearby provider match was available; a local placeholder was generated.',
+      sourceType: 'placeholder',
+      sourceLabel: 'Placeholder recommendation',
+      confidenceNote: 'Placeholder provider shown so next-step planning is never blocked.',
+    },
+    {
+      categoryKey: 'cleaning_service',
+      categoryLabel: 'Cleaning Service',
+      businessName: 'Local Cleaning Service',
+      coverageLabel: 'Nearby service area',
+      phone: '',
+      email: '',
+      mapsUrl: '',
+      websiteUrl: '',
+      ratingLabel: '',
+      turnaroundLabel: '1-3 day scheduling typical',
+      pricingSummary: 'Rates vary by scope',
+      reason: 'Useful before photography, brochure generation, and early showings.',
+      reasonMatched: 'No curated or nearby provider match was available; a local placeholder was generated.',
+      sourceType: 'placeholder',
+      sourceLabel: 'Placeholder recommendation',
+      confidenceNote: 'Placeholder provider shown so prep execution remains actionable.',
+    },
+    {
+      categoryKey: 'staging_company',
+      categoryLabel: 'Home Staging',
+      businessName: 'Home Staging Specialist',
+      coverageLabel: 'Nearby service area',
+      phone: '',
+      email: '',
+      mapsUrl: '',
+      websiteUrl: '',
+      ratingLabel: '',
+      turnaroundLabel: 'Consultation windows vary',
+      pricingSummary: 'Consultation and package pricing vary',
+      reason: 'Helpful when key rooms still need stronger presentation and buyer clarity.',
+      reasonMatched: 'No curated or nearby provider match was available; a local placeholder was generated.',
+      sourceType: 'placeholder',
+      sourceLabel: 'Placeholder recommendation',
+      confidenceNote: 'Placeholder provider shown so launch sequencing can proceed without dead ends.',
+    },
+  ];
+}
+
+function buildFallbackRecommendationActions({
+  recommendations = [],
+  propertyId = '',
+}) {
+  const fallback = (recommendations || [])
+    .map((item, index) => {
+      const title = String(item?.title || item || '').trim();
+      if (!title) {
+        return null;
+      }
+      const normalized = title.toLowerCase();
+      const recommendedActionType = normalized.includes('photo') || normalized.includes('retake')
+        ? 'photo_retake'
+        : normalized.includes('price')
+          ? 'pricing_review'
+          : normalized.includes('curb') || normalized.includes('exterior')
+            ? 'curb_appeal'
+            : normalized.includes('provider') || normalized.includes('clean') || normalized.includes('staging')
+              ? 'provider_booking'
+              : 'staging_improvement';
+      const urgency = String(item?.priority || 'medium').toLowerCase();
+      return {
+        id: `fallback-action-${index + 1}`,
+        title,
+        reason: String(item?.rationale || 'Fallback action mapped from raw recommendation.').trim(),
+        urgency: ['high', 'medium', 'low'].includes(urgency) ? urgency : 'medium',
+        estimatedCost: 'Varies',
+        expectedOutcome: String(item?.estimatedImpact || 'Improved launch readiness and buyer confidence.').trim(),
+        recommendedActionType,
+        ctaLabel: recommendedActionType === 'pricing_review' ? 'Review pricing' : 'Start action',
+        ctaDestination: `/properties/${propertyId || ':propertyId'}`,
+        linkedChecklistItemIds: [],
+        linkedProviderCategory: '',
+        cta: {
+          label: recommendedActionType === 'pricing_review' ? 'Review pricing' : 'Start action',
+          destinationType: 'app_route',
+          destinationRoute: `/properties/${propertyId || ':propertyId'}`,
+          relatedPropertyId: propertyId || '',
+          relatedTaskId: '',
+          relatedProviderCategory: '',
+          priority: Math.max(1, 100 - index * 10),
+          visibilityConditions: [],
+        },
+      };
+    })
+    .filter(Boolean);
+
+  if (fallback.length) {
+    return fallback;
+  }
+
+  return [{
+    id: 'fallback-action-1',
+    title: 'Complete highest-priority prep items before listing',
+    reason: 'Fallback action generated so the action card pipeline is never empty.',
+    urgency: 'high',
+    estimatedCost: 'Varies',
+    expectedOutcome: 'Better buyer first impressions and stronger showing readiness.',
+    recommendedActionType: 'staging_improvement',
+    ctaLabel: 'Start action',
+    ctaDestination: `/properties/${propertyId || ':propertyId'}`,
+    linkedChecklistItemIds: [],
+    linkedProviderCategory: '',
+    cta: {
+      label: 'Start action',
+      destinationType: 'app_route',
+      destinationRoute: `/properties/${propertyId || ':propertyId'}`,
+      relatedPropertyId: propertyId || '',
+      relatedTaskId: '',
+      relatedProviderCategory: '',
+      priority: 90,
+      visibilityConditions: [],
+    },
+  }];
 }
 
 function normalizeReportCustomizations(customizations = {}) {
@@ -683,7 +820,7 @@ async function buildReportPayload({
     readinessSummary,
     providerRecommendations,
   });
-  const recommendationActions = includedSectionSet.has('improvement_recommendations')
+  let recommendationActions = includedSectionSet.has('improvement_recommendations')
     ? buildRecommendationActions({
         propertyId,
         improvementGuidance,
@@ -694,6 +831,23 @@ async function buildReportPayload({
         readinessSummary,
       })
     : [];
+  if (includedSectionSet.has('improvement_recommendations') && !recommendationActions.length) {
+    recommendationActions = buildFallbackRecommendationActions({
+      recommendations: improvementGuidance?.recommendations || draftImprovementItems,
+      propertyId,
+    });
+  }
+  const rawRecommendationCount = Number(improvementGuidance?.recommendations?.length || 0);
+  if (includedSectionSet.has('improvement_recommendations')) {
+    console.info(
+      `[report] action_pipeline_counts propertyId=${propertyId} rawRecommendations=${rawRecommendationCount} actionCards=${recommendationActions.length}`,
+    );
+    if (rawRecommendationCount > 0 && rawRecommendationCount !== recommendationActions.length) {
+      console.warn(
+        `[report] action_pipeline_mismatch propertyId=${propertyId} rawRecommendations=${rawRecommendationCount} actionCards=${recommendationActions.length}`,
+      );
+    }
+  }
   const improvementItems = recommendationActions.length
     ? recommendationActions.map((action) => action.title).slice(0, 5)
     : draftImprovementItems;
@@ -1261,7 +1415,11 @@ async function renderFallbackPropertyReportPdf({ property, report, filename }) {
           (provider) =>
             `${provider.businessName}${provider.categoryLabel ? ` (${provider.categoryLabel})` : ''}${provider.sourceLabel ? ` · ${provider.sourceLabel}` : ''}${provider.coverageLabel ? ` - ${provider.coverageLabel}` : ''}`,
         )
-      : ['No provider recommendations were available from marketplace or nearby discovery for this run.'],
+      : [
+          'Local Professional Photographer (Photography) · Placeholder recommendation',
+          'Local Cleaning Service (Cleaning Service) · Placeholder recommendation',
+          'Home Staging Specialist (Home Staging) · Placeholder recommendation',
+        ],
     {
       x: PDF_PAGE_MARGIN,
       y: Math.max(280, compCursorY - 30),

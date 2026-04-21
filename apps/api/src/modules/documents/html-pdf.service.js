@@ -6,6 +6,7 @@ import { formatCurrency } from '@workside/utils';
 import { env } from '../../config/env.js';
 
 const SUPPORT_EMAIL = BRANDING.supportEmail;
+const SUPPORT_PHONE = BRANDING.supportPhone || String(env.SUPPORT_PHONE || '').trim();
 const RAW_PUBLIC_WEB_URL = BRANDING.publicWebUrl || String(env.PUBLIC_WEB_URL || 'https://worksideadvisor.com');
 const PUBLIC_WEB_URL = (() => {
   const normalized = String(RAW_PUBLIC_WEB_URL || '')
@@ -214,10 +215,19 @@ function formatCompactNumber(value) {
 }
 
 function pickMeaningfulLines(items = [], limit = 5) {
+  const seen = new Set();
   return (items || [])
     .flat()
     .map((item) => String(item ?? '').trim())
     .filter((item) => hasMeaningfulValue(item))
+    .filter((item) => {
+      const key = item.toLowerCase();
+      if (!key || seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
     .slice(0, limit);
 }
 
@@ -613,6 +623,197 @@ function sortRecommendationActions(actions = []) {
   });
 }
 
+function inferFallbackActionType(title = '') {
+  const normalized = String(title || '').toLowerCase();
+  if (normalized.includes('photo') || normalized.includes('retake')) {
+    return 'photo_retake';
+  }
+  if (normalized.includes('price')) {
+    return 'pricing_review';
+  }
+  if (normalized.includes('curb') || normalized.includes('exterior')) {
+    return 'curb_appeal';
+  }
+  if (normalized.includes('light')) {
+    return 'lighting_improvement';
+  }
+  if (normalized.includes('declutter') || normalized.includes('organize')) {
+    return 'declutter';
+  }
+  if (normalized.includes('stage') || normalized.includes('staging')) {
+    return 'staging_improvement';
+  }
+  if (normalized.includes('provider') || normalized.includes('cleaning') || normalized.includes('photographer')) {
+    return 'provider_booking';
+  }
+  return 'staging_improvement';
+}
+
+function fallbackActionUrgency(actionType = '') {
+  if (actionType === 'photo_retake' || actionType === 'pricing_review' || actionType === 'provider_booking') {
+    return 'high';
+  }
+  if (actionType === 'curb_appeal' || actionType === 'lighting_improvement') {
+    return 'medium';
+  }
+  return 'medium';
+}
+
+function fallbackActionCost(actionType = '') {
+  const map = {
+    photo_retake: '$250-$650',
+    pricing_review: 'Low direct cost',
+    curb_appeal: '$300-$1,500',
+    lighting_improvement: '$150-$600',
+    declutter: '$100-$900',
+    staging_improvement: '$500-$2,000',
+    provider_booking: 'Varies by provider',
+  };
+  return map[actionType] || 'Varies';
+}
+
+function fallbackActionImpact(actionType = '') {
+  const map = {
+    photo_retake: 'Stronger first impressions and cleaner gallery quality.',
+    pricing_review: 'Clearer buyer value positioning before launch.',
+    curb_appeal: 'Improved street-level buyer perception.',
+    lighting_improvement: 'Brighter visuals and clearer room presentation.',
+    declutter: 'Cleaner perceived space and lower buyer friction.',
+    staging_improvement: 'More compelling room purpose and buyer clarity.',
+    provider_booking: 'Faster execution across high-priority prep items.',
+  };
+  return map[actionType] || 'Improved launch readiness and buyer confidence.';
+}
+
+function fallbackActionCtaLabel(actionType = '') {
+  const map = {
+    photo_retake: 'Retake Photos',
+    pricing_review: 'Review Pricing',
+    curb_appeal: 'Improve Exterior',
+    lighting_improvement: 'Fix Lighting',
+    declutter: 'Declutter Rooms',
+    staging_improvement: 'Improve Staging',
+    provider_booking: 'Find Provider',
+  };
+  return map[actionType] || 'Start Action';
+}
+
+function mapRawRecommendationToAction(rawRecommendation, index = 0) {
+  const title = typeof rawRecommendation === 'string'
+    ? rawRecommendation
+    : rawRecommendation?.title || rawRecommendation?.label || '';
+  const cleanTitle = String(title || '').trim();
+  if (!cleanTitle) {
+    return null;
+  }
+  const actionType = inferFallbackActionType(cleanTitle);
+  const urgency = String(rawRecommendation?.priority || fallbackActionUrgency(actionType)).toLowerCase();
+  return {
+    id: `fallback-action-${index + 1}`,
+    title: cleanTitle,
+    urgency: ['high', 'medium', 'low'].includes(urgency) ? urgency : fallbackActionUrgency(actionType),
+    estimatedCost: rawRecommendation?.estimatedCost || fallbackActionCost(actionType),
+    expectedOutcome: rawRecommendation?.expectedImpact || rawRecommendation?.estimatedImpact || fallbackActionImpact(actionType),
+    reason: rawRecommendation?.rationale || rawRecommendation?.reason || 'Action identified from the report recommendations pipeline.',
+    recommendedActionType: rawRecommendation?.recommendedActionType || actionType,
+    ctaLabel: rawRecommendation?.ctaLabel || fallbackActionCtaLabel(actionType),
+  };
+}
+
+function ensureStructuredRecommendationActions({
+  structuredActions = [],
+  rawRecommendations = [],
+  improvementItems = [],
+}) {
+  const normalizeStructured = (structuredActions || [])
+    .map((action, index) => {
+      const title = String(action?.title || '').trim();
+      if (!title) {
+        return null;
+      }
+      const actionType = action.recommendedActionType || inferFallbackActionType(title);
+      return {
+        id: action.id || `action-${index + 1}`,
+        title,
+        urgency: action.urgency || fallbackActionUrgency(actionType),
+        estimatedCost: action.estimatedCost || fallbackActionCost(actionType),
+        expectedOutcome: action.expectedOutcome || fallbackActionImpact(actionType),
+        reason: action.reason || 'Action identified from the report recommendations pipeline.',
+        recommendedActionType: actionType,
+        ctaLabel: action.ctaLabel || action?.cta?.label || fallbackActionCtaLabel(actionType),
+      };
+    })
+    .filter(Boolean);
+
+  const fallbackPool = [
+    ...(rawRecommendations || []),
+    ...(improvementItems || []).map((item) => ({ title: item })),
+  ];
+  const fallbackMapped = fallbackPool
+    .map((item, index) => mapRawRecommendationToAction(item, index))
+    .filter(Boolean);
+  const source = normalizeStructured.length ? normalizeStructured : fallbackMapped;
+  const deduped = [];
+  const seen = new Set();
+  for (const action of source) {
+    const key = String(action.title || '').trim().toLowerCase();
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(action);
+  }
+  if (deduped.length) {
+    return deduped.slice(0, 7);
+  }
+  return [{
+    id: 'fallback-action-1',
+    title: 'Complete top readiness blockers before listing',
+    urgency: 'high',
+    estimatedCost: 'Varies by scope',
+    expectedOutcome: 'Higher launch confidence and better buyer first impressions.',
+    reason: 'Fallback action generated to keep the preparation workflow actionable.',
+    recommendedActionType: 'staging_improvement',
+    ctaLabel: 'Start Action',
+  }];
+}
+
+function buildPlaceholderProviders() {
+  return [
+    {
+      categoryKey: 'photographer',
+      categoryLabel: 'Photography',
+      businessName: 'Local Professional Photographer',
+      reason: 'Use for final listing photography and cleaner hero images.',
+      reasonMatched: 'Placeholder provider generated because no live provider match was available.',
+      sourceLabel: 'Placeholder recommendation',
+      confidenceNote: 'Placeholder shown so the provider section never blocks action.',
+    },
+    {
+      categoryKey: 'cleaning_service',
+      categoryLabel: 'Cleaning Service',
+      businessName: 'Local Cleaning Service',
+      reason: 'Useful before photography, brochure generation, and early showings.',
+      reasonMatched: 'Placeholder provider generated because no live provider match was available.',
+      sourceLabel: 'Placeholder recommendation',
+      confidenceNote: 'Placeholder shown so the provider section never blocks action.',
+    },
+    {
+      categoryKey: 'staging_company',
+      categoryLabel: 'Home Staging',
+      businessName: 'Home Staging Specialist',
+      reason: 'Helpful when key rooms still need stronger presentation and buyer clarity.',
+      reasonMatched: 'Placeholder provider generated because no live provider match was available.',
+      sourceLabel: 'Placeholder recommendation',
+      confidenceNote: 'Placeholder shown so the provider section never blocks action.',
+    },
+  ];
+}
+
+function ensureProviderRecommendations(items = []) {
+  return (items || []).length ? items : buildPlaceholderProviders();
+}
+
 function renderPriorityLegend() {
   return `
     <div class="priority-legend">
@@ -665,6 +866,7 @@ function renderRecommendationActionCards(actions = [], emptyText = '') {
                         </div>
                         ${action.expectedOutcome ? `<div class="action-impact"><strong>Expected impact:</strong> ${escapeHtml(action.expectedOutcome)}</div>` : ''}
                         ${action.reason ? `<div class="action-why"><strong>Why it matters:</strong> ${escapeHtml(action.reason)}</div>` : ''}
+                        ${action.ctaLabel ? `<div class="action-cta-pill">${escapeHtml(action.ctaLabel)}</div>` : ''}
                       </article>
                     `;
                   })
@@ -704,17 +906,19 @@ function classifyPhotoQuality(photo = {}) {
 function buildPhotoFeedback(photo = {}, quality = {}) {
   const listingNote = String(photo?.listingNote || '').trim();
   if (listingNote) {
-    return listingNote;
+    return listingNote.split(/[.!?]/).map((part) => part.trim()).filter(Boolean)[0] || listingNote;
   }
+  const score = Number(photo?.score || 0);
   if (quality.label === 'Needs Retake') {
-    return 'Lighting or composition needs improvement before listing launch.';
+    if (score < 50) {
+      return 'Lighting too dark.';
+    }
+    return 'Composition unbalanced.';
   }
   if (quality.label === 'Usable') {
-    return photo?.listingCandidate
-      ? 'Usable image with minor polish opportunities.'
-      : 'Usable image, but clutter or framing may limit buyer appeal.';
+    return photo?.listingCandidate ? 'Good composition.' : 'Clutter visible.';
   }
-  return 'Good composition and listing-ready clarity.';
+  return 'Good composition.';
 }
 
 function renderPhotoTiles(photos = [], limit = 4) {
@@ -743,7 +947,7 @@ function renderPhotoTiles(photos = [], limit = 4) {
               </div>
               <figcaption>
                 <strong>${escapeHtml(photo.roomLabel || 'Property photo')}</strong>
-                <span class="photo-meta">${escapeHtml(photo.marketplaceStatus || 'Photo review pending')}</span>
+                <span class="photo-meta">${escapeHtml(photo.marketplaceStatus || 'Needs review for launch readiness')}</span>
                 <span class="photo-feedback">${escapeHtml(feedback)}</span>
               </figcaption>
             </figure>
@@ -756,13 +960,11 @@ function renderPhotoTiles(photos = [], limit = 4) {
 }
 
 function renderProviderCards(items = []) {
-  if (!items.length) {
-    return `<div class="empty-card">No provider recommendations were available from marketplace or nearby discovery for this run. Continue checklist progress and regenerate after provider data updates.</div>`;
-  }
+  const resolvedItems = ensureProviderRecommendations(items);
 
   return `
     <div class="provider-grid">
-      ${items
+      ${resolvedItems
         .map(
           (provider) => `
             <article class="provider-card">
@@ -1063,9 +1265,10 @@ function renderHtmlDocument({ title, body }) {
       .action-card-head h4 { margin: 0; font-size: 15px; line-height: 1.3; }
       .action-meta { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 8px; font-size: 11px; color: var(--muted); }
       .action-impact, .action-why { margin-top: 8px; font-size: 12px; line-height: 1.5; color: var(--ink); }
+      .action-cta-pill { display: inline-block; margin-top: 10px; padding: 7px 10px; border-radius: 999px; background: rgba(47,95,143,0.12); border: 1px solid rgba(47,95,143,0.2); color: var(--brand-blue); font-size: 11px; font-weight: 700; }
       .dashboard-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
       .roi-hero-card { border: 1px solid rgba(79,123,98,0.28); border-radius: 20px; padding: 18px 20px; background: linear-gradient(135deg, rgba(79,123,98,0.12), rgba(47,95,143,0.08)); }
-      .roi-hero-value { font-size: 34px; line-height: 1.05; font-weight: 800; color: #2f6a4e; margin-top: 8px; }
+      .roi-hero-value { font-size: 68px; line-height: 0.96; font-weight: 800; color: #2f6a4e; margin-top: 8px; letter-spacing: -0.02em; }
       .roi-hero-sub { margin-top: 6px; font-size: 12px; color: var(--muted); }
       .roi-bar-shell { margin-top: 12px; display: grid; gap: 8px; }
       .roi-bar { height: 10px; border-radius: 999px; background: rgba(47,95,143,0.12); overflow: hidden; }
@@ -1248,12 +1451,17 @@ function buildPropertySummaryHtml({ property, report }) {
   const photoSummary = report.payload?.photoSummary || {};
   const readinessSummary = report.payload?.readinessSummary || {};
   const propertyDetails = report.payload?.propertyDetails || {};
-  const providerRecommendations = report.payload?.providerRecommendations || [];
+  const providerRecommendations = ensureProviderRecommendations(report.payload?.providerRecommendations || []);
   const nextSteps = report.payload?.nextSteps || [];
   const riskOpportunity = report.payload?.riskOpportunity || {};
   const improvementEconomics = report.payload?.improvementEconomics || {};
   const consequenceFraming = report.payload?.consequenceFraming || {};
-  const recommendationActions = report.payload?.recommendationActions || [];
+  const rawRecommendationItems = report.payload?.improvementGuidance?.recommendations || [];
+  const recommendationActions = ensureStructuredRecommendationActions({
+    structuredActions: report.payload?.recommendationActions || [],
+    rawRecommendations: rawRecommendationItems,
+    improvementItems: report.improvementItems || [],
+  });
   const buyerPersonaSummary = report.payload?.buyerPersonaSummary || {};
   const checklistSummary = report.payload?.checklistSummary || {};
   const compMapImageUrl = report._resolvedCompMapImageUrl || buildComparableMapImageUrl(property, report.selectedComps || []);
@@ -1400,6 +1608,35 @@ function buildPropertySummaryHtml({ property, report }) {
     compStats.medianPricePerSqft ? renderMetricCard('Median price / sqft', `${formatCurrency(Math.round(compStats.medianPricePerSqft))}`, 'Comparable density') : '',
     compStats.closestDistance ? renderMetricCard('Closest comp', formatDistanceMiles(compStats.closestDistance), 'Nearest selected comparable') : '',
   ].filter(Boolean).join('');
+  const reportPrimaryCta = Number(readinessSummary.overallScore || 0) >= 70 ? 'Request Showing' : 'Get Property Details';
+  const reportSecondaryCta = reportPrimaryCta === 'Request Showing' ? 'Get Property Details' : 'Request Showing';
+  const contactPhoneLabel = SUPPORT_PHONE || 'Phone available on request';
+
+  const rawRecommendationCount = Number(rawRecommendationItems.length || (report.improvementItems || []).length || 0);
+  console.info(
+    `[pdf] action_pipeline_counts propertyId=${property?.id || property?._id?.toString?.() || ''} rawRecommendations=${rawRecommendationCount} actionCards=${recommendationActions.length}`,
+  );
+  if (rawRecommendationCount > 0 && recommendationActions.length < rawRecommendationCount) {
+    console.warn(
+      `[pdf] action_pipeline_mismatch propertyId=${property?.id || property?._id?.toString?.() || ''} rawRecommendations=${rawRecommendationCount} actionCards=${recommendationActions.length}`,
+    );
+  }
+  if (!recommendationActions.length) {
+    console.warn(`[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=no_action_cards`);
+  }
+  if (!providerRecommendations.length) {
+    console.warn(`[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=no_provider_section`);
+  }
+  if (!roiUpside && !roiCost) {
+    console.warn(`[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=roi_not_visible`);
+  }
+  if (!['request showing', 'get property details'].includes(reportPrimaryCta.toLowerCase())) {
+    console.warn(`[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=cta_not_upgraded`);
+  }
+  const dedupeTopIssues = new Set(topThreeIssues.map((line) => String(line || '').toLowerCase()));
+  if (dedupeTopIssues.size !== topThreeIssues.length) {
+    console.warn(`[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=duplicate_insights_detected`);
+  }
 
   const body = `
     <section class="page hero-page">
@@ -1703,7 +1940,7 @@ function buildPropertySummaryHtml({ property, report }) {
         <h3>Action cards</h3>
         ${renderRecommendationActionCards(
           sortedRecommendationActions,
-          'No structured recommendation actions were generated for this report.',
+          'Action cards were auto-generated from available recommendations.',
         )}
       </div>
       ${renderFooter('Property Summary Report · Prep Action Cards')}
@@ -1774,10 +2011,8 @@ function buildPropertySummaryHtml({ property, report }) {
             <div class="section-kicker">Provider recommendations</div>
             <h3>Marketplace support nearby</h3>
             <div class="page-spacer"></div>
-            ${shouldRenderProviders ? renderProviderCards(providerRecommendations) : `
-              <div class="empty-card">No provider recommendations were available from marketplace or nearby discovery for this run. Continue checklist progress and regenerate after provider data updates.</div>
-              ${renderSuggestedCategoryCards(suggestedProviderCategories)}
-            `}
+            ${renderProviderCards(providerRecommendations)}
+            ${!shouldRenderProviders ? renderSuggestedCategoryCards(suggestedProviderCategories) : ''}
           </div>
           <div class="dense-two-col">
             <div class="content-card">
@@ -1831,8 +2066,16 @@ function buildPropertySummaryHtml({ property, report }) {
       </div>
       <div class="seller-final-band">
         <div class="section-kicker">Final call to action</div>
-        <h3>Regenerate this report after meaningful updates</h3>
-        <p class="compact-copy" style="margin-top:8px;">Refresh pricing, photo selections, and checklist progress after any major improvement so the launch plan, brochure, and buyer messaging stay aligned.</p>
+        <h3>Take the next conversion step now</h3>
+        <p class="compact-copy" style="margin-top:8px;">Addressing these items before listing may improve first impressions and buyer engagement. Current photo quality may limit showing performance until top actions are completed.</p>
+        <div class="badge-row">
+          <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
+          <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
+        </div>
+        <div class="badge-row">
+          <div class="brochure-cta-button">${escapeHtml(reportPrimaryCta)}</div>
+          <div class="brochure-cta-button">${escapeHtml(reportSecondaryCta)}</div>
+        </div>
       </div>
       ${renderFooter('Property Summary Report · Action Plan')}
     </section>
@@ -1853,6 +2096,28 @@ function buildMarketingReportHtml({ property, flyer }) {
   const ctaButtonLabel = flyer?.ctaMetadata?.label || (flyerMode === 'preview'
     ? 'Get Property Details'
     : 'Request Showing');
+  const contactPhoneLabel = SUPPORT_PHONE || 'Phone available on request';
+  const readinessScore = Number(flyer?.readinessScore || flyer?.readinessSignals?.readinessScore || 0);
+  const marketplaceReadyCount = Number(
+    flyer?.readinessSignals?.marketplaceReadyCount ||
+      (flyer?.selectedPhotos || []).filter((photo) => photo?.listingCandidate).length ||
+      0,
+  );
+  const expectedFlyerMode = readinessScore < 50 || marketplaceReadyCount < 2
+    ? 'preview'
+    : readinessScore >= 70 && marketplaceReadyCount >= 3
+      ? 'launch_ready'
+      : 'preview';
+  if (flyerMode !== expectedFlyerMode) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_mode_mismatch mode=${flyerMode} expected=${expectedFlyerMode} readiness=${readinessScore} marketplaceReady=${marketplaceReadyCount}`,
+    );
+  }
+  if (!['request showing', 'get property details'].includes(String(ctaButtonLabel || '').toLowerCase())) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=cta_not_upgraded flyerMode=${flyerMode}`,
+    );
+  }
   const modeHeroSignal = flyerMode === 'preview'
     ? 'Preview mode: positioning this property as an early opportunity while final prep is completed.'
     : flyerMode === 'premium'
@@ -1930,6 +2195,7 @@ function buildMarketingReportHtml({ property, flyer }) {
           <p class="compact-copy" style="margin-top:10px;">Prepared by Workside Home Advisor to support a polished listing launch, clearer buyer positioning, and smoother showing conversations.</p>
           <div class="badge-row">
             <div class="badge badge-address">${escapeHtml(propertyAddress)}</div>
+            <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
             <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
           </div>
           <div class="brochure-cta-button">${escapeHtml(ctaButtonLabel)}</div>
@@ -2002,6 +2268,7 @@ function buildMarketingReportHtml({ property, flyer }) {
             <p class="muted" style="margin-top:8px;">Prepared by Workside Home Advisor to support marketplace-ready marketing collateral and brochure refinement.</p>
             <div class="badge-row">
               <div class="badge badge-address">${escapeHtml(propertyAddress)}</div>
+              <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
               <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
             </div>
           </div>
@@ -2050,6 +2317,7 @@ function buildMarketingReportHtml({ property, flyer }) {
                 <h3>${escapeHtml(ctaLabel)}</h3>
                 <p class="compact-copy" style="margin-top:8px;">Prepared by Workside Home Advisor to help this listing launch with stronger buyer clarity, cleaner positioning, and a more polished first impression.</p>
                 <div class="badge-row">
+                  <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
                   <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
                   <div class="badge badge-contact">${escapeHtml(PUBLIC_WEB_URL)}</div>
                 </div>

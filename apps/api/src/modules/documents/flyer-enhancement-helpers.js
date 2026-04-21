@@ -141,17 +141,35 @@ export function deriveFlyerReadiness(selectedPhotos = []) {
   };
 }
 
-export function selectFlyerMode({ readinessScore, marketplaceReadyCount, qualityScore, strongPhotoCount }) {
-  if (readinessScore < 50 || marketplaceReadyCount === 0) {
-    return 'preview';
+export function resolveFlyerModeDecision({ readinessScore, marketplaceReadyCount }) {
+  const normalizedReadiness = Number(readinessScore || 0);
+  const normalizedMarketplaceReady = Number(marketplaceReadyCount || 0);
+
+  if (normalizedReadiness < 50 || normalizedMarketplaceReady < 2) {
+    return {
+      mode: 'preview',
+      reason:
+        normalizedReadiness < 50
+          ? `Readiness ${normalizedReadiness} is below 50.`
+          : `Marketplace-ready photos ${normalizedMarketplaceReady} are below 2.`,
+    };
   }
-  if (readinessScore >= 85 && marketplaceReadyCount >= 4 && strongPhotoCount >= 4 && qualityScore >= 80) {
-    return 'premium';
+
+  if (normalizedReadiness >= 70 && normalizedMarketplaceReady >= 3) {
+    return {
+      mode: 'launch_ready',
+      reason: `Readiness ${normalizedReadiness} and marketplace-ready photos ${normalizedMarketplaceReady} meet launch threshold.`,
+    };
   }
-  if (readinessScore >= 70 && strongPhotoCount >= 3) {
-    return 'launch_ready';
-  }
-  return 'preview';
+
+  return {
+    mode: 'preview',
+    reason: `Readiness ${normalizedReadiness} and marketplace-ready photos ${normalizedMarketplaceReady} do not meet launch threshold.`,
+  };
+}
+
+export function selectFlyerMode(signals = {}) {
+  return resolveFlyerModeDecision(signals).mode;
 }
 
 export function flyerModeLabel(mode = 'launch_ready') {
