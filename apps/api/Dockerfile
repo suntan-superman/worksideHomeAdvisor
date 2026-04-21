@@ -1,5 +1,5 @@
 # ---------- BASE IMAGE ----------
-FROM node:20-slim
+FROM node:20-bookworm-slim
 
 # ---------- ENV ----------
 ENV PNPM_HOME="/pnpm"
@@ -11,6 +11,37 @@ ENV PUPPETEER_CACHE_DIR="/opt/puppeteer"
 # Keep Docker aligned with the repo's packageManager version to avoid Corepack
 # switching versions at install time.
 RUN corepack enable && corepack prepare pnpm@10.7.1 --activate
+
+# ---------- SYSTEM DEPS FOR HEADLESS CHROME ----------
+# Pinning to bookworm + explicit deps keeps Puppeteer stable in Cloud Build.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libatspi2.0-0 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libgbm1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libx11-6 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    wget \
+    xdg-utils \
+  && rm -rf /var/lib/apt/lists/*
 
 # ---------- WORKDIR ----------
 WORKDIR /app
@@ -27,7 +58,7 @@ RUN pnpm install --frozen-lockfile
 # ---------- INSTALL PUPPETEER CHROME ----------
 # Ensure Chrome is present in the image (Cloud Run has no persistent disk).
 RUN mkdir -p /opt/puppeteer
-RUN pnpm --filter @workside/api exec puppeteer browsers install chrome --install-deps
+RUN pnpm --filter @workside/api exec puppeteer browsers install chrome
 
 # ---------- VERIFY PUPPETEER ----------
 # Fail the build if browser launch is broken.
