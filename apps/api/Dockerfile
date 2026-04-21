@@ -19,16 +19,16 @@ COPY . .
 
 # ---------- INSTALL DEPENDENCIES ----------
 # Install all workspace deps
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --allow-build=puppeteer,sharp
 
 # ---------- INSTALL PUPPETEER CHROME ----------
 # Ensure Chrome is present in the image (Cloud Run has no persistent disk).
 RUN mkdir -p /opt/puppeteer
-RUN npx puppeteer browsers install chrome
+RUN pnpm --filter @workside/api exec puppeteer browsers install chrome
 
 # ---------- VERIFY PUPPETEER ----------
 # Fail the build if browser launch is broken.
-RUN node --input-type=module -e "import puppeteer from 'puppeteer'; const browser = await puppeteer.launch({headless:'new', args:['--no-sandbox','--disable-setuid-sandbox']}); await browser.close(); console.log('puppeteer_launch_ok');"
+RUN pnpm --filter @workside/api exec node --input-type=module -e "import puppeteer from 'puppeteer'; const browser = await puppeteer.launch({headless:'new', args:['--no-sandbox','--disable-setuid-sandbox']}); await browser.close(); console.log('puppeteer_launch_ok');"
 
 # ---------- BUILD ----------
 # If you have a backend build step, keep this
