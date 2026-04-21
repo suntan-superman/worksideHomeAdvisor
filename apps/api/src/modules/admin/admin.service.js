@@ -101,6 +101,70 @@ function serializeProperty(property, extras = {}) {
   };
 }
 
+function startOfMonth(date = new Date()) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+function endOfMonth(date = new Date()) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1));
+}
+
+function toDate(value) {
+  return value ? new Date(value) : null;
+}
+
+function buildCycleKey(start, end) {
+  return `${start.toISOString().slice(0, 10)}_to_${end.toISOString().slice(0, 10)}`;
+}
+
+async function resolveAdminUsageUser({ userId = '', userEmail = '' } = {}) {
+  const normalizedUserId = String(userId || '').trim();
+  const normalizedEmail = String(userEmail || '').trim().toLowerCase();
+
+  if (normalizedUserId) {
+    const user = await UserModel.findById(normalizedUserId).lean();
+    if (!user) {
+      throw new Error('User not found for the provided userId.');
+    }
+    return user;
+  }
+
+  if (normalizedEmail) {
+    const user = await UserModel.findOne({ email: normalizedEmail }).lean();
+    if (!user) {
+      throw new Error('User not found for the provided userEmail.');
+    }
+    return user;
+  }
+
+  throw new Error('Provide either userId or userEmail.');
+}
+
+async function resolveUserCurrentBillingCycleKey(user) {
+  if (!user) {
+    throw new Error('User is required.');
+  }
+
+  if (user.isBillingBypass || user.role === 'admin' || user.role === 'super_admin') {
+    return 'admin_bypass';
+  }
+
+  if (user.isDemoAccount) {
+    return 'demo_bypass';
+  }
+
+  const subscription = await BillingSubscriptionModel.findOne({
+    userId: user._id,
+    isActive: true,
+  })
+    .sort({ updatedAt: -1 })
+    .lean();
+
+  const billingCycleStart = toDate(subscription?.currentPeriodStart) || startOfMonth();
+  const billingCycleEnd = toDate(subscription?.currentPeriodEnd) || endOfMonth();
+  return buildCycleKey(billingCycleStart, billingCycleEnd);
+}
+
 function buildDemoOverview() {
   return {
     dataSource: 'demo',
@@ -491,7 +555,94 @@ export async function getAdminUsageSnapshot() {
       photoAnalysisRuns: record.photoAnalysisRuns || 0,
       flyersGenerated: record.flyersGenerated || 0,
       flyerCacheHits: record.flyerCacheHits || 0,
+      documentGenerations: record.documentGenerations || 0,
       deniedRequests: record.deniedRequests || 0,
+      updatedAt: record.updatedAt || null,
+    })),
+  };
+}
+
+export async function resetAdminUserFreeTeasersAction({
+  userId = '',
+  userEmail = '',
+  scope = 'current_cycle',
+  resetFlyer = true,
+  resetReport = true,
+} = {}) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to reset usage counters.');
+  }
+
+  const shouldResetFlyer = Boolean(resetFlyer);
+  const shouldResetReport = Boolean(resetReport);
+  if (!shouldResetFlyer && !shouldResetReport) {
+    throw new Error('Choose at least one counter to reset (flyer and/or report).');
+  }
+
+  const user = await resolveAdminUsageUser({ userId, userEmail });
+  const usageFilter = {
+    userId: user._id,
+  };
+
+  let billingCycleKey = null;
+  if (scope === 'current_cycle') {
+    billingCycleKey = await resolveUserCurrentBillingCycleKey(user);
+    usageFilter.billingCycleKey = billingCycleKey;
+  }
+
+  const resetFields = {
+    updatedAt: new Date(),
+  };
+  if (shouldResetFlyer) {
+    resetFields.flyersGenerated = 0;
+  }
+  if (shouldResetReport) {
+    resetFields.documentGenerations = 0;
+  }
+
+  const beforeSnapshot = await UsageTrackingModel.find(usageFilter)
+    .sort({ updatedAt: -1 })
+    .lean();
+
+  const resetResult = await UsageTrackingModel.updateMany(usageFilter, {
+    $set: resetFields,
+  });
+
+  const afterSnapshot = await UsageTrackingModel.find(usageFilter)
+    .sort({ updatedAt: -1 })
+    .lean();
+
+  return {
+    success: true,
+    scope,
+    billingCycleKey: billingCycleKey || null,
+    targetUser: {
+      id: user._id?.toString?.() || String(user._id),
+      email: user.email || '',
+      role: user.role || '',
+      isDemoAccount: Boolean(user.isDemoAccount),
+      isBillingBypass: Boolean(user.isBillingBypass),
+    },
+    reset: {
+      flyer: shouldResetFlyer,
+      report: shouldResetReport,
+    },
+    matchedRecords: resetResult.matchedCount || 0,
+    modifiedRecords: resetResult.modifiedCount || 0,
+    before: beforeSnapshot.map((record) => ({
+      id: record._id?.toString?.() || String(record._id),
+      billingCycleKey: record.billingCycleKey || '',
+      planCode: record.planCode || '',
+      flyersGenerated: record.flyersGenerated || 0,
+      documentGenerations: record.documentGenerations || 0,
+      updatedAt: record.updatedAt || null,
+    })),
+    after: afterSnapshot.map((record) => ({
+      id: record._id?.toString?.() || String(record._id),
+      billingCycleKey: record.billingCycleKey || '',
+      planCode: record.planCode || '',
+      flyersGenerated: record.flyersGenerated || 0,
+      documentGenerations: record.documentGenerations || 0,
       updatedAt: record.updatedAt || null,
     })),
   };

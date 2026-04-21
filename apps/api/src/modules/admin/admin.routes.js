@@ -18,6 +18,7 @@ import {
   linkAdminProviderAccountAction,
   listAdminProperties,
   listAdminUsers,
+  resetAdminUserFreeTeasersAction,
   resendAdminProviderLeadAction,
   runAdminMediaVariantCleanup,
   syncAdminProviderBillingAction,
@@ -101,6 +102,32 @@ const updatePricingQueryPolicySchema = z.object({
   maxRunsPerPropertyPerUser: z.coerce.number().int().min(0).max(100),
 });
 
+const resetUsageTeasersSchema = z
+  .object({
+    userId: z.string().trim().min(1).optional(),
+    userEmail: z.string().trim().email().max(120).optional(),
+    scope: z.enum(['current_cycle', 'all_cycles']).default('current_cycle'),
+    resetFlyer: z.boolean().default(true),
+    resetReport: z.boolean().default(true),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.userId && !value.userEmail) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Provide either userId or userEmail.',
+        path: ['userId'],
+      });
+    }
+
+    if (!value.resetFlyer && !value.resetReport) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Select at least one reset target: resetFlyer and/or resetReport.',
+        path: ['resetFlyer'],
+      });
+    }
+  });
+
 export async function adminRoutes(fastify) {
   fastify.addHook('preHandler', async (request, reply) => {
     try {
@@ -148,6 +175,15 @@ export async function adminRoutes(fastify) {
   fastify.get('/usage', async (_request, reply) => {
     try {
       return reply.send(await getAdminUsageSnapshot());
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/usage/reset-free-teasers', async (request, reply) => {
+    try {
+      const payload = resetUsageTeasersSchema.parse(request.body || {});
+      return reply.send(await resetAdminUserFreeTeasersAction(payload));
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }
