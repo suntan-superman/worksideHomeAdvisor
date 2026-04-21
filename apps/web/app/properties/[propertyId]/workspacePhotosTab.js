@@ -103,6 +103,7 @@ export function WorkspacePhotosTab({
   setPhotoImportRoomLabel,
   photoImportNotes,
   setPhotoImportNotes,
+  photoImportProgress,
   photoImportSourceOptions,
   photoCategoryGroups,
   selectedMediaAssetPhotoCategory,
@@ -115,6 +116,32 @@ export function WorkspacePhotosTab({
   isArchivedProperty,
   handleOpenPhotoVariations,
 }) {
+  const importProgressCopy = photoImportProgress
+    ? (() => {
+        const total = Math.max(0, Number(photoImportProgress.total || 0));
+        const completed = Math.max(0, Number(photoImportProgress.completed || 0));
+        const currentIndex = Math.max(1, Number(photoImportProgress.currentIndex || 1));
+        const displayIndex = Math.min(total || 1, currentIndex);
+        const currentFileName = photoImportProgress.currentFileName
+          ? ` ${photoImportProgress.currentFileName}`
+          : '';
+
+        if (photoImportProgress.phase === 'refreshing') {
+          return `Uploaded ${completed} of ${total} photos. Refreshing the library...`;
+        }
+
+        if (photoImportProgress.phase === 'uploading') {
+          return `Uploading photo ${displayIndex} of ${total}:${currentFileName}`;
+        }
+
+        if (photoImportProgress.phase === 'saved') {
+          return `Saved photo ${completed} of ${total}:${currentFileName}`;
+        }
+
+        return `Preparing photo ${displayIndex} of ${total}:${currentFileName}`;
+      })()
+    : '';
+
   return (
     <div className="workspace-tab-stack">
       {renderCollapsibleSection({
@@ -177,6 +204,11 @@ export function WorkspacePhotosTab({
                 onChange={(event) => handleImportPhotoFiles(event.target.files)}
               />
             </label>
+            {photoImportProgress ? (
+              <p className="workspace-control-note" role="status" aria-live="polite">
+                {importProgressCopy}
+              </p>
+            ) : null}
             <p className="workspace-control-note">
               Drag-and-drop works here too. Import first, then choose one room photo and continue into Vision.
             </p>

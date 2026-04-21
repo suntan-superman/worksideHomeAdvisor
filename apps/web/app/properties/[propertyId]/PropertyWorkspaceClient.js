@@ -53,6 +53,7 @@ import {
 import { getStoredSession, setStoredSession } from '../../../lib/session';
 import {
   ASYNC_DOCUMENT_JOB_TIMEOUT_MS,
+  waitForDuration,
   pollAsyncDocumentJobUntilSettled,
 } from './asyncJobPolling';
 import {
@@ -63,6 +64,7 @@ import {
   getAssetGenerationStageKey,
   getDefaultVisionPresetKeyForStage,
   getDefaultVisionStageForAsset,
+  getMediaAssetPrimaryLabel,
   getMediaAssetBadges,
   getMediaAssetCreatedAtTimestamp,
   getMediaAssetSummary,
@@ -227,6 +229,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [photoImportSource, setPhotoImportSource] = useState('web_upload');
   const [photoImportRoomLabel, setPhotoImportRoomLabel] = useState('Living room');
   const [photoImportNotes, setPhotoImportNotes] = useState('');
+  const [photoImportProgress, setPhotoImportProgress] = useState(null);
   const [freeformEnhancementInstructions, setFreeformEnhancementInstructions] = useState('');
   const [customChecklistTitle, setCustomChecklistTitle] = useState('');
   const [customChecklistDetail, setCustomChecklistDetail] = useState('');
@@ -3627,12 +3630,38 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       return;
     }
 
-    setStatus(`Uploading ${files.length} photo${files.length === 1 ? '' : 's'}...`);
+    setPhotoImportProgress({
+      total: files.length,
+      completed: 0,
+      currentIndex: 1,
+      currentFileName: files[0]?.name || '',
+      phase: 'reading',
+    });
+    setStatus(`Importing photo 1 of ${files.length}...`);
     setToast(null);
     try {
-      for (const file of files) {
+      for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+        const file = files[fileIndex];
+        const currentIndex = fileIndex + 1;
+        setPhotoImportProgress({
+          total: files.length,
+          completed: fileIndex,
+          currentIndex,
+          currentFileName: file?.name || '',
+          phase: 'reading',
+        });
+        setStatus(`Importing photo ${currentIndex} of ${files.length}...`);
         const dataUrl = await readFileAsDataUrl(file);
         const [, imageBase64 = ''] = dataUrl.split(',');
+
+        setPhotoImportProgress({
+          total: files.length,
+          completed: fileIndex,
+          currentIndex,
+          currentFileName: file?.name || '',
+          phase: 'uploading',
+        });
+
         await savePhoto(propertyId, {
           roomLabel: photoImportRoomLabel,
           source: photoImportSource,
@@ -3640,8 +3669,24 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           mimeType: file.type || 'image/jpeg',
           imageBase64,
         });
+
+        setPhotoImportProgress({
+          total: files.length,
+          completed: currentIndex,
+          currentIndex,
+          currentFileName: file?.name || '',
+          phase: 'saved',
+        });
       }
 
+      setStatus('Refreshing photo library...');
+      setPhotoImportProgress({
+        total: files.length,
+        completed: files.length,
+        currentIndex: files.length,
+        currentFileName: '',
+        phase: 'refreshing',
+      });
       const nextAssets = await refreshMediaAssets();
       if (nextAssets[0]?.id) {
         setSelectedMediaAssetId(nextAssets[0].id);
@@ -3659,6 +3704,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     } catch (requestError) {
       setToast({ tone: 'error', title: 'Photo import failed', message: requestError.message });
     } finally {
+      setPhotoImportProgress(null);
       setStatus('');
     }
   }
@@ -3997,6 +4043,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setPhotoImportRoomLabel={setPhotoImportRoomLabel}
       photoImportNotes={photoImportNotes}
       setPhotoImportNotes={setPhotoImportNotes}
+      photoImportProgress={photoImportProgress}
       photoImportSourceOptions={PHOTO_IMPORT_SOURCE_OPTIONS}
       photoCategoryGroups={photoCategoryGroups}
       selectedMediaAssetPhotoCategory={selectedMediaAssetPhotoCategory}
