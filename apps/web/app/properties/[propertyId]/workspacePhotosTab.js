@@ -101,9 +101,11 @@ export function WorkspacePhotosTab({
   setPhotoImportSource,
   photoImportRoomLabel,
   setPhotoImportRoomLabel,
+  photoImportRoomLabelOptions,
   photoImportNotes,
   setPhotoImportNotes,
   photoImportProgress,
+  canAccessVisionWorkspace,
   photoImportSourceOptions,
   photoCategoryGroups,
   selectedMediaAssetPhotoCategory,
@@ -177,12 +179,21 @@ export function WorkspacePhotosTab({
               </label>
               <label className="workspace-control-field">
                 <span>Room label</span>
-                <input
-                  type="text"
-                  value={photoImportRoomLabel}
+                <select
+                  className="select-input"
+                  value={
+                    photoImportRoomLabelOptions.includes(photoImportRoomLabel)
+                      ? photoImportRoomLabel
+                      : 'Other'
+                  }
                   onChange={(event) => setPhotoImportRoomLabel(event.target.value)}
-                  placeholder="Kitchen"
-                />
+                >
+                  {photoImportRoomLabelOptions.map((label) => (
+                    <option key={label} value={label}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="workspace-control-field workspace-control-field-full">
                 <span>Notes</span>
@@ -210,7 +221,9 @@ export function WorkspacePhotosTab({
               </p>
             ) : null}
             <p className="workspace-control-note">
-              Drag-and-drop works here too. Import first, then choose one room photo and continue into Vision.
+              {canAccessVisionWorkspace
+                ? 'Drag-and-drop works here too. Import first, then open Vision when you are ready.'
+                : 'Drag-and-drop works here too. Vision enhancements unlock after upgrade.'}
             </p>
           </div>
         ),

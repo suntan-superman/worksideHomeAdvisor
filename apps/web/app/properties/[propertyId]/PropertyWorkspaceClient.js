@@ -26,6 +26,7 @@ import {
   generateFlyer,
   generateReport,
   generateSocialPack,
+  getBillingSummary,
   getImageEnhancementJob,
   getFlyerExportUrl,
   getLatestFlyer,
@@ -58,6 +59,7 @@ import {
 } from './asyncJobPolling';
 import {
   VISION_WORKFLOW_STAGES,
+  PHOTO_LIBRARY_CATEGORY_DEFINITIONS,
   buildPhotoCategoryGroups,
   buildVisionWorkflowRecommendation,
   formatFreeformPlanHighlights,
@@ -121,6 +123,12 @@ const HIDDEN_WORKSPACE_TABS = [{ id: 'vision', label: 'Vision workspace' }];
 const PHOTO_IMPORT_SOURCE_OPTIONS = [
   { value: 'web_upload', label: 'Web upload' },
   { value: 'third_party_import', label: 'Third-party import' },
+];
+const PHOTO_IMPORT_ROOM_LABEL_OPTIONS = [
+  ...PHOTO_LIBRARY_CATEGORY_DEFINITIONS.filter((category) => category.key !== 'other').map(
+    (category) => category.label,
+  ),
+  'Other',
 ];
 
 const PHOTO_VARIATIONS_PAGE_SIZE = 12;
@@ -227,7 +235,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [selectedListPriceDraft, setSelectedListPriceDraft] = useState('');
   const [selectedListPriceSourceDraft, setSelectedListPriceSourceDraft] = useState('recommended_mid');
   const [photoImportSource, setPhotoImportSource] = useState('web_upload');
-  const [photoImportRoomLabel, setPhotoImportRoomLabel] = useState('Living room');
+  const [photoImportRoomLabel, setPhotoImportRoomLabel] = useState('Living Room');
   const [photoImportNotes, setPhotoImportNotes] = useState('');
   const [photoImportProgress, setPhotoImportProgress] = useState(null);
   const [freeformEnhancementInstructions, setFreeformEnhancementInstructions] = useState('');
@@ -280,6 +288,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     const session = getStoredSession();
     return session?.user?.role === 'agent' ? 'agent' : 'seller';
   }, []);
+  const viewerUserId = useMemo(() => {
+    const session = getStoredSession();
+    return session?.user?.id || '';
+  }, []);
+  const recommendedVisionUpgradePlanKey = viewerRole === 'agent' ? 'agent_starter' : 'seller_pro';
   const viewerIdentityKey = useMemo(() => {
     const session = getStoredSession();
     return (
@@ -297,6 +310,51 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     () => `${HOME_ADVISOR_GUIDE_STORAGE_KEY_PREFIX}.${viewerIdentityKey}.${propertyId}`,
     [propertyId, viewerIdentityKey],
   );
+
+  const billingSummaryQuery = useQuery({
+    queryKey: ['billing-summary', viewerUserId || 'workspace-user'],
+    enabled: Boolean(viewerUserId),
+    queryFn: async () => getBillingSummary(viewerUserId),
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  });
+  const billingAccess = billingSummaryQuery.data?.access || null;
+  const canAccessVisionWorkspace =
+    billingAccess?.planKey &&
+    billingAccess.planKey !== 'free';
+
+  useEffect(() => {
+    if (canAccessVisionWorkspace) {
+      return;
+    }
+
+    if (activeTab === 'vision') {
+      setActiveTab('photos');
+    }
+    if (visionRecoveryState) {
+      setVisionRecoveryState(null);
+    }
+    if (visionGenerationState) {
+      setVisionGenerationState(null);
+    }
+    if (visionCancellationPending) {
+      setVisionCancellationPending(false);
+    }
+    if (
+      status === 'Recovering vision job...' ||
+      status.startsWith('Generating ') ||
+      status.includes('vision')
+    ) {
+      setStatus('');
+    }
+  }, [
+    activeTab,
+    canAccessVisionWorkspace,
+    status,
+    visionCancellationPending,
+    visionGenerationState,
+    visionRecoveryState,
+  ]);
 
   useEffect(() => {
     setWorkspaceSectionState(readWorkspaceSectionState(workspaceSectionStorageKey));
@@ -2170,6 +2228,37 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     return true;
   }
 
+  function blockVisionAccessIfUnavailable() {
+    if (canAccessVisionWorkspace) {
+      return false;
+    }
+
+    if (billingSummaryQuery.isLoading && !billingAccess?.planKey) {
+      setToast({
+        tone: 'info',
+        title: 'Checking Vision access',
+        message:
+          'We are still loading your plan details. Try Vision again in a moment.',
+        autoDismissMs: 5000,
+      });
+      return true;
+    }
+
+    setToast({
+      tone: 'warning',
+      title: 'Upgrade required for Vision',
+      message:
+        'Photo import and starter pricing are available now. Upgrade to unlock Vision enhancements and advanced photo-variation workflows.',
+      actionLabel: 'View upgrade options',
+      onAction: () =>
+        router.push(
+          `/dashboard?upgrade=${encodeURIComponent(recommendedVisionUpgradePlanKey)}`,
+        ),
+      autoDismissMs: 0,
+    });
+    return true;
+  }
+
   async function handleAnalyzePricing() {
     if (blockArchivedMutation()) {
       return;
@@ -2511,6 +2600,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (!asset) {
       return;
     }
+    if (blockVisionAccessIfUnavailable()) {
+      return;
+    }
 
     const resolvedStageKey = nextStageKey || getDefaultVisionStageForAsset(asset);
     if (asset.id !== selectedMediaAssetId) {
@@ -2542,6 +2634,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   function handleUseVariantAsVisionBaseline(asset, variant) {
     if (!asset || !variant) {
+      return;
+    }
+    if (blockVisionAccessIfUnavailable()) {
       return;
     }
 
@@ -2850,6 +2945,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (blockArchivedMutation()) {
       return;
     }
+    if (blockVisionAccessIfUnavailable()) {
+      return;
+    }
     if (!selectedMediaAsset) {
       return;
     }
@@ -3048,6 +3146,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   useEffect(() => {
     if (
+      !canAccessVisionWorkspace ||
       activeTab !== 'vision' ||
       !selectedMediaAsset?.id ||
       selectedMediaAsset.assetType === 'generated' ||
@@ -3072,6 +3171,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     void handleGenerateVariant('enhance_listing_quality');
   }, [
     activeTab,
+    canAccessVisionWorkspace,
     handleGenerateVariant,
     isArchivedProperty,
     liveMediaVariantsQuery.isLoading,
@@ -3097,6 +3197,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
   async function handleGenerateFreeformVariant() {
     if (blockArchivedMutation()) {
+      return;
+    }
+    if (blockVisionAccessIfUnavailable()) {
       return;
     }
     if (!selectedMediaAsset || !freeformEnhancementInstructions.trim()) {
@@ -3639,6 +3742,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     });
     setStatus(`Importing photo 1 of ${files.length}...`);
     setToast(null);
+    const normalizedRoomLabel = PHOTO_IMPORT_ROOM_LABEL_OPTIONS.includes(photoImportRoomLabel)
+      ? photoImportRoomLabel
+      : 'Other';
     try {
       for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
         const file = files[fileIndex];
@@ -3663,7 +3769,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         });
 
         await savePhoto(propertyId, {
-          roomLabel: photoImportRoomLabel,
+          roomLabel: normalizedRoomLabel,
           source: photoImportSource,
           notes: photoImportNotes,
           mimeType: file.type || 'image/jpeg',
@@ -3689,10 +3795,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       });
       const nextAssets = await refreshMediaAssets();
       if (nextAssets[0]?.id) {
-        setSelectedMediaAssetId(nextAssets[0].id);
-        await refreshMediaVariants(nextAssets[0].id);
-        setActiveTab('vision');
-        setPendingWorkspaceScrollTarget('vision-top');
+        setSelectedMediaAssetId((current) => current || nextAssets[0].id);
       }
       await Promise.all([refreshDashboardSnapshot(), refreshWorkflow()]);
       setPhotoImportNotes('');
@@ -4041,9 +4144,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setPhotoImportSource={setPhotoImportSource}
       photoImportRoomLabel={photoImportRoomLabel}
       setPhotoImportRoomLabel={setPhotoImportRoomLabel}
+      photoImportRoomLabelOptions={PHOTO_IMPORT_ROOM_LABEL_OPTIONS}
       photoImportNotes={photoImportNotes}
       setPhotoImportNotes={setPhotoImportNotes}
       photoImportProgress={photoImportProgress}
+      canAccessVisionWorkspace={canAccessVisionWorkspace}
       photoImportSourceOptions={PHOTO_IMPORT_SOURCE_OPTIONS}
       photoCategoryGroups={photoCategoryGroups}
       selectedMediaAssetPhotoCategory={selectedMediaAssetPhotoCategory}
@@ -4990,7 +5095,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (activeTab === 'pricing') return renderPricingTab();
     if (activeTab === 'photos') return renderPhotosTab();
     if (activeTab === 'seller_picks') return renderSellerPicksTab();
-    if (activeTab === 'vision') return renderVisionTab();
+    if (activeTab === 'vision') {
+      return canAccessVisionWorkspace ? renderVisionTab() : renderPhotosTab();
+    }
     if (activeTab === 'brochure') return renderBrochureTab();
     if (activeTab === 'report') return renderReportTab();
     if (activeTab === 'checklist') return renderChecklistTab();
@@ -4998,7 +5105,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   };
 
   const visibleWorkspaceTabs =
-    activeTab === 'vision'
+    activeTab === 'vision' && canAccessVisionWorkspace
       ? [...WORKSPACE_TABS.slice(0, 3), ...HIDDEN_WORKSPACE_TABS, ...WORKSPACE_TABS.slice(3)]
       : WORKSPACE_TABS;
 
@@ -5109,11 +5216,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 className="button-primary"
                 onClick={() => {
                   handleOpenAssetInVision(resolvedActivePhotoDetailsAsset);
-                  setActivePhotoDetailsAsset(null);
+                  if (canAccessVisionWorkspace) {
+                    setActivePhotoDetailsAsset(null);
+                  }
                 }}
                 disabled={Boolean(status) || isArchivedProperty}
               >
-                Open in Vision
+                {canAccessVisionWorkspace ? 'Open in Vision' : 'Upgrade for Vision'}
               </button>
               {resolvedActivePhotoDetailsAsset.assetType === 'generated' && resolvedActivePhotoDetailsAsset.sourceMediaId ? (
                 <button
