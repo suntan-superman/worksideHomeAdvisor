@@ -31,6 +31,7 @@ import {
   PDF_PAGE_HEIGHT,
   PDF_PAGE_MARGIN,
   sanitizeFilePart,
+  wrapText,
 } from './pdf-theme.js';
 
 function serializeFlyer(document) {
@@ -516,7 +517,10 @@ async function renderFallbackMarketingFlyerPdf({ property, flyer, filename }) {
   const bodyFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const colors = createPdfPalette();
   const page = pdfDoc.addPage([PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT]);
-  const heroPhoto = await fetchPdfImage(pdfDoc, flyer.selectedPhotos?.[0]?.imageUrl);
+  const selectedPhotos = (flyer.selectedPhotos || []).slice(0, 4);
+  const embeddedPhotos = await Promise.all(
+    selectedPhotos.map((photo) => fetchPdfImage(pdfDoc, photo?.imageUrl)),
+  );
 
   drawDocumentFrame(page, colors);
   drawBrandHeader(page, { headingFont, bodyFont }, {
@@ -527,13 +531,94 @@ async function renderFallbackMarketingFlyerPdf({ property, flyer, filename }) {
     colors,
   });
 
-  drawContainedImageFrame(page, heroPhoto, {
-    x: PDF_PAGE_MARGIN,
-    y: 430,
-    width: PDF_PAGE_WIDTH - PDF_PAGE_MARGIN * 2,
-    height: 210,
-    colors,
-  });
+  const galleryX = PDF_PAGE_MARGIN;
+  const galleryY = 430;
+  const galleryWidth = PDF_PAGE_WIDTH - PDF_PAGE_MARGIN * 2;
+  const galleryHeight = 210;
+  const gridGap = 8;
+  const photoCount = embeddedPhotos.length;
+
+  if (photoCount >= 4) {
+    const cellWidth = (galleryWidth - gridGap) / 2;
+    const cellHeight = (galleryHeight - gridGap) / 2;
+    drawContainedImageFrame(page, embeddedPhotos[0], {
+      x: galleryX,
+      y: galleryY + cellHeight + gridGap,
+      width: cellWidth,
+      height: cellHeight,
+      colors,
+    });
+    drawContainedImageFrame(page, embeddedPhotos[1], {
+      x: galleryX + cellWidth + gridGap,
+      y: galleryY + cellHeight + gridGap,
+      width: cellWidth,
+      height: cellHeight,
+      colors,
+    });
+    drawContainedImageFrame(page, embeddedPhotos[2], {
+      x: galleryX,
+      y: galleryY,
+      width: cellWidth,
+      height: cellHeight,
+      colors,
+    });
+    drawContainedImageFrame(page, embeddedPhotos[3], {
+      x: galleryX + cellWidth + gridGap,
+      y: galleryY,
+      width: cellWidth,
+      height: cellHeight,
+      colors,
+    });
+  } else if (photoCount === 3) {
+    const largeWidth = Math.max(220, Math.floor((galleryWidth - gridGap) * 0.62));
+    const stackWidth = galleryWidth - largeWidth - gridGap;
+    const stackHeight = (galleryHeight - gridGap) / 2;
+    drawContainedImageFrame(page, embeddedPhotos[0], {
+      x: galleryX,
+      y: galleryY,
+      width: largeWidth,
+      height: galleryHeight,
+      colors,
+    });
+    drawContainedImageFrame(page, embeddedPhotos[1], {
+      x: galleryX + largeWidth + gridGap,
+      y: galleryY + stackHeight + gridGap,
+      width: stackWidth,
+      height: stackHeight,
+      colors,
+    });
+    drawContainedImageFrame(page, embeddedPhotos[2], {
+      x: galleryX + largeWidth + gridGap,
+      y: galleryY,
+      width: stackWidth,
+      height: stackHeight,
+      colors,
+    });
+  } else if (photoCount === 2) {
+    const cellWidth = (galleryWidth - gridGap) / 2;
+    drawContainedImageFrame(page, embeddedPhotos[0], {
+      x: galleryX,
+      y: galleryY,
+      width: cellWidth,
+      height: galleryHeight,
+      colors,
+    });
+    drawContainedImageFrame(page, embeddedPhotos[1], {
+      x: galleryX + cellWidth + gridGap,
+      y: galleryY,
+      width: cellWidth,
+      height: galleryHeight,
+      colors,
+    });
+  } else {
+    drawContainedImageFrame(page, embeddedPhotos[0] || null, {
+      x: galleryX,
+      y: galleryY,
+      width: galleryWidth,
+      height: galleryHeight,
+      colors,
+    });
+  }
 
   drawMetricCard(page, { headingFont, bodyFont }, {
     x: PDF_PAGE_MARGIN,
@@ -558,10 +643,33 @@ async function renderFallbackMarketingFlyerPdf({ property, flyer, filename }) {
     y: 332,
     width: 176,
     label: 'Call to action',
-    value: flyer.callToAction || 'Schedule a showing',
+    value: '',
     colors,
     tone: 'moss',
   });
+  const ctaCardX = PDF_PAGE_MARGIN + 352;
+  const ctaCardY = 332;
+  const ctaCardWidth = 176;
+  const ctaText = flyer.callToAction || 'Schedule a showing';
+  const ctaLines = wrapText(ctaText, 20);
+  const ctaVisibleLines = ctaLines.slice(0, 3);
+  if (ctaLines.length > ctaVisibleLines.length && ctaVisibleLines.length) {
+    const lastLineIndex = ctaVisibleLines.length - 1;
+    ctaVisibleLines[lastLineIndex] = `${ctaVisibleLines[lastLineIndex].slice(0, 18).trimEnd()}…`;
+  }
+
+  let ctaCursorY = ctaCardY + 38;
+  for (const line of ctaVisibleLines) {
+    page.drawText(line, {
+      x: ctaCardX + 14,
+      y: ctaCursorY,
+      size: 12,
+      font: headingFont,
+      color: colors.ink,
+      maxWidth: ctaCardWidth - 24,
+    });
+    ctaCursorY -= 13;
+  }
 
   drawSectionEyebrow(page, { headingFont, bodyFont }, {
     x: PDF_PAGE_MARGIN,

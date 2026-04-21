@@ -251,6 +251,13 @@ export function drawDocumentFooter(page, fonts, options = {}) {
   } = options;
   const { headingFont, bodyFont } = fonts;
   const footerY = 38;
+  const configuredDomain = String(env.PUBLIC_WEB_URL || '')
+    .replace(/^https?:\/\//, '')
+    .replace(/\/$/, '');
+  const footerDomain =
+    configuredDomain && !configuredDomain.includes('netlify.app')
+      ? configuredDomain
+      : 'worksideadvisor.com';
 
   page.drawLine({
     start: { x: PDF_PAGE_MARGIN, y: footerY + 22 },
@@ -276,18 +283,13 @@ export function drawDocumentFooter(page, fonts, options = {}) {
     lineHeight: 10,
   });
 
-  page.drawText(
-    String(env.PUBLIC_WEB_URL || 'https://worksideadvisor.com')
-      .replace(/^https?:\/\//, '')
-      .replace(/\/$/, ''),
-    {
-      x: PDF_PAGE_WIDTH - PDF_PAGE_MARGIN - 110,
-      y: footerY + 8,
-      size: 9,
-      font: bodyFont,
-      color: colors.muted,
-    },
-  );
+  page.drawText(footerDomain, {
+    x: PDF_PAGE_WIDTH - PDF_PAGE_MARGIN - 110,
+    y: footerY + 8,
+    size: 9,
+    font: bodyFont,
+    color: colors.muted,
+  });
 }
 
 export function drawMetricCard(page, fonts, options = {}) {

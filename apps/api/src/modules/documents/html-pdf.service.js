@@ -6,7 +6,16 @@ import { formatCurrency } from '@workside/utils';
 import { env } from '../../config/env.js';
 
 const SUPPORT_EMAIL = BRANDING.supportEmail;
-const PUBLIC_WEB_URL = BRANDING.publicWebUrl || String(env.PUBLIC_WEB_URL || 'https://worksideadvisor.com');
+const RAW_PUBLIC_WEB_URL = BRANDING.publicWebUrl || String(env.PUBLIC_WEB_URL || 'https://worksideadvisor.com');
+const PUBLIC_WEB_URL = (() => {
+  const normalized = String(RAW_PUBLIC_WEB_URL || '')
+    .replace(/^https?:\/\//, '')
+    .replace(/\/$/, '');
+  if (!normalized || normalized.includes('netlify.app')) {
+    return 'worksideadvisor.com';
+  }
+  return normalized;
+})();
 
 function logPdfEvent(event, details = {}) {
   const payload = Object.entries(details)
@@ -225,10 +234,12 @@ function getReadinessTone({ score, label }) {
 }
 
 function renderMetricCard(label, value, support = '', tone = 'default') {
+  const valueText = String(value ?? '').trim();
+  const shouldWrapValue = valueText.length > 24 || valueText.includes('\n');
   return `
     <div class="metric-card metric-card-${escapeHtml(tone)}">
       <div class="metric-label">${escapeHtml(label)}</div>
-      <div class="metric-value">${formatMetricValue(value)}</div>
+      <div class="metric-value ${shouldWrapValue ? 'metric-value-wrap' : ''}">${formatMetricValue(value)}</div>
       ${support ? `<div class="metric-support">${escapeHtml(support)}</div>` : ''}
     </div>
   `;
@@ -803,6 +814,7 @@ function renderHtmlDocument({ title, body }) {
       .metric-card-needs-work { border-color: rgba(176,108,99,0.34); background: rgba(255,246,245,0.97); }
       .metric-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--moss); margin-bottom: 8px; white-space: nowrap; }
       .metric-value { font-size: 22px; font-weight: 700; white-space: nowrap; }
+      .metric-value-wrap { white-space: normal; overflow-wrap: anywhere; line-height: 1.2; font-size: 19px; }
       .metric-support { margin-top: 8px; font-size: 12px; color: var(--muted); line-height: 1.4; }
       .section-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 14px; }
       .content-card, .sidebar-card { padding: 18px 20px; }
@@ -955,6 +967,8 @@ function renderHtmlDocument({ title, body }) {
       .action-plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
       .brochure-cover { position: relative; min-height: 5.2in; border-radius: 28px; overflow: hidden; border: 1px solid var(--line); background: linear-gradient(135deg, #304f72 0%, #203245 100%); }
       .brochure-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .brochure-cover-media-grid { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 8px; }
+      .brochure-cover-media-grid img { position: relative; width: 100%; height: 100%; object-fit: cover; border-radius: 16px; }
       .brochure-cover::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(16,24,32,0.08) 0%, rgba(30,57,84,0.40) 30%, rgba(16,24,32,0.72) 68%, rgba(16,24,32,0.9) 100%); }
       .brochure-cover-overlay { position: relative; z-index: 1; min-height: 5.2in; padding: 30px 30px 26px; color: #ffffff; display: flex; flex-direction: column; justify-content: flex-end; }
       .brochure-cover-overlay .brand-kicker { color: rgba(255,255,255,0.78); }
@@ -1537,9 +1551,11 @@ function buildPropertySummaryHtml({ property, report }) {
 function buildMarketingReportHtml({ property, flyer }) {
   const propertyAddress = buildPropertyAddress(property);
   const neighborhoodMapImageUrl = flyer._resolvedNeighborhoodMapImageUrl || buildNeighborhoodMapImageUrl(property);
-  const selectedPhotos = flyer.selectedPhotos || [];
-  const heroPhoto = selectedPhotos[0];
-  const galleryPhotos = selectedPhotos.slice(1, 5);
+  const selectedPhotos = (flyer.selectedPhotos || []).filter((photo) => photo?.imageUrl);
+  const coverPhotos = selectedPhotos.slice(0, 4);
+  const hasFourPhotoCover = coverPhotos.length >= 4;
+  const heroPhoto = coverPhotos[0];
+  const galleryPhotos = hasFourPhotoCover ? selectedPhotos.slice(4, 8) : selectedPhotos.slice(1, 5);
   const featureTags = pickMeaningfulLines(flyer.highlights || [], 6);
   const topReasonsToBuy = [
     ...(featureTags || []),
@@ -1568,7 +1584,19 @@ function buildMarketingReportHtml({ property, flyer }) {
   const body = `
     <section class="page">
       <div class="brochure-cover">
-        ${heroPhoto?.imageUrl ? `<img src="${escapeHtml(heroPhoto.imageUrl)}" alt="${escapeHtml(heroPhoto.roomLabel || 'Hero property photo')}" />` : ''}
+        ${
+          hasFourPhotoCover
+            ? `
+              <div class="brochure-cover-media-grid">
+                ${coverPhotos
+                  .map((photo) => `<img src="${escapeHtml(photo.imageUrl || '')}" alt="${escapeHtml(photo.roomLabel || 'Property photo')}" />`)
+                  .join('')}
+              </div>
+            `
+            : heroPhoto?.imageUrl
+              ? `<img src="${escapeHtml(heroPhoto.imageUrl)}" alt="${escapeHtml(heroPhoto.roomLabel || 'Hero property photo')}" />`
+              : ''
+        }
         <div class="brochure-cover-overlay">
           <div class="brand-kicker">Workside Home Advisor · Marketing Report</div>
           <div class="brochure-price">${escapeHtml(property?.selectedListPrice ? `Starting at ${formatCurrency(property.selectedListPrice)}` : flyer.priceText || 'Pricing on request')}</div>
