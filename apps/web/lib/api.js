@@ -586,6 +586,13 @@ export function generateFlyer(propertyId, flyerType = 'sale', customizations = {
   });
 }
 
+export function suggestFlyerCopy(propertyId, payload = {}) {
+  return request(`/api/v1/properties/${propertyId}/flyer/copy-suggestions`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function getLatestFlyer(propertyId) {
   return request(`/api/v1/properties/${propertyId}/flyer/latest`);
 }

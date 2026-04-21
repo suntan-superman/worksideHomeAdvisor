@@ -47,6 +47,7 @@ import {
   saveVariantToPhotos,
   saveProvider,
   selectMediaVariant,
+  suggestFlyerCopy,
   setPropertyPricingDecision,
   updateChecklistItem,
   updateMediaAsset,
@@ -225,6 +226,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [flyerSummaryDraft, setFlyerSummaryDraft] = useState('');
   const [flyerCallToActionDraft, setFlyerCallToActionDraft] = useState('');
   const [flyerSelectedPhotoIds, setFlyerSelectedPhotoIds] = useState([]);
+  const [flyerCopySuggestions, setFlyerCopySuggestions] = useState([]);
+  const [flyerCopySuggestionSource, setFlyerCopySuggestionSource] = useState('');
+  const [isSuggestingFlyerCopy, setIsSuggestingFlyerCopy] = useState(false);
   const [reportTitleDraft, setReportTitleDraft] = useState('');
   const [reportExecutiveSummaryDraft, setReportExecutiveSummaryDraft] = useState('');
   const [reportListingDescriptionDraft, setReportListingDescriptionDraft] = useState('');
@@ -1947,6 +1951,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     reportPhotoPool,
   ]);
 
+  useEffect(() => {
+    setFlyerCopySuggestions([]);
+    setFlyerCopySuggestionSource('');
+  }, [propertyId, flyerType]);
+
   function applyPropertySnapshot(snapshot, preferredAssetId = selectedMediaAssetId) {
     const nextAssets = snapshot?.mediaAssets || [];
     const nextPricing = snapshot?.pricingAnalyses?.latest || null;
@@ -2406,6 +2415,67 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     } finally {
       setStatus('');
     }
+  }
+
+  async function handleSuggestFlyerCopy() {
+    if (blockArchivedMutation()) {
+      return;
+    }
+
+    setIsSuggestingFlyerCopy(true);
+    setToast(null);
+    try {
+      const response = await suggestFlyerCopy(propertyId, {
+        flyerType,
+        headline: flyerHeadlineDraft,
+        count: 3,
+      });
+      const suggestions = Array.isArray(response?.suggestions)
+        ? response.suggestions
+            .filter((option) => option?.subheadline && option?.summary)
+            .slice(0, 3)
+            .map((option, index) => ({
+              id: option.id || `suggestion-${index + 1}`,
+              subheadline: String(option.subheadline || '').trim(),
+              summary: String(option.summary || '').trim(),
+            }))
+        : [];
+
+      if (!suggestions.length) {
+        throw new Error('No copy suggestions were generated.');
+      }
+
+      setFlyerCopySuggestions(suggestions);
+      setFlyerCopySuggestionSource(response?.source || '');
+      setToast({
+        tone: 'success',
+        title: 'Copy ideas ready',
+        message:
+          'Select a suggestion to populate the subheadline and summary fields.',
+      });
+    } catch (requestError) {
+      setToast({
+        tone: 'error',
+        title: 'Could not generate copy ideas',
+        message: requestError.message,
+      });
+    } finally {
+      setIsSuggestingFlyerCopy(false);
+    }
+  }
+
+  function handleUseFlyerCopySuggestion(suggestion) {
+    if (!suggestion) {
+      return;
+    }
+
+    setFlyerSubheadlineDraft(String(suggestion.subheadline || '').trim());
+    setFlyerSummaryDraft(String(suggestion.summary || '').trim());
+    setToast({
+      tone: 'success',
+      title: 'Suggestion applied',
+      message: 'You can edit the suggested copy before generating the brochure.',
+    });
   }
 
   async function handleGenerateFlyer() {
@@ -5037,6 +5107,11 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setFlyerSummaryDraft={setFlyerSummaryDraft}
       flyerCallToActionDraft={flyerCallToActionDraft}
       setFlyerCallToActionDraft={setFlyerCallToActionDraft}
+      flyerCopySuggestions={flyerCopySuggestions}
+      flyerCopySuggestionSource={flyerCopySuggestionSource}
+      isSuggestingFlyerCopy={isSuggestingFlyerCopy}
+      handleSuggestFlyerCopy={handleSuggestFlyerCopy}
+      handleUseFlyerCopySuggestion={handleUseFlyerCopySuggestion}
       brochurePhotoPool={brochurePhotoPool}
       flyerSelectedPhotoIds={flyerSelectedPhotoIds}
       toggleFlyerPhotoSelection={toggleFlyerPhotoSelection}

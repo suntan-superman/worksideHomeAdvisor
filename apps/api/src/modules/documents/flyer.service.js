@@ -4,6 +4,7 @@ import { formatCurrency } from '@workside/utils';
 
 import { env } from '../../config/env.js';
 import { generateMarketingInsights } from '../../services/aiWorkflowService.js';
+import { generateStructuredJson, isOpenAiConfigured } from '../../services/openaiClient.js';
 import { buildMediaVariantUrl } from '../../services/storageService.js';
 import {
   getMediaAssetMarketplaceState,
@@ -160,6 +161,223 @@ function normalizeFlyerCustomizations(customizations = {}) {
     callToAction: customizations.callToAction?.trim() || '',
     selectedPhotoAssetIds: (customizations.selectedPhotoAssetIds || []).filter(Boolean),
   };
+}
+
+const FLYER_COPY_SUGGESTIONS_SCHEMA = {
+  type: 'object',
+  properties: {
+    suggestions: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 5,
+      items: {
+        type: 'object',
+        properties: {
+          subheadline: { type: 'string' },
+          summary: { type: 'string' },
+        },
+        required: ['subheadline', 'summary'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['suggestions'],
+  additionalProperties: false,
+};
+
+function toShortText(value, maxLength, fallback = '') {
+  const normalized = String(value || fallback || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) {
+    return '';
+  }
+
+  return normalized.slice(0, maxLength);
+}
+
+function buildPropertyLocationLine(property = {}) {
+  return [property.addressLine1, property.city, property.state, property.zip]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function buildFallbackFlyerCopySuggestions({
+  property,
+  flyerType,
+  headline,
+  fallbackFlyer,
+  count,
+}) {
+  const propertyTitle = toShortText(headline, 140, property?.title || 'This property');
+  const location = buildPropertyLocationLine(property);
+  const bedBathText = `${property?.bedrooms || '--'} bed / ${property?.bathrooms || '--'} bath`;
+  const squareFeetText = property?.squareFeet ? `${property.squareFeet} sqft` : '';
+  const inventoryContext = [bedBathText, squareFeetText].filter(Boolean).join(' • ');
+  const listingContext = [location, inventoryContext].filter(Boolean).join(' • ');
+  const listingSummary = listingContext ? ` ${listingContext}.` : '';
+
+  const optionSet =
+    flyerType === 'rental'
+      ? [
+          {
+            subheadline: 'Move-in-ready rental with bright everyday flow.',
+            summary: `${propertyTitle} stands out as a practical rental option with balanced room flow and strong natural light.${listingSummary} Position this as a clean, well-kept home suited for qualified renters seeking comfort and convenience.`,
+          },
+          {
+            subheadline: 'Comfort-first layout with strong renter appeal.',
+            summary: `Frame ${propertyTitle} as a rental that combines usable square footage, approachable styling, and dependable day-to-day livability.${listingSummary} Keep the narrative focused on ease, functionality, and immediate move-in readiness.`,
+          },
+          {
+            subheadline: 'A polished rental opportunity ready for tours.',
+            summary: `Present ${propertyTitle} as a rental listing that shows clean presentation, practical space planning, and a welcoming tone.${listingSummary} Emphasize clear photos, simple positioning, and a direct invitation to request rental details.`,
+          },
+        ]
+      : [
+          {
+            subheadline: 'Seller-ready positioning with market-friendly presentation.',
+            summary: `${propertyTitle} is presented as a move-in-ready home with strong everyday livability and a clear path to market confidence.${listingSummary} Highlight the balanced layout, clean visual presentation, and practical value story for qualified buyers.`,
+          },
+          {
+            subheadline: 'Practical layout, polished visuals, and listing momentum.',
+            summary: `Position ${propertyTitle} as a well-prepared listing that blends functionality with buyer-friendly presentation.${listingSummary} Focus the copy on clean rooms, strong light, and a straightforward value narrative that supports showing activity.`,
+          },
+          {
+            subheadline: 'Confident listing story built around comfort and flow.',
+            summary: `Frame ${propertyTitle} as a home that already presents well and can launch with confidence.${listingSummary} Use the brochure to spotlight livable space, clear condition cues, and the next step for buyers to schedule a showing.`,
+          },
+        ];
+
+  return optionSet.slice(0, count).map((option, index) => ({
+    id: `fallback-${index + 1}`,
+    subheadline: toShortText(option.subheadline, 220, fallbackFlyer?.subheadline || ''),
+    summary: toShortText(option.summary, 600, fallbackFlyer?.summary || ''),
+  }));
+}
+
+function normalizeFlyerCopySuggestions(rawSuggestions = [], fallbackSuggestions = []) {
+  const normalized = rawSuggestions
+    .filter(Boolean)
+    .map((option, index) => ({
+      id: `ai-${index + 1}`,
+      subheadline: toShortText(
+        option?.subheadline,
+        220,
+        fallbackSuggestions[index]?.subheadline || fallbackSuggestions[0]?.subheadline || '',
+      ),
+      summary: toShortText(
+        option?.summary,
+        600,
+        fallbackSuggestions[index]?.summary || fallbackSuggestions[0]?.summary || '',
+      ),
+    }))
+    .filter((option) => option.subheadline && option.summary);
+
+  return normalized;
+}
+
+export async function suggestPropertyFlyerCopy({
+  propertyId,
+  flyerType = 'sale',
+  headline = '',
+  count = 3,
+}) {
+  const property = await getPropertyById(propertyId);
+  if (!property) {
+    throw new Error('Property not found.');
+  }
+
+  const safeCount = Math.max(1, Math.min(5, Number(count) || 3));
+  const pricing = await getLatestPricingAnalysis(propertyId);
+  const fallbackFlyer = buildFallbackFlyer({
+    property,
+    pricing,
+    flyerType,
+    selectedPhotos: [],
+  });
+  const fallbackSuggestions = buildFallbackFlyerCopySuggestions({
+    property,
+    flyerType,
+    headline,
+    fallbackFlyer,
+    count: safeCount,
+  });
+
+  if (!isOpenAiConfigured()) {
+    return {
+      suggestions: fallbackSuggestions,
+      source: 'fallback',
+    };
+  }
+
+  const promptPayload = {
+    objective:
+      'Generate high-quality brochure copy ideas for subheadline and summary that are fair-housing-safe and practical for residential marketing.',
+    flyerType,
+    requestedSuggestionCount: safeCount,
+    providedHeadline: toShortText(headline, 140, property?.title || ''),
+    property: {
+      title: property?.title || '',
+      locationLine: buildPropertyLocationLine(property),
+      propertyType: property?.propertyType || '',
+      bedrooms: property?.bedrooms || null,
+      bathrooms: property?.bathrooms || null,
+      squareFeet: property?.squareFeet || null,
+    },
+    pricing: pricing
+      ? {
+          low: pricing.recommendedListLow || null,
+          mid: pricing.recommendedListMid || null,
+          high: pricing.recommendedListHigh || null,
+          confidence: pricing.confidenceScore || null,
+        }
+      : null,
+    constraints: {
+      subheadlineMaxChars: 220,
+      summaryMaxChars: 600,
+      summaryStyle:
+        '2-4 concise sentences, clear and market-ready without exaggerated claims or guaranteed outcomes.',
+      avoid: [
+        'fair housing violations',
+        'guaranteed returns',
+        'unverifiable superlatives',
+        'all-caps promotional language',
+      ],
+    },
+  };
+
+  try {
+    const aiResult = await generateStructuredJson({
+      schemaName: 'flyer_copy_suggestions',
+      schema: FLYER_COPY_SUGGESTIONS_SCHEMA,
+      systemPrompt:
+        'You are Workside Home Seller Assistant. Produce fair-housing-safe, seller-ready brochure copy ideas. Return only structured JSON that follows the schema.',
+      userPrompt: JSON.stringify(promptPayload, null, 2),
+    });
+
+    const normalizedSuggestions = normalizeFlyerCopySuggestions(
+      aiResult?.suggestions || [],
+      fallbackSuggestions,
+    ).slice(0, safeCount);
+
+    if (!normalizedSuggestions.length) {
+      return {
+        suggestions: fallbackSuggestions,
+        source: 'fallback',
+      };
+    }
+
+    return {
+      suggestions: normalizedSuggestions,
+      source: 'openai',
+    };
+  } catch (error) {
+    return {
+      suggestions: fallbackSuggestions,
+      source: 'fallback',
+      warning: error.message,
+    };
+  }
 }
 
 export async function generatePropertyFlyer({

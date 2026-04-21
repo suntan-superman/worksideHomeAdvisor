@@ -13,6 +13,7 @@ import {
 import {
   exportPropertyFlyerPdf,
   getLatestPropertyFlyer,
+  suggestPropertyFlyerCopy,
 } from './flyer.service.js';
 import { exportProviderReferenceSheetPdf } from './provider-reference.service.js';
 import {
@@ -36,6 +37,12 @@ const flyerRequestSchema = z.object({
       selectedPhotoAssetIds: z.array(z.string().trim().min(1)).max(6).optional(),
     })
     .default({}),
+});
+
+const flyerCopySuggestionRequestSchema = z.object({
+  flyerType: z.enum(['sale', 'rental']).default('sale'),
+  headline: z.string().trim().max(140).optional(),
+  count: z.coerce.number().int().min(1).max(5).default(3),
 });
 
 const reportRequestSchema = z.object({
@@ -63,6 +70,31 @@ function resolveDocumentsUpgradeRequiredMessage(reason) {
 }
 
 export async function documentsRoutes(fastify) {
+  fastify.post('/:propertyId/flyer/copy-suggestions', async (request, reply) => {
+    try {
+      const payload = flyerCopySuggestionRequestSchema.parse(request.body || {});
+      const property = await assertPropertyEditableById(request.params.propertyId);
+      if (!property) {
+        return reply.code(404).send({ message: 'Property not found.' });
+      }
+
+      const result = await suggestPropertyFlyerCopy({
+        propertyId: request.params.propertyId,
+        flyerType: payload.flyerType,
+        headline: payload.headline || '',
+        count: payload.count,
+      });
+
+      return reply.send({
+        suggestions: result.suggestions || [],
+        source: result.source || 'fallback',
+        warning: result.warning || '',
+      });
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
   fastify.post('/:propertyId/flyer/generate', async (request, reply) => {
     try {
       const payload = flyerRequestSchema.parse(request.body || {});
