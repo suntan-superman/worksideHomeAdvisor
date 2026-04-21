@@ -519,6 +519,204 @@ function renderSuggestedCategoryCards(items = []) {
   `;
 }
 
+function resolvePriorityMeta(priority = '') {
+  const normalized = String(priority || '').trim().toLowerCase();
+  if (normalized === 'high' || normalized === 'p1' || normalized.includes('must')) {
+    return {
+      key: 'p1',
+      label: 'P1 Must fix',
+      shortLabel: 'P1',
+      badgeClass: 'priority-badge priority-badge-p1',
+      cardClass: 'action-card-p1',
+    };
+  }
+  if (normalized === 'low' || normalized === 'p3' || normalized.includes('nice')) {
+    return {
+      key: 'p3',
+      label: 'P3 Nice to have',
+      shortLabel: 'P3',
+      badgeClass: 'priority-badge priority-badge-p3',
+      cardClass: 'action-card-p3',
+    };
+  }
+  return {
+    key: 'p2',
+    label: 'P2 Should fix',
+    shortLabel: 'P2',
+    badgeClass: 'priority-badge priority-badge-p2',
+    cardClass: 'action-card-p2',
+  };
+}
+
+function resolveActionCategory(action = {}) {
+  const actionType = String(action.recommendedActionType || '').toLowerCase();
+  if (actionType.includes('photo')) {
+    return 'Photo';
+  }
+  if (actionType.includes('pricing')) {
+    return 'Pricing';
+  }
+  if (actionType.includes('curb') || actionType.includes('exterior')) {
+    return 'Exterior';
+  }
+  if (actionType.includes('staging') || actionType.includes('lighting') || actionType.includes('declutter')) {
+    return 'Interior';
+  }
+  if (actionType.includes('provider')) {
+    if (String(action.linkedProviderCategory || '').toLowerCase().includes('clean')) {
+      return 'Interior';
+    }
+    if (String(action.linkedProviderCategory || '').toLowerCase().includes('staging')) {
+      return 'Interior';
+    }
+    if (String(action.linkedProviderCategory || '').toLowerCase().includes('exterior')) {
+      return 'Exterior';
+    }
+    return 'Interior';
+  }
+  return 'General';
+}
+
+function actionRoiScore(action = {}) {
+  const actionType = String(action.recommendedActionType || '').toLowerCase();
+  const scoreMap = {
+    photo_retake: 95,
+    pricing_review: 92,
+    staging_improvement: 84,
+    lighting_improvement: 80,
+    curb_appeal: 76,
+    declutter: 72,
+    provider_booking: 68,
+    report_regeneration: 50,
+  };
+  return Number(scoreMap[actionType] || 60);
+}
+
+function actionUrgencyScore(action = {}) {
+  const meta = resolvePriorityMeta(action.urgency);
+  if (meta.key === 'p1') {
+    return 3;
+  }
+  if (meta.key === 'p2') {
+    return 2;
+  }
+  return 1;
+}
+
+function sortRecommendationActions(actions = []) {
+  return [...(actions || [])].sort((left, right) => {
+    const roiDelta = actionRoiScore(right) - actionRoiScore(left);
+    if (roiDelta !== 0) {
+      return roiDelta;
+    }
+    return actionUrgencyScore(right) - actionUrgencyScore(left);
+  });
+}
+
+function renderPriorityLegend() {
+  return `
+    <div class="priority-legend">
+      <div class="priority-legend-label">Priority legend</div>
+      <span class="priority-badge priority-badge-p1">P1 Must fix before listing</span>
+      <span class="priority-badge priority-badge-p2">P2 Should fix</span>
+      <span class="priority-badge priority-badge-p3">P3 Nice to have</span>
+    </div>
+  `;
+}
+
+function renderRecommendationActionCards(actions = [], emptyText = '') {
+  const ranked = sortRecommendationActions(actions);
+  if (!ranked.length) {
+    return emptyText ? `<div class="empty-card">${escapeHtml(emptyText)}</div>` : '';
+  }
+
+  const categoryOrder = ['Photo', 'Interior', 'Exterior', 'Pricing', 'General'];
+  const grouped = new Map(categoryOrder.map((category) => [category, []]));
+  for (const action of ranked) {
+    const category = resolveActionCategory(action);
+    if (!grouped.has(category)) {
+      grouped.set(category, []);
+    }
+    grouped.get(category).push(action);
+  }
+
+  return `
+    <div class="action-category-stack">
+      ${categoryOrder
+        .filter((category) => (grouped.get(category) || []).length)
+        .map((category) => {
+          const items = grouped.get(category) || [];
+          return `
+            <section class="action-group">
+              <div class="section-kicker">${escapeHtml(category)} actions</div>
+              <div class="action-card-grid">
+                ${items
+                  .map((action, index) => {
+                    const priorityMeta = resolvePriorityMeta(action.urgency);
+                    return `
+                      <article class="action-card ${priorityMeta.cardClass}">
+                        <div class="action-card-head">
+                          <h4>${escapeHtml(action.title || `Action ${index + 1}`)}</h4>
+                          <span class="${priorityMeta.badgeClass}">${escapeHtml(priorityMeta.shortLabel)}</span>
+                        </div>
+                        <div class="action-meta">
+                          <span>${escapeHtml(category)}</span>
+                          ${action.estimatedCost ? `<span>Cost: ${escapeHtml(action.estimatedCost)}</span>` : ''}
+                        </div>
+                        ${action.expectedOutcome ? `<div class="action-impact"><strong>Expected impact:</strong> ${escapeHtml(action.expectedOutcome)}</div>` : ''}
+                        ${action.reason ? `<div class="action-why"><strong>Why it matters:</strong> ${escapeHtml(action.reason)}</div>` : ''}
+                      </article>
+                    `;
+                  })
+                  .join('')}
+              </div>
+            </section>
+          `;
+        })
+        .join('')}
+    </div>
+  `;
+}
+
+function classifyPhotoQuality(photo = {}) {
+  const score = Number(photo?.score || 0);
+  if (score >= 80 && photo?.listingCandidate) {
+    return {
+      label: 'Strong',
+      priority: resolvePriorityMeta('p3'),
+      badgeClass: 'photo-quality-badge photo-quality-strong',
+    };
+  }
+  if (score >= 60) {
+    return {
+      label: 'Usable',
+      priority: resolvePriorityMeta('p2'),
+      badgeClass: 'photo-quality-badge photo-quality-usable',
+    };
+  }
+  return {
+    label: 'Needs Retake',
+    priority: resolvePriorityMeta('p1'),
+    badgeClass: 'photo-quality-badge photo-quality-retake',
+  };
+}
+
+function buildPhotoFeedback(photo = {}, quality = {}) {
+  const listingNote = String(photo?.listingNote || '').trim();
+  if (listingNote) {
+    return listingNote;
+  }
+  if (quality.label === 'Needs Retake') {
+    return 'Lighting or composition needs improvement before listing launch.';
+  }
+  if (quality.label === 'Usable') {
+    return photo?.listingCandidate
+      ? 'Usable image with minor polish opportunities.'
+      : 'Usable image, but clutter or framing may limit buyer appeal.';
+  }
+  return 'Good composition and listing-ready clarity.';
+}
+
 function renderPhotoTiles(photos = [], limit = 4) {
   const selected = photos.filter((photo) => photo?.imageUrl).slice(0, limit);
   if (!selected.length) {
@@ -530,21 +728,23 @@ function renderPhotoTiles(photos = [], limit = 4) {
       ${selected
         .map(
           (photo) => {
-            const statusParts = [
-              photo.marketplaceStatus || '',
-              photo.qualityLabel || '',
-              photo.usesPreferredVariant ? 'Preferred enhancement selected' : '',
-            ].filter(Boolean);
-            const fallbackLabel = photo.usesPreferredVariant
-              ? 'Preferred enhancement selected'
-              : 'Original or current selection';
+            const quality = classifyPhotoQuality(photo);
+            const feedback = buildPhotoFeedback(photo, quality);
+            const scoreLabel = Number.isFinite(Number(photo?.score))
+              ? `${Math.round(Number(photo.score))}/100`
+              : '--/100';
 
             return `
             <figure class="photo-tile">
               <img src="${escapeHtml(photo.imageUrl)}" alt="${escapeHtml(photo.roomLabel || 'Property photo')}" />
+              <div class="photo-tile-overlay">
+                <span class="photo-score-chip">${escapeHtml(scoreLabel)}</span>
+                <span class="${quality.badgeClass}">${escapeHtml(`${quality.label} · ${quality.priority.shortLabel}`)}</span>
+              </div>
               <figcaption>
                 <strong>${escapeHtml(photo.roomLabel || 'Property photo')}</strong>
-                <span>${escapeHtml(statusParts.join(' · ') || fallbackLabel)}</span>
+                <span class="photo-meta">${escapeHtml(photo.marketplaceStatus || 'Photo review pending')}</span>
+                <span class="photo-feedback">${escapeHtml(feedback)}</span>
               </figcaption>
             </figure>
           `;
@@ -769,12 +969,19 @@ function renderHtmlDocument({ title, body }) {
       }
       .page:last-child { page-break-after: auto; }
       .hero-page { display: grid; gap: 14px; }
-      .brand-kicker, .section-kicker {
+      .brand-kicker {
         text-transform: uppercase;
         letter-spacing: 0.18em;
         font-size: 10px;
         color: var(--moss);
         white-space: nowrap;
+      }
+      .section-kicker {
+        letter-spacing: 0.08em;
+        font-size: 10px;
+        color: var(--moss);
+        white-space: nowrap;
+        font-weight: 700;
       }
       h1, h2, h3, h4, p { margin: 0; }
       h1 { font-family: Georgia, "Times New Roman", serif; font-size: 38px; line-height: 1.03; margin-top: 10px; }
@@ -825,12 +1032,46 @@ function renderHtmlDocument({ title, body }) {
       .bullet-list li { margin: 0 0 8px; color: var(--muted); line-height: 1.5; }
       .feature-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
       .feature-pill { padding: 10px 12px; font-size: 12px; color: var(--ink); background: rgba(255,255,255,0.78); }
-      .photo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
-      .photo-tile { margin: 0; border: 1px solid var(--line); background: rgba(255,255,255,0.88); border-radius: 18px; overflow: hidden; }
+      .photo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+      .photo-tile { margin: 0; border: 1px solid var(--line); background: rgba(255,255,255,0.88); border-radius: 18px; overflow: hidden; position: relative; }
       .photo-tile img { width: 100%; height: 190px; display: block; object-fit: cover; }
-      .photo-tile figcaption { padding: 12px 14px 14px; display: grid; gap: 4px; }
+      .photo-tile-overlay { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+      .photo-score-chip { display: inline-block; padding: 6px 10px; border-radius: 999px; background: rgba(15,23,42,0.78); color: #fff; font-size: 11px; font-weight: 700; }
+      .photo-quality-badge { display: inline-block; padding: 6px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; color: #fff; }
+      .photo-quality-retake { background: rgba(176,98,84,0.92); }
+      .photo-quality-usable { background: rgba(170,120,36,0.9); }
+      .photo-quality-strong { background: rgba(61,120,88,0.9); }
+      .photo-tile figcaption { padding: 12px 14px 14px; display: grid; gap: 6px; }
       .photo-tile figcaption strong { font-size: 14px; }
       .photo-tile figcaption span { font-size: 12px; color: var(--muted); }
+      .photo-meta { font-size: 11px; color: #6f7c7a; }
+      .photo-feedback { font-size: 12px; color: var(--ink); line-height: 1.45; }
+      .priority-legend { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+      .priority-legend-label { font-size: 11px; color: var(--muted); font-weight: 700; }
+      .priority-badge { padding: 6px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+      .priority-badge-p1 { background: var(--risk-soft); color: #8f4d41; border: 1px solid rgba(176,98,84,0.28); }
+      .priority-badge-p2 { background: rgba(245,158,11,0.16); color: #9a6808; border: 1px solid rgba(245,158,11,0.28); }
+      .priority-badge-p3 { background: var(--moss-soft); color: var(--moss); border: 1px solid rgba(79,123,98,0.24); }
+      .action-category-stack { display: grid; gap: 16px; }
+      .action-group { display: grid; gap: 10px; }
+      .action-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+      .action-card { border: 1px solid var(--line); border-left-width: 4px; border-radius: 16px; background: rgba(255,255,255,0.94); padding: 14px 16px; }
+      .action-card-p1 { border-left-color: #c86a5b; }
+      .action-card-p2 { border-left-color: #d49a2b; }
+      .action-card-p3 { border-left-color: #5a8b70; }
+      .action-card-head { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+      .action-card-head h4 { margin: 0; font-size: 15px; line-height: 1.3; }
+      .action-meta { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 8px; font-size: 11px; color: var(--muted); }
+      .action-impact, .action-why { margin-top: 8px; font-size: 12px; line-height: 1.5; color: var(--ink); }
+      .dashboard-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+      .roi-hero-card { border: 1px solid rgba(79,123,98,0.28); border-radius: 20px; padding: 18px 20px; background: linear-gradient(135deg, rgba(79,123,98,0.12), rgba(47,95,143,0.08)); }
+      .roi-hero-value { font-size: 34px; line-height: 1.05; font-weight: 800; color: #2f6a4e; margin-top: 8px; }
+      .roi-hero-sub { margin-top: 6px; font-size: 12px; color: var(--muted); }
+      .roi-bar-shell { margin-top: 12px; display: grid; gap: 8px; }
+      .roi-bar { height: 10px; border-radius: 999px; background: rgba(47,95,143,0.12); overflow: hidden; }
+      .roi-bar-fill-upside { height: 100%; background: linear-gradient(90deg, rgba(79,123,98,0.72), rgba(47,95,143,0.88)); }
+      .roi-bar-fill-cost { height: 100%; background: linear-gradient(90deg, rgba(176,98,84,0.62), rgba(200,116,71,0.78)); }
+      .quick-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
       .provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
       .provider-card { padding: 16px; }
       .provider-card-head { display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: start; }
@@ -994,6 +1235,9 @@ function renderHtmlDocument({ title, body }) {
       .legend-note { margin-top: 10px; font-size: 11px; line-height: 1.45; color: var(--muted); }
       .marketing-gallery-card { padding: 14px 16px; }
       .closing-band { margin-top: 14px; padding: 14px 16px; border-radius: 18px; background: linear-gradient(135deg, rgba(47,95,143,0.10), rgba(200,116,71,0.12)); border: 1px solid rgba(47,95,143,0.14); }
+      @media (max-width: 740px) {
+        .photo-grid, .dashboard-row, .quick-summary-grid { grid-template-columns: 1fr; }
+      }
     </style>
   </head>
   <body>${body}</body>
@@ -1118,6 +1362,20 @@ function buildPropertySummaryHtml({ property, report }) {
     ),
     5,
   );
+  const sortedRecommendationActions = sortRecommendationActions(recommendationActions);
+  const topThreeActions = sortedRecommendationActions.slice(0, 3);
+  const topThreeActionLines = pickMeaningfulLines(
+    topThreeActions.map((action) => {
+      const priorityMeta = resolvePriorityMeta(action.urgency);
+      return `${priorityMeta.shortLabel} · ${action.title}`;
+    }),
+    3,
+  );
+  const topThreeIssues = pickMeaningfulLines([
+    summaryRisk,
+    ...(consequenceFraming.lines || []),
+    checklistSummary.openCount ? `${checklistSummary.openCount} checklist items still open.` : '',
+  ], 3);
   const launchStatusHighlights = pickMeaningfulLines([
     photoSummary.summary,
     checklistSummary.totalCount ? `${checklistSummary.completedCount || 0} of ${checklistSummary.totalCount} checklist items are complete.` : '',
@@ -1125,6 +1383,11 @@ function buildPropertySummaryHtml({ property, report }) {
     pricingInsightLines[0] || '',
     consequenceFraming.summary || '',
   ], 4);
+  const roiUpside = Number(improvementEconomics.estimatedRoi || 0);
+  const roiCost = Number(improvementEconomics.estimatedCost || 0);
+  const roiMax = Math.max(roiUpside, roiCost, 1);
+  const roiUpsideWidth = Math.max(4, Math.round((roiUpside / roiMax) * 100));
+  const roiCostWidth = Math.max(4, Math.round((roiCost / roiMax) * 100));
   const pricingMetricCards = [
     renderMetricCard('Suggested range', report.pricingSummary?.low && report.pricingSummary?.high ? `${formatCurrency(report.pricingSummary.low)} - ${formatCurrency(report.pricingSummary.high)}` : 'Unavailable', report.pricingSummary?.strategy || 'Market-aligned pricing recommendation'),
     renderMetricCard('Midpoint', report.pricingSummary?.mid ? formatCurrency(report.pricingSummary.mid) : 'Unavailable', report.pricingSummary?.confidence ? `${Math.round(report.pricingSummary.confidence * 100)}% confidence` : 'Comparable signal based'),
@@ -1209,85 +1472,46 @@ function buildPropertySummaryHtml({ property, report }) {
     <section class="page">
       <div class="brand-bar">
         <div>
-          <div class="section-kicker">Launch focus</div>
-          <h2>Near-term operating plan</h2>
-          <p class="muted">The most important actions to keep this listing launch moving with clarity and momentum.</p>
-        </div>
-      </div>
-      <div class="single-column">
-        <div class="content-card">
-          ${renderChecklistItems(
-            pickMeaningfulLines([
-              orderedNextSteps[0] || '',
-              orderedNextSteps[1] || '',
-              orderedNextSteps[2] || '',
-              orderedNextSteps[3] || '',
-            ], 4),
-            'Use the guided workflow to keep the launch plan moving.',
-          )}
-        </div>
-        <div class="content-card">
-          <div class="section-kicker">Launch status</div>
-          <h3>Current signals</h3>
-          ${renderStatusSentenceList(
-            launchStatusHighlights,
-            'Launch status details are reflected here from pricing, photos, and checklist progress.',
-          )}
-        </div>
-      </div>
-      ${renderFooter('Property Summary Report · Launch Focus')}
-    </section>
-
-    <section class="page">
-      <div class="brand-bar">
-        <div>
-          <div class="section-kicker">KPI overview</div>
-          <h2>Core metrics and property snapshot</h2>
-          <p class="muted">The key numbers and facts that define current launch readiness.</p>
+          <div class="section-kicker">Quick summary</div>
+          <h2>At a glance</h2>
+          <p class="muted">Readiness, top issues, top actions, and ROI in one page.</p>
         </div>
       </div>
       <div class="metric-grid">
-        ${renderMetricCard('Selected price', property?.selectedListPrice ? formatCurrency(property.selectedListPrice) : 'Not set', report.pricingSummary?.mid ? `Suggested midpoint ${formatCurrency(report.pricingSummary.mid)}` : 'Pricing guidance available')}
-        ${renderMetricCard('Suggested range', report.pricingSummary?.low && report.pricingSummary?.high ? `${formatCurrency(report.pricingSummary.low)} - ${formatCurrency(report.pricingSummary.high)}` : 'Unavailable', 'Market-aligned range')}
-        ${renderMetricCard(
-          'Photo coverage',
-          `${photoSummary.roomCoverageCount || 0}/5`,
-          `${photoSummary.listingCandidateCount || 0} marketplace-ready${photoSummary.savedVisionPublishableCount ? ` · ${photoSummary.savedVisionPublishableCount} publishable Vision` : ''}`,
-        )}
-        ${renderMetricCard('Checklist', `${checklistSummary.completedCount || 0}/${checklistSummary.totalCount || 0}`, `${checklistSummary.openCount || 0} open items`)}
+        ${renderMetricCard('Overall readiness', `${readinessSummary.overallScore || 0}/100`, readinessSummary.label || 'Needs work', readinessTone)}
+        ${renderMetricCard('Photo quality score', `${photoSummary.averageQualityScore || 0}/100`, `${photoSummary.retakeCount || 0} retakes needed`)}
+        ${renderMetricCard('Checklist completion', `${checklistSummary.progressPercent || 0}%`, `${checklistSummary.completedCount || 0}/${checklistSummary.totalCount || 0} complete`)}
+        ${renderMetricCard('Launch status', readinessSummary.label || 'Needs work', topThreeIssues[0] || 'Address top action items before launch.', readinessTone)}
       </div>
-      <div class="dense-two-col" style="margin-top:18px;">
+      <div class="quick-summary-grid" style="margin-top:14px;">
         <div class="content-card">
-          <div class="section-kicker">Property facts</div>
-          <h3>Snapshot</h3>
-          <div class="fact-grid">
-            ${propertyFacts
-              .map(
-                (fact) => `
-                  <div class="fact-row">
-                    <div class="fact-row-label">${escapeHtml(fact.label)}</div>
-                    <div>${escapeHtml(fact.value)}</div>
-                  </div>
-                `,
-              )
-              .join('')}
+          <div class="section-kicker">Top issues</div>
+          <h3>What may hold launch back</h3>
+          ${renderChecklistItems(topThreeIssues, 'No major issues are currently dominant.')}
+        </div>
+        <div class="content-card">
+          <div class="section-kicker">Top actions</div>
+          <h3>What to do next</h3>
+          ${renderChecklistItems(topThreeActionLines.length ? topThreeActionLines : orderedNextSteps.slice(0, 3), 'Use the guided workflow to keep the launch plan moving.')}
+        </div>
+      </div>
+      <div class="roi-hero-card" style="margin-top:14px;">
+        <div class="section-kicker">ROI snapshot</div>
+        <div class="roi-hero-value">${escapeHtml(roiUpside ? `~${formatCurrency(roiUpside)} potential upside` : 'Potential upside pending')}</div>
+        <div class="roi-hero-sub">${escapeHtml(roiCost ? `Estimated prep cost: ${formatCurrency(roiCost)}` : 'Estimated prep cost pending')}</div>
+        <div class="roi-hero-sub">${escapeHtml(`Estimated value at risk: ${roiUpside ? formatCurrency(roiUpside) : 'Pending'}`)}</div>
+        <div class="roi-bar-shell">
+          <div>
+            <div class="metric-label">Potential upside</div>
+            <div class="roi-bar"><div class="roi-bar-fill-upside" style="width:${roiUpsideWidth}%;"></div></div>
+          </div>
+          <div>
+            <div class="metric-label">Estimated prep cost</div>
+            <div class="roi-bar"><div class="roi-bar-fill-cost" style="width:${roiCostWidth}%;"></div></div>
           </div>
         </div>
-        <div class="content-card">
-          <div class="section-kicker">Status summary</div>
-          <h3>Current launch picture</h3>
-          ${renderStatusSentenceList(
-            pickMeaningfulLines([
-              coverKeyInsight,
-              hasMeaningfulValue(readinessSummary.label) ? `Launch status: ${readinessSummary.label}` : '',
-              photoSummary.summary,
-              checklistSummary.totalCount ? `${checklistSummary.completedCount || 0} of ${checklistSummary.totalCount} checklist items are complete.` : '',
-            ], 4),
-            'This page summarizes the strongest current launch signals.',
-          )}
-        </div>
       </div>
-      ${renderFooter('Property Summary Report · KPI')}
+      ${renderFooter('Property Summary Report · Quick Summary')}
     </section>
 
     <section class="page">
@@ -1415,51 +1639,98 @@ function buildPropertySummaryHtml({ property, report }) {
       <div class="brand-bar">
         <div>
           <div class="section-kicker">Readiness and preparation</div>
-          <h2>Photos, readiness, and prep recommendations</h2>
-          <p class="muted">Listing-quality images, launch blockers, and estimated improvement economics.</p>
+          <h2>Readiness dashboard</h2>
+          <p class="muted">A structured prep dashboard showing score, risk, opportunity, top actions, and value at risk.</p>
         </div>
       </div>
-      <div class="section-grid">
-        <div class="content-card">
-          <div class="section-kicker">Selected photos</div>
-          <h3>Photo review</h3>
-          <div class="page-spacer"></div>
-          ${renderPhotoTiles([heroPhoto, ...remainingPhotos].filter(Boolean), 4)}
+      ${renderPriorityLegend()}
+      <div class="dashboard-row">
+        ${renderMetricCard('R Overall readiness', `${readinessSummary.overallScore || 0}/100`, readinessSummary.label || 'Needs work', readinessTone)}
+        ${renderMetricCard('P Photo quality', `${photoSummary.averageQualityScore || 0}/100`, `${photoSummary.retakeCount || 0} retakes pending`)}
+        ${renderMetricCard('C Checklist completion', `${checklistSummary.progressPercent || 0}%`, `${checklistSummary.completedCount || 0}/${checklistSummary.totalCount || 0} complete`)}
+        ${renderMetricCard('L Launch status', readinessSummary.label || 'Needs work', consequenceFraming.summary || 'Address top blockers before listing launch.', readinessTone)}
+      </div>
+      <div class="dashboard-row" style="margin-top:14px;">
+        <div class="callout-chip callout-chip-risk">
+          <div class="metric-label">Biggest risk</div>
+          <strong>${escapeHtml(summaryRisk || 'No dominant launch risk identified.')}</strong>
+          <div style="margin-top:10px;"><span class="priority-badge priority-badge-p1">P1 Must fix</span></div>
         </div>
-        <div class="section-stack">
-          <div class="sidebar-card">
-            <div class="section-kicker">Readiness score</div>
-            <h3>${escapeHtml(readinessSummary.label || 'Needs Work')}</h3>
-            <div class="metric-grid" style="grid-template-columns:repeat(2, minmax(0,1fr)); margin-top:12px;">
-              ${renderMetricCard('Overall', `${readinessSummary.overallScore || 0}/100`)}
-              ${renderMetricCard('Photo quality', `${photoSummary.averageQualityScore || 0}/100`)}
-              ${renderMetricCard('Retakes', String(photoSummary.retakeCount || 0))}
-              ${renderMetricCard('Open items', String(checklistSummary.openCount || 0))}
-            </div>
+        <div class="callout-chip callout-chip-opportunity">
+          <div class="metric-label">Biggest opportunity</div>
+          <strong>${escapeHtml(summaryOpportunity || 'No major opportunity signal was detected.')}</strong>
+          <div style="margin-top:10px;"><span class="priority-badge priority-badge-p2">P2 Should fix</span></div>
+        </div>
+      </div>
+      <div class="content-card" style="margin-top:14px;">
+        <div class="section-kicker">Top 3 actions</div>
+        <h3>What to do first</h3>
+        ${renderChecklistItems(
+          topThreeActionLines.length ? topThreeActionLines : orderedNextSteps.slice(0, 3),
+          'Use the launch checklist to define the first three prep actions.',
+        )}
+      </div>
+      <div class="roi-hero-card" style="margin-top:14px;">
+        <div class="section-kicker">Estimated value at risk</div>
+        <div class="roi-hero-value">${escapeHtml(roiUpside ? `~${formatCurrency(roiUpside)} potential upside` : 'Potential upside pending')}</div>
+        <div class="roi-hero-sub">${escapeHtml(roiCost ? `Estimated prep cost: ${formatCurrency(roiCost)}` : 'Estimated prep cost pending')}</div>
+        <div class="roi-hero-sub">${escapeHtml(improvementEconomics.decisionMessage || improvementEconomics.summary || 'Complete the top actions to protect listing value.')}</div>
+        <div class="roi-bar-shell">
+          <div>
+            <div class="metric-label">Potential upside</div>
+            <div class="roi-bar"><div class="roi-bar-fill-upside" style="width:${roiUpsideWidth}%;"></div></div>
           </div>
-          <div class="sidebar-card">
-            <div class="section-kicker">Preparation recommendations</div>
-            <h3>Highest-impact improvements</h3>
-            ${renderBulletList(
-              recommendationActionLines.length
-                ? recommendationActionLines
-                : pickMeaningfulLines(report.improvementItems || [], 5),
-              'Use the checklist and photo review to identify the next preparation priorities.',
-            )}
-          </div>
-          <div class="sidebar-card">
-            <div class="section-kicker">Cost and ROI</div>
-            <h3>${escapeHtml(improvementEconomics.decisionMessage || improvementEconomics.summary || 'Estimated prep investment and value-protection range')}</h3>
-            <div class="badge-row">
-              ${improvementEconomics.estimatedCost ? `<div class="badge">Est. cost ${escapeHtml(formatCurrency(improvementEconomics.estimatedCost))}</div>` : ''}
-              ${improvementEconomics.estimatedRoi ? `<div class="badge">Potential ROI ${escapeHtml(formatCurrency(improvementEconomics.estimatedRoi))}</div>` : ''}
-              ${improvementEconomics.netUpside ? `<div class="badge">Potential net upside ${escapeHtml(formatCurrency(improvementEconomics.netUpside))}</div>` : ''}
-              ${improvementEconomics.estimatedCost && improvementEconomics.estimatedRoi ? `<div class="badge">${escapeHtml(`Potential upside ${formatCurrency(improvementEconomics.estimatedRoi)} vs. est. prep ${formatCurrency(improvementEconomics.estimatedCost)}`)}</div>` : ''}
-            </div>
+          <div>
+            <div class="metric-label">Estimated prep cost</div>
+            <div class="roi-bar"><div class="roi-bar-fill-cost" style="width:${roiCostWidth}%;"></div></div>
           </div>
         </div>
       </div>
       ${renderFooter('Property Summary Report · Readiness & Preparation')}
+    </section>
+
+    <section class="page">
+      <div class="brand-bar">
+        <div>
+          <div class="section-kicker">Preparation action cards</div>
+          <h2>Ranked recommendations by category</h2>
+          <p class="muted">Recommendations are grouped by category and ordered by estimated ROI and urgency.</p>
+        </div>
+      </div>
+      ${renderPriorityLegend()}
+      <div class="content-card">
+        <div class="section-kicker">Structured recommendations</div>
+        <h3>Action cards</h3>
+        ${renderRecommendationActionCards(
+          sortedRecommendationActions,
+          'No structured recommendation actions were generated for this report.',
+        )}
+      </div>
+      ${renderFooter('Property Summary Report · Prep Action Cards')}
+    </section>
+
+    <section class="page">
+      <div class="brand-bar">
+        <div>
+          <div class="section-kicker">Photo analysis</div>
+          <h2>Scored photo gallery</h2>
+          <p class="muted">Each selected photo includes quality score, readiness label, and one-line feedback.</p>
+        </div>
+      </div>
+      ${renderPriorityLegend()}
+      <div class="metric-grid">
+        ${renderMetricCard('Total photos', String(photoSummary.totalPhotos || 0))}
+        ${renderMetricCard('Marketplace-ready', String(photoSummary.listingCandidateCount || 0))}
+        ${renderMetricCard('Retakes needed', String(photoSummary.retakeCount || 0), photoSummary.retakeCount ? 'Prioritize P1 retakes before listing launch.' : 'No high-priority retakes currently flagged.')}
+        ${renderMetricCard('Average quality', `${photoSummary.averageQualityScore || 0}/100`)}
+      </div>
+      <div class="content-card" style="margin-top:14px;">
+        <div class="section-kicker">Selected photos</div>
+        <h3>Gallery review</h3>
+        <div class="page-spacer"></div>
+        ${renderPhotoTiles([heroPhoto, ...remainingPhotos].filter(Boolean), 6)}
+      </div>
+      ${renderFooter('Property Summary Report · Photo Gallery')}
     </section>
 
     <section class="page">
@@ -1578,12 +1849,10 @@ function buildMarketingReportHtml({ property, flyer }) {
   const neighborhoodMapImageUrl = flyer._resolvedNeighborhoodMapImageUrl || buildNeighborhoodMapImageUrl(property);
   const flyerMode = String(flyer.mode || 'launch_ready').toLowerCase();
   const modeLabel = flyer.modeLabel || titleCaseLabel(flyerMode.replace(/_/g, ' '));
-  const ctaLabel = flyer.callToAction || flyer?.ctaMetadata?.label || 'Schedule a showing or request the full property package.';
+  const ctaLabel = flyer.callToAction || flyer?.ctaMetadata?.label || (flyerMode === 'preview' ? 'Get Property Details' : 'Request Showing');
   const ctaButtonLabel = flyer?.ctaMetadata?.label || (flyerMode === 'preview'
-    ? 'Request the property packet'
-    : flyerMode === 'premium'
-      ? 'Book a private showing'
-      : 'Request showing details');
+    ? 'Get Property Details'
+    : 'Request Showing');
   const modeHeroSignal = flyerMode === 'preview'
     ? 'Preview mode: positioning this property as an early opportunity while final prep is completed.'
     : flyerMode === 'premium'

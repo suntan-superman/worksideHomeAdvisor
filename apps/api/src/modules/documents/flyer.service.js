@@ -151,7 +151,10 @@ function buildFallbackFlyer({ property, pricing, flyerType, selectedPhotos }) {
     modeLabel,
     readinessScore: readinessSignals.readinessScore,
     readinessSignals,
-    headline: property.title,
+    headline:
+      mode === 'preview'
+        ? 'Coming Soon Opportunity'
+        : property.title,
     subheadline: modeCopy.subheadline,
     priceText: buildPriceText(property, pricing, flyerType),
     locationLine,
@@ -500,7 +503,9 @@ export async function generatePropertyFlyer({
         readinessScore: fallbackFlyer.readinessScore,
         readinessSignals: fallbackFlyer.readinessSignals,
         headline:
-          normalizedCustomizations.headline || marketing.headline || fallbackFlyer.headline,
+          normalizedCustomizations.headline ||
+          (fallbackFlyer.mode === 'preview' ? fallbackFlyer.headline : marketing.headline) ||
+          fallbackFlyer.headline,
         subheadline:
           normalizedCustomizations.subheadline ||
           (fallbackFlyer.mode === 'preview' ? modeCopy.subheadline : marketing.shortDescription) ||
@@ -697,7 +702,7 @@ async function renderFallbackMarketingFlyerPdf({ property, flyer, filename }) {
   const ctaCardX = PDF_PAGE_MARGIN + 352;
   const ctaCardY = 332;
   const ctaCardWidth = 176;
-  const ctaText = flyer.callToAction || flyer?.ctaMetadata?.label || 'Schedule a showing';
+  const ctaText = flyer.callToAction || flyer?.ctaMetadata?.label || 'Request Showing';
   const ctaLines = wrapText(ctaText, 20);
   const ctaVisibleLines = ctaLines.slice(0, 3);
   if (ctaLines.length > ctaVisibleLines.length && ctaVisibleLines.length) {

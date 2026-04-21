@@ -107,6 +107,9 @@ function average(values = []) {
 export function deriveFlyerReadiness(selectedPhotos = []) {
   const qualityScore = average(selectedPhotos.map((photo) => Number(photo?.score || 0)));
   const marketplaceReadyCount = selectedPhotos.filter((photo) => photo?.listingCandidate).length;
+  const strongPhotoCount = selectedPhotos.filter(
+    (photo) => photo?.listingCandidate && Number(photo?.score || 0) >= 70,
+  ).length;
   const preferredVariantCount = selectedPhotos.filter((photo) => photo?.usesPreferredVariant).length;
   const weakPhotoCount = selectedPhotos.filter((photo) => Number(photo?.score || 0) < 60).length;
   const roomDiversity = new Set(
@@ -131,17 +134,21 @@ export function deriveFlyerReadiness(selectedPhotos = []) {
     readinessScore,
     qualityScore,
     marketplaceReadyCount,
+    strongPhotoCount,
     preferredVariantCount,
     weakPhotoCount,
     roomDiversity,
   };
 }
 
-export function selectFlyerMode({ readinessScore, marketplaceReadyCount, qualityScore }) {
-  if (readinessScore >= 85 && marketplaceReadyCount >= 3 && qualityScore >= 78) {
+export function selectFlyerMode({ readinessScore, marketplaceReadyCount, qualityScore, strongPhotoCount }) {
+  if (readinessScore < 50 || marketplaceReadyCount === 0) {
+    return 'preview';
+  }
+  if (readinessScore >= 85 && marketplaceReadyCount >= 4 && strongPhotoCount >= 4 && qualityScore >= 80) {
     return 'premium';
   }
-  if (readinessScore >= 62 && marketplaceReadyCount >= 2 && qualityScore >= 63) {
+  if (readinessScore >= 70 && strongPhotoCount >= 3) {
     return 'launch_ready';
   }
   return 'preview';
@@ -167,19 +174,19 @@ export function buildFlyerModeCopy({
   const modeCopy = {
     sale: {
       preview: {
-        subheadline: 'Early preview with strong upside as final prep is completed.',
-        summary: `${propertyTitle} is currently in pre-launch preparation mode.${listingContext} Position this as an early opportunity while high-impact photo and presentation refinements are being finalized.`,
-        callToAction: 'Request the property packet and showing timeline.',
+        subheadline: 'Early preview before full listing launch.',
+        summary: `Coming Soon Opportunity: ${propertyTitle} is in pre-launch preparation mode.${listingContext} This preview is shared before final photo and readiness refinements are complete.`,
+        callToAction: 'Request early access.',
       },
       launch_ready: {
         subheadline: 'Listing-ready presentation with practical buyer appeal.',
         summary: `${propertyTitle} combines clean presentation, livable flow, and a market-ready value story.${listingContext} Use this flyer to support serious buyer conversations and showing requests.`,
-        callToAction: 'Request showing details and the full property packet.',
+        callToAction: 'Request Showing',
       },
       premium: {
         subheadline: 'Premium presentation built for high-intent buyer demand.',
         summary: `${propertyTitle} is presented with a premium-quality marketing package and strong visual readiness.${listingContext} This mode is optimized for confident pricing posture and conversion-focused showing activity.`,
-        callToAction: 'Schedule a private showing or request the premium packet.',
+        callToAction: 'Request Showing',
       },
     },
     rental: {
@@ -218,12 +225,12 @@ export function buildFlyerCtaMetadata({
   const strategy = strategyByMode[mode] || 'request_showing';
   const map = {
     request_showing: {
-      label: flyerType === 'rental' ? 'Request a tour' : 'Request showing details',
+      label: flyerType === 'rental' ? 'Request Tour' : 'Request Showing',
       destinationType: 'app_route',
       destinationRoute: `/properties/${propertyId || ':propertyId'}/showings/request`,
     },
     request_property_packet: {
-      label: 'Request the property packet',
+      label: flyerType === 'rental' ? 'Get Rental Details' : 'Get Property Details',
       destinationType: 'app_route',
       destinationRoute: `/properties/${propertyId || ':propertyId'}/packet/request`,
     },
