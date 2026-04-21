@@ -231,6 +231,57 @@ function pickMeaningfulLines(items = [], limit = 5) {
     .slice(0, limit);
 }
 
+function resolveInsightTheme(line = '') {
+  const normalized = String(line || '').toLowerCase();
+  if (!normalized) {
+    return 'other';
+  }
+  if (normalized.includes('retake') || normalized.includes('photo')) {
+    return 'photo';
+  }
+  if (normalized.includes('readiness') || normalized.includes('launch status')) {
+    return 'readiness';
+  }
+  if (normalized.includes('checklist')) {
+    return 'checklist';
+  }
+  if (normalized.includes('pricing') || normalized.includes('price')) {
+    return 'pricing';
+  }
+  if (normalized.includes('provider')) {
+    return 'provider';
+  }
+  if (normalized.includes('action') || normalized.includes('next step')) {
+    return 'action';
+  }
+  return 'other';
+}
+
+function dedupeInsightsByTheme(lines = [], limit = 5) {
+  const output = [];
+  const seenThemes = new Set();
+  const seenLines = new Set();
+  for (const line of lines || []) {
+    const normalizedLine = String(line || '').trim().toLowerCase();
+    if (!normalizedLine || seenLines.has(normalizedLine)) {
+      continue;
+    }
+    const theme = resolveInsightTheme(line);
+    if (theme !== 'other' && seenThemes.has(theme)) {
+      continue;
+    }
+    seenLines.add(normalizedLine);
+    if (theme !== 'other') {
+      seenThemes.add(theme);
+    }
+    output.push(String(line || '').trim());
+    if (output.length >= limit) {
+      break;
+    }
+  }
+  return output;
+}
+
 function getReadinessTone({ score, label }) {
   const normalizedLabel = String(label || '').toLowerCase();
   const numericScore = Number(score || 0);
@@ -903,22 +954,91 @@ function classifyPhotoQuality(photo = {}) {
   };
 }
 
-function buildPhotoFeedback(photo = {}, quality = {}) {
+function buildPhotoFeedback(photo = {}, quality = {}, usedFeedback = new Set()) {
   const listingNote = String(photo?.listingNote || '').trim();
   if (listingNote) {
-    return listingNote.split(/[.!?]/).map((part) => part.trim()).filter(Boolean)[0] || listingNote;
+    const firstSentence = listingNote.split(/[.!?]/).map((part) => part.trim()).filter(Boolean)[0] || listingNote;
+    const normalized = firstSentence.toLowerCase();
+    if (!usedFeedback.has(normalized)) {
+      usedFeedback.add(normalized);
+      return firstSentence;
+    }
   }
   const score = Number(photo?.score || 0);
+  const room = String(photo?.roomLabel || '').toLowerCase();
+  const isKitchen = room.includes('kitchen');
+  const isExterior = room.includes('exterior') || room.includes('front') || room.includes('yard') || room.includes('backyard');
+  const isLiving = room.includes('living') || room.includes('family') || room.includes('great room');
+  const isBedroom = room.includes('bedroom') || room.includes('primary');
+  const isBathroom = room.includes('bath');
+
+  let candidates = [];
   if (quality.label === 'Needs Retake') {
-    if (score < 50) {
-      return 'Lighting too dark.';
+    if (isKitchen) {
+      candidates = score < 50
+        ? ['Kitchen lighting is too dark.', 'Counter clutter is pulling focus.']
+        : ['Kitchen framing misses prep-space flow.', 'Counter details look visually busy.'];
+    } else if (isExterior) {
+      candidates = ['Exterior shadows are too heavy.', 'Street-side angle needs cleaner framing.'];
+    } else if (isLiving) {
+      candidates = ['Living-room composition feels unbalanced.', 'Main seating area is cropped too tightly.'];
+    } else if (isBedroom) {
+      candidates = ['Bedroom angle limits room depth.', 'Lighting is flattening bedroom detail.'];
+    } else if (isBathroom) {
+      candidates = ['Bathroom framing feels tight.', 'Bathroom lighting reads uneven.'];
+    } else {
+      candidates = score < 50 ? ['Lighting is too dark.'] : ['Composition is unbalanced.'];
     }
-    return 'Composition unbalanced.';
+  } else if (quality.label === 'Usable') {
+    if (isKitchen) {
+      candidates = photo?.listingCandidate
+        ? ['Kitchen composition is solid with minor polish room.']
+        : ['Kitchen layout reads well, but clutter is still visible.'];
+    } else if (isExterior) {
+      candidates = ['Exterior angle is usable with minor shadow cleanup.'];
+    } else if (isLiving) {
+      candidates = ['Living-room layout reads clearly with minor framing cleanup.'];
+    } else if (isBedroom) {
+      candidates = ['Bedroom framing is usable with small lighting polish opportunities.'];
+    } else if (isBathroom) {
+      candidates = ['Bathroom shot is usable; tighten angle for clarity.'];
+    } else {
+      candidates = photo?.listingCandidate ? ['Good composition with minor polish opportunities.'] : ['Usable image, but clutter is visible.'];
+    }
+  } else {
+    if (isKitchen) {
+      candidates = ['Kitchen composition is strong and listing-ready.'];
+    } else if (isExterior) {
+      candidates = ['Exterior framing is strong and curb-focused.'];
+    } else if (isLiving) {
+      candidates = ['Living-room composition is balanced and clear.'];
+    } else if (isBedroom) {
+      candidates = ['Bedroom framing is clean and buyer-friendly.'];
+    } else if (isBathroom) {
+      candidates = ['Bathroom composition is clean and clear.'];
+    } else {
+      candidates = ['Good composition.'];
+    }
   }
-  if (quality.label === 'Usable') {
-    return photo?.listingCandidate ? 'Good composition.' : 'Clutter visible.';
+
+  for (const candidate of candidates) {
+    const normalized = String(candidate || '').toLowerCase();
+    if (!normalized || usedFeedback.has(normalized)) {
+      continue;
+    }
+    usedFeedback.add(normalized);
+    return candidate;
   }
-  return 'Good composition.';
+
+  const fallback = isKitchen
+    ? 'Kitchen angle can be tightened for clarity.'
+    : isExterior
+      ? 'Exterior angle can be tightened for clarity.'
+      : isLiving
+        ? 'Living-room angle can be tightened for clarity.'
+        : 'Composition can be tightened for clarity.';
+  usedFeedback.add(fallback.toLowerCase());
+  return fallback;
 }
 
 function renderPhotoTiles(photos = [], limit = 4) {
@@ -927,18 +1047,18 @@ function renderPhotoTiles(photos = [], limit = 4) {
     return `<div class="empty-card">No marketplace-ready photos selected yet.</div>`;
   }
 
-  return `
-    <div class="photo-grid">
-      ${selected
-        .map(
-          (photo) => {
-            const quality = classifyPhotoQuality(photo);
-            const feedback = buildPhotoFeedback(photo, quality);
-            const scoreLabel = Number.isFinite(Number(photo?.score))
-              ? `${Math.round(Number(photo.score))}/100`
-              : '--/100';
+  const usedFeedback = new Set();
+  const feedbackValues = [];
+  const cards = selected
+    .map((photo) => {
+      const quality = classifyPhotoQuality(photo);
+      const feedback = buildPhotoFeedback(photo, quality, usedFeedback);
+      feedbackValues.push(String(feedback || '').toLowerCase());
+      const scoreLabel = Number.isFinite(Number(photo?.score))
+        ? `${Math.round(Number(photo.score))}/100`
+        : '--/100';
 
-            return `
+      return `
             <figure class="photo-tile">
               <img src="${escapeHtml(photo.imageUrl)}" alt="${escapeHtml(photo.roomLabel || 'Property photo')}" />
               <div class="photo-tile-overlay">
@@ -952,9 +1072,17 @@ function renderPhotoTiles(photos = [], limit = 4) {
               </figcaption>
             </figure>
           `;
-          },
-        )
-        .join('')}
+    })
+    .join('');
+
+  const uniqueFeedbackCount = new Set(feedbackValues).size;
+  if (uniqueFeedbackCount < feedbackValues.length) {
+    console.warn(`[pdf] validation_warning issue=photo_feedback_duplicate total=${feedbackValues.length} unique=${uniqueFeedbackCount}`);
+  }
+
+  return `
+    <div class="photo-grid">
+      ${cards}
     </div>
   `;
 }
@@ -1384,6 +1512,7 @@ function renderHtmlDocument({ title, body }) {
       .hero-signal-chip-blue { background: var(--brand-blue-soft); color: var(--brand-blue); border-color: rgba(47,95,143,0.18); }
       .hero-signal-chip-green { background: var(--moss-soft); color: var(--moss); border-color: rgba(79,123,98,0.18); }
       .hero-signal-chip-orange { background: var(--accent-soft); color: #9a5a33; border-color: rgba(200,116,71,0.18); }
+      .preview-urgency { margin-top: 8px; font-size: 12px; font-weight: 700; color: #9a5a33; }
       .suggested-category-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 12px; }
       .suggested-category-card { padding: 14px 16px; border-radius: 18px; border: 1px solid rgba(47,95,143,0.16); background: rgba(244,248,252,0.96); }
       .suggested-category-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--brand-blue); margin-bottom: 8px; }
@@ -1435,6 +1564,8 @@ function renderHtmlDocument({ title, body }) {
       .confidence-track { width: 100%; height: 12px; border-radius: 999px; background: rgba(47,95,143,0.10); overflow: hidden; }
       .confidence-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, rgba(79,123,98,0.55), rgba(47,95,143,0.88)); }
       .brochure-cta-button { display: inline-block; margin-top: 12px; padding: 12px 18px; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 700; }
+      .brochure-cta-button.secondary { background: var(--brand-blue); }
+      .cta-button-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
       .legend-note { margin-top: 10px; font-size: 11px; line-height: 1.45; color: var(--muted); }
       .marketing-gallery-card { padding: 14px 16px; }
       .closing-band { margin-top: 14px; padding: 14px 16px; border-radius: 18px; background: linear-gradient(135deg, rgba(47,95,143,0.10), rgba(200,116,71,0.12)); border: 1px solid rgba(47,95,143,0.14); }
@@ -1489,7 +1620,7 @@ function buildPropertySummaryHtml({ property, report }) {
   const pricingNarrative = hasMeaningfulValue(report.pricingSummary?.narrative)
     ? report.pricingSummary.narrative
     : 'Pricing guidance is based on the latest comparable sales, home condition, and current market readiness signals.';
-  const marketingMomentum = pickMeaningfulLines(report.marketingHighlights || [], 5);
+  const marketingMomentum = pickMeaningfulLines(report.marketingHighlights || [], 4);
   const orderedNextSteps = nextSteps.length
     ? nextSteps.map((step) => `${step.title}${step.eta ? ` · ${step.eta}` : ''}${step.owner ? ` · ${step.owner}` : ''}`)
     : recommendationActions.length
@@ -1556,13 +1687,12 @@ function buildPropertySummaryHtml({ property, report }) {
     Number(checklistSummary.openCount || 0) > 0 ? 'Cleaning and prep support' : '',
     hasMeaningfulValue(riskOpportunity.biggestOpportunity) ? 'Staging or presentation support' : '',
   ], 3);
-  const summaryRecommendations = pickMeaningfulLines([
+  const summaryRecommendations = dedupeInsightsByTheme(pickMeaningfulLines([
     report.payload?.improvementGuidance?.summary,
     ...recommendationActions.map((action) => action.title),
     ...(report.improvementItems || []).slice(0, 3),
-    summaryOpportunity,
     pricingNarrative,
-  ], 5);
+  ], 7), 5);
   const recommendationActionLines = pickMeaningfulLines(
     recommendationActions.map(
       (action) =>
@@ -1579,23 +1709,26 @@ function buildPropertySummaryHtml({ property, report }) {
     }),
     3,
   );
-  const topThreeIssues = pickMeaningfulLines([
+  const topThreeIssues = dedupeInsightsByTheme(pickMeaningfulLines([
     summaryRisk,
     ...(consequenceFraming.lines || []),
     checklistSummary.openCount ? `${checklistSummary.openCount} checklist items still open.` : '',
-  ], 3);
-  const launchStatusHighlights = pickMeaningfulLines([
-    photoSummary.summary,
+  ], 6), 3);
+  const launchStatusHighlights = dedupeInsightsByTheme(pickMeaningfulLines([
+    photoSummary.averageQualityScore ? `Average photo quality ${photoSummary.averageQualityScore}/100.` : '',
     checklistSummary.totalCount ? `${checklistSummary.completedCount || 0} of ${checklistSummary.totalCount} checklist items are complete.` : '',
     property?.selectedListPrice ? `Chosen list price ${formatCurrency(property.selectedListPrice)}.` : '',
     pricingInsightLines[0] || '',
     consequenceFraming.summary || '',
-  ], 4);
+  ], 6), 4);
   const roiUpside = Number(improvementEconomics.estimatedRoi || 0);
   const roiCost = Number(improvementEconomics.estimatedCost || 0);
   const roiMax = Math.max(roiUpside, roiCost, 1);
   const roiUpsideWidth = Math.max(4, Math.round((roiUpside / roiMax) * 100));
   const roiCostWidth = Math.max(4, Math.round((roiCost / roiMax) * 100));
+  const roiComparisonLine = roiUpside && roiCost
+    ? `${formatCurrency(roiUpside)} upside vs ${formatCurrency(roiCost)} cost`
+    : '';
   const pricingMetricCards = [
     renderMetricCard('Suggested range', report.pricingSummary?.low && report.pricingSummary?.high ? `${formatCurrency(report.pricingSummary.low)} - ${formatCurrency(report.pricingSummary.high)}` : 'Unavailable', report.pricingSummary?.strategy || 'Market-aligned pricing recommendation'),
     renderMetricCard('Midpoint', report.pricingSummary?.mid ? formatCurrency(report.pricingSummary.mid) : 'Unavailable', report.pricingSummary?.confidence ? `${Math.round(report.pricingSummary.confidence * 100)}% confidence` : 'Comparable signal based'),
@@ -1736,6 +1869,7 @@ function buildPropertySummaryHtml({ property, report }) {
         <div class="section-kicker">ROI snapshot</div>
         <div class="roi-hero-value">${escapeHtml(roiUpside ? `~${formatCurrency(roiUpside)} potential upside` : 'Potential upside pending')}</div>
         <div class="roi-hero-sub">${escapeHtml(roiCost ? `Estimated prep cost: ${formatCurrency(roiCost)}` : 'Estimated prep cost pending')}</div>
+        ${roiComparisonLine ? `<div class="roi-hero-sub"><strong>${escapeHtml(roiComparisonLine)}</strong></div>` : ''}
         <div class="roi-hero-sub">${escapeHtml(`Estimated value at risk: ${roiUpside ? formatCurrency(roiUpside) : 'Pending'}`)}</div>
         <div class="roi-bar-shell">
           <div>
@@ -1911,6 +2045,7 @@ function buildPropertySummaryHtml({ property, report }) {
         <div class="section-kicker">Estimated value at risk</div>
         <div class="roi-hero-value">${escapeHtml(roiUpside ? `~${formatCurrency(roiUpside)} potential upside` : 'Potential upside pending')}</div>
         <div class="roi-hero-sub">${escapeHtml(roiCost ? `Estimated prep cost: ${formatCurrency(roiCost)}` : 'Estimated prep cost pending')}</div>
+        ${roiComparisonLine ? `<div class="roi-hero-sub"><strong>${escapeHtml(roiComparisonLine)}</strong></div>` : ''}
         <div class="roi-hero-sub">${escapeHtml(improvementEconomics.decisionMessage || improvementEconomics.summary || 'Complete the top actions to protect listing value.')}</div>
         <div class="roi-bar-shell">
           <div>
@@ -2002,7 +2137,7 @@ function buildPropertySummaryHtml({ property, report }) {
           <div class="content-card">
             <div class="section-kicker">Buyer persona</div>
             <h3>Who this home should resonate with</h3>
-            <p class="muted" style="margin-top:8px;">${escapeHtml(buyerPersonaSummary.buyerPersona || 'This home should appeal to buyers seeking comfort, livability, and a well-positioned launch price.')}</p>
+            <p class="muted" style="margin-top:8px;">${escapeHtml(buyerPersonaSummary.buyerPersona || 'This home should appeal to buyers prioritizing layout clarity, practical room function, and a market-aligned price position.')}</p>
           </div>
           ` : ''}
         </div>
@@ -2020,7 +2155,7 @@ function buildPropertySummaryHtml({ property, report }) {
               <h3>Buyer-facing highlights</h3>
               ${renderBulletList(
                 topReasonsToBuy,
-                'This home’s strongest buyer signals center on pricing, livability, and showing-ready presentation.',
+                'This home’s strongest buyer signals center on pricing alignment, room clarity, and showing-ready presentation.',
               )}
             </div>
             <div class="content-card">
@@ -2074,7 +2209,7 @@ function buildPropertySummaryHtml({ property, report }) {
         </div>
         <div class="badge-row">
           <div class="brochure-cta-button">${escapeHtml(reportPrimaryCta)}</div>
-          <div class="brochure-cta-button">${escapeHtml(reportSecondaryCta)}</div>
+          <div class="brochure-cta-button secondary">${escapeHtml(reportSecondaryCta)}</div>
         </div>
       </div>
       ${renderFooter('Property Summary Report · Action Plan')}
@@ -2092,11 +2227,12 @@ function buildMarketingReportHtml({ property, flyer }) {
   const neighborhoodMapImageUrl = flyer._resolvedNeighborhoodMapImageUrl || buildNeighborhoodMapImageUrl(property);
   const flyerMode = String(flyer.mode || 'launch_ready').toLowerCase();
   const modeLabel = flyer.modeLabel || titleCaseLabel(flyerMode.replace(/_/g, ' '));
-  const ctaLabel = flyer.callToAction || flyer?.ctaMetadata?.label || (flyerMode === 'preview' ? 'Get Property Details' : 'Request Showing');
-  const ctaButtonLabel = flyer?.ctaMetadata?.label || (flyerMode === 'preview'
-    ? 'Get Property Details'
-    : 'Request Showing');
+  const ctaPrimaryLabel = flyerMode === 'preview' ? 'Get Property Details' : 'Request Showing';
+  const ctaSecondaryLabel = ctaPrimaryLabel === 'Request Showing' ? 'Get Property Details' : 'Request Showing';
+  const ctaLabel = ctaPrimaryLabel;
+  const ctaButtonLabel = ctaPrimaryLabel;
   const contactPhoneLabel = SUPPORT_PHONE || 'Phone available on request';
+  const previewUrgencyLine = 'Full listing launch expected soon — early inquiries prioritized.';
   const readinessScore = Number(flyer?.readinessScore || flyer?.readinessSignals?.readinessScore || 0);
   const marketplaceReadyCount = Number(
     flyer?.readinessSignals?.marketplaceReadyCount ||
@@ -2113,7 +2249,7 @@ function buildMarketingReportHtml({ property, flyer }) {
       `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_mode_mismatch mode=${flyerMode} expected=${expectedFlyerMode} readiness=${readinessScore} marketplaceReady=${marketplaceReadyCount}`,
     );
   }
-  if (!['request showing', 'get property details'].includes(String(ctaButtonLabel || '').toLowerCase())) {
+  if (!['request showing', 'get property details'].includes(String(ctaPrimaryLabel || '').toLowerCase())) {
     console.warn(
       `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=cta_not_upgraded flyerMode=${flyerMode}`,
     );
@@ -2178,6 +2314,7 @@ function buildMarketingReportHtml({ property, flyer }) {
           <div class="hero-signal-row" style="margin-top:14px;">
             <div class="hero-signal-chip hero-signal-chip-orange">${escapeHtml(modeHeroSignal)}</div>
           </div>
+          ${flyerMode === 'preview' ? `<div class="preview-urgency">${escapeHtml(previewUrgencyLine)}</div>` : ''}
           <div class="brochure-cover-facts">
             ${brochureFactBadges.map((item) => `<div class="brochure-cover-fact">${escapeHtml(item)}</div>`).join('')}
           </div>
@@ -2192,13 +2329,17 @@ function buildMarketingReportHtml({ property, flyer }) {
         <div class="brochure-cta-card">
           <div class="section-kicker">Call to action</div>
           <h3>${escapeHtml(ctaLabel)}</h3>
+          ${flyerMode === 'preview' ? `<p class="compact-copy" style="margin-top:8px;"><strong>${escapeHtml(previewUrgencyLine)}</strong></p>` : ''}
           <p class="compact-copy" style="margin-top:10px;">Prepared by Workside Home Advisor to support a polished listing launch, clearer buyer positioning, and smoother showing conversations.</p>
           <div class="badge-row">
             <div class="badge badge-address">${escapeHtml(propertyAddress)}</div>
             <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
             <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
           </div>
-          <div class="brochure-cta-button">${escapeHtml(ctaButtonLabel)}</div>
+          <div class="cta-button-row">
+            <div class="brochure-cta-button">${escapeHtml(ctaButtonLabel)}</div>
+            <div class="brochure-cta-button secondary">${escapeHtml(ctaSecondaryLabel)}</div>
+          </div>
         </div>
       </div>
       ${renderFooter('Marketing Report · Cover')}
@@ -2265,11 +2406,16 @@ function buildMarketingReportHtml({ property, flyer }) {
             <div class="page-spacer"></div>
             <div class="section-kicker">Call to action</div>
             <h3>${escapeHtml(ctaLabel)}</h3>
+            ${flyerMode === 'preview' ? `<p class="compact-copy" style="margin-top:8px;"><strong>${escapeHtml(previewUrgencyLine)}</strong></p>` : ''}
             <p class="muted" style="margin-top:8px;">Prepared by Workside Home Advisor to support marketplace-ready marketing collateral and brochure refinement.</p>
             <div class="badge-row">
               <div class="badge badge-address">${escapeHtml(propertyAddress)}</div>
               <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
               <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
+            </div>
+            <div class="cta-button-row">
+              <div class="brochure-cta-button">${escapeHtml(ctaButtonLabel)}</div>
+              <div class="brochure-cta-button secondary">${escapeHtml(ctaSecondaryLabel)}</div>
             </div>
           </div>
         </div>
@@ -2315,6 +2461,7 @@ function buildMarketingReportHtml({ property, flyer }) {
                 <div class="page-spacer"></div>
                 <div class="section-kicker">Urgency and contact</div>
                 <h3>${escapeHtml(ctaLabel)}</h3>
+                ${flyerMode === 'preview' ? `<p class="compact-copy" style="margin-top:8px;"><strong>${escapeHtml(previewUrgencyLine)}</strong></p>` : ''}
                 <p class="compact-copy" style="margin-top:8px;">Prepared by Workside Home Advisor to help this listing launch with stronger buyer clarity, cleaner positioning, and a more polished first impression.</p>
                 <div class="badge-row">
                   <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
@@ -2325,7 +2472,10 @@ function buildMarketingReportHtml({ property, flyer }) {
                   <div class="section-kicker">Final push</div>
                   <p class="compact-copy" style="margin-top:6px;">Homes that combine clear pricing, polished photography, and a strong first showing impression create more confident buyer momentum. Schedule the showing window while buyer interest is fresh.</p>
                 </div>
-                <div class="brochure-cta-button">${escapeHtml(ctaButtonLabel)}</div>
+                <div class="cta-button-row">
+                  <div class="brochure-cta-button">${escapeHtml(ctaButtonLabel)}</div>
+                  <div class="brochure-cta-button secondary">${escapeHtml(ctaSecondaryLabel)}</div>
+                </div>
               </div>
             </div>
             ${renderFooter('Marketing Report · Neighborhood & Positioning')}

@@ -129,6 +129,163 @@ function buildPriceText(property, pricing, flyerType) {
   return `${formatCurrency(pricing.recommendedListLow)} to ${formatCurrency(pricing.recommendedListHigh)}`;
 }
 
+function normalizeRoomLabel(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function hasRoomSignal(roomLabels = [], pattern) {
+  return (roomLabels || []).some((label) => pattern.test(label));
+}
+
+function buildSignalBundle({ property, selectedPhotos = [] }) {
+  const roomLabels = (selectedPhotos || []).map((photo) => normalizeRoomLabel(photo?.roomLabel));
+  const listingNotes = (selectedPhotos || [])
+    .map((photo) => String(photo?.listingNote || '').toLowerCase())
+    .join(' ');
+  const hasKitchen = hasRoomSignal(roomLabels, /kitchen/);
+  const hasLiving = hasRoomSignal(roomLabels, /living|family|great room/);
+  const hasExterior = hasRoomSignal(roomLabels, /exterior|front|backyard|yard/);
+  const hasPrimaryBed = hasRoomSignal(roomLabels, /primary|bedroom/);
+  const hasNaturalLight = listingNotes.includes('light') || listingNotes.includes('bright') || (selectedPhotos || []).some((photo) => Number(photo?.score || 0) >= 78);
+  const squareFeet = Number(property?.squareFeet || 0);
+  const hasLot = Number(property?.lotSizeSqFt || 0) > 0;
+
+  const layoutLine = squareFeet >= 2400
+    ? 'Expansive floor plan with clearly separated living zones.'
+    : squareFeet >= 1500
+      ? 'Balanced layout connecting kitchen flow and everyday living space.'
+      : 'Practical layout designed for efficient daily flow.';
+  const kitchenLine = hasKitchen
+    ? hasNaturalLight
+      ? 'Kitchen photos show bright prep surfaces and clear workspace definition.'
+      : 'Kitchen photos highlight practical counter workspace and storage flow.'
+    : '';
+  const livingLine = hasLiving
+    ? 'Main living area reads clean and functional for showing conversations.'
+    : '';
+  const exteriorLine = hasExterior
+    ? 'Exterior views support curb-first appeal and stronger first impressions.'
+    : hasLot
+      ? 'Lot footprint supports flexible outdoor use and staging potential.'
+      : '';
+  const primaryBedLine = hasPrimaryBed
+    ? 'Primary sleeping area presents as straightforward and ready for staging continuity.'
+    : '';
+
+  const signalLines = [kitchenLine, livingLine, exteriorLine, primaryBedLine, layoutLine]
+    .filter(Boolean);
+
+  const subheadline = hasKitchen && hasLiving
+    ? 'Bright kitchen and connected living layout'
+    : hasExterior && hasLiving
+      ? 'Curb appeal paired with practical interior flow'
+      : hasKitchen
+        ? 'Kitchen-forward layout with practical room flow'
+        : hasExterior
+          ? 'Curb-first presentation with clear interior flow'
+          : 'Practical layout with clean room-to-room flow';
+
+  const highlightCandidates = [
+    kitchenLine || 'Kitchen layout supports practical prep and hosting use.',
+    livingLine || 'Main living zone presents clean lines for first-showing walkthroughs.',
+    exteriorLine || 'Exterior presentation supports stronger first impressions.',
+    layoutLine,
+    hasNaturalLight ? 'Natural light support is visible across key rooms.' : '',
+    hasPrimaryBed ? 'Bedroom sequence supports clear buyer walk-through pacing.' : '',
+  ].filter(Boolean);
+  const dedupedHighlights = [];
+  const seen = new Set();
+  for (const line of highlightCandidates) {
+    const key = String(line || '').toLowerCase();
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    dedupedHighlights.push(line);
+  }
+
+  return {
+    subheadline,
+    primarySignal: signalLines[0] || layoutLine,
+    secondarySignal: signalLines[1] || '',
+    tertiarySignal: signalLines[2] || '',
+    highlights: dedupedHighlights.slice(0, 4),
+  };
+}
+
+function buildSpecificModeCopy({
+  property,
+  flyerType,
+  mode,
+  locationLine,
+  selectedPhotos,
+}) {
+  const title = property?.title || 'This property';
+  const signalBundle = buildSignalBundle({ property, selectedPhotos });
+  const listingContext = locationLine ? ` ${locationLine}.` : '';
+
+  if (flyerType === 'rental') {
+    if (mode === 'preview') {
+      return {
+        subheadline: `Early rental preview: ${signalBundle.subheadline}.`,
+        summary: `${title} preview highlights ${signalBundle.primarySignal.toLowerCase()}${signalBundle.secondarySignal ? ` ${signalBundle.secondarySignal}` : ''}${listingContext} Full listing launch expected soon — early inquiries prioritized.`,
+      };
+    }
+    if (mode === 'launch_ready') {
+      return {
+        subheadline: `Rental-ready marketing: ${signalBundle.subheadline}.`,
+        summary: `${title} is positioned with ${signalBundle.primarySignal.toLowerCase()}${signalBundle.tertiarySignal ? ` ${signalBundle.tertiarySignal}` : ''}${listingContext} Use this flyer to convert qualified tour requests quickly.`,
+      };
+    }
+    return {
+      subheadline: `Priority rental launch: ${signalBundle.subheadline}.`,
+      summary: `${title} is marketed with ${signalBundle.primarySignal.toLowerCase()} and polished renter-facing sequencing.${listingContext} Prioritize qualified tour requests while demand is active.`,
+    };
+  }
+
+  if (mode === 'preview') {
+    return {
+      subheadline: `Early preview: ${signalBundle.subheadline}.`,
+      summary: `${title} preview highlights ${signalBundle.primarySignal.toLowerCase()}${signalBundle.secondarySignal ? ` ${signalBundle.secondarySignal}` : ''}${listingContext} Full listing launch expected soon — early inquiries prioritized.`,
+    };
+  }
+  if (mode === 'launch_ready') {
+    return {
+      subheadline: `Launch-ready positioning: ${signalBundle.subheadline}.`,
+      summary: `${title} is positioned with ${signalBundle.primarySignal.toLowerCase()}${signalBundle.tertiarySignal ? ` ${signalBundle.tertiarySignal}` : ''}${listingContext} Request a showing to review full property details.`,
+    };
+  }
+  return {
+    subheadline: `Premium launch positioning: ${signalBundle.subheadline}.`,
+    summary: `${title} is presented with ${signalBundle.primarySignal.toLowerCase()} and high-clarity marketing sequencing.${listingContext} Use this format for high-intent buyer conversations and showing conversion.`,
+  };
+}
+
+function tightenFlyerText(text = '', signalBundle = {}) {
+  let value = String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!value) {
+    return '';
+  }
+  const replacementSignal = String(signalBundle?.primarySignal || 'clear room-to-room layout and stronger first-impression cues')
+    .replace(/\.$/, '');
+  const replacements = [
+    { pattern: /comfortable and spacious/gi, replacement: replacementSignal.toLowerCase() },
+    { pattern: /beautiful home/gi, replacement: 'well-presented property' },
+    { pattern: /comfort and flow/gi, replacement: 'layout clarity and room flow' },
+    { pattern: /everyday livability/gi, replacement: 'practical day-to-day function' },
+    { pattern: /welcoming tone/gi, replacement: 'clear buyer-facing positioning' },
+  ];
+  for (const { pattern, replacement } of replacements) {
+    value = value.replace(pattern, replacement);
+  }
+  return value;
+}
+
 function buildFallbackFlyer({ property, pricing, flyerType, selectedPhotos }) {
   const readinessSignals = deriveFlyerReadiness(selectedPhotos);
   const modeDecision = resolveFlyerModeDecision(readinessSignals);
@@ -141,6 +298,14 @@ function buildFallbackFlyer({ property, pricing, flyerType, selectedPhotos }) {
     propertyTitle: property.title,
     locationLine,
   });
+  const specificCopy = buildSpecificModeCopy({
+    property,
+    flyerType,
+    mode,
+    locationLine,
+    selectedPhotos,
+  });
+  const signalBundle = buildSignalBundle({ property, selectedPhotos });
   const ctaMetadata = buildFlyerCtaMetadata({
     flyerType,
     mode,
@@ -164,16 +329,18 @@ function buildFallbackFlyer({ property, pricing, flyerType, selectedPhotos }) {
       mode === 'preview'
         ? 'Coming Soon Opportunity'
         : property.title,
-    subheadline: modeCopy.subheadline,
+    subheadline: tightenFlyerText(specificCopy.subheadline || modeCopy.subheadline, signalBundle),
     priceText: buildPriceText(property, pricing, flyerType),
     locationLine,
-    summary: modeCopy.summary,
-    highlights: [
-      `${property.bedrooms || '--'} bedrooms`,
-      `${property.bathrooms || '--'} bathrooms`,
-      `${property.squareFeet || '--'} square feet`,
-      property.propertyType || 'single family',
-    ],
+    summary: tightenFlyerText(specificCopy.summary || modeCopy.summary, signalBundle),
+    highlights: signalBundle.highlights.length
+      ? signalBundle.highlights
+      : [
+          `${property.bedrooms || '--'} bedrooms`,
+          `${property.bathrooms || '--'} bathrooms`,
+          `${property.squareFeet || '--'} square feet`,
+          property.propertyType || 'single family',
+        ],
     selectedPhotos,
     ctaMetadata,
     callToAction: modeCopy.callToAction || ctaMetadata.label,
@@ -246,35 +413,39 @@ function buildFallbackFlyerCopySuggestions({
   const inventoryContext = [bedBathText, squareFeetText].filter(Boolean).join(' • ');
   const listingContext = [location, inventoryContext].filter(Boolean).join(' • ');
   const listingSummary = listingContext ? ` ${listingContext}.` : '';
+  const signalBundle = buildSignalBundle({ property, selectedPhotos: fallbackFlyer?.selectedPhotos || [] });
+  const primarySignal = signalBundle.primarySignal.toLowerCase();
+  const secondarySignal = signalBundle.secondarySignal ? ` ${signalBundle.secondarySignal}` : '';
+  const urgencyLine = 'Full listing launch expected soon — early inquiries prioritized.';
 
   const optionSet =
     flyerType === 'rental'
       ? [
           {
-            subheadline: 'Move-in-ready rental with bright everyday flow.',
-            summary: `${propertyTitle} stands out as a practical rental option with balanced room flow and strong natural light.${listingSummary} Position this as a clean, well-kept home suited for qualified renters seeking comfort and convenience.`,
+            subheadline: `Rental preview: ${signalBundle.subheadline}.`,
+            summary: `${propertyTitle} emphasizes ${primarySignal}${secondarySignal}.${listingSummary} ${urgencyLine}`,
           },
           {
-            subheadline: 'Comfort-first layout with strong renter appeal.',
-            summary: `Frame ${propertyTitle} as a rental that combines usable square footage, approachable styling, and dependable day-to-day livability.${listingSummary} Keep the narrative focused on ease, functionality, and immediate move-in readiness.`,
+            subheadline: 'Practical rental layout with clear room sequencing.',
+            summary: `${propertyTitle} positions renters around kitchen-to-living flow, cleaner room framing, and straightforward tour readiness.${listingSummary} Invite qualified renters to request full property details.`,
           },
           {
-            subheadline: 'A polished rental opportunity ready for tours.',
-            summary: `Present ${propertyTitle} as a rental listing that shows clean presentation, practical space planning, and a welcoming tone.${listingSummary} Emphasize clear photos, simple positioning, and a direct invitation to request rental details.`,
+            subheadline: 'Tour-ready rental with clearer first-impression signals.',
+            summary: `${propertyTitle} highlights actionable presentation strengths across key rooms and exterior touchpoints.${listingSummary} Keep messaging specific and direct: layout quality, light, and showing readiness.`,
           },
         ]
       : [
           {
-            subheadline: 'Seller-ready positioning with market-friendly presentation.',
-            summary: `${propertyTitle} is presented as a move-in-ready home with strong everyday livability and a clear path to market confidence.${listingSummary} Highlight the balanced layout, clean visual presentation, and practical value story for qualified buyers.`,
+            subheadline: `Listing preview: ${signalBundle.subheadline}.`,
+            summary: `${propertyTitle} highlights ${primarySignal}${secondarySignal}.${listingSummary} ${urgencyLine}`,
           },
           {
-            subheadline: 'Practical layout, polished visuals, and listing momentum.',
-            summary: `Position ${propertyTitle} as a well-prepared listing that blends functionality with buyer-friendly presentation.${listingSummary} Focus the copy on clean rooms, strong light, and a straightforward value narrative that supports showing activity.`,
+            subheadline: 'Kitchen-to-living flow with cleaner buyer walk-through pacing.',
+            summary: `${propertyTitle} focuses buyers on room-to-room clarity, stronger first-photo impact, and practical launch sequencing.${listingSummary} Use direct language tied to visible property signals.`,
           },
           {
-            subheadline: 'Confident listing story built around comfort and flow.',
-            summary: `Frame ${propertyTitle} as a home that already presents well and can launch with confidence.${listingSummary} Use the brochure to spotlight livable space, clear condition cues, and the next step for buyers to schedule a showing.`,
+            subheadline: 'Curb-first impression supported by practical interior presentation.',
+            summary: `${propertyTitle} pairs exterior and interior signals to support clearer showing conversations.${listingSummary} End with a strong CTA: Request Showing or Get Property Details.`,
           },
         ];
 
@@ -342,7 +513,7 @@ export async function suggestPropertyFlyerCopy({
 
   const promptPayload = {
     objective:
-      'Generate high-quality brochure copy ideas for subheadline and summary that are fair-housing-safe and practical for residential marketing.',
+      'Generate high-quality brochure copy ideas for subheadline and summary that are fair-housing-safe, conversion-focused, and grounded in specific property signals.',
     flyerType,
     requestedSuggestionCount: safeCount,
     providedHeadline: toShortText(headline, 140, property?.title || ''),
@@ -366,12 +537,15 @@ export async function suggestPropertyFlyerCopy({
       subheadlineMaxChars: 220,
       summaryMaxChars: 600,
       summaryStyle:
-        '2-4 concise sentences, clear and market-ready without exaggerated claims or guaranteed outcomes.',
+        '2-4 concise sentences using specific property details (layout, kitchen, light, exterior cues) without exaggerated claims or guaranteed outcomes.',
       avoid: [
         'fair housing violations',
         'guaranteed returns',
         'unverifiable superlatives',
         'all-caps promotional language',
+        'comfortable and spacious',
+        'beautiful home',
+        'generic filler language',
       ],
     },
   };
@@ -457,6 +631,7 @@ export async function generatePropertyFlyer({
     normalizedCustomizations.selectedPhotoAssetIds,
     brochureVariantByAssetId,
   );
+  const signalBundle = buildSignalBundle({ property, selectedPhotos });
   const fallbackFlyer = buildFallbackFlyer({
     property,
     pricing,
@@ -516,17 +691,23 @@ export async function generatePropertyFlyer({
           (fallbackFlyer.mode === 'preview' ? fallbackFlyer.headline : marketing.headline) ||
           fallbackFlyer.headline,
         subheadline:
-          normalizedCustomizations.subheadline ||
-          (fallbackFlyer.mode === 'preview' ? modeCopy.subheadline : marketing.shortDescription) ||
-          fallbackFlyer.subheadline,
+          tightenFlyerText(
+            normalizedCustomizations.subheadline ||
+            (fallbackFlyer.mode === 'preview' ? fallbackFlyer.subheadline : marketing.shortDescription) ||
+            fallbackFlyer.subheadline,
+            signalBundle,
+          ),
         priceText: buildPriceText(property, pricing, flyerType),
         locationLine: fallbackFlyer.locationLine,
         summary:
-          normalizedCustomizations.summary ||
-          (fallbackFlyer.mode === 'preview' ? modeCopy.summary : marketing.shortDescription) ||
-          fallbackFlyer.summary,
+          tightenFlyerText(
+            normalizedCustomizations.summary ||
+            (fallbackFlyer.mode === 'preview' ? fallbackFlyer.summary : marketing.shortDescription) ||
+            fallbackFlyer.summary,
+            signalBundle,
+          ),
         highlights: marketing.featureHighlights?.length
-          ? marketing.featureHighlights
+          ? marketing.featureHighlights.map((item) => tightenFlyerText(item, signalBundle))
           : fallbackFlyer.highlights,
         selectedPhotos,
         ctaMetadata,
@@ -541,8 +722,8 @@ export async function generatePropertyFlyer({
         ...fallbackFlyer,
         ctaMetadata,
         headline: normalizedCustomizations.headline || fallbackFlyer.headline,
-        subheadline: normalizedCustomizations.subheadline || fallbackFlyer.subheadline,
-        summary: normalizedCustomizations.summary || fallbackFlyer.summary,
+        subheadline: tightenFlyerText(normalizedCustomizations.subheadline || fallbackFlyer.subheadline, signalBundle),
+        summary: tightenFlyerText(normalizedCustomizations.summary || fallbackFlyer.summary, signalBundle),
         callToAction:
           normalizedCustomizations.callToAction ||
           modeCopy.callToAction ||

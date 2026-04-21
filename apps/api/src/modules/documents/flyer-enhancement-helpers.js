@@ -194,7 +194,7 @@ export function buildFlyerModeCopy({
       preview: {
         subheadline: 'Early preview before full listing launch.',
         summary: `Coming Soon Opportunity: ${propertyTitle} is in pre-launch preparation mode.${listingContext} This preview is shared before final photo and readiness refinements are complete.`,
-        callToAction: 'Request early access.',
+        callToAction: 'Get Property Details',
       },
       launch_ready: {
         subheadline: 'Listing-ready presentation with practical buyer appeal.',
@@ -211,7 +211,7 @@ export function buildFlyerModeCopy({
       preview: {
         subheadline: 'Early rental preview while final details are being prepared.',
         summary: `${propertyTitle} is being prepared as a high-clarity rental opportunity.${listingContext} Share this preview with qualified renters while final media refinements are completed.`,
-        callToAction: 'Request availability details and the rental packet.',
+        callToAction: 'Get Rental Details',
       },
       launch_ready: {
         subheadline: 'Move-in-ready rental with clear everyday livability.',
