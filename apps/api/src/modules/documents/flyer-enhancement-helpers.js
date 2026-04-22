@@ -207,7 +207,7 @@ export function buildFlyerModeCopy({
     sale: {
       preview: {
         subheadline: 'Early preview before full listing launch.',
-        summary: `Coming Soon Opportunity: ${propertyTitle} is in pre-launch preparation mode.${listingContext} This preview is shared before final photo and readiness refinements are complete.`,
+        summary: `${propertyTitle} is positioned in focused pre-launch mode with polished buyer-facing messaging.${listingContext} This preview highlights the strongest currently selected listing assets.`,
         callToAction: 'Get Property Details',
       },
       launch_ready: {
@@ -225,17 +225,17 @@ export function buildFlyerModeCopy({
       preview: {
         subheadline: 'Early rental preview while final details are being prepared.',
         summary: `${propertyTitle} is being prepared as a high-clarity rental opportunity.${listingContext} Share this preview with qualified renters while final media refinements are completed.`,
-        callToAction: 'Get Rental Details',
+        callToAction: 'Get Property Details',
       },
       launch_ready: {
         subheadline: 'Move-in-ready rental with clear everyday livability.',
         summary: `${propertyTitle} is positioned as a rental with practical flow, strong core spaces, and ready-to-tour presentation.${listingContext} Use this flyer to convert qualified inquiries into tour requests.`,
-        callToAction: 'Request a tour and rental details.',
+        callToAction: 'Request Showing',
       },
       premium: {
         subheadline: 'Premium rental positioning for qualified tour demand.',
         summary: `${propertyTitle} is presented with premium-ready marketing visuals and polished renter-facing copy.${listingContext} Use this mode to attract high-intent renters and shorten decision timelines.`,
-        callToAction: 'Book a priority tour and request full rental details.',
+        callToAction: 'Request Showing',
       },
     },
   };
@@ -250,29 +250,29 @@ export function buildFlyerCtaMetadata({
   propertyId = '',
 }) {
   const strategyByMode = {
-    preview: flyerType === 'rental' ? 'request_property_packet' : 'request_property_packet',
-    launch_ready: flyerType === 'rental' ? 'request_showing' : 'request_showing',
-    premium: flyerType === 'rental' ? 'contact_agent' : 'request_showing',
+    preview: 'request_property_packet',
+    launch_ready: 'request_showing',
+    premium: 'request_showing',
   };
   const strategy = strategyByMode[mode] || 'request_showing';
   const map = {
     request_showing: {
-      label: flyerType === 'rental' ? 'Request Tour' : 'Request Showing',
+      label: 'Request Showing',
       destinationType: 'app_route',
       destinationRoute: `/properties/${propertyId || ':propertyId'}/showings/request`,
     },
     request_property_packet: {
-      label: flyerType === 'rental' ? 'Get Rental Details' : 'Get Property Details',
+      label: 'Get Property Details',
       destinationType: 'app_route',
       destinationRoute: `/properties/${propertyId || ':propertyId'}/packet/request`,
     },
     contact_agent: {
-      label: 'Contact the listing team',
+      label: 'Request Showing',
       destinationType: 'app_route',
       destinationRoute: `/properties/${propertyId || ':propertyId'}/contact`,
     },
     contact_seller: {
-      label: 'Contact seller',
+      label: 'Get Property Details',
       destinationType: 'app_route',
       destinationRoute: `/properties/${propertyId || ':propertyId'}/contact`,
     },

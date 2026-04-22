@@ -233,7 +233,7 @@ function buildSpecificModeCopy({
     if (mode === 'preview') {
       return {
         subheadline: `Early rental preview: ${signalBundle.subheadline}.`,
-        summary: `${title} preview highlights ${signalBundle.primarySignal.toLowerCase()}${signalBundle.secondarySignal ? ` ${signalBundle.secondarySignal}` : ''}${listingContext} Full listing launch expected soon — early inquiries prioritized.`,
+        summary: `${title} preview highlights ${signalBundle.primarySignal.toLowerCase()}${signalBundle.secondarySignal ? ` ${signalBundle.secondarySignal}` : ''}${listingContext} Early inquiries are prioritized for this listing.`,
       };
     }
     if (mode === 'launch_ready') {
@@ -251,7 +251,7 @@ function buildSpecificModeCopy({
   if (mode === 'preview') {
     return {
       subheadline: `Early preview: ${signalBundle.subheadline}.`,
-      summary: `${title} preview highlights ${signalBundle.primarySignal.toLowerCase()}${signalBundle.secondarySignal ? ` ${signalBundle.secondarySignal}` : ''}${listingContext} Full listing launch expected soon — early inquiries prioritized.`,
+      summary: `${title} preview highlights ${signalBundle.primarySignal.toLowerCase()}${signalBundle.secondarySignal ? ` ${signalBundle.secondarySignal}` : ''}${listingContext} Early inquiries are prioritized for this listing.`,
     };
   }
   if (mode === 'launch_ready') {
@@ -329,7 +329,7 @@ function buildFallbackFlyer({ property, pricing, flyerType, selectedPhotos }) {
     },
     headline:
       mode === 'preview'
-        ? 'Coming Soon Opportunity'
+        ? 'Featured Property Opportunity'
         : property.title,
     subheadline: tightenFlyerText(specificCopy.subheadline || modeCopy.subheadline, signalBundle),
     priceText: buildPriceText(property, pricing, flyerType),
@@ -418,7 +418,7 @@ function buildFallbackFlyerCopySuggestions({
   const signalBundle = buildSignalBundle({ property, selectedPhotos: fallbackFlyer?.selectedPhotos || [] });
   const primarySignal = signalBundle.primarySignal.toLowerCase();
   const secondarySignal = signalBundle.secondarySignal ? ` ${signalBundle.secondarySignal}` : '';
-  const urgencyLine = 'Full listing launch expected soon — early inquiries prioritized.';
+  const urgencyLine = 'Early inquiries are currently prioritized for this listing.';
 
   const optionSet =
     flyerType === 'rental'

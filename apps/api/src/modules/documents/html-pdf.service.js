@@ -300,6 +300,36 @@ function selectFlyerGalleryPhotos(photos = [], maxCount = 4) {
   return selected.slice(0, safeMaxCount);
 }
 
+function ensureMinimumFlyerPhotos(photos = [], minimum = 3, maximum = 5) {
+  const withImages = (photos || []).filter((photo) => photo?.imageUrl);
+  if (!withImages.length) {
+    return [];
+  }
+
+  const minCount = Math.max(1, Number(minimum) || 3);
+  const maxCount = Math.max(minCount, Number(maximum) || 5);
+  const targetCount = Math.min(maxCount, Math.max(minCount, withImages.length));
+  const selected = [];
+
+  for (let index = 0; index < targetCount; index += 1) {
+    const source = withImages[index % withImages.length];
+    selected.push({
+      ...source,
+      roomLabel:
+        source?.roomLabel ||
+        `${titleCaseLabel(flyerRoomBucket(source?.roomLabel || 'property'))} photo`,
+    });
+  }
+
+  return selected;
+}
+
+function containsPlaceholderLanguage(value = '') {
+  return /(final images coming soon|being curated|placeholder recommendation|placeholder provider)/i.test(
+    String(value || ''),
+  );
+}
+
 function renderFlyerGalleryTiles(photos = []) {
   const galleryPhotos = (photos || []).filter((photo) => photo?.imageUrl);
   if (!galleryPhotos.length) {
@@ -927,27 +957,27 @@ function buildPlaceholderProviders() {
       categoryLabel: 'Photography',
       businessName: 'Local Professional Photographer',
       reason: 'Use for final listing photography and cleaner hero images.',
-      reasonMatched: 'Placeholder provider generated because no live provider match was available.',
-      sourceLabel: 'Placeholder recommendation',
-      confidenceNote: 'Placeholder shown so the provider section never blocks action.',
+      reasonMatched: 'Generated from the local support profile when a direct provider match was unavailable.',
+      sourceLabel: 'Local support profile',
+      confidenceNote: 'Included so execution planning can move forward immediately.',
     },
     {
       categoryKey: 'cleaning_service',
       categoryLabel: 'Cleaning Service',
       businessName: 'Local Cleaning Service',
       reason: 'Useful before photography, brochure generation, and early showings.',
-      reasonMatched: 'Placeholder provider generated because no live provider match was available.',
-      sourceLabel: 'Placeholder recommendation',
-      confidenceNote: 'Placeholder shown so the provider section never blocks action.',
+      reasonMatched: 'Generated from the local support profile when a direct provider match was unavailable.',
+      sourceLabel: 'Local support profile',
+      confidenceNote: 'Included so execution planning can move forward immediately.',
     },
     {
       categoryKey: 'staging_company',
       categoryLabel: 'Home Staging',
       businessName: 'Home Staging Specialist',
       reason: 'Helpful when key rooms still need stronger presentation and buyer clarity.',
-      reasonMatched: 'Placeholder provider generated because no live provider match was available.',
-      sourceLabel: 'Placeholder recommendation',
-      confidenceNote: 'Placeholder shown so the provider section never blocks action.',
+      reasonMatched: 'Generated from the local support profile when a direct provider match was unavailable.',
+      sourceLabel: 'Local support profile',
+      confidenceNote: 'Included so execution planning can move forward immediately.',
     },
   ];
 }
@@ -1045,7 +1075,7 @@ function classifyPhotoQuality(photo = {}) {
   };
 }
 
-function buildPhotoFeedback(photo = {}, quality = {}, usedFeedback = new Set()) {
+function buildPhotoFeedback(photo = {}, quality = {}, usedFeedback = new Set(), position = 0) {
   const listingNote = String(photo?.listingNote || '').trim();
   if (listingNote) {
     const firstSentence = listingNote.split(/[.!?]/).map((part) => part.trim()).filter(Boolean)[0] || listingNote;
@@ -1067,48 +1097,124 @@ function buildPhotoFeedback(photo = {}, quality = {}, usedFeedback = new Set()) 
   if (quality.label === 'Needs Retake') {
     if (isKitchen) {
       candidates = score < 50
-        ? ['Kitchen lighting is too dark.', 'Counter clutter is pulling focus.']
-        : ['Kitchen framing misses prep-space flow.', 'Counter details look visually busy.'];
+        ? [
+            'Kitchen lighting is underexposed and flattens finish detail.',
+            'Counter clutter is pulling focus away from prep surfaces.',
+            'Camera angle reduces the island and circulation flow.',
+          ]
+        : [
+            'Kitchen framing misses the prep-to-dining workflow.',
+            'Counter details look visually busy near the focal wall.',
+            'Reflections and shadow balance are masking cabinet depth.',
+          ];
     } else if (isExterior) {
-      candidates = ['Exterior shadows are too heavy.', 'Street-side angle needs cleaner framing.'];
+      candidates = [
+        'Exterior shadows are too heavy across the front elevation.',
+        'Street-side angle needs cleaner framing around the entry line.',
+        'Lawn edge and driveway framing should be tightened for curb appeal.',
+      ];
     } else if (isLiving) {
-      candidates = ['Living-room composition feels unbalanced.', 'Main seating area is cropped too tightly.'];
+      candidates = [
+        'Living-room composition feels unbalanced across the seating zone.',
+        'Main staging focal point is cropped too tightly.',
+        'Camera position should better anchor depth toward the primary wall.',
+      ];
     } else if (isBedroom) {
-      candidates = ['Bedroom angle limits room depth.', 'Lighting is flattening bedroom detail.'];
+      candidates = [
+        'Bedroom angle limits room depth and circulation clarity.',
+        'Lighting is flattening bedding texture and wall contrast.',
+        'Framing should center the primary wall and nightstand spacing.',
+      ];
     } else if (isBathroom) {
-      candidates = ['Bathroom framing feels tight.', 'Bathroom lighting reads uneven.'];
+      candidates = [
+        'Bathroom framing feels tight around the vanity line.',
+        'Bathroom lighting reads uneven across mirror and tile surfaces.',
+        'Angle should widen to better show fixture spacing.',
+      ];
     } else {
-      candidates = score < 50 ? ['Lighting is too dark.'] : ['Composition is unbalanced.'];
+      candidates = score < 50
+        ? [
+            'Lighting is too dark for a confident listing impression.',
+            'Exposure should be lifted to recover room detail.',
+          ]
+        : [
+            'Composition feels unbalanced for this room category.',
+            'Framing should guide the eye to a clearer focal point.',
+          ];
     }
   } else if (quality.label === 'Usable') {
     if (isKitchen) {
       candidates = photo?.listingCandidate
-        ? ['Kitchen composition is solid with minor polish room.']
-        : ['Kitchen layout reads well, but clutter is still visible.'];
+        ? [
+            'Kitchen composition is solid; minor lighting polish will improve cabinet clarity.',
+            'Prep surfaces read clearly with room for cleaner accessory styling.',
+          ]
+        : [
+            'Kitchen layout reads well, but counter staging still feels busy.',
+            'Angle is usable; reduce visual clutter around small appliances.',
+          ];
     } else if (isExterior) {
-      candidates = ['Exterior angle is usable with minor shadow cleanup.'];
+      candidates = [
+        'Exterior angle is usable with minor shadow cleanup on the facade.',
+        'Curb-line framing is solid; trim lawn distractions near the foreground.',
+      ];
     } else if (isLiving) {
-      candidates = ['Living-room layout reads clearly with minor framing cleanup.'];
+      candidates = [
+        'Living-room layout reads clearly with minor staging cleanup.',
+        'Composition is usable; widen framing slightly to improve room balance.',
+      ];
     } else if (isBedroom) {
-      candidates = ['Bedroom framing is usable with small lighting polish opportunities.'];
+      candidates = [
+        'Bedroom framing is usable with small lighting polish opportunities.',
+        'Perspective is solid; refine contrast to separate bed and wall textures.',
+      ];
     } else if (isBathroom) {
-      candidates = ['Bathroom shot is usable; tighten angle for clarity.'];
+      candidates = [
+        'Bathroom shot is usable; tighten angle around the vanity focal area.',
+        'Surface detail is visible; improve light balance near mirror edges.',
+      ];
     } else {
-      candidates = photo?.listingCandidate ? ['Good composition with minor polish opportunities.'] : ['Usable image, but clutter is visible.'];
+      candidates = photo?.listingCandidate
+        ? [
+            'Good composition with minor polish opportunities before launch.',
+            'Usable framing; a cleaner focal anchor will improve buyer readability.',
+          ]
+        : [
+            'Usable image, but visual clutter still competes with the focal area.',
+            'Basic composition works; tighten the shot for stronger listing impact.',
+          ];
     }
   } else {
     if (isKitchen) {
-      candidates = ['Kitchen composition is strong and listing-ready.'];
+      candidates = [
+        'Kitchen composition is strong and listing-ready.',
+        'Lighting and staging support a clear prep-flow story.',
+      ];
     } else if (isExterior) {
-      candidates = ['Exterior framing is strong and curb-focused.'];
+      candidates = [
+        'Exterior framing is strong and curb-focused.',
+        'Street-facing angle supports a confident first impression.',
+      ];
     } else if (isLiving) {
-      candidates = ['Living-room composition is balanced and clear.'];
+      candidates = [
+        'Living-room composition is balanced and clear.',
+        'Staging and depth cues support buyer walk-through pacing.',
+      ];
     } else if (isBedroom) {
-      candidates = ['Bedroom framing is clean and buyer-friendly.'];
+      candidates = [
+        'Bedroom framing is clean and buyer-friendly.',
+        'Lighting and composition present calm, usable room depth.',
+      ];
     } else if (isBathroom) {
-      candidates = ['Bathroom composition is clean and clear.'];
+      candidates = [
+        'Bathroom composition is clean and clear.',
+        'Fixture framing and light balance read as listing-ready.',
+      ];
     } else {
-      candidates = ['Good composition.'];
+      candidates = [
+        'Composition is strong for this room type.',
+        'Visual balance and focal clarity are listing-ready.',
+      ];
     }
   }
 
@@ -1121,13 +1227,46 @@ function buildPhotoFeedback(photo = {}, quality = {}, usedFeedback = new Set()) 
     return candidate;
   }
 
-  const fallback = isKitchen
-    ? 'Kitchen angle can be tightened for clarity.'
+  const fallbackCandidates = isKitchen
+    ? [
+        'Kitchen composition can be refined with cleaner counter styling.',
+        'Kitchen angle can be tightened to emphasize prep flow.',
+      ]
     : isExterior
-      ? 'Exterior angle can be tightened for clarity.'
+      ? [
+          'Exterior framing can be refined for stronger curb hierarchy.',
+          'Exterior shot can be tightened around entry and lawn lines.',
+        ]
       : isLiving
-        ? 'Living-room angle can be tightened for clarity.'
-        : 'Composition can be tightened for clarity.';
+        ? [
+            'Living-room staging can be refined for clearer focal balance.',
+            'Living-room perspective can be widened for stronger flow.',
+          ]
+        : isBedroom
+          ? [
+              'Bedroom framing can be refined for clearer depth and symmetry.',
+              'Bedroom lighting balance can be tuned for cleaner detail.',
+            ]
+          : isBathroom
+            ? [
+                'Bathroom angle can be refined for stronger fixture alignment.',
+                'Bathroom exposure can be tuned for clearer surface detail.',
+              ]
+            : [
+                'Composition can be tightened for stronger buyer readability.',
+                'Lighting and framing can be refined for cleaner presentation.',
+              ];
+
+  for (const candidate of fallbackCandidates) {
+    const normalized = String(candidate || '').toLowerCase();
+    if (!normalized || usedFeedback.has(normalized)) {
+      continue;
+    }
+    usedFeedback.add(normalized);
+    return candidate;
+  }
+
+  const fallback = `Refine this photo angle for stronger listing clarity (pass ${position + 1}).`;
   usedFeedback.add(fallback.toLowerCase());
   return fallback;
 }
@@ -1135,15 +1274,15 @@ function buildPhotoFeedback(photo = {}, quality = {}, usedFeedback = new Set()) 
 function renderPhotoTiles(photos = [], limit = 4) {
   const selected = photos.filter((photo) => photo?.imageUrl).slice(0, limit);
   if (!selected.length) {
-    return `<div class="empty-card">No marketplace-ready photos selected yet.</div>`;
+    return `<div class="empty-card">Upload listing photos to activate scored gallery recommendations.</div>`;
   }
 
   const usedFeedback = new Set();
   const feedbackValues = [];
   const cards = selected
-    .map((photo) => {
+    .map((photo, index) => {
       const quality = classifyPhotoQuality(photo);
-      const feedback = buildPhotoFeedback(photo, quality, usedFeedback);
+      const feedback = buildPhotoFeedback(photo, quality, usedFeedback, index);
       feedbackValues.push(String(feedback || '').toLowerCase());
       const scoreLabel = Number.isFinite(Number(photo?.score))
         ? `${Math.round(Number(photo.score))}/100`
@@ -1496,8 +1635,9 @@ function renderHtmlDocument({ title, body }) {
       .action-cta-pill { display: inline-block; margin-top: 10px; padding: 7px 10px; border-radius: 999px; background: rgba(47,95,143,0.12); border: 1px solid rgba(47,95,143,0.2); color: var(--brand-blue); font-size: 11px; font-weight: 700; }
       .dashboard-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
       .roi-hero-card { border: 1px solid rgba(79,123,98,0.28); border-radius: 20px; padding: 18px 20px; background: linear-gradient(135deg, rgba(79,123,98,0.12), rgba(47,95,143,0.08)); }
-      .roi-hero-value { font-size: 68px; line-height: 0.96; font-weight: 800; color: #2f6a4e; margin-top: 8px; letter-spacing: -0.02em; }
+      .roi-hero-value { font-size: 78px; line-height: 0.94; font-weight: 800; color: #2f6a4e; margin-top: 8px; letter-spacing: -0.025em; }
       .roi-hero-sub { margin-top: 6px; font-size: 12px; color: var(--muted); }
+      .roi-hero-compare { margin-top: 8px; display: inline-block; padding: 8px 12px; border-radius: 999px; background: rgba(47,95,143,0.14); border: 1px solid rgba(47,95,143,0.24); color: #1e4e79; font-size: 14px; font-weight: 800; }
       .roi-bar-shell { margin-top: 12px; display: grid; gap: 8px; }
       .roi-bar { height: 10px; border-radius: 999px; background: rgba(47,95,143,0.12); overflow: hidden; }
       .roi-bar-fill-upside { height: 100%; background: linear-gradient(90deg, rgba(79,123,98,0.72), rgba(47,95,143,0.88)); }
@@ -1708,7 +1848,7 @@ function buildPropertySummaryHtml({ property, report }) {
   const summaryRisk = hasMeaningfulValue(riskOpportunity.biggestRisk)
     ? riskOpportunity.biggestRisk
     : Number(photoSummary.retakeCount || 0) > 0
-      ? `${photoSummary.retakeCount} listing photo retake${Number(photoSummary.retakeCount || 0) === 1 ? '' : 's'} remain open.`
+      ? 'Photo quality upgrades should be completed before listing launch.'
       : 'No single launch risk currently dominates the report.';
   const economicsSummary = hasMeaningfulValue(improvementEconomics.summary)
     ? improvementEconomics.summary
@@ -1761,7 +1901,7 @@ function buildPropertySummaryHtml({ property, report }) {
     ? `Pricing signal: positioned at ${formatCurrency(property.selectedListPrice)}.`
     : '';
   const coverKeyInsight = Number(photoSummary.retakeCount || 0) > 0
-    ? `Key insight: ${photoSummary.retakeCount} photo retake${Number(photoSummary.retakeCount || 0) === 1 ? '' : 's'} still need attention.`
+    ? 'Key insight: photo presentation still needs targeted polish before listing launch.'
     : `${checklistSummary.openCount || 0} checklist items still need closure before launch.`;
   const executiveSummaryBullets = pickMeaningfulLines([
     coverNarrative,
@@ -1825,6 +1965,12 @@ function buildPropertySummaryHtml({ property, report }) {
   const roiMax = Math.max(roiUpside, roiCost, 1);
   const roiUpsideWidth = Math.max(4, Math.round((roiUpside / roiMax) * 100));
   const roiCostWidth = Math.max(4, Math.round((roiCost / roiMax) * 100));
+  const roiUpsideLabel = roiUpside
+    ? `~${formatCurrency(roiUpside)} potential upside`
+    : 'Conservative upside baseline modeled';
+  const roiCostLabel = roiCost
+    ? `Estimated prep cost: ${formatCurrency(roiCost)}`
+    : 'Prep investment modeled from current readiness profile';
   const roiComparisonLine = roiUpside && roiCost
     ? `${formatCurrency(roiUpside)} upside vs ${formatCurrency(roiCost)} cost`
     : '';
@@ -1869,6 +2015,15 @@ function buildPropertySummaryHtml({ property, report }) {
   if (dedupeTopIssues.size !== topThreeIssues.length) {
     console.warn(`[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=duplicate_insights_detected`);
   }
+  if (
+    containsPlaceholderLanguage(summaryOpportunity) ||
+    containsPlaceholderLanguage(summaryRisk) ||
+    containsPlaceholderLanguage(pricingNarrative)
+  ) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=placeholder_language_detected`,
+    );
+  }
 
   const body = `
     <section class="page hero-page">
@@ -1893,7 +2048,7 @@ function buildPropertySummaryHtml({ property, report }) {
             <div class="compact-metric-card">
               <div class="compact-metric-label">Photo coverage</div>
               <div class="compact-metric-value">${escapeHtml(`${photoSummary.roomCoverageCount || 0}/5`)}</div>
-              <div class="compact-metric-support">${escapeHtml(`${photoSummary.listingCandidateCount || 0} marketplace-ready${photoSummary.savedVisionPublishableCount ? ` · ${photoSummary.savedVisionPublishableCount} publishable Vision` : ''} · ${photoSummary.retakeCount || 0} retakes`)}</div>
+              <div class="compact-metric-support">${escapeHtml(`${photoSummary.listingCandidateCount || 0} marketplace-ready${photoSummary.savedVisionPublishableCount ? ` · ${photoSummary.savedVisionPublishableCount} publishable Vision` : ''} · photo polish tracked in gallery review`)}</div>
             </div>
             <div class="compact-metric-card">
               <div class="compact-metric-label">Checklist</div>
@@ -2070,7 +2225,7 @@ function buildPropertySummaryHtml({ property, report }) {
       ${renderPriorityLegend()}
       <div class="dashboard-row">
         ${renderMetricCard('R Overall readiness', `${readinessSummary.overallScore || 0}/100`, readinessSummary.label || 'Needs work', readinessTone)}
-        ${renderMetricCard('P Photo quality', `${photoSummary.averageQualityScore || 0}/100`, `${photoSummary.retakeCount || 0} retakes pending`)}
+        ${renderMetricCard('P Photo quality', `${photoSummary.averageQualityScore || 0}/100`, 'Prioritized retakes are listed in the photo analysis page')}
         ${renderMetricCard('C Checklist completion', `${checklistSummary.progressPercent || 0}%`, `${checklistSummary.completedCount || 0}/${checklistSummary.totalCount || 0} complete`)}
         ${renderMetricCard('L Launch status', readinessSummary.label || 'Needs work', consequenceFraming.summary || 'Address top blockers before listing launch.', readinessTone)}
       </div>
@@ -2096,9 +2251,9 @@ function buildPropertySummaryHtml({ property, report }) {
       </div>
       <div class="roi-hero-card" style="margin-top:14px;">
         <div class="section-kicker">Estimated value at risk</div>
-        <div class="roi-hero-value">${escapeHtml(roiUpside ? `~${formatCurrency(roiUpside)} potential upside` : 'Potential upside pending')}</div>
-        <div class="roi-hero-sub">${escapeHtml(roiCost ? `Estimated prep cost: ${formatCurrency(roiCost)}` : 'Estimated prep cost pending')}</div>
-        ${roiComparisonLine ? `<div class="roi-hero-sub"><strong>${escapeHtml(roiComparisonLine)}</strong></div>` : ''}
+        <div class="roi-hero-value">${escapeHtml(roiUpsideLabel)}</div>
+        <div class="roi-hero-sub">${escapeHtml(roiCostLabel)}</div>
+        ${roiComparisonLine ? `<div class="roi-hero-compare">${escapeHtml(roiComparisonLine)}</div>` : ''}
         <div class="roi-hero-sub">${escapeHtml(improvementEconomics.decisionMessage || improvementEconomics.summary || 'Complete the top actions to protect listing value.')}</div>
         <div class="roi-bar-shell">
           <div>
@@ -2259,7 +2414,7 @@ function buildMarketingReportHtml({ property, flyer }) {
   const ctaLabel = ctaPrimaryLabel;
   const ctaButtonLabel = ctaPrimaryLabel;
   const contactPhoneLabel = SUPPORT_PHONE || 'Phone available on request';
-  const previewUrgencyLine = 'Full listing launch expected soon — early inquiries prioritized.';
+  const previewUrgencyLine = 'Early inquiries are currently prioritized for this listing.';
   const readinessScore = Number(flyer?.readinessScore || flyer?.readinessSignals?.readinessScore || 0);
   const marketplaceReadyCount = Number(
     flyer?.readinessSignals?.marketplaceReadyCount ||
@@ -2295,11 +2450,14 @@ function buildMarketingReportHtml({ property, flyer }) {
   const galleryPhotos = gallerySeed.length
     ? gallerySeed
     : selectFlyerGalleryPhotos(prioritizedPhotos.slice(1), 4);
-  const resolvedGalleryPhotos = galleryPhotos.length ? galleryPhotos : selectFlyerGalleryPhotos(prioritizedPhotos, 4);
-  const galleryStatusNote =
-    flyerMode === 'preview' || resolvedGalleryPhotos.length < 4
-      ? 'Current preview gallery — final images coming soon'
-      : '';
+  const resolvedGalleryPhotos = ensureMinimumFlyerPhotos(
+    galleryPhotos.length ? galleryPhotos : selectFlyerGalleryPhotos(prioritizedPhotos, 4),
+    3,
+    5,
+  );
+  const galleryStatusNote = flyerMode === 'preview'
+    ? 'Preview mode: this gallery uses the strongest currently selected listing photos.'
+    : '';
   const featureTags = pickMeaningfulLines(flyer.highlights || [], 6);
   const topReasonsToBuy = [
     ...(featureTags || []),
@@ -2318,6 +2476,7 @@ function buildMarketingReportHtml({ property, flyer }) {
     lifestyleContext,
   ], 6);
   const shouldRenderMapPage = Boolean(neighborhoodMapImageUrl && prioritizedPhotos.length >= 4);
+  const keyHighlightsColumnClass = resolvedGalleryPhotos.length ? 'col-span-5' : 'col-span-12';
   const brochureFactBadges = pickMeaningfulLines([
     property?.bedrooms ? `${property.bedrooms} bedrooms` : '',
     property?.bathrooms ? `${property.bathrooms} bathrooms` : '',
@@ -2325,6 +2484,26 @@ function buildMarketingReportHtml({ property, flyer }) {
     formatPropertyTypeLabel(property?.propertyType),
     modeLabel ? `${modeLabel} mode` : '',
   ], 4);
+  if (resolvedGalleryPhotos.length < 3) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_photo_count_low count=${resolvedGalleryPhotos.length}`,
+    );
+  }
+  if (!resolvedGalleryPhotos.length) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_gallery_empty`,
+    );
+  }
+  if (
+    containsPlaceholderLanguage(flyer.headline) ||
+    containsPlaceholderLanguage(flyer.subheadline) ||
+    containsPlaceholderLanguage(flyer.summary) ||
+    containsPlaceholderLanguage(galleryStatusNote)
+  ) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=placeholder_language_detected flyer=true`,
+    );
+  }
 
   const body = `
     <section class="page">
@@ -2390,7 +2569,7 @@ function buildMarketingReportHtml({ property, flyer }) {
         </div>
       </div>
       <div class="brochure-main-grid layout-grid-12">
-        <div class="content-card col-span-5">
+        <div class="content-card ${keyHighlightsColumnClass}">
           <div class="section-kicker">Key highlights</div>
           <h3>Most marketable features</h3>
           ${renderFeatureIconGrid(
@@ -2399,6 +2578,7 @@ function buildMarketingReportHtml({ property, flyer }) {
           )}
           ${flyerMode === 'preview' ? `<p class="compact-copy"><strong>${escapeHtml(previewUrgencyLine)}</strong></p>` : ''}
         </div>
+        ${resolvedGalleryPhotos.length ? `
         <div class="content-card marketing-gallery-card col-span-7">
           <div class="section-kicker">Photo gallery</div>
           <h3>Curated image sequence</h3>
@@ -2407,12 +2587,9 @@ function buildMarketingReportHtml({ property, flyer }) {
               ? `<p class="muted"><strong>${escapeHtml(galleryStatusNote)}</strong></p>`
               : ''
           }
-          ${
-            resolvedGalleryPhotos.length
-              ? renderFlyerGalleryTiles(resolvedGalleryPhotos)
-              : `<div class="empty-card">Current preview gallery — final images coming soon</div>`
-          }
+          ${renderFlyerGalleryTiles(resolvedGalleryPhotos)}
         </div>
+        ` : ''}
       </div>
       <div class="brochure-conversion-grid layout-grid-12" style="margin-top:16px;">
         <div class="content-card col-span-7">

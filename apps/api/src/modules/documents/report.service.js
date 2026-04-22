@@ -545,10 +545,10 @@ async function buildProviderRecommendations(propertyId) {
       turnaroundLabel: 'Same-week availability typical',
       pricingSummary: 'Rates vary by package',
       reason: 'Use for final listing photography and cleaner hero images.',
-      reasonMatched: 'No curated or nearby provider match was available; a local placeholder was generated.',
+      reasonMatched: 'No curated or nearby provider match was available; this local support profile was generated.',
       sourceType: 'placeholder',
-      sourceLabel: 'Placeholder recommendation',
-      confidenceNote: 'Placeholder provider shown so next-step planning is never blocked.',
+      sourceLabel: 'Local support profile',
+      confidenceNote: 'Included so next-step planning remains actionable.',
     },
     {
       categoryKey: 'cleaning_service',
@@ -563,10 +563,10 @@ async function buildProviderRecommendations(propertyId) {
       turnaroundLabel: '1-3 day scheduling typical',
       pricingSummary: 'Rates vary by scope',
       reason: 'Useful before photography, brochure generation, and early showings.',
-      reasonMatched: 'No curated or nearby provider match was available; a local placeholder was generated.',
+      reasonMatched: 'No curated or nearby provider match was available; this local support profile was generated.',
       sourceType: 'placeholder',
-      sourceLabel: 'Placeholder recommendation',
-      confidenceNote: 'Placeholder provider shown so prep execution remains actionable.',
+      sourceLabel: 'Local support profile',
+      confidenceNote: 'Included so prep execution remains actionable.',
     },
     {
       categoryKey: 'staging_company',
@@ -581,10 +581,10 @@ async function buildProviderRecommendations(propertyId) {
       turnaroundLabel: 'Consultation windows vary',
       pricingSummary: 'Consultation and package pricing vary',
       reason: 'Helpful when key rooms still need stronger presentation and buyer clarity.',
-      reasonMatched: 'No curated or nearby provider match was available; a local placeholder was generated.',
+      reasonMatched: 'No curated or nearby provider match was available; this local support profile was generated.',
       sourceType: 'placeholder',
-      sourceLabel: 'Placeholder recommendation',
-      confidenceNote: 'Placeholder provider shown so launch sequencing can proceed without dead ends.',
+      sourceLabel: 'Local support profile',
+      confidenceNote: 'Included so launch sequencing can proceed without dead ends.',
     },
   ];
 }
@@ -1416,9 +1416,9 @@ async function renderFallbackPropertyReportPdf({ property, report, filename }) {
             `${provider.businessName}${provider.categoryLabel ? ` (${provider.categoryLabel})` : ''}${provider.sourceLabel ? ` · ${provider.sourceLabel}` : ''}${provider.coverageLabel ? ` - ${provider.coverageLabel}` : ''}`,
         )
       : [
-          'Local Professional Photographer (Photography) · Placeholder recommendation',
-          'Local Cleaning Service (Cleaning Service) · Placeholder recommendation',
-          'Home Staging Specialist (Home Staging) · Placeholder recommendation',
+          'Local Professional Photographer (Photography) · Local support profile',
+          'Local Cleaning Service (Cleaning Service) · Local support profile',
+          'Home Staging Specialist (Home Staging) · Local support profile',
         ],
     {
       x: PDF_PAGE_MARGIN,
