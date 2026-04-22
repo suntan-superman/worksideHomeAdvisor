@@ -1691,7 +1691,7 @@ function renderHtmlDocument({ title, body }) {
       .page {
         width: 8.5in;
         min-height: 11in;
-        padding: 0.58in 0.58in 0.78in;
+        padding: 0.58in 0.58in 0.68in;
         background:
           radial-gradient(circle at top right, rgba(200,116,71,0.12), transparent 36%),
           linear-gradient(180deg, #fffdf8 0%, #f8f4ea 100%);
@@ -1843,7 +1843,7 @@ function renderHtmlDocument({ title, body }) {
         font-size: 11px;
         color: var(--muted);
       }
-      .brand-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 14px; break-after: avoid-page; page-break-after: avoid; }
+      .brand-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
       .empty-card { padding: 18px; color: var(--muted); font-size: 13px; }
       .cta-band {
         margin-top: 18px;
@@ -1898,7 +1898,7 @@ function renderHtmlDocument({ title, body }) {
         }
       }
       .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; break-inside: auto; page-break-inside: auto; }
-      .map-frame.compact { min-height: 240px; }
+      .map-frame.compact { min-height: 210px; }
       .flyer-context-grid { min-height: auto; align-content: start; align-items: start; }
       .badge-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
       .badge { padding: 8px 12px; border-radius: 999px; background: var(--moss-soft); color: var(--moss); font-size: 12px; font-weight: 600; white-space: nowrap; }
@@ -1973,19 +1973,19 @@ function renderHtmlDocument({ title, body }) {
       .comp-map-stack { display: grid; gap: 14px; }
       .comp-meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
       .action-plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
-      .brochure-cover { position: relative; min-height: 5.2in; border-radius: 28px; overflow: hidden; border: 1px solid var(--line); background: linear-gradient(135deg, #304f72 0%, #203245 100%); }
+      .brochure-cover { position: relative; min-height: 4.8in; border-radius: 28px; overflow: hidden; border: 1px solid var(--line); background: linear-gradient(135deg, #304f72 0%, #203245 100%); }
       .brochure-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
       .brochure-cover-media-grid { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 8px; }
       .brochure-cover-media-grid img { position: relative; width: 100%; height: 100%; object-fit: cover; border-radius: 16px; }
       .brochure-cover::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(16,24,32,0.08) 0%, rgba(30,57,84,0.40) 30%, rgba(16,24,32,0.72) 68%, rgba(16,24,32,0.9) 100%); }
-      .brochure-cover-overlay { position: relative; z-index: 1; min-height: 5.2in; padding: 30px 30px 26px; color: #ffffff; display: flex; flex-direction: column; justify-content: flex-end; }
+      .brochure-cover-overlay { position: relative; z-index: 1; min-height: 4.8in; padding: 26px 28px 22px; color: #ffffff; display: flex; flex-direction: column; justify-content: flex-end; }
       .brochure-cover-overlay .brand-kicker { color: rgba(255,255,255,0.78); }
       .brochure-cover-overlay h1 { color: #ffffff; font-size: 52px; line-height: 0.98; max-width: 6.2in; text-shadow: 0 10px 24px rgba(0,0,0,0.18); }
       .brochure-cover-overlay .lede { color: rgba(255,255,255,0.88); max-width: 5.4in; }
       .brochure-price { display: inline-flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 12px 18px; border-radius: 999px; background: rgba(255,255,255,0.18); color: #ffffff; border: 1px solid rgba(255,255,255,0.26); font-weight: 800; font-size: 15px; backdrop-filter: blur(3px); box-shadow: 0 12px 26px rgba(0,0,0,0.12); white-space: nowrap; }
       .brochure-cover-facts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
       .brochure-cover-fact { padding: 8px 12px; border-radius: 999px; background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.22); font-size: 12px; color: #fff; white-space: nowrap; }
-      .brochure-cover-lower { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 16px; }
+      .brochure-cover-lower { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 12px; }
       .brochure-cta-card { padding: 18px 20px; border-radius: 18px; border: 1px solid rgba(200,116,71,0.24); background: rgba(255,255,255,0.92); }
       .address-line { max-width: 100%; line-height: 1.45; overflow-wrap: normal; word-break: keep-all; }
       .status-list { display: grid; gap: 10px; margin-top: 12px; }
@@ -2238,20 +2238,20 @@ function buildPropertySummaryHtml({ property, report }) {
   };
   const executiveSummaryDisplayBullets = shouldRenderExecutiveContinuation
     ? executiveSummaryBullets
-    : pickMeaningfulLines([...executiveSummaryBullets, ...executiveSummaryOverflowBullets], 4);
+    : pickMeaningfulLines([...executiveSummaryBullets, ...executiveSummaryOverflowBullets], 3);
   const summaryRecommendationsDisplay = shouldRenderExecutiveContinuation
     ? summaryRecommendations
-    : dedupeInsightsByTheme([...summaryRecommendations, ...summaryRecommendationsOverflow], 4);
+    : dedupeInsightsByTheme([...summaryRecommendations, ...summaryRecommendationsOverflow], 3);
   const launchStatusHighlightsDisplay = shouldRenderExecutiveContinuation
     ? launchStatusHighlights
-    : dedupeInsightsByTheme([...launchStatusHighlights, ...launchStatusHighlightsOverflow], 3);
+    : dedupeInsightsByTheme([...launchStatusHighlights, ...launchStatusHighlightsOverflow], 2);
   const orderedNextStepsDisplay = shouldRenderReadinessContinuation
     ? orderedNextStepsPrimary
     : pickMeaningfulLines([...orderedNextStepsPrimary, ...orderedNextStepsOverflow], 4);
   const actionCardsDisplay = shouldRenderReadinessContinuation
     ? actionCardsPrimary
     : dedupeActionCards([...actionCardsPrimary, ...actionCardsOverflow]).slice(0, 4);
-  const supportProviderRecommendations = providerRecommendations.slice(0, 2);
+  const supportProviderRecommendations = providerRecommendations.slice(0, 1);
   const supportSuggestedProviderCategories = suggestedProviderCategories.slice(0, 3);
   const roiUpside = Number(improvementEconomics.estimatedRoi || 0);
   const roiCost = Number(improvementEconomics.estimatedCost || 0);
@@ -2455,14 +2455,6 @@ function buildPropertySummaryHtml({ property, report }) {
           <div class="callout-chip callout-chip-value">
             <div class="metric-label">Budget / ROI</div>
             <strong>${escapeHtml(economicsSummary || 'Use this report to coordinate a confident, disciplined launch.')}</strong>
-          </div>
-          <div class="content-card">
-            <div class="section-kicker">Launch status</div>
-            <h3>${escapeHtml(readinessSummary.label || 'Needs work')}</h3>
-            ${renderHighlightGrid(
-              launchStatusHighlightsDisplay,
-              'Launch status details are reflected here from pricing, photos, and checklist progress.',
-            )}
           </div>
         </div>
       </div>
@@ -2707,24 +2699,11 @@ function buildPropertySummaryHtml({ property, report }) {
           )}
         </div>
       </div>
-      <div class="seller-final-band">
-        <div class="section-kicker">Final call to action</div>
-        <h3>Take the next conversion step now</h3>
-        <p class="compact-copy" style="margin-top:8px;">Addressing these items before listing may improve first impressions and buyer engagement. Current photo quality may limit showing performance until top actions are completed.</p>
-        <div class="badge-row">
-          <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
-          <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
-        </div>
-        <div class="badge-row">
-          <div class="brochure-cta-button">${escapeHtml(reportPrimaryCta)}</div>
-          <div class="brochure-cta-button secondary">${escapeHtml(reportSecondaryCta)}</div>
-        </div>
-      </div>
       ${renderFooter('Property Summary Report · Action Plan')}
     </section>
 
     ${
-      actionCardsOverflow.length || shouldRenderProviders || shouldRenderBuyerPersona || propertyFacts.length
+      actionCardsOverflow.length || shouldRenderProviders || suggestedProviderCategories.length
         ? `
           <section class="page">
             <div class="brand-bar">
@@ -2752,6 +2731,10 @@ function buildPropertySummaryHtml({ property, report }) {
                         <div class="section-kicker">Provider recommendations</div>
                         <h3>Marketplace support nearby</h3>
                         ${renderProviderCards(supportProviderRecommendations)}
+                        <div class="badge-row">
+                          <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
+                          <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
+                        </div>
                       </div>
                     `
                     : `
@@ -2759,42 +2742,12 @@ function buildPropertySummaryHtml({ property, report }) {
                         <div class="section-kicker">Suggested provider categories</div>
                         <h3>Execution support options</h3>
                         ${renderSuggestedCategoryCards(supportSuggestedProviderCategories)}
-                      </div>
-                    `
-                }
-                ${
-                  shouldRenderBuyerPersona
-                    ? `
-                      <div class="content-card">
-                        <div class="section-kicker">Buyer persona</div>
-                        <h3>Who this home should resonate with</h3>
-                        <p class="muted">${escapeHtml(buyerPersonaSummary.buyerPersona || 'This home should appeal to buyers prioritizing layout clarity, practical room function, and a market-aligned price position.')}</p>
-                      </div>
-                    `
-                    : ''
-                }
-                ${
-                  propertyFacts.length
-                    ? `
-                      <div class="content-card">
-                        <div class="section-kicker">Property details</div>
-                        <h3>Core facts reference</h3>
-                        <div class="fact-grid">
-                          ${propertyFacts
-                            .slice(0, 4)
-                            .map(
-                              (fact) => `
-                                <div class="fact-row">
-                                  <div class="fact-row-label">${escapeHtml(fact.label)}</div>
-                                  <div>${escapeHtml(fact.value)}</div>
-                                </div>
-                              `,
-                            )
-                            .join('')}
+                        <div class="badge-row">
+                          <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
+                          <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
                         </div>
                       </div>
                     `
-                    : ''
                 }
               </div>
             </div>
@@ -3045,7 +2998,8 @@ function buildMarketingReportHtml({ property, flyer }) {
     ...specificFeatureLines,
     ...featureTags,
     property?.selectedListPrice ? `Seller-confirmed list price ${formatCurrency(property.selectedListPrice)}` : '',
-  ], 6);
+  ], 5);
+  const coverFeatureItems = featureGridItems.slice(0, 4);
   const highlightsFeatureItems = featureGridItems.slice(0, 4);
   const keyHighlightsColumnClass = narrativeGalleryPhotos.length ? 'col-span-5' : 'col-span-12';
   const neighborhoodHighlights = pickMeaningfulLines([
@@ -3054,7 +3008,7 @@ function buildMarketingReportHtml({ property, flyer }) {
     property?.city ? `${property.city} location supports daily convenience, lifestyle access, and showing appeal.` : '',
     property?.selectedListPrice ? `Price point ${formatCurrency(property.selectedListPrice)} aligns with current buyer search bands in this area.` : '',
     'Balanced neighborhood positioning supports both immediate move-in buyers and long-term value-focused buyers.',
-  ], 3);
+  ], 2);
   const commuteNotes = pickMeaningfulLines([
     property?.city && property?.state ? `Commuter note: ${property.city}, ${property.state} offers multiple corridor options for daily travel patterns.` : '',
     'Local retail corridors and services are positioned for practical day-to-day access.',
@@ -3068,7 +3022,7 @@ function buildMarketingReportHtml({ property, flyer }) {
       ? 'Image sequencing is structured from arrival impact to core living flow for faster buyer comprehension.'
       : '',
     'Feature-forward copy and neighborhood context are designed to move buyers from interest to showing request.',
-  ], 2);
+  ], 1);
   const shouldRenderMapPage = Boolean(
     neighborhoodMapImageUrl ||
       neighborhoodHighlights.length ||
@@ -3183,21 +3137,18 @@ function buildMarketingReportHtml({ property, flyer }) {
         <div class="content-card">
           <div class="section-kicker">Buyer appeal</div>
           <h3>Why this home stands out</h3>
-            ${renderFeatureIconGrid(featureGridItems, 'This brochure highlights the features most likely to drive buyer interest and showing activity.')}
+            ${renderFeatureIconGrid(coverFeatureItems, 'This flyer highlights the features most likely to drive buyer interest and showing activity.')}
         </div>
         <div class="brochure-cta-card">
           <div class="section-kicker">Call to action</div>
           <h3>${escapeHtml(ctaLabel)}</h3>
           ${flyerMode === 'preview' ? `<p class="compact-copy" style="margin-top:8px;"><strong>${escapeHtml(previewUrgencyLine)}</strong></p>` : ''}
-          <p class="compact-copy" style="margin-top:10px;">Prepared by Workside Home Advisor to support a polished listing launch, clearer buyer positioning, and smoother showing conversations.</p>
           <div class="badge-row">
-            <div class="badge badge-address">${escapeHtml(propertyAddress)}</div>
+            <div class="badge badge-address">${escapeHtml(shortenNarrative(propertyAddress, 1))}</div>
             <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
-            <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
           </div>
           <div class="cta-button-row">
             <div class="brochure-cta-button">${escapeHtml(ctaButtonLabel)}</div>
-            <div class="brochure-cta-button secondary">${escapeHtml(ctaSecondaryLabel)}</div>
           </div>
         </div>
       </div>
@@ -3304,12 +3255,11 @@ function buildMarketingReportHtml({ property, flyer }) {
                 <p class="muted" style="margin-top:10px;">${escapeHtml(propertyAddress)}</p>
                 <div class="badge-row">
                   <div class="badge">${escapeHtml(property?.selectedListPrice ? `Starting at ${formatCurrency(property.selectedListPrice)}` : flyer.priceText || 'Pricing on request')}</div>
-                  <div class="badge">${escapeHtml('Neighborhood-lifestyle positioning')}</div>
                 </div>
                 <div class="page-spacer"></div>
                 <div class="section-kicker">Area benefits</div>
                 ${renderBulletList(
-                  neighborhoodHighlights.slice(0, 3),
+                  neighborhoodHighlights.slice(0, 2),
                   'Neighborhood positioning aligns with buyer priorities and showing-readiness goals.',
                 )}
               </div>
@@ -3334,11 +3284,9 @@ function buildMarketingReportHtml({ property, flyer }) {
                 <div class="badge-row">
                   <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
                   <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
-                  <div class="badge badge-contact">${escapeHtml(PUBLIC_WEB_URL)}</div>
                 </div>
                 <div class="cta-button-row">
                   <div class="brochure-cta-button">${escapeHtml(ctaButtonLabel)}</div>
-                  <div class="brochure-cta-button secondary">${escapeHtml(ctaSecondaryLabel)}</div>
                 </div>
               </div>
             </div>

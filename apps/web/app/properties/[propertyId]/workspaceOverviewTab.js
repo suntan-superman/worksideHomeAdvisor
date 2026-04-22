@@ -21,7 +21,7 @@ export function WorkspaceOverviewTab({
           {latestReport?.executiveSummary ||
             latestPricing?.summary ||
             dashboard?.pricingSummary ||
-            'Use the workspace tabs to move from pricing to photos, brochure, report, and checklist work.'}
+            'Use the workspace tabs to move from pricing to photos, flyer, report, and checklist work.'}
         </p>
         <div className="mini-stats">
           <div className="stat-card">
@@ -63,7 +63,7 @@ export function WorkspaceOverviewTab({
         <p>
           {latestReport?.payload?.marketingGuidance?.shortDescription ||
             latestPricing?.pricingStrategy ||
-            'The strongest next step is to turn pricing and photo selection into brochure and report output.'}
+            'The strongest next step is to turn pricing and photo selection into flyer and report output.'}
         </p>
         <ul className="plain-list">
           <li>{listingCandidateAssets.length} seller-selected photo pick(s)</li>
@@ -91,7 +91,7 @@ export function WorkspaceOverviewTab({
             ))}
           </div>
         ) : (
-          <p>No brochure or report output has been generated yet.</p>
+          <p>No flyer or report output has been generated yet.</p>
         )}
       </div>
     </div>

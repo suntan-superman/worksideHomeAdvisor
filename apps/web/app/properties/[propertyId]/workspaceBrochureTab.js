@@ -45,15 +45,15 @@ export function WorkspaceBrochureTab({
     <div className="workspace-tab-stack">
       {renderCollapsibleSection({
         sectionKey: 'brochure_controls',
-        label: 'Brochure',
-        title: 'Brochure controls',
+        label: 'Flyer',
+        title: 'Flyer controls',
         meta: latestFlyer ? 'Draft ready' : 'No draft yet',
         defaultOpen: defaultSectionState.brochure_controls,
         className: 'content-card flyer-generator-card',
         children: (
           <div className="workspace-tab-stack">
             <p>
-              Generate a brochure-style flyer from live pricing, selected photos, and the strongest
+              Generate a flyer from live pricing, selected photos, and the strongest
               seller-ready language.
             </p>
             <div className="mode-switch">
@@ -114,7 +114,7 @@ export function WorkspaceBrochureTab({
                   <textarea
                     value={flyerSummaryDraft}
                     onChange={(event) => setFlyerSummaryDraft(event.target.value)}
-                    placeholder="How should this brochure frame the property?"
+                    placeholder="How should this flyer frame the property?"
                     maxLength={600}
                   />
                 </label>
@@ -184,18 +184,18 @@ export function WorkspaceBrochureTab({
                       }
                       onClick={() => toggleFlyerPhotoSelection(asset.id)}
                     >
-                      <img src={asset.imageUrl} alt={asset.roomLabel || 'Brochure candidate'} />
+                      <img src={asset.imageUrl} alt={asset.roomLabel || 'Flyer candidate'} />
                       <div>
                         <strong>{asset.roomLabel}</strong>
                         <span>
                           {asset.listingNote ||
                             (asset.selectedVariant
                               ? `${asset.selectedVariant.label || 'Vision-ready'} selected`
-                              : 'Available for brochure use')}
+                              : 'Available for flyer use')}
                         </span>
                         <em>
                           {flyerSelectedPhotoIds.includes(asset.id)
-                            ? 'Included in brochure'
+                            ? 'Included in flyer'
                             : 'Click to include'}
                         </em>
                       </div>
@@ -203,7 +203,7 @@ export function WorkspaceBrochureTab({
                   ))}
                 </div>
               ) : (
-                <p>No photos are available yet. Add them in mobile, then return here to shape the brochure.</p>
+                <p>No photos are available yet. Add them in mobile, then return here to shape the flyer.</p>
               )}
               <p className="workspace-control-note">
                 Up to 4 photos are used. Seller picks stay prioritized, and preferred vision variants
@@ -230,8 +230,8 @@ export function WorkspaceBrochureTab({
             </div>
             {documentGenerationState?.kind === 'flyer' ? (
               <p className="workspace-control-note">
-                <strong>Brochure generation in progress:</strong>{' '}
-                {documentGenerationState.phase || 'Working on your brochure...'}{' '}
+                <strong>Flyer generation in progress:</strong>{' '}
+                {documentGenerationState.phase || 'Working on your flyer...'}{' '}
                 {Number.isFinite(documentGenerationState.elapsedSeconds)
                   ? `(${documentGenerationState.elapsedSeconds}s elapsed)`
                   : ''}
@@ -247,7 +247,7 @@ export function WorkspaceBrochureTab({
 
       {renderCollapsibleSection({
         sectionKey: 'brochure_preview',
-        label: 'Brochure',
+        label: 'Flyer',
         title: 'Live preview',
         meta: latestFlyer ? latestFlyer.flyerType : 'No preview',
         defaultOpen: defaultSectionState.brochure_preview,
@@ -327,13 +327,13 @@ export function WorkspaceBrochureTab({
             </div>
           </div>
         ) : (
-          <p>No flyer draft yet. Generate one to preview brochure output.</p>
+          <p>No flyer draft yet. Generate one to preview flyer output.</p>
         ),
       })}
 
       {renderCollapsibleSection({
         sectionKey: 'brochure_social',
-        label: 'Brochure',
+        label: 'Flyer',
         title: 'Social ad pack',
         meta: latestSocialPack ? 'Available' : 'Not generated',
         defaultOpen: defaultSectionState.brochure_social,

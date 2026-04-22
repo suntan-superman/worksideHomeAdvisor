@@ -104,7 +104,7 @@ export function WorkspacePricingTab({
         <h2>Choose the price you want to market</h2>
         <p>
           The pricing analysis gives you a suggested range. This is where you confirm the actual list
-          price that should carry into future brochure and report generation.
+          price that should carry into future flyer and report generation.
         </p>
         <div className="pricing-summary-grid">
           <div className="stat-card pricing-summary-stat">

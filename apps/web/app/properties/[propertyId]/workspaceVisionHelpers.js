@@ -83,7 +83,7 @@ export const VISION_WORKFLOW_STAGES = [
     key: 'final',
     label: '4. Finalize',
     title: 'Finalize',
-    description: 'Keep the winner, set brochure/report usage, and delete earlier drafts when ready.',
+    description: 'Keep the winner, set flyer/report usage, and delete earlier drafts when ready.',
     nextKey: 'final',
     groups: [],
     allowFreeform: false,
@@ -190,7 +190,7 @@ export function buildVisionWorkflowRecommendation(asset, selectedVariant = null,
       label: recommendedNextStep.label || 'Save this result',
       reason:
         recommendedNextStep.reason ||
-        'This preview is already reading as listing-ready, so the next move is to keep it and use it in Photos, brochure, or report output.',
+        'This preview is already reading as listing-ready, so the next move is to keep it and use it in Photos, flyer, or report output.',
     };
   }
 
@@ -210,7 +210,7 @@ export function buildVisionWorkflowRecommendation(asset, selectedVariant = null,
       type: 'save_result',
       label: 'Save this result',
       reason:
-        'This preview is already reading as listing-ready, so the next move is to keep it and use it in Photos, brochure, or report output.',
+        'This preview is already reading as listing-ready, so the next move is to keep it and use it in Photos, flyer, or report output.',
     };
   }
 
@@ -311,7 +311,7 @@ export function getVariantSummary(variant) {
   return (
     variant?.metadata?.summary ||
     variant?.metadata?.warning ||
-    'This variant can be reviewed, marked preferred, and optionally used in brochure or report outputs.'
+    'This variant can be reviewed, marked preferred, and optionally used in flyer or report outputs.'
   );
 }
 
@@ -487,7 +487,7 @@ export function getVisionPipelinePackageSummary(variant, saveDefaults = null) {
       'This result is ready for the stricter Listing Ready pass once the room feels clean and believable.';
   } else if (publishable) {
     deliveryMessage =
-      'This result is strong enough to save as a listing photo and use in brochure and report workflows.';
+      'This result is strong enough to save as a listing photo and use in flyer and report workflows.';
   } else if (pipelineDescriptor?.stageKey === 'listing_ready') {
     deliveryMessage =
       'Treat this as a reviewed draft unless you want to step back into Smart Enhancement for another pass.';

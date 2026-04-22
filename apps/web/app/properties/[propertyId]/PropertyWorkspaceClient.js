@@ -115,7 +115,7 @@ const WORKSPACE_TABS = [
   { id: 'pricing', label: 'Pricing' },
   { id: 'photos', label: 'Photos' },
   { id: 'seller_picks', label: 'Seller Picks' },
-  { id: 'brochure', label: 'Brochure' },
+  { id: 'brochure', label: 'Flyer' },
   { id: 'report', label: 'Report' },
   { id: 'checklist', label: 'Checklist' },
 ];
@@ -291,7 +291,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [visionCancellationPending, setVisionCancellationPending] = useState(false);
 
   function resolveDocumentGenerationPhase(kind, job = null) {
-    const kindLabel = kind === 'report' ? 'Report' : 'Brochure';
+    const kindLabel = kind === 'report' ? 'Report' : 'Flyer';
     const message = String(job?.message || '').trim();
     if (message) {
       return message;
@@ -302,7 +302,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       return `${kindLabel} queued. Starting shortly...`;
     }
     if (stage === 'generating_flyer') {
-      return 'Generating brochure content...';
+      return 'Generating flyer content...';
     }
     if (stage === 'generating_report') {
       return 'Generating seller report content...';
@@ -1561,7 +1561,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     () =>
       [
         latestFlyer
-          ? { key: 'brochure', label: 'Brochure', title: latestFlyer.headline, detail: latestFlyer.summary, tab: 'brochure' }
+          ? { key: 'brochure', label: 'Flyer', title: latestFlyer.headline, detail: latestFlyer.summary, tab: 'brochure' }
           : null,
         latestReport
           ? { key: 'report', label: 'Report', title: latestReport.title, detail: latestReport.executiveSummary, tab: 'report' }
@@ -1577,13 +1577,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       return { title: 'Review the photo set', detail: 'Use the Photos tab to work from the shared mobile gallery and start building listing picks.', tab: 'photos' };
     }
     if (!listingCandidateAssets.length) {
-      return { title: 'Select listing photos', detail: 'Choose the strongest images so brochure and report output prioritize them automatically.', tab: 'photos' };
+      return { title: 'Select listing photos', detail: 'Choose the strongest images so flyer and report output prioritize them automatically.', tab: 'photos' };
     }
     if (!selectedVariant && selectedMediaAsset) {
-      return { title: 'Generate a vision variant', detail: 'Create an enhanced or decluttered version before final brochure and report generation.', tab: 'vision' };
+      return { title: 'Generate a vision variant', detail: 'Create an enhanced or decluttered version before final flyer and report generation.', tab: 'vision' };
     }
     if (!latestFlyer) {
-      return { title: 'Generate the brochure', detail: 'Turn pricing and photo selection into a seller-facing brochure draft.', tab: 'brochure' };
+      return { title: 'Generate the flyer', detail: 'Turn pricing and photo selection into a seller-facing flyer draft.', tab: 'brochure' };
     }
     if (!latestReport) {
       return { title: 'Generate the report', detail: 'Package pricing, photos, and checklist progress into a premium deliverable.', tab: 'report' };
@@ -1591,7 +1591,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (checklist?.nextTask?.title) {
       return { title: checklist.nextTask.title, detail: checklist.nextTask.detail || 'Keep the checklist moving with the next prep step.', tab: 'checklist' };
     }
-    return { title: 'Review the latest outputs', detail: 'Both brochure and report are ready. Use Overview to compare the latest deliverables.', tab: 'overview' };
+    return { title: 'Review the latest outputs', detail: 'Both flyer and report are ready. Use Overview to compare the latest deliverables.', tab: 'overview' };
   }, [checklist?.nextTask?.detail, checklist?.nextTask?.title, latestFlyer, latestReport, listingCandidateAssets.length, mediaAssets.length, property?.status, selectedMediaAsset, selectedVariant]);
   const workflowNextStep = guidedWorkflow?.nextStep || null;
   const homeAdvisorGuide = useMemo(() => {
@@ -1612,7 +1612,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (!latestPricing) {
       return {
         title: 'Home Advisor Agent',
-        body: 'Run pricing first so brochure, report, and seller guidance all have a live comp-backed foundation.',
+        body: 'Run pricing first so flyer, report, and seller guidance all have a live comp-backed foundation.',
         ctaLabel: 'Open Pricing',
         ctaAction: () => setActiveTab('pricing'),
         highlights: ['Review comps', 'Confirm pricing direction'],
@@ -1632,7 +1632,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (!listingCandidateAssets.length) {
       return {
         title: 'Home Advisor Agent',
-        body: 'Mark a few seller picks so the brochure and report use the right photos by default.',
+        body: 'Mark a few seller picks so the flyer and report use the right photos by default.',
         ctaLabel: 'Open Seller Picks',
         ctaAction: () => setActiveTab('seller_picks'),
         highlights: ['Choose strongest rooms', 'Keep the story focused'],
@@ -1642,10 +1642,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (!latestFlyer) {
       return {
         title: 'Home Advisor Agent',
-        body: 'You have pricing and photo picks. The fastest next win is generating the brochure draft.',
-        ctaLabel: 'Open Brochure',
+        body: 'You have pricing and photo picks. The fastest next win is generating the flyer draft.',
+        ctaLabel: 'Open Flyer',
         ctaAction: () => setActiveTab('brochure'),
-        highlights: ['Generate brochure draft', 'Check headline and selected photos'],
+        highlights: ['Generate flyer draft', 'Check headline and selected photos'],
       };
     }
 
@@ -1671,7 +1671,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     return {
       title: 'Home Advisor Agent',
-      body: 'The essentials are in place. Use Seller Picks, Brochure, and Report to review the final presentation package.',
+      body: 'The essentials are in place. Use Seller Picks, Flyer, and Report to review the final presentation package.',
       ctaLabel: 'Open Seller Picks',
       ctaAction: () => setActiveTab('seller_picks'),
       highlights: ['Review deliverables', 'Fine-tune presentation'],
@@ -2473,7 +2473,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setToast({
         tone: 'success',
         title: 'List price saved',
-        message: 'Your chosen list price will be used the next time you generate brochure and report materials.',
+        message: 'Your chosen list price will be used the next time you generate flyer and report materials.',
       });
     } catch (requestError) {
       setToast({
@@ -2543,7 +2543,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setToast({
       tone: 'success',
       title: 'Suggestion applied',
-      message: 'You can edit the suggested copy before generating the brochure.',
+      message: 'You can edit the suggested copy before generating the flyer.',
     });
   }
 
@@ -2551,12 +2551,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (blockArchivedMutation()) {
       return;
     }
-    beginDocumentGeneration('flyer', 'Preparing brochure generation...');
+    beginDocumentGeneration('flyer', 'Preparing flyer generation...');
     setStatus(`Generating ${flyerType} flyer...`);
     setToast({
       tone: 'info',
-      title: 'Brochure generation started',
-      message: 'We are preparing your brochure now. This can take a little time.',
+      title: 'Flyer generation started',
+      message: 'We are preparing your flyer now. This can take a little time.',
     });
     setGenerationPrompt(null);
     try {
@@ -2575,9 +2575,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         clearDocumentGeneration('flyer');
         setToast({
           tone: isFreeTeaserAccess ? 'warning' : 'success',
-          title: isFreeTeaserAccess ? 'Teaser brochure ready' : 'Flyer generated',
+          title: isFreeTeaserAccess ? 'Teaser flyer ready' : 'Flyer generated',
           message: isFreeTeaserAccess
-            ? 'Your teaser brochure is ready using the uploaded photos. Upgrade to unlock Vision-enhanced photo selection and additional brochure attempts.'
+            ? 'Your teaser flyer is ready using the uploaded photos. Upgrade to unlock Vision-enhanced photo selection and additional flyer attempts.'
             : 'The flyer is ready. You can review it here or download the PDF now.',
           autoDismissMs: isFreeTeaserAccess ? 0 : undefined,
         });
@@ -2610,9 +2610,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       clearDocumentGeneration('flyer');
       setToast({
         tone: isFreeTeaserAccess ? 'warning' : 'success',
-        title: isFreeTeaserAccess ? 'Teaser brochure ready' : 'Flyer generated',
+        title: isFreeTeaserAccess ? 'Teaser flyer ready' : 'Flyer generated',
         message: isFreeTeaserAccess
-          ? 'Your teaser brochure is ready using the uploaded photos. Upgrade to unlock Vision-enhanced photo selection and additional brochure attempts.'
+          ? 'Your teaser flyer is ready using the uploaded photos. Upgrade to unlock Vision-enhanced photo selection and additional flyer attempts.'
           : 'The flyer is ready. You can review it here or download the PDF now.',
         autoDismissMs: isFreeTeaserAccess ? 0 : undefined,
       });
@@ -2626,10 +2626,10 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         setToast({
           tone: 'warning',
           title: isTeaserLimitReason
-            ? 'Free teaser brochure already used'
-            : 'Upgrade required for brochure generation',
+            ? 'Free teaser flyer already used'
+            : 'Upgrade required for flyer generation',
           message: isTeaserLimitReason
-            ? 'Your free teaser brochure is ready with your uploaded photos. Upgrade to unlock Vision-enhanced selections and additional brochure attempts.'
+            ? 'Your free teaser flyer is ready with your uploaded photos. Upgrade to unlock Vision-enhanced selections and additional flyer attempts.'
             : requestError.message,
           actionLabel: suggestedPlan ? 'View upgrade options' : '',
           onAction: suggestedPlan
@@ -4683,7 +4683,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   {currentVisionPipelinePackage ? (
                     <p className="workspace-control-note">
                       {currentVisionPipelinePackage.publishable
-                        ? 'This result is ready to flow into brochure and report materials once you keep it.'
+                        ? 'This result is ready to flow into flyer and report materials once you keep it.'
                         : currentVisionPipelinePackage.deliveryMessage}
                     </p>
                   ) : null}
@@ -4723,7 +4723,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                         className="button-secondary"
                         onClick={() => setActiveTab('brochure')}
                       >
-                        Open Brochure
+                        Open Flyer
                       </button>
                       <button
                         type="button"
@@ -5187,7 +5187,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                       className="button-secondary"
                       onClick={() => setActiveTab('brochure')}
                     >
-                      Open Brochure
+                      Open Flyer
                     </button>
                     <button
                       type="button"
@@ -5933,7 +5933,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             <span className="label">Delete property</span>
             <h2 id="delete-property-title">Delete {pendingDeleteProperty.title || 'this property'} permanently?</h2>
             <p id="delete-property-description">
-              This action is irreversible. The property, pricing history, photos, brochures, reports, social pack, saved providers, provider outreach, and linked activity records will be removed permanently.
+              This action is irreversible. The property, pricing history, photos, flyers, reports, social pack, saved providers, provider outreach, and linked activity records will be removed permanently.
             </p>
             <div className="workspace-modal-preview-copy">
               <strong>{pendingDeleteProperty.title || 'Archived property'}</strong>
@@ -6067,7 +6067,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             aria-describedby="generation-prompt-description"
             onClick={(event) => event.stopPropagation()}
           >
-            <span className="label">{generationPrompt.kind === 'flyer' ? 'Brochure output' : 'Seller report'}</span>
+            <span className="label">{generationPrompt.kind === 'flyer' ? 'Flyer output' : 'Seller report'}</span>
             <h2 id="generation-prompt-title">{generationPrompt.title}</h2>
             <p id="generation-prompt-description">{generationPrompt.message}</p>
             <div className="workspace-modal-actions">
@@ -6442,7 +6442,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 <strong>Archived property</strong>
                 <p>
                   This workspace remains viewable, but new pricing runs, media updates, checklist edits, provider actions,
-                  and fresh brochure/report generation are disabled until the property is restored from the dashboard.
+                  and fresh flyer/report generation are disabled until the property is restored from the dashboard.
                 </p>
                 <p className="workspace-archive-detail">
                   Archiving frees an active-property slot. Restoring this workspace will use a slot again, and permanent delete will remove all linked outputs, providers, and activity records tied to this property.
