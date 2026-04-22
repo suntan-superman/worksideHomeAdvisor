@@ -2060,6 +2060,8 @@ function renderHtmlDocument({ title, body }) {
       .seller-page .photo-tile img { height: 176px; }
       .seller-page .photo-tile figcaption { padding: 10px 12px 12px; gap: 4px; }
       .seller-page .photo-feedback { font-size: 11px; line-height: 1.35; }
+      .seller-page .roi-hero-card { padding: 14px 16px; }
+      .seller-page .roi-hero-value { font-size: 48px; line-height: 0.98; }
       .seller-page .page-spacer { height: 6px; }
       .page-flow { break-inside: auto !important; page-break-inside: auto !important; }
       @media (max-width: 740px) {
@@ -2219,6 +2221,12 @@ function buildPropertySummaryHtml({ property, report }) {
     }),
     3,
   );
+  const readinessTopActionLines = pickMeaningfulLines(
+    (topThreeActionLines.length ? topThreeActionLines : orderedNextSteps.slice(0, 3)).map((line) =>
+      truncateWords(line, 12),
+    ),
+    3,
+  );
   const topThreeIssues = dedupeInsightsByTheme(pickMeaningfulLines([
     summaryRisk,
     ...(consequenceFraming.lines || []),
@@ -2326,6 +2334,12 @@ function buildPropertySummaryHtml({ property, report }) {
   const roiComparisonLine = roiUpside && roiCost
     ? `${formatCurrency(roiUpside)} upside vs ${formatCurrency(roiCost)} cost`
     : '';
+  const readinessEconomicsNotes = pickMeaningfulLines([
+    improvementEconomics.decisionMessage,
+    improvementEconomics.summary,
+    `Risk focus: ${readinessRiskHeadline}`,
+    `Opportunity focus: ${readinessOpportunityHeadline}`,
+  ], 3);
   const pricingMetricCards = [
     renderMetricCard('Suggested range', report.pricingSummary?.low && report.pricingSummary?.high ? `${formatCurrency(report.pricingSummary.low)} - ${formatCurrency(report.pricingSummary.high)}` : 'Unavailable', report.pricingSummary?.strategy || 'Market-aligned pricing recommendation'),
     renderMetricCard('Midpoint', report.pricingSummary?.mid ? formatCurrency(report.pricingSummary.mid) : 'Unavailable', report.pricingSummary?.confidence ? `${Math.round(report.pricingSummary.confidence * 100)}% confidence` : 'Comparable signal based'),
@@ -2621,7 +2635,7 @@ function buildPropertySummaryHtml({ property, report }) {
         <div>
           <div class="section-kicker">Readiness and preparation</div>
           <h2>Readiness dashboard</h2>
-          <p class="muted">A structured prep dashboard showing score, risk, opportunity, top actions, and value at risk.</p>
+          <p class="muted">A structured prep dashboard showing score, risk, opportunity, and top actions.</p>
         </div>
       </div>
       ${renderPriorityLegend()}
@@ -2647,11 +2661,22 @@ function buildPropertySummaryHtml({ property, report }) {
         <div class="section-kicker">Top 3 actions</div>
         <h3>What to do first</h3>
         ${renderChecklistItems(
-          topThreeActionLines.length ? topThreeActionLines : orderedNextSteps.slice(0, 3),
+          readinessTopActionLines,
           'Use the launch checklist to define the first three prep actions.',
         )}
       </div>
-      <div class="roi-hero-card" style="margin-top:14px;">
+      ${renderFooter('Property Summary Report · Readiness & Preparation')}
+    </section>
+
+    <section class="page seller-page">
+      <div class="brand-bar">
+        <div>
+          <div class="section-kicker">Readiness economics</div>
+          <h2>Estimated value at risk</h2>
+          <p class="muted">A focused cost-versus-upside view for launch decision making.</p>
+        </div>
+      </div>
+      <div class="roi-hero-card page-flow">
         <div class="section-kicker">Estimated value at risk</div>
         <div class="roi-hero-value">${escapeHtml(roiUpsideLabel)}</div>
         <div class="roi-hero-sub">${escapeHtml(roiCostLabel)}</div>
@@ -2668,7 +2693,15 @@ function buildPropertySummaryHtml({ property, report }) {
           </div>
         </div>
       </div>
-      ${renderFooter('Property Summary Report · Readiness & Preparation')}
+      <div class="content-card" style="margin-top:12px;">
+        <div class="section-kicker">Interpretation</div>
+        <h3>How to use this estimate</h3>
+        ${renderBulletList(
+          readinessEconomicsNotes,
+          'Use this estimate as a launch planning signal alongside pricing and checklist progress.',
+        )}
+      </div>
+      ${renderFooter('Property Summary Report · Readiness Economics')}
     </section>
 
     <section class="page seller-page">
