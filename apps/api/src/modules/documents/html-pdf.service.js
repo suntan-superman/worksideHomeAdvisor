@@ -1155,8 +1155,13 @@ function renderPriorityLegend() {
   `;
 }
 
-function renderRecommendationActionCards(actions = [], emptyText = '') {
-  const ranked = sortRecommendationActions(actions);
+function renderRecommendationActionCards(actions = [], emptyText = '', options = {}) {
+  const {
+    maxCards = 4,
+    maxPerCategory = 2,
+    compact = true,
+  } = options || {};
+  const ranked = sortRecommendationActions(actions).slice(0, Math.max(1, Number(maxCards) || 4));
   if (!ranked.length) {
     return emptyText ? `<div class="empty-card">${escapeHtml(emptyText)}</div>` : '';
   }
@@ -1176,7 +1181,7 @@ function renderRecommendationActionCards(actions = [], emptyText = '') {
       ${categoryOrder
         .filter((category) => (grouped.get(category) || []).length)
         .map((category) => {
-          const items = grouped.get(category) || [];
+          const items = (grouped.get(category) || []).slice(0, Math.max(1, Number(maxPerCategory) || 2));
           return `
             <section class="action-group">
               <div class="section-kicker">${escapeHtml(category)} actions</div>
@@ -1184,6 +1189,12 @@ function renderRecommendationActionCards(actions = [], emptyText = '') {
                 ${items
                   .map((action, index) => {
                     const priorityMeta = resolvePriorityMeta(action.urgency);
+                    const expectedImpact = compact
+                      ? shortenNarrative(action.expectedOutcome || '', 1)
+                      : action.expectedOutcome;
+                    const reason = compact
+                      ? shortenNarrative(action.reason || '', 1)
+                      : action.reason;
                     return `
                       <article class="action-card ${priorityMeta.cardClass}">
                         <div class="action-card-head">
@@ -1194,8 +1205,8 @@ function renderRecommendationActionCards(actions = [], emptyText = '') {
                           <span>${escapeHtml(category)}</span>
                           ${action.estimatedCost ? `<span>Cost: ${escapeHtml(action.estimatedCost)}</span>` : ''}
                         </div>
-                        ${action.expectedOutcome ? `<div class="action-impact"><strong>Expected impact:</strong> ${escapeHtml(action.expectedOutcome)}</div>` : ''}
-                        ${action.reason ? `<div class="action-why"><strong>Why it matters:</strong> ${escapeHtml(action.reason)}</div>` : ''}
+                        ${expectedImpact ? `<div class="action-impact"><strong>Expected impact:</strong> ${escapeHtml(expectedImpact)}</div>` : ''}
+                        ${reason ? `<div class="action-why"><strong>Why it matters:</strong> ${escapeHtml(reason)}</div>` : ''}
                         ${action.ctaLabel ? `<div class="action-cta-pill">${escapeHtml(action.ctaLabel)}</div>` : ''}
                       </article>
                     `;
@@ -1680,7 +1691,7 @@ function renderHtmlDocument({ title, body }) {
       .page {
         width: 8.5in;
         min-height: 11in;
-        padding: 0.58in 0.58in 0.62in;
+        padding: 0.58in 0.58in 0.78in;
         background:
           radial-gradient(circle at top right, rgba(200,116,71,0.12), transparent 36%),
           linear-gradient(180deg, #fffdf8 0%, #f8f4ea 100%);
@@ -1739,11 +1750,15 @@ function renderHtmlDocument({ title, body }) {
         border-radius: 16px;
         box-shadow: 0 6px 14px rgba(16,24,32,0.04);
       }
-      .metric-card, .content-card, .sidebar-card, .provider-card, .feature-pill, .empty-card,
-      .cta-band, .hero-photo, .map-frame, .photo-grid, .gallery-strip, .summary-grid,
-      .metric-grid, .marketing-cover-grid, .marketing-metrics, .action-card {
+      .metric-card, .feature-pill, .empty-card, .cta-band, .hero-photo, .map-frame,
+      .photo-grid, .gallery-strip, .summary-grid, .metric-grid, .marketing-cover-grid, .marketing-metrics {
         break-inside: avoid;
         page-break-inside: avoid;
+      }
+      .content-card, .sidebar-card, .provider-card, .action-card, .action-group, .action-card-grid,
+      .two-col, .dense-two-col, .summary-shell, .flyer-context-grid, .section-stack {
+        break-inside: auto;
+        page-break-inside: auto;
       }
       .metric-card { padding: 16px 18px; }
       .metric-card-ready { border-color: rgba(79,123,98,0.35); background: rgba(244,251,246,0.96); }
@@ -1828,7 +1843,7 @@ function renderHtmlDocument({ title, body }) {
         font-size: 11px;
         color: var(--muted);
       }
-      .brand-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
+      .brand-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 14px; break-after: avoid-page; page-break-after: avoid; }
       .empty-card { padding: 18px; color: var(--muted); font-size: 13px; }
       .cta-band {
         margin-top: 18px;
@@ -2166,8 +2181,8 @@ function buildPropertySummaryHtml({ property, report }) {
     primary: orderedNextStepsPrimary,
     overflow: orderedNextStepsOverflow,
   } = splitPrimaryAndOverflow(orderedNextSteps, 3);
-  const actionCardsPrimary = sortedRecommendationActions.slice(0, 3);
-  const actionCardsOverflow = sortedRecommendationActions.slice(3, 8);
+  const actionCardsPrimary = sortedRecommendationActions.slice(0, 2);
+  const actionCardsOverflow = sortedRecommendationActions.slice(2, 6);
   const readinessRiskOpportunity = deriveReadinessRiskOpportunity({
     photoSummary,
     checklistSummary,
@@ -2223,19 +2238,21 @@ function buildPropertySummaryHtml({ property, report }) {
   };
   const executiveSummaryDisplayBullets = shouldRenderExecutiveContinuation
     ? executiveSummaryBullets
-    : pickMeaningfulLines([...executiveSummaryBullets, ...executiveSummaryOverflowBullets], 5);
+    : pickMeaningfulLines([...executiveSummaryBullets, ...executiveSummaryOverflowBullets], 4);
   const summaryRecommendationsDisplay = shouldRenderExecutiveContinuation
     ? summaryRecommendations
-    : dedupeInsightsByTheme([...summaryRecommendations, ...summaryRecommendationsOverflow], 5);
+    : dedupeInsightsByTheme([...summaryRecommendations, ...summaryRecommendationsOverflow], 4);
   const launchStatusHighlightsDisplay = shouldRenderExecutiveContinuation
     ? launchStatusHighlights
-    : dedupeInsightsByTheme([...launchStatusHighlights, ...launchStatusHighlightsOverflow], 5);
+    : dedupeInsightsByTheme([...launchStatusHighlights, ...launchStatusHighlightsOverflow], 3);
   const orderedNextStepsDisplay = shouldRenderReadinessContinuation
     ? orderedNextStepsPrimary
-    : pickMeaningfulLines([...orderedNextStepsPrimary, ...orderedNextStepsOverflow], 5);
+    : pickMeaningfulLines([...orderedNextStepsPrimary, ...orderedNextStepsOverflow], 4);
   const actionCardsDisplay = shouldRenderReadinessContinuation
     ? actionCardsPrimary
-    : dedupeActionCards([...actionCardsPrimary, ...actionCardsOverflow]).slice(0, 5);
+    : dedupeActionCards([...actionCardsPrimary, ...actionCardsOverflow]).slice(0, 4);
+  const supportProviderRecommendations = providerRecommendations.slice(0, 2);
+  const supportSuggestedProviderCategories = suggestedProviderCategories.slice(0, 3);
   const roiUpside = Number(improvementEconomics.estimatedRoi || 0);
   const roiCost = Number(improvementEconomics.estimatedCost || 0);
   const roiMax = Math.max(roiUpside, roiCost, 1);
@@ -2684,8 +2701,9 @@ function buildPropertySummaryHtml({ property, report }) {
           <div class="section-kicker">Execution cards</div>
           <h3>Highest-impact actions</h3>
           ${renderRecommendationActionCards(
-            actionCardsPrimary.length ? actionCardsPrimary : actionCardsDisplay.slice(0, 3),
+            actionCardsPrimary.length ? actionCardsPrimary : actionCardsDisplay.slice(0, 2),
             'Use these structured actions to keep launch readiness improving.',
+            { maxCards: 2, maxPerCategory: 1, compact: true },
           )}
         </div>
       </div>
@@ -2723,6 +2741,7 @@ function buildPropertySummaryHtml({ property, report }) {
                 ${renderRecommendationActionCards(
                   actionCardsOverflow,
                   'No additional supporting actions are required beyond the top priorities.',
+                  { maxCards: 3, maxPerCategory: 2, compact: true },
                 )}
               </div>
               <div class="section-stack">
@@ -2732,14 +2751,14 @@ function buildPropertySummaryHtml({ property, report }) {
                       <div class="content-card">
                         <div class="section-kicker">Provider recommendations</div>
                         <h3>Marketplace support nearby</h3>
-                        ${renderProviderCards(providerRecommendations)}
+                        ${renderProviderCards(supportProviderRecommendations)}
                       </div>
                     `
                     : `
                       <div class="content-card">
                         <div class="section-kicker">Suggested provider categories</div>
                         <h3>Execution support options</h3>
-                        ${renderSuggestedCategoryCards(suggestedProviderCategories)}
+                        ${renderSuggestedCategoryCards(supportSuggestedProviderCategories)}
                       </div>
                     `
                 }
@@ -2762,7 +2781,7 @@ function buildPropertySummaryHtml({ property, report }) {
                         <h3>Core facts reference</h3>
                         <div class="fact-grid">
                           ${propertyFacts
-                            .slice(0, 6)
+                            .slice(0, 4)
                             .map(
                               (fact) => `
                                 <div class="fact-row">
@@ -2811,6 +2830,7 @@ function buildPropertySummaryHtml({ property, report }) {
                 ${renderRecommendationActionCards(
                   actionCardsOverflow,
                   'No additional action cards remain after the primary set.',
+                  { maxCards: 3, maxPerCategory: 2, compact: true },
                 )}
               </div>
             </div>
@@ -3034,12 +3054,12 @@ function buildMarketingReportHtml({ property, flyer }) {
     property?.city ? `${property.city} location supports daily convenience, lifestyle access, and showing appeal.` : '',
     property?.selectedListPrice ? `Price point ${formatCurrency(property.selectedListPrice)} aligns with current buyer search bands in this area.` : '',
     'Balanced neighborhood positioning supports both immediate move-in buyers and long-term value-focused buyers.',
-  ], 4);
+  ], 3);
   const commuteNotes = pickMeaningfulLines([
     property?.city && property?.state ? `Commuter note: ${property.city}, ${property.state} offers multiple corridor options for daily travel patterns.` : '',
     'Local retail corridors and services are positioned for practical day-to-day access.',
     'Nearby amenities can improve showing conversations by helping buyers visualize everyday routines.',
-  ], 3);
+  ], 2);
   const positioningOutcomeLines = pickMeaningfulLines([
     property?.selectedListPrice
       ? `Price positioning at ${formatCurrency(property.selectedListPrice)} supports a clear value narrative for qualified buyers.`
@@ -3048,7 +3068,7 @@ function buildMarketingReportHtml({ property, flyer }) {
       ? 'Image sequencing is structured from arrival impact to core living flow for faster buyer comprehension.'
       : '',
     'Feature-forward copy and neighborhood context are designed to move buyers from interest to showing request.',
-  ], 3);
+  ], 2);
   const shouldRenderMapPage = Boolean(
     neighborhoodMapImageUrl ||
       neighborhoodHighlights.length ||
