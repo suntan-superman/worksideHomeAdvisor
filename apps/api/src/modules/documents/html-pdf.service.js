@@ -1740,7 +1740,7 @@ function renderHtmlDocument({ title, body }) {
         box-shadow: 0 6px 14px rgba(16,24,32,0.04);
       }
       .metric-card, .content-card, .sidebar-card, .provider-card, .feature-pill, .empty-card,
-      .cta-band, .hero-photo, .map-frame, .photo-grid, .gallery-strip, .two-col, .summary-grid,
+      .cta-band, .hero-photo, .map-frame, .photo-grid, .gallery-strip, .summary-grid,
       .metric-grid, .marketing-cover-grid, .marketing-metrics, .action-card {
         break-inside: avoid;
         page-break-inside: avoid;
@@ -1882,9 +1882,9 @@ function renderHtmlDocument({ title, body }) {
           grid-row: auto;
         }
       }
-      .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
-      .map-frame.compact { min-height: 340px; }
-      .flyer-context-grid { min-height: 6.8in; align-content: stretch; align-items: stretch; }
+      .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; break-inside: auto; page-break-inside: auto; }
+      .map-frame.compact { min-height: 240px; }
+      .flyer-context-grid { min-height: auto; align-content: start; align-items: start; }
       .badge-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
       .badge { padding: 8px 12px; border-radius: 999px; background: var(--moss-soft); color: var(--moss); font-size: 12px; font-weight: 600; white-space: nowrap; }
       .badge-address, .badge-contact { white-space: normal; line-height: 1.4; }
@@ -1920,10 +1920,10 @@ function renderHtmlDocument({ title, body }) {
       .highlight-card { display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: start; padding: 14px 16px; border-radius: 18px; border: 1px solid rgba(79,123,98,0.16); background: rgba(255,255,255,0.92); }
       .highlight-index { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(200,116,71,0.14); color: var(--accent); font-weight: 800; }
       .highlight-copy { font-size: 14px; line-height: 1.5; color: var(--ink); }
-      .feature-icon-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 12px; }
-      .feature-icon-card { display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: start; padding: 14px 16px; border-radius: 18px; border: 1px solid rgba(47,95,143,0.16); background: rgba(244,248,252,0.96); box-shadow: 0 8px 18px rgba(19,32,43,0.05); }
-      .feature-icon-badge { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 14px; background: linear-gradient(135deg, rgba(47,95,143,0.14), rgba(200,116,71,0.14)); color: var(--brand-blue); font-size: 15px; font-weight: 800; }
-      .feature-icon-copy { font-size: 14px; line-height: 1.5; color: var(--ink); font-weight: 600; }
+      .feature-icon-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; margin-top: 12px; }
+      .feature-icon-card { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: start; padding: 12px 14px; border-radius: 14px; border: 1px solid rgba(47,95,143,0.14); background: rgba(244,248,252,0.96); box-shadow: 0 6px 14px rgba(19,32,43,0.04); }
+      .feature-icon-badge { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: linear-gradient(135deg, rgba(47,95,143,0.14), rgba(200,116,71,0.14)); color: var(--brand-blue); font-size: 14px; font-weight: 800; }
+      .feature-icon-copy { font-size: 13px; line-height: 1.42; color: var(--ink); font-weight: 600; }
       .hero-signal-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
       .hero-signal-chip { padding: 10px 12px; border-radius: 14px; font-size: 12px; line-height: 1.45; font-weight: 600; border: 1px solid transparent; white-space: nowrap; }
       .hero-signal-chip-blue { background: var(--brand-blue-soft); color: var(--brand-blue); border-color: rgba(47,95,143,0.18); }
@@ -3004,12 +3004,14 @@ function buildMarketingReportHtml({ property, flyer }) {
       'Bright, open living spaces with feature-forward flow and strong showing appeal.',
     ], 1)[0] || '',
   );
+  const heroPositioningLineCandidates = pickMeaningfulLines([
+    specificFeatureLines.find((line) => /corner|lot|backyard/i.test(String(line || ''))),
+    property?.city ? `Located in ${titleCaseLabel(property.city)} with lifestyle convenience and practical daily access.` : '',
+    property?.selectedListPrice ? `Strategically positioned at ${formatCurrency(property.selectedListPrice)} for qualified buyer demand.` : '',
+  ], 3);
+  const normalizedHeroFeatureLine = String(heroFeatureLine || '').trim().toLowerCase();
   const heroPositioningLine = rewriteGenericFlyerCopy(
-    pickMeaningfulLines([
-      specificFeatureLines.find((line) => /corner|lot|backyard/i.test(String(line || ''))),
-      property?.city ? `Located in ${titleCaseLabel(property.city)} with lifestyle convenience and practical daily access.` : '',
-      property?.selectedListPrice ? `Strategically positioned at ${formatCurrency(property.selectedListPrice)} for qualified buyer demand.` : '',
-    ], 1)[0] || '',
+    heroPositioningLineCandidates.find((line) => String(line || '').trim().toLowerCase() !== normalizedHeroFeatureLine) || '',
   );
   const brochureSummary = hasMeaningfulValue(flyer.summary)
     ? rewriteGenericFlyerCopy(shortenNarrative(flyer.summary, 2))
@@ -3024,6 +3026,7 @@ function buildMarketingReportHtml({ property, flyer }) {
     ...featureTags,
     property?.selectedListPrice ? `Seller-confirmed list price ${formatCurrency(property.selectedListPrice)}` : '',
   ], 6);
+  const highlightsFeatureItems = featureGridItems.slice(0, 4);
   const keyHighlightsColumnClass = narrativeGalleryPhotos.length ? 'col-span-5' : 'col-span-12';
   const neighborhoodHighlights = pickMeaningfulLines([
     topReasonsToBuy.find((line) => /(school|park|trail|community|walk|retail|dining)/i.test(String(line || ''))),
@@ -3046,7 +3049,12 @@ function buildMarketingReportHtml({ property, flyer }) {
       : '',
     'Feature-forward copy and neighborhood context are designed to move buyers from interest to showing request.',
   ], 3);
-  const shouldRenderMapPage = true;
+  const shouldRenderMapPage = Boolean(
+    neighborhoodMapImageUrl ||
+      neighborhoodHighlights.length ||
+      commuteNotes.length ||
+      positioningOutcomeLines.length,
+  );
   const brochureFactBadges = pickMeaningfulLines([
     property?.bedrooms ? `${property.bedrooms} bedrooms` : '',
     property?.bathrooms ? `${property.bathrooms} bathrooms` : '',
@@ -3189,7 +3197,7 @@ function buildMarketingReportHtml({ property, flyer }) {
           <div class="section-kicker">Key highlights</div>
           <h3>Most marketable features</h3>
           ${renderFeatureIconGrid(
-            featureGridItems.length ? featureGridItems : topReasonsToBuy,
+            highlightsFeatureItems.length ? highlightsFeatureItems : topReasonsToBuy.slice(0, 4),
             'Feature copy is anchored to concrete property details and photo-backed signals.',
           )}
         </div>
@@ -3257,16 +3265,22 @@ function buildMarketingReportHtml({ property, flyer }) {
               <div>
                 <div class="section-kicker">Neighborhood and positioning</div>
                 <h2>Local context and pricing posture</h2>
-                <p class="muted">A cleaner neighborhood view and contact block designed for seller-facing brochure review.</p>
+                <p class="muted">Neighborhood fit, practical convenience, and final showing call-to-action in one concise page.</p>
               </div>
             </div>
             <div class="two-col flyer-context-grid">
               <div class="content-card">
                 <div class="section-kicker">Neighborhood</div>
                 <h3>Local context</h3>
-                <div class="map-frame compact" style="margin-top:12px;">
-                  <img src="${escapeHtml(neighborhoodMapImageUrl)}" alt="Neighborhood map" onerror="this.closest('.map-frame').style.display='none';" />
-                </div>
+                ${
+                  neighborhoodMapImageUrl
+                    ? `
+                      <div class="map-frame compact" style="margin-top:12px;">
+                        <img src="${escapeHtml(neighborhoodMapImageUrl)}" alt="Neighborhood map" onerror="this.closest('.map-frame').style.display='none';" />
+                      </div>
+                    `
+                    : ''
+                }
                 <p class="muted" style="margin-top:10px;">${escapeHtml(propertyAddress)}</p>
                 <div class="badge-row">
                   <div class="badge">${escapeHtml(property?.selectedListPrice ? `Starting at ${formatCurrency(property.selectedListPrice)}` : flyer.priceText || 'Pricing on request')}</div>
@@ -3275,7 +3289,7 @@ function buildMarketingReportHtml({ property, flyer }) {
                 <div class="page-spacer"></div>
                 <div class="section-kicker">Area benefits</div>
                 ${renderBulletList(
-                  neighborhoodHighlights,
+                  neighborhoodHighlights.slice(0, 3),
                   'Neighborhood positioning aligns with buyer priorities and showing-readiness goals.',
                 )}
               </div>
@@ -3290,22 +3304,17 @@ function buildMarketingReportHtml({ property, flyer }) {
                 <div class="section-kicker">Commute and local convenience</div>
                 <h3>How the area supports day-to-day living</h3>
                 ${renderBulletList(
-                  commuteNotes,
+                  commuteNotes.slice(0, 2),
                   'Everyday convenience and local access strengthen this home’s buyer appeal.',
                 )}
                 <div class="page-spacer"></div>
                 <div class="section-kicker">Urgency and contact</div>
                 <h3>${escapeHtml(ctaLabel)}</h3>
                 ${flyerMode === 'preview' ? `<p class="compact-copy" style="margin-top:8px;"><strong>${escapeHtml(previewUrgencyLine)}</strong></p>` : ''}
-                <p class="compact-copy" style="margin-top:8px;">Prepared by Workside Home Advisor to help this listing launch with stronger buyer clarity, cleaner positioning, and a more polished first impression.</p>
                 <div class="badge-row">
                   <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
                   <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
                   <div class="badge badge-contact">${escapeHtml(PUBLIC_WEB_URL)}</div>
-                </div>
-                <div class="closing-band">
-                  <div class="section-kicker">Final push</div>
-                  <p class="compact-copy" style="margin-top:6px;">Homes that combine clear pricing, polished photography, and a strong first showing impression create more confident buyer momentum. Schedule the showing window while buyer interest is fresh.</p>
                 </div>
                 <div class="cta-button-row">
                   <div class="brochure-cta-button">${escapeHtml(ctaButtonLabel)}</div>

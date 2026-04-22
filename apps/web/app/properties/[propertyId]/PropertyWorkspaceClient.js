@@ -4277,7 +4277,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
 
     const viewUrl = getGeneratedDocumentExportUrl(generationPrompt.kind, { disposition: 'inline' });
-    const previewWindow = window.open(viewUrl, '_blank', 'noopener,noreferrer');
+    const previewWindow = window.open(viewUrl, '_blank');
     if (!previewWindow) {
       setToast({
         tone: 'error',
@@ -4287,9 +4287,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       return;
     }
 
-    if (typeof previewWindow.focus === 'function') {
-      previewWindow.focus();
-    }
+    try {
+      previewWindow.opener = null;
+      if (typeof previewWindow.focus === 'function') {
+        previewWindow.focus();
+      }
+    } catch {}
 
     setGenerationPrompt(null);
   }
