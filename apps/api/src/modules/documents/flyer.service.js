@@ -354,6 +354,10 @@ function tightenFlyerText(text = '', signalBundle = {}) {
     { pattern: /comfort and flow/gi, replacement: 'layout clarity and room flow' },
     { pattern: /everyday livability/gi, replacement: 'practical day-to-day function' },
     { pattern: /welcoming tone/gi, replacement: 'clear buyer-facing positioning' },
+    { pattern: /kitchen photos? (show|highlight)[^.]*/gi, replacement: 'the kitchen anchors prep, hosting, and day-to-day flow' },
+    { pattern: /main living area reads clean and functional[^.]*/gi, replacement: 'the main living area feels bright, open, and showing-ready' },
+    { pattern: /exterior views support curb-first appeal[^.]*/gi, replacement: 'curb presence creates a strong first impression on arrival' },
+    { pattern: /primary sleeping area presents as straightforward[^.]*/gi, replacement: 'the primary suite supports calm, practical daily use' },
   ];
   for (const { pattern, replacement } of replacements) {
     value = value.replace(pattern, replacement);
