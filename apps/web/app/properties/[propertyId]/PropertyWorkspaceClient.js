@@ -4277,8 +4277,23 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
 
     const viewUrl = getGeneratedDocumentExportUrl(generationPrompt.kind, { disposition: 'inline' });
-    const openedWindow = window.open(viewUrl, '_blank', 'noopener,noreferrer');
-    if (!openedWindow) {
+    const previewWindow = window.open('', '_blank');
+    if (!previewWindow) {
+      setToast({
+        tone: 'error',
+        title: 'Could not open PDF preview',
+        message: 'Your browser blocked the new tab. Allow pop-ups and try again.',
+      });
+      return;
+    }
+
+    try {
+      previewWindow.opener = null;
+      previewWindow.location.href = viewUrl;
+      if (typeof previewWindow.focus === 'function') {
+        previewWindow.focus();
+      }
+    } catch {
       setToast({
         tone: 'error',
         title: 'Could not open PDF preview',

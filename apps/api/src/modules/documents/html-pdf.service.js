@@ -385,18 +385,38 @@ function containsPlaceholderLanguage(value = '') {
   );
 }
 
+function rewriteGenericFlyerCopy(value = '') {
+  let text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) {
+    return '';
+  }
+  const replacements = [
+    { pattern: /\bcomfortable living\b/gi, replacement: 'clear living-room layout' },
+    { pattern: /\bspacious living\b/gi, replacement: 'open living-zone flow' },
+    { pattern: /\bgreat for entertaining\b/gi, replacement: 'supports hosting flow and daily function' },
+    { pattern: /\bcharming\b/gi, replacement: 'well-positioned' },
+    { pattern: /\bbeautiful\b/gi, replacement: 'well-presented' },
+    { pattern: /\bcozy\b/gi, replacement: 'efficiently arranged' },
+  ];
+  for (const { pattern, replacement } of replacements) {
+    text = text.replace(pattern, replacement);
+  }
+  return text;
+}
+
 function renderFlyerGalleryTiles(photos = []) {
-  const galleryPhotos = (photos || []).filter((photo) => photo?.imageUrl);
+  const galleryPhotos = (photos || []).filter((photo) => photo?.imageUrl).slice(0, 6);
   if (!galleryPhotos.length) {
     return '';
   }
+  const slotClasses = ['large', 'medium-a', 'medium-b', 'small-a', 'small-b', 'small-c'];
 
   return `
-    <div class="gallery-strip gallery-strip-polished">
+    <div class="gallery-strip gallery-strip-polished gallery-strip-mosaic">
       ${galleryPhotos
         .map(
-          (photo) => `
-            <figure class="gallery-item">
+          (photo, index) => `
+            <figure class="gallery-item gallery-item-${slotClasses[index] || 'small-c'}">
               <img src="${escapeHtml(photo.imageUrl)}" alt="${escapeHtml(photo.roomLabel || 'Gallery photo')}" />
             </figure>
           `,
@@ -455,6 +475,26 @@ function dedupeInsightsByTheme(lines = [], limit = 5) {
     }
   }
   return output;
+}
+
+function toSecondaryInsightReference(line = '') {
+  const normalized = String(line || '').toLowerCase();
+  if (!normalized) {
+    return '';
+  }
+  if (normalized.includes('retake') || normalized.includes('photo')) {
+    return 'Photo retakes are still required before listing.';
+  }
+  if (normalized.includes('checklist')) {
+    return 'Checklist completion is still required before launch.';
+  }
+  if (normalized.includes('pricing') || normalized.includes('price')) {
+    return 'Pricing alignment should stay tied to current comp signals.';
+  }
+  if (normalized.includes('provider')) {
+    return 'Provider coordination is still required for launch readiness.';
+  }
+  return shortenNarrative(line, 1);
 }
 
 function getReadinessTone({ score, label }) {
@@ -1756,8 +1796,27 @@ function renderHtmlDocument({ title, body }) {
       .gallery-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
       .gallery-strip img { width: 100%; height: 220px; object-fit: cover; display: block; border-radius: 16px; border: 1px solid var(--line); }
       .gallery-strip-polished { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+      .gallery-strip-mosaic {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        grid-auto-rows: 86px;
+        gap: 10px;
+      }
       .gallery-item { margin: 0; position: relative; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 10px 20px rgba(19,32,43,0.08); background: rgba(255,255,255,0.95); }
       .gallery-item img { width: 100%; height: 220px; object-fit: cover; display: block; border-radius: 0; border: 0; }
+      .gallery-strip-mosaic .gallery-item img { height: 100%; }
+      .gallery-item-large { grid-column: 1 / span 3; grid-row: 1 / span 3; }
+      .gallery-item-medium-a { grid-column: 4 / span 3; grid-row: 1 / span 2; }
+      .gallery-item-medium-b { grid-column: 4 / span 2; grid-row: 3 / span 1; }
+      .gallery-item-small-a { grid-column: 6 / span 1; grid-row: 3 / span 1; }
+      .gallery-item-small-b { grid-column: 1 / span 3; grid-row: 4 / span 1; }
+      .gallery-item-small-c { grid-column: 4 / span 3; grid-row: 4 / span 1; }
+      @media (max-width: 900px) {
+        .gallery-strip-mosaic { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 160px; }
+        .gallery-item-large, .gallery-item-medium-a, .gallery-item-medium-b, .gallery-item-small-a, .gallery-item-small-b, .gallery-item-small-c {
+          grid-column: auto;
+          grid-row: auto;
+        }
+      }
       .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
       .map-frame.compact { min-height: 340px; }
       .flyer-context-grid { min-height: 6.8in; align-content: stretch; align-items: stretch; }
@@ -2032,11 +2091,11 @@ function buildPropertySummaryHtml({ property, report }) {
   const {
     primary: orderedNextStepsPrimary,
     overflow: orderedNextStepsOverflow,
-  } = splitPrimaryAndOverflow(orderedNextSteps, 6);
-  const actionCardsPrimary = sortedRecommendationActions.slice(0, 4);
-  const actionCardsOverflow = sortedRecommendationActions.slice(4, 8);
-  const readinessRiskHeadline = shortenNarrative(summaryRisk, 1);
-  const readinessOpportunityHeadline = shortenNarrative(summaryOpportunity, 1);
+  } = splitPrimaryAndOverflow(orderedNextSteps, 5);
+  const actionCardsPrimary = sortedRecommendationActions.slice(0, 3);
+  const actionCardsOverflow = sortedRecommendationActions.slice(3, 8);
+  const readinessRiskHeadline = toSecondaryInsightReference(summaryRisk);
+  const readinessOpportunityHeadline = toSecondaryInsightReference(summaryOpportunity);
   const readinessContinuationInsights = pickMeaningfulLines([
     ...topThreeIssues,
     ...recommendationActionLines,
@@ -2056,6 +2115,47 @@ function buildPropertySummaryHtml({ property, report }) {
       actionCardsOverflow.length ||
       readinessContinuationInsightsOverflow.length,
   );
+  const executiveContinuationUnitCount =
+    executiveSummaryOverflowBullets.length +
+    summaryRecommendationsOverflow.length +
+    launchStatusHighlightsOverflow.length;
+  const readinessContinuationUnitCount =
+    orderedNextStepsOverflow.length +
+    actionCardsOverflow.length +
+    readinessContinuationInsightsPrimary.length +
+    readinessContinuationInsightsOverflow.length;
+  const shouldRenderExecutiveContinuation =
+    hasExecutiveSummaryContinuation && executiveContinuationUnitCount >= 4;
+  const shouldRenderReadinessContinuation =
+    hasReadinessContinuation && readinessContinuationUnitCount >= 5;
+  const dedupeActionCards = (actions = []) => {
+    const seen = new Set();
+    const deduped = [];
+    for (const action of actions || []) {
+      const key = String(action?.title || '').toLowerCase().trim();
+      if (!key || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      deduped.push(action);
+    }
+    return deduped;
+  };
+  const executiveSummaryDisplayBullets = shouldRenderExecutiveContinuation
+    ? executiveSummaryBullets
+    : pickMeaningfulLines([...executiveSummaryBullets, ...executiveSummaryOverflowBullets], 5);
+  const summaryRecommendationsDisplay = shouldRenderExecutiveContinuation
+    ? summaryRecommendations
+    : dedupeInsightsByTheme([...summaryRecommendations, ...summaryRecommendationsOverflow], 5);
+  const launchStatusHighlightsDisplay = shouldRenderExecutiveContinuation
+    ? launchStatusHighlights
+    : dedupeInsightsByTheme([...launchStatusHighlights, ...launchStatusHighlightsOverflow], 5);
+  const orderedNextStepsDisplay = shouldRenderReadinessContinuation
+    ? orderedNextStepsPrimary
+    : pickMeaningfulLines([...orderedNextStepsPrimary, ...orderedNextStepsOverflow], 5);
+  const actionCardsDisplay = shouldRenderReadinessContinuation
+    ? actionCardsPrimary
+    : dedupeActionCards([...actionCardsPrimary, ...actionCardsOverflow]).slice(0, 5);
   const roiUpside = Number(improvementEconomics.estimatedRoi || 0);
   const roiCost = Number(improvementEconomics.estimatedCost || 0);
   const roiMax = Math.max(roiUpside, roiCost, 1);
@@ -2130,15 +2230,30 @@ function buildPropertySummaryHtml({ property, report }) {
     (executiveSummaryOverflowBullets.length ||
       summaryRecommendationsOverflow.length ||
       launchStatusHighlightsOverflow.length) &&
-    !hasExecutiveSummaryContinuation
+    !shouldRenderExecutiveContinuation
   ) {
     console.warn(
-      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=continuation_header_missing section=executive_summary`,
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=continuation_merged section=executive_summary`,
     );
   }
-  if ((orderedNextStepsOverflow.length || actionCardsOverflow.length) && !hasReadinessContinuation) {
+  if ((orderedNextStepsOverflow.length || actionCardsOverflow.length) && !shouldRenderReadinessContinuation) {
     console.warn(
-      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=continuation_header_missing section=readiness_dashboard`,
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=continuation_merged section=readiness_dashboard`,
+    );
+  }
+  if (shouldRenderExecutiveContinuation && executiveContinuationUnitCount < 5) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=continuation_density_low section=executive_summary items=${executiveContinuationUnitCount}`,
+    );
+  }
+  if (shouldRenderReadinessContinuation && readinessContinuationUnitCount < 6) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=continuation_density_low section=readiness_dashboard items=${readinessContinuationUnitCount}`,
+    );
+  }
+  if (orderedNextStepsDisplay.length > 5 || actionCardsDisplay.length > 5) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=action_plan_primary_too_long steps=${orderedNextStepsDisplay.length} cards=${actionCardsDisplay.length}`,
     );
   }
 
@@ -2222,7 +2337,7 @@ function buildPropertySummaryHtml({ property, report }) {
         <div class="content-card">
           <div class="section-kicker">Key insights</div>
           <h3>What matters most right now</h3>
-          ${renderInsightList(executiveSummaryBullets, 'Use this report to identify the clearest launch priorities.')}
+          ${renderInsightList(executiveSummaryDisplayBullets, 'Use this report to identify the clearest launch priorities.')}
           <div class="page-spacer"></div>
           <div class="callout-chip callout-chip-opportunity">
             <div class="metric-label">Top opportunity</div>
@@ -2238,7 +2353,7 @@ function buildPropertySummaryHtml({ property, report }) {
           <div class="content-card">
             <div class="section-kicker">Recommendations</div>
             <h3>Priority actions</h3>
-            ${renderBulletList(summaryRecommendations, 'Use the guided workflow to continue improving readiness and launch confidence.')}
+            ${renderBulletList(summaryRecommendationsDisplay, 'Use the guided workflow to continue improving readiness and launch confidence.')}
           </div>
           <div class="callout-chip callout-chip-value">
             <div class="metric-label">Budget / ROI</div>
@@ -2248,7 +2363,7 @@ function buildPropertySummaryHtml({ property, report }) {
             <div class="section-kicker">Launch status</div>
             <h3>${escapeHtml(readinessSummary.label || 'Needs work')}</h3>
             ${renderHighlightGrid(
-              launchStatusHighlights,
+              launchStatusHighlightsDisplay,
               'Launch status details are reflected here from pricing, photos, and checklist progress.',
             )}
           </div>
@@ -2258,7 +2373,7 @@ function buildPropertySummaryHtml({ property, report }) {
     </section>
 
     ${
-      hasExecutiveSummaryContinuation
+      shouldRenderExecutiveContinuation
         ? `
           <section class="page">
             <div class="brand-bar">
@@ -2534,7 +2649,7 @@ function buildPropertySummaryHtml({ property, report }) {
           <div class="section-kicker">Ordered launch steps</div>
           <h3>What to do next</h3>
           ${renderChecklistItems(
-            orderedNextStepsPrimary,
+            orderedNextStepsDisplay,
             'Use the guided workflow in the app to continue the launch checklist.',
           )}
         </div>
@@ -2542,7 +2657,7 @@ function buildPropertySummaryHtml({ property, report }) {
           <div class="section-kicker">Priority action cards</div>
           <h3>Highest-impact prep moves</h3>
           ${renderRecommendationActionCards(
-            actionCardsPrimary,
+            actionCardsDisplay,
             'Use these structured actions to keep launch readiness improving.',
           )}
         </div>
@@ -2564,7 +2679,7 @@ function buildPropertySummaryHtml({ property, report }) {
     </section>
 
     ${
-      hasReadinessContinuation
+      shouldRenderReadinessContinuation
         ? `
           <section class="page">
             <div class="brand-bar">
@@ -2675,15 +2790,15 @@ function buildMarketingReportHtml({ property, flyer }) {
   const coverPhotos = prioritizedPhotos.slice(0, 4);
   const hasFourPhotoCover = coverPhotos.length >= 4;
   const heroPhoto = coverPhotos[0];
-  const gallerySeed = hasFourPhotoCover ? prioritizedPhotos.slice(4, 8) : prioritizedPhotos.slice(1, 5);
+  const gallerySeed = hasFourPhotoCover ? prioritizedPhotos.slice(4, 10) : prioritizedPhotos.slice(1, 7);
   const galleryPhotos = gallerySeed.length
     ? gallerySeed
-    : selectFlyerGalleryPhotos(prioritizedPhotos.slice(1), 5);
+    : selectFlyerGalleryPhotos(prioritizedPhotos.slice(1), 6);
   const seededGalleryPhotos = ensureMinimumFlyerPhotos(
-    galleryPhotos.length ? galleryPhotos : selectFlyerGalleryPhotos(prioritizedPhotos, 5),
+    galleryPhotos.length ? galleryPhotos : selectFlyerGalleryPhotos(prioritizedPhotos, 6),
     prioritizedPhotos,
-    3,
-    5,
+    4,
+    6,
   );
   const coverIdentities = new Set(
     coverPhotos
@@ -2716,14 +2831,14 @@ function buildMarketingReportHtml({ property, flyer }) {
   }
   const replacementPool = selectFlyerGalleryPhotos([...prioritizedPhotos, ...selectedPhotos], 12);
   for (const photo of replacementPool) {
-    if (resolvedGalleryPhotos.length >= 5) {
+    if (resolvedGalleryPhotos.length >= 6) {
       break;
     }
     addUniqueGalleryPhoto(photo, 'fallback');
   }
-  if (resolvedGalleryPhotos.length < 3) {
+  if (resolvedGalleryPhotos.length < 4) {
     for (const photo of [...selectedPhotos, ...prioritizedPhotos]) {
-      if (resolvedGalleryPhotos.length >= 3) {
+      if (resolvedGalleryPhotos.length >= 4) {
         break;
       }
       addUniqueGalleryPhoto(photo, 'fallback');
@@ -2733,24 +2848,57 @@ function buildMarketingReportHtml({ property, flyer }) {
   const galleryStatusNote = flyerMode === 'preview'
     ? 'Preview mode: this gallery uses the strongest currently selected listing photos.'
     : '';
-  const featureTags = pickMeaningfulLines(flyer.highlights || [], 6);
+  const flyerTextCorpus = [
+    flyer?.headline,
+    flyer?.subheadline,
+    flyer?.summary,
+    ...(flyer?.highlights || []),
+    ...(selectedPhotos || []).map((photo) => photo?.listingNote || ''),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  const hasKitchenIslandSignal = /\bisland\b/.test(flyerTextCorpus);
+  const hasCornerLotSignal = /\bcorner lot\b|\bcorner-lot\b/.test(flyerTextCorpus);
+  const lotSizeSqFt = Number(property?.lotSizeSqFt || 0);
+  const specificFeatureLines = pickMeaningfulLines([
+    hasKitchenIslandSignal
+      ? 'Kitchen island anchors prep, serving, and casual seating flow.'
+      : '',
+    lotSizeSqFt > 0
+      ? `Lot size is approximately ${formatCompactNumber(lotSizeSqFt)} square feet with flexible backyard use potential.`
+      : '',
+    hasCornerLotSignal
+      ? 'Corner-lot placement improves curb visibility and arrival presence.'
+      : '',
+    property?.squareFeet
+      ? `${formatCompactNumber(property.squareFeet)} interior square feet supports clear room-to-room flow.`
+      : '',
+    property?.bedrooms
+      ? `${property.bedrooms}-bedroom layout supports guest flexibility and work-from-home options.`
+      : '',
+  ], 4);
+  const featureTags = pickMeaningfulLines((flyer.highlights || []).map((line) => rewriteGenericFlyerCopy(line)), 6);
   const topReasonsToBuy = [
+    ...specificFeatureLines,
     ...(featureTags || []),
     property?.selectedListPrice ? `Positioned at ${formatCurrency(property.selectedListPrice)}` : '',
-    buildNeighborhoodContext(property),
   ]
     .filter(Boolean)
     .slice(0, 6);
   const brochureSummary = hasMeaningfulValue(flyer.summary)
-    ? shortenNarrative(flyer.summary, 2)
-    : 'A buyer-facing brochure designed to spotlight the home’s strongest features, neighborhood appeal, and showing-ready presentation.';
+    ? rewriteGenericFlyerCopy(shortenNarrative(flyer.summary, 2))
+    : pickMeaningfulLines([
+        specificFeatureLines[0],
+        specificFeatureLines[1],
+        property?.selectedListPrice ? `Positioned at ${formatCurrency(property.selectedListPrice)} with buyer-ready marketing sequencing.` : '',
+      ], 2).join(' ');
   const lifestyleContext = buildNeighborhoodContext(property);
   const featureGridItems = pickMeaningfulLines([
+    ...specificFeatureLines,
     ...featureTags,
     property?.selectedListPrice ? `Seller-confirmed list price ${formatCurrency(property.selectedListPrice)}` : '',
-    lifestyleContext,
   ], 6);
-  const shouldRenderMapPage = Boolean(neighborhoodMapImageUrl);
   const keyHighlightsColumnClass = resolvedGalleryPhotos.length ? 'col-span-5' : 'col-span-12';
   const neighborhoodHighlights = pickMeaningfulLines([
     topReasonsToBuy.find((line) => /(school|park|trail|community|walk|retail|dining)/i.test(String(line || ''))),
@@ -2764,6 +2912,7 @@ function buildMarketingReportHtml({ property, flyer }) {
     'Local retail corridors and services are positioned for practical day-to-day access.',
     'Nearby amenities can improve showing conversations by helping buyers visualize everyday routines.',
   ], 3);
+  const shouldRenderMapPage = true;
   const brochureFactBadges = pickMeaningfulLines([
     property?.bedrooms ? `${property.bedrooms} bedrooms` : '',
     property?.bathrooms ? `${property.bathrooms} bathrooms` : '',
@@ -2771,9 +2920,9 @@ function buildMarketingReportHtml({ property, flyer }) {
     formatPropertyTypeLabel(property?.propertyType),
     modeLabel ? `${modeLabel} mode` : '',
   ], 4);
-  const flyerMapCount = shouldRenderMapPage ? 1 : 0;
+  const flyerMapCount = neighborhoodMapImageUrl ? 1 : 0;
   const combinedDuplicateCount = countDuplicateFlyerPhotos([...coverPhotos, ...resolvedGalleryPhotos]);
-  if (resolvedGalleryPhotos.length < 3) {
+  if (resolvedGalleryPhotos.length < 4) {
     console.warn(
       `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_photo_count_low count=${resolvedGalleryPhotos.length}`,
     );
@@ -2806,6 +2955,24 @@ function buildMarketingReportHtml({ property, flyer }) {
   if (shouldRenderMapPage && neighborhoodHighlights.length < 2 && commuteNotes.length < 1) {
     console.warn(
       `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_context_sparse`,
+    );
+  }
+  if (!specificFeatureLines.length) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_copy_generic`,
+    );
+  }
+  if (!shouldRenderMapPage) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_structure_incomplete`,
+    );
+  }
+  const neighborhoodDedupKeySet = new Set(
+    [...neighborhoodHighlights, ...commuteNotes].map((line) => String(line || '').toLowerCase().trim()).filter(Boolean),
+  );
+  if (neighborhoodDedupKeySet.size < [...neighborhoodHighlights, ...commuteNotes].filter(Boolean).length) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_neighborhood_repetition_detected`,
     );
   }
   if (
@@ -2877,9 +3044,9 @@ function buildMarketingReportHtml({ property, flyer }) {
     <section class="page">
       <div class="brand-bar">
         <div>
-          <div class="section-kicker">Conversion brochure</div>
-          <h2>Highlights, gallery, and neighborhood context</h2>
-          <p class="muted">A buyer-facing layout designed to support interest, clarity, and showing requests.</p>
+          <div class="section-kicker">Highlights and gallery</div>
+          <h2>Visual story and feature proof</h2>
+          <p class="muted">A brochure-style spread focused on what buyers notice first.</p>
         </div>
       </div>
       <div class="brochure-main-grid layout-grid-12">
@@ -2887,15 +3054,14 @@ function buildMarketingReportHtml({ property, flyer }) {
           <div class="section-kicker">Key highlights</div>
           <h3>Most marketable features</h3>
           ${renderFeatureIconGrid(
-            featureTags.length ? featureTags : topReasonsToBuy,
-            'This section captures the strongest reasons a buyer would choose this home right now.',
+            featureGridItems.length ? featureGridItems : topReasonsToBuy,
+            'Feature copy is anchored to concrete property details and photo-backed signals.',
           )}
-          ${flyerMode === 'preview' ? `<p class="compact-copy"><strong>${escapeHtml(previewUrgencyLine)}</strong></p>` : ''}
         </div>
         ${resolvedGalleryPhotos.length ? `
         <div class="content-card marketing-gallery-card col-span-7">
           <div class="section-kicker">Photo gallery</div>
-          <h3>Curated image sequence</h3>
+          <h3>Curated visual sequence</h3>
           ${
             galleryStatusNote
               ? `<p class="muted"><strong>${escapeHtml(galleryStatusNote)}</strong></p>`
@@ -2905,51 +3071,47 @@ function buildMarketingReportHtml({ property, flyer }) {
         </div>
         ` : ''}
       </div>
-      <div class="brochure-conversion-grid layout-grid-12" style="margin-top:16px;">
-        <div class="content-card col-span-7">
-          <div class="section-kicker">Pricing positioning</div>
+      ${renderFooter('Marketing Report · Highlights & Gallery')}
+    </section>
+
+    <section class="page">
+      <div class="brand-bar">
+        <div>
+          <div class="section-kicker">Pricing and positioning</div>
+          <h2>Value story and buyer positioning</h2>
+          <p class="muted">Pricing clarity and feature-backed positioning to support serious inquiries.</p>
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="content-card">
+          <div class="section-kicker">Pricing posture</div>
           <h3>${escapeHtml(flyer.priceText || 'Pricing on request')}</h3>
           ${renderInsightList(
             pickMeaningfulLines([
               property?.selectedListPrice
-                ? `Competitively positioned at ${formatCurrency(property.selectedListPrice)} to balance value perception and buyer demand.`
+                ? `Positioned at ${formatCurrency(property.selectedListPrice)} to balance buyer urgency and perceived value.`
                 : 'Positioned to align with recent comparable sales and current buyer demand.',
-              topReasonsToBuy[0] ? `Buyer signal: ${topReasonsToBuy[0]}` : '',
-              'Use this brochure format to turn early interest into qualified showing requests.',
+              topReasonsToBuy[0] ? `Primary buyer signal: ${topReasonsToBuy[0]}` : '',
+              'Pricing communication should stay consistent across listing channels and showing conversations.',
             ], 3),
             '',
           )}
-          <div class="page-spacer"></div>
-          <div class="section-kicker">Neighborhood context</div>
-          <p class="compact-copy">${escapeHtml(lifestyleContext)}</p>
-          ${renderBulletList(neighborhoodHighlights.slice(0, 3), '')}
-          ${
-            commuteNotes.length
-              ? `
-                <div class="page-spacer"></div>
-                <div class="section-kicker">Commute notes</div>
-                ${renderBulletList(commuteNotes, '')}
-              `
-              : ''
-          }
         </div>
-        <div class="brochure-cta-card col-span-5">
-          <div class="section-kicker">Call to action</div>
-          <h3>${escapeHtml(ctaLabel)}</h3>
+        <div class="content-card">
+          <div class="section-kicker">Positioning details</div>
+          <h3>Feature-backed narrative</h3>
+          ${renderBulletList(
+            pickMeaningfulLines([
+              ...specificFeatureLines,
+              ...featureTags,
+              property?.selectedListPrice ? `List-price strategy currently centers on ${formatCurrency(property.selectedListPrice)}.` : '',
+            ], 5),
+            'Feature-backed positioning should stay concise and specific.',
+          )}
           ${flyerMode === 'preview' ? `<p class="compact-copy" style="margin-top:8px;"><strong>${escapeHtml(previewUrgencyLine)}</strong></p>` : ''}
-          <p class="muted" style="margin-top:8px;">Prepared by Workside Home Advisor to support marketplace-ready marketing collateral and brochure refinement.</p>
-          <div class="badge-row">
-            <div class="badge badge-address">${escapeHtml(propertyAddress)}</div>
-            <div class="badge badge-contact">${escapeHtml(contactPhoneLabel)}</div>
-            <div class="badge badge-contact">${escapeHtml(SUPPORT_EMAIL)}</div>
-          </div>
-          <div class="cta-button-row">
-            <div class="brochure-cta-button">${escapeHtml(ctaButtonLabel)}</div>
-            <div class="brochure-cta-button secondary">${escapeHtml(ctaSecondaryLabel)}</div>
-          </div>
         </div>
       </div>
-      ${renderFooter('Marketing Report · Gallery & Conversion')}
+      ${renderFooter('Marketing Report · Pricing & Positioning')}
     </section>
 
     ${
