@@ -90,9 +90,12 @@ function chooseFlyerPhotos(
   const selectedAssets = chooseEnhancedFlyerAssets(rankedAssets, selectedPhotoAssetIds, {
     maxCount: 8,
   });
-  return selectedAssets
-    .slice(0, 8)
-    .map((asset) => {
+  const overflowAssets = rankedAssets.filter(
+    (asset) => !selectedAssets.some((selectedAsset) => selectedAsset.id === asset.id),
+  );
+  const candidateAssets = [...selectedAssets, ...overflowAssets].slice(0, 16);
+
+  const mapAssetToPhoto = (asset) => {
       const selectedVariant =
         brochureVariantByAssetId.get(asset.id) || asset.selectedVariant || null;
       const marketplaceState = getMediaAssetMarketplaceState(asset, {
@@ -112,7 +115,77 @@ function chooseFlyerPhotos(
         qualityLabel: marketplaceState.qualityLabel || '',
         marketplaceStatus: marketplaceState.publishable ? 'Marketplace ready' : 'Review draft',
       };
-    });
+    };
+
+  const mappedPhotos = candidateAssets.map(mapAssetToPhoto);
+  const getPhotoIdentity = (photo) => {
+    const url = String(photo?.imageUrl || '').trim();
+    const normalizedUrl = url.split('?')[0].toLowerCase();
+    const fileName = normalizedUrl.split('/').pop() || '';
+    return String(photo?.assetId || fileName || normalizedUrl || '').toLowerCase();
+  };
+  const roomBucket = (roomLabel = '') => {
+    const room = normalizeRoomLabel(roomLabel);
+    if (!room) {
+      return 'other';
+    }
+    if (room.includes('exterior') || room.includes('front') || room.includes('backyard') || room.includes('yard')) {
+      return 'exterior';
+    }
+    if (room.includes('kitchen')) {
+      return 'kitchen';
+    }
+    if (room.includes('living') || room.includes('family') || room.includes('great room')) {
+      return 'living';
+    }
+    if (room.includes('bedroom') || room.includes('primary')) {
+      return 'bedroom';
+    }
+    return 'other';
+  };
+
+  const uniquePhotos = [];
+  const seenIdentities = new Set();
+  for (const photo of mappedPhotos) {
+    if (!photo?.imageUrl) {
+      continue;
+    }
+    const identity = getPhotoIdentity(photo);
+    if (!identity || seenIdentities.has(identity)) {
+      continue;
+    }
+    seenIdentities.add(identity);
+    uniquePhotos.push(photo);
+    if (uniquePhotos.length >= 8) {
+      break;
+    }
+  }
+
+  const prioritizedBuckets = ['exterior', 'kitchen', 'living'];
+  const diversified = [];
+  for (const bucket of prioritizedBuckets) {
+    const candidate = uniquePhotos.find(
+      (photo) =>
+        roomBucket(photo.roomLabel) === bucket &&
+        !diversified.some((entry) => getPhotoIdentity(entry) === getPhotoIdentity(photo)),
+    );
+    if (!candidate) {
+      continue;
+    }
+    diversified.push(candidate);
+  }
+
+  for (const photo of uniquePhotos) {
+    if (diversified.length >= 8) {
+      break;
+    }
+    if (diversified.some((entry) => getPhotoIdentity(entry) === getPhotoIdentity(photo))) {
+      continue;
+    }
+    diversified.push(photo);
+  }
+
+  return diversified.slice(0, 8);
 }
 
 function buildPriceText(property, pricing, flyerType) {

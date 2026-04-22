@@ -261,6 +261,13 @@ function flyerRoomBucket(roomLabel = '') {
   return 'other';
 }
 
+function resolveFlyerPhotoIdentity(photo = {}) {
+  const imageUrl = String(photo?.imageUrl || '').trim();
+  const normalizedUrl = imageUrl.split('?')[0].toLowerCase();
+  const fileName = normalizedUrl.split('/').pop() || '';
+  return String(photo?.assetId || fileName || normalizedUrl || '').toLowerCase();
+}
+
 function selectFlyerGalleryPhotos(photos = [], maxCount = 4) {
   const withImages = (photos || []).filter((photo) => photo?.imageUrl);
   if (!withImages.length) {
@@ -275,7 +282,7 @@ function selectFlyerGalleryPhotos(photos = [], maxCount = 4) {
   for (const bucket of priorityBuckets) {
     const candidate = withImages.find(
       (photo) =>
-        !selected.some((picked) => picked.imageUrl === photo.imageUrl) &&
+        !selected.some((picked) => resolveFlyerPhotoIdentity(picked) === resolveFlyerPhotoIdentity(photo)) &&
         flyerRoomBucket(photo.roomLabel) === bucket,
     );
     if (!candidate) {
@@ -291,37 +298,85 @@ function selectFlyerGalleryPhotos(photos = [], maxCount = 4) {
     if (selected.length >= safeMaxCount) {
       break;
     }
-    if (selected.some((picked) => picked.imageUrl === photo.imageUrl)) {
+    if (selected.some((picked) => resolveFlyerPhotoIdentity(picked) === resolveFlyerPhotoIdentity(photo))) {
       continue;
     }
     selected.push(photo);
   }
 
-  return selected.slice(0, safeMaxCount);
+  const deduped = [];
+  const seenIdentities = new Set();
+  for (const photo of selected) {
+    const identity = resolveFlyerPhotoIdentity(photo);
+    if (!identity || seenIdentities.has(identity)) {
+      continue;
+    }
+    seenIdentities.add(identity);
+    deduped.push(photo);
+  }
+
+  return deduped.slice(0, safeMaxCount);
 }
 
-function ensureMinimumFlyerPhotos(photos = [], minimum = 3, maximum = 5) {
-  const withImages = (photos || []).filter((photo) => photo?.imageUrl);
-  if (!withImages.length) {
+function ensureMinimumFlyerPhotos(primaryPhotos = [], fallbackPhotos = [], minimum = 3, maximum = 5) {
+  const allCandidates = [...(primaryPhotos || []), ...(fallbackPhotos || [])].filter(
+    (photo) => photo?.imageUrl,
+  );
+  if (!allCandidates.length) {
     return [];
   }
 
   const minCount = Math.max(1, Number(minimum) || 3);
   const maxCount = Math.max(minCount, Number(maximum) || 5);
-  const targetCount = Math.min(maxCount, Math.max(minCount, withImages.length));
   const selected = [];
-
-  for (let index = 0; index < targetCount; index += 1) {
-    const source = withImages[index % withImages.length];
+  const seenIdentities = new Set();
+  for (const photo of allCandidates) {
+    const identity = resolveFlyerPhotoIdentity(photo);
+    if (!identity || seenIdentities.has(identity)) {
+      continue;
+    }
+    seenIdentities.add(identity);
     selected.push({
-      ...source,
+      ...photo,
       roomLabel:
-        source?.roomLabel ||
-        `${titleCaseLabel(flyerRoomBucket(source?.roomLabel || 'property'))} photo`,
+        photo?.roomLabel || `${titleCaseLabel(flyerRoomBucket(photo?.roomLabel || 'property'))} photo`,
     });
+    if (selected.length >= maxCount) {
+      break;
+    }
   }
 
-  return selected;
+  if (selected.length < minCount) {
+    return selected;
+  }
+
+  return selected.slice(0, maxCount);
+}
+
+function countDuplicateFlyerPhotos(photos = []) {
+  const seen = new Set();
+  let duplicateCount = 0;
+  for (const photo of photos || []) {
+    const identity = resolveFlyerPhotoIdentity(photo);
+    if (!identity) {
+      continue;
+    }
+    if (seen.has(identity)) {
+      duplicateCount += 1;
+      continue;
+    }
+    seen.add(identity);
+  }
+  return duplicateCount;
+}
+
+function splitPrimaryAndOverflow(items = [], primaryLimit = 4) {
+  const safeItems = (items || []).filter(Boolean);
+  const safeLimit = Math.max(1, Number(primaryLimit) || 1);
+  return {
+    primary: safeItems.slice(0, safeLimit),
+    overflow: safeItems.slice(safeLimit),
+  };
 }
 
 function containsPlaceholderLanguage(value = '') {
@@ -343,7 +398,6 @@ function renderFlyerGalleryTiles(photos = []) {
           (photo) => `
             <figure class="gallery-item">
               <img src="${escapeHtml(photo.imageUrl)}" alt="${escapeHtml(photo.roomLabel || 'Gallery photo')}" />
-              <figcaption class="gallery-item-label">${escapeHtml(photo.roomLabel || 'Property photo')}</figcaption>
             </figure>
           `,
         )
@@ -1704,9 +1758,9 @@ function renderHtmlDocument({ title, body }) {
       .gallery-strip-polished { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
       .gallery-item { margin: 0; position: relative; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 10px 20px rgba(19,32,43,0.08); background: rgba(255,255,255,0.95); }
       .gallery-item img { width: 100%; height: 220px; object-fit: cover; display: block; border-radius: 0; border: 0; }
-      .gallery-item-label { position: absolute; top: 10px; left: 10px; margin: 0; padding: 6px 10px; border-radius: 999px; background: rgba(15,23,42,0.74); color: #fff; font-size: 10px; font-weight: 700; line-height: 1.2; max-width: calc(100% - 20px); }
       .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
-      .map-frame.compact { min-height: 220px; }
+      .map-frame.compact { min-height: 340px; }
+      .flyer-context-grid { min-height: 6.8in; align-content: stretch; align-items: stretch; }
       .badge-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
       .badge { padding: 8px 12px; border-radius: 999px; background: var(--moss-soft); color: var(--moss); font-size: 12px; font-weight: 600; white-space: nowrap; }
       .badge-address, .badge-contact { white-space: normal; line-height: 1.4; }
@@ -1759,8 +1813,9 @@ function renderHtmlDocument({ title, body }) {
       .seller-cover-row-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 12px; }
       .cover-right-stack { display: grid; gap: 10px; align-content: start; }
       .cover-photo-card { padding: 12px; }
-      .score-hero { border-radius: 28px; padding: 24px 24px 20px; border: 1px solid rgba(200,116,71,0.24); background: linear-gradient(145deg, rgba(47,95,143,0.08), rgba(200,116,71,0.16) 62%, rgba(255,250,244,0.98) 100%); text-align: left; min-height: 3.3in; display: flex; flex-direction: column; justify-content: center; }
-      .score-hero-value { font-size: 124px; line-height: 0.82; font-weight: 800; margin-top: 10px; letter-spacing: -0.07em; }
+      .score-hero { border-radius: 28px; padding: 28px 26px 24px; border: 1px solid rgba(200,116,71,0.24); background: linear-gradient(145deg, rgba(47,95,143,0.08), rgba(200,116,71,0.16) 62%, rgba(255,250,244,0.98) 100%); text-align: left; min-height: 3.3in; display: flex; flex-direction: column; justify-content: center; }
+      .score-hero-value { font-size: 100px; line-height: 0.86; font-weight: 800; margin-top: 10px; letter-spacing: -0.05em; }
+      .continuation-title { font-size: 22px; line-height: 1.15; margin-bottom: 8px; }
       .score-status { display: inline-flex; margin-top: 10px; padding: 8px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
       .score-status-ready { background: rgba(79,123,98,0.16); color: var(--moss); }
       .score-status-almost { background: rgba(200,116,71,0.16); color: #9a5a33; }
@@ -1903,14 +1958,19 @@ function buildPropertySummaryHtml({ property, report }) {
   const coverKeyInsight = Number(photoSummary.retakeCount || 0) > 0
     ? 'Key insight: photo presentation still needs targeted polish before listing launch.'
     : `${checklistSummary.openCount || 0} checklist items still need closure before launch.`;
-  const executiveSummaryBullets = pickMeaningfulLines([
+  const executiveSummaryBulletPool = pickMeaningfulLines([
     coverNarrative,
     coverPricingSignal,
     coverKeyInsight,
     hasMeaningfulValue(report.payload?.listingDescriptions?.shortDescription)
       ? report.payload.listingDescriptions.shortDescription
       : '',
-  ], 3);
+    summaryOpportunity,
+  ], 5);
+  const {
+    primary: executiveSummaryBullets,
+    overflow: executiveSummaryOverflowBullets,
+  } = splitPrimaryAndOverflow(executiveSummaryBulletPool, 3);
   const pricingRationaleBullets = pickMeaningfulLines([
     report.pricingSummary?.strategy,
     ...(report.pricingSummary?.strengths || []),
@@ -1926,18 +1986,22 @@ function buildPropertySummaryHtml({ property, report }) {
     Number(checklistSummary.openCount || 0) > 0 ? 'Cleaning and prep support' : '',
     hasMeaningfulValue(riskOpportunity.biggestOpportunity) ? 'Staging or presentation support' : '',
   ], 3);
-  const summaryRecommendations = dedupeInsightsByTheme(pickMeaningfulLines([
+  const summaryRecommendationPool = dedupeInsightsByTheme(pickMeaningfulLines([
     report.payload?.improvementGuidance?.summary,
     ...recommendationActions.map((action) => action.title),
     ...(report.improvementItems || []).slice(0, 3),
     pricingNarrative,
-  ], 7), 5);
+  ], 9), 7);
+  const {
+    primary: summaryRecommendations,
+    overflow: summaryRecommendationsOverflow,
+  } = splitPrimaryAndOverflow(summaryRecommendationPool, 4);
   const recommendationActionLines = pickMeaningfulLines(
     recommendationActions.map(
       (action) =>
         `${action.title}${action.urgency ? ` (${titleCaseLabel(action.urgency)} urgency)` : ''}${action.expectedOutcome ? ` - ${action.expectedOutcome}` : ''}`,
     ),
-    5,
+    8,
   );
   const sortedRecommendationActions = sortRecommendationActions(recommendationActions);
   const topThreeActions = sortedRecommendationActions.slice(0, 3);
@@ -1953,13 +2017,45 @@ function buildPropertySummaryHtml({ property, report }) {
     ...(consequenceFraming.lines || []),
     checklistSummary.openCount ? `${checklistSummary.openCount} checklist items still open.` : '',
   ], 6), 3);
-  const launchStatusHighlights = dedupeInsightsByTheme(pickMeaningfulLines([
+  const launchStatusHighlightPool = dedupeInsightsByTheme(pickMeaningfulLines([
     photoSummary.averageQualityScore ? `Average photo quality ${photoSummary.averageQualityScore}/100.` : '',
     checklistSummary.totalCount ? `${checklistSummary.completedCount || 0} of ${checklistSummary.totalCount} checklist items are complete.` : '',
     property?.selectedListPrice ? `Chosen list price ${formatCurrency(property.selectedListPrice)}.` : '',
     pricingInsightLines[0] || '',
     consequenceFraming.summary || '',
-  ], 6), 4);
+    summaryOpportunity,
+  ], 8), 6);
+  const {
+    primary: launchStatusHighlights,
+    overflow: launchStatusHighlightsOverflow,
+  } = splitPrimaryAndOverflow(launchStatusHighlightPool, 4);
+  const {
+    primary: orderedNextStepsPrimary,
+    overflow: orderedNextStepsOverflow,
+  } = splitPrimaryAndOverflow(orderedNextSteps, 6);
+  const actionCardsPrimary = sortedRecommendationActions.slice(0, 4);
+  const actionCardsOverflow = sortedRecommendationActions.slice(4, 8);
+  const readinessRiskHeadline = shortenNarrative(summaryRisk, 1);
+  const readinessOpportunityHeadline = shortenNarrative(summaryOpportunity, 1);
+  const readinessContinuationInsights = pickMeaningfulLines([
+    ...topThreeIssues,
+    ...recommendationActionLines,
+    ...orderedNextStepsOverflow,
+  ], 8);
+  const {
+    primary: readinessContinuationInsightsPrimary,
+    overflow: readinessContinuationInsightsOverflow,
+  } = splitPrimaryAndOverflow(readinessContinuationInsights, 4);
+  const hasExecutiveSummaryContinuation = Boolean(
+    executiveSummaryOverflowBullets.length ||
+      summaryRecommendationsOverflow.length ||
+      launchStatusHighlightsOverflow.length,
+  );
+  const hasReadinessContinuation = Boolean(
+    orderedNextStepsOverflow.length ||
+      actionCardsOverflow.length ||
+      readinessContinuationInsightsOverflow.length,
+  );
   const roiUpside = Number(improvementEconomics.estimatedRoi || 0);
   const roiCost = Number(improvementEconomics.estimatedCost || 0);
   const roiMax = Math.max(roiUpside, roiCost, 1);
@@ -1989,6 +2085,7 @@ function buildPropertySummaryHtml({ property, report }) {
   const reportPrimaryCta = Number(readinessSummary.overallScore || 0) >= 70 ? 'Request Showing' : 'Get Property Details';
   const reportSecondaryCta = reportPrimaryCta === 'Request Showing' ? 'Get Property Details' : 'Request Showing';
   const contactPhoneLabel = SUPPORT_PHONE || 'Phone available on request';
+  const readinessScoreLabel = `${readinessSummary.overallScore || 0}/100`;
 
   const rawRecommendationCount = Number(rawRecommendationItems.length || (report.improvementItems || []).length || 0);
   console.info(
@@ -2024,6 +2121,26 @@ function buildPropertySummaryHtml({ property, report }) {
       `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=placeholder_language_detected`,
     );
   }
+  if (readinessScoreLabel.length > 8) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=readiness_typography_risk value=${readinessScoreLabel}`,
+    );
+  }
+  if (
+    (executiveSummaryOverflowBullets.length ||
+      summaryRecommendationsOverflow.length ||
+      launchStatusHighlightsOverflow.length) &&
+    !hasExecutiveSummaryContinuation
+  ) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=continuation_header_missing section=executive_summary`,
+    );
+  }
+  if ((orderedNextStepsOverflow.length || actionCardsOverflow.length) && !hasReadinessContinuation) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=continuation_header_missing section=readiness_dashboard`,
+    );
+  }
 
   const body = `
     <section class="page hero-page">
@@ -2033,7 +2150,7 @@ function buildPropertySummaryHtml({ property, report }) {
           <h1>${escapeHtml(report.title || property.title || 'Property Summary Report')}</h1>
           <div class="score-hero">
             <div class="metric-label">Readiness score</div>
-            <div class="score-hero-value">${escapeHtml(`${readinessSummary.overallScore || 0}/100`)}</div>
+            <div class="score-hero-value">${escapeHtml(readinessScoreLabel)}</div>
             <div class="score-status score-status-${escapeHtml(readinessTone)}">${escapeHtml(readinessSummary.label || 'Needs work')}</div>
             <p class="score-hero-note">${escapeHtml(coverNarrative || 'This report turns property data into a clear launch decision and next-step sequence.')}</p>
           </div>
@@ -2140,6 +2257,55 @@ function buildPropertySummaryHtml({ property, report }) {
       ${renderFooter('Property Summary Report · Summary')}
     </section>
 
+    ${
+      hasExecutiveSummaryContinuation
+        ? `
+          <section class="page">
+            <div class="brand-bar">
+              <div>
+                <div class="section-kicker">Summary</div>
+                <h2 class="continuation-title">Executive Summary (continued)</h2>
+                <p class="muted">Additional summary details moved to this page to keep each section clean and fully readable.</p>
+              </div>
+            </div>
+            <div class="dense-two-col">
+              <div class="content-card">
+                <div class="section-kicker">Key insights (continued)</div>
+                <h3>Additional observations</h3>
+                ${renderInsightList(
+                  executiveSummaryOverflowBullets,
+                  'Primary insights are already captured on the summary page.',
+                )}
+              </div>
+              <div class="content-card">
+                <div class="section-kicker">Recommendations (continued)</div>
+                <h3>Additional action guidance</h3>
+                ${renderBulletList(
+                  summaryRecommendationsOverflow,
+                  'Priority recommendations are already captured on the summary page.',
+                )}
+              </div>
+            </div>
+            ${
+              launchStatusHighlightsOverflow.length
+                ? `
+                  <div class="content-card" style="margin-top:14px;">
+                    <div class="section-kicker">Launch status (continued)</div>
+                    <h3>Additional readiness signals</h3>
+                    ${renderHighlightGrid(
+                      launchStatusHighlightsOverflow,
+                      'No additional launch-status detail is required.',
+                    )}
+                  </div>
+                `
+                : ''
+            }
+            ${renderFooter('Property Summary Report · Summary Continuation')}
+          </section>
+        `
+        : ''
+    }
+
     <section class="page">
       <div class="brand-bar">
         <div>
@@ -2232,12 +2398,12 @@ function buildPropertySummaryHtml({ property, report }) {
       <div class="dashboard-row" style="margin-top:14px;">
         <div class="callout-chip callout-chip-risk">
           <div class="metric-label">Biggest risk</div>
-          <strong>${escapeHtml(summaryRisk || 'No dominant launch risk identified.')}</strong>
+          <strong>${escapeHtml(readinessRiskHeadline || 'No dominant launch risk identified.')}</strong>
           <div style="margin-top:10px;"><span class="priority-badge priority-badge-p1">P1 Must fix</span></div>
         </div>
         <div class="callout-chip callout-chip-opportunity">
           <div class="metric-label">Biggest opportunity</div>
-          <strong>${escapeHtml(summaryOpportunity || 'No major opportunity signal was detected.')}</strong>
+          <strong>${escapeHtml(readinessOpportunityHeadline || 'No major opportunity signal was detected.')}</strong>
           <div style="margin-top:10px;"><span class="priority-badge priority-badge-p2">P2 Should fix</span></div>
         </div>
       </div>
@@ -2368,7 +2534,7 @@ function buildPropertySummaryHtml({ property, report }) {
           <div class="section-kicker">Ordered launch steps</div>
           <h3>What to do next</h3>
           ${renderChecklistItems(
-            orderedNextSteps,
+            orderedNextStepsPrimary,
             'Use the guided workflow in the app to continue the launch checklist.',
           )}
         </div>
@@ -2376,7 +2542,7 @@ function buildPropertySummaryHtml({ property, report }) {
           <div class="section-kicker">Priority action cards</div>
           <h3>Highest-impact prep moves</h3>
           ${renderRecommendationActionCards(
-            sortedRecommendationActions.slice(0, 4),
+            actionCardsPrimary,
             'Use these structured actions to keep launch readiness improving.',
           )}
         </div>
@@ -2396,6 +2562,69 @@ function buildPropertySummaryHtml({ property, report }) {
       </div>
       ${renderFooter('Property Summary Report · Action Plan')}
     </section>
+
+    ${
+      hasReadinessContinuation
+        ? `
+          <section class="page">
+            <div class="brand-bar">
+              <div>
+                <div class="section-kicker">Readiness and preparation</div>
+                <h2 class="continuation-title">Readiness Dashboard (continued)</h2>
+                <p class="muted">Extended action detail is continued here so cards and checklists stay intact and readable.</p>
+              </div>
+            </div>
+            <div class="dense-two-col">
+              <div class="content-card">
+                <div class="section-kicker">Ordered launch steps (continued)</div>
+                <h3>Additional next steps</h3>
+                ${renderChecklistItems(
+                  orderedNextStepsOverflow,
+                  'The primary launch sequence is already listed on the action-plan page.',
+                )}
+              </div>
+              <div class="content-card">
+                <div class="section-kicker">Priority action cards (continued)</div>
+                <h3>Additional prep moves</h3>
+                ${renderRecommendationActionCards(
+                  actionCardsOverflow,
+                  'No additional action cards remain after the primary set.',
+                )}
+              </div>
+            </div>
+            ${
+              readinessContinuationInsightsPrimary.length
+                ? `
+                  <div class="content-card" style="margin-top:14px;">
+                    <div class="section-kicker">Additional readiness notes</div>
+                    <h3>Extended risk and opportunity context</h3>
+                    ${renderBulletList(
+                      readinessContinuationInsightsPrimary,
+                      'No additional readiness notes were required.',
+                    )}
+                  </div>
+                `
+                : ''
+            }
+            ${
+              readinessContinuationInsightsOverflow.length
+                ? `
+                  <div class="content-card" style="margin-top:14px;">
+                    <div class="section-kicker">Additional readiness notes</div>
+                    <h3>More detail</h3>
+                    ${renderBulletList(
+                      readinessContinuationInsightsOverflow,
+                      'No additional readiness notes were required.',
+                    )}
+                  </div>
+                `
+                : ''
+            }
+            ${renderFooter('Property Summary Report · Readiness Continuation')}
+          </section>
+        `
+        : ''
+    }
   `;
 
   return renderHtmlDocument({
@@ -2442,19 +2671,65 @@ function buildMarketingReportHtml({ property, flyer }) {
       ? 'Premium mode: polished presentation designed to convert high-intent buyer interest.'
       : 'Launch-ready mode: private showings and property-package requests available now.';
   const selectedPhotos = (flyer.selectedPhotos || []).filter((photo) => photo?.imageUrl);
-  const prioritizedPhotos = selectFlyerGalleryPhotos(selectedPhotos, 8);
+  const prioritizedPhotos = selectFlyerGalleryPhotos(selectedPhotos, 10);
   const coverPhotos = prioritizedPhotos.slice(0, 4);
   const hasFourPhotoCover = coverPhotos.length >= 4;
   const heroPhoto = coverPhotos[0];
   const gallerySeed = hasFourPhotoCover ? prioritizedPhotos.slice(4, 8) : prioritizedPhotos.slice(1, 5);
   const galleryPhotos = gallerySeed.length
     ? gallerySeed
-    : selectFlyerGalleryPhotos(prioritizedPhotos.slice(1), 4);
-  const resolvedGalleryPhotos = ensureMinimumFlyerPhotos(
-    galleryPhotos.length ? galleryPhotos : selectFlyerGalleryPhotos(prioritizedPhotos, 4),
+    : selectFlyerGalleryPhotos(prioritizedPhotos.slice(1), 5);
+  const seededGalleryPhotos = ensureMinimumFlyerPhotos(
+    galleryPhotos.length ? galleryPhotos : selectFlyerGalleryPhotos(prioritizedPhotos, 5),
+    prioritizedPhotos,
     3,
     5,
   );
+  const coverIdentities = new Set(
+    coverPhotos
+      .map((photo) => resolveFlyerPhotoIdentity(photo))
+      .filter(Boolean),
+  );
+  const resolvedGalleryPhotos = [];
+  const galleryIdentities = new Set();
+  let replacedDuplicateImages = 0;
+  const addUniqueGalleryPhoto = (photo, source = 'primary') => {
+    if (!photo?.imageUrl) {
+      return false;
+    }
+    const identity = resolveFlyerPhotoIdentity(photo);
+    if (!identity || coverIdentities.has(identity) || galleryIdentities.has(identity)) {
+      if (source === 'primary') {
+        replacedDuplicateImages += 1;
+      }
+      return false;
+    }
+    galleryIdentities.add(identity);
+    resolvedGalleryPhotos.push({
+      ...photo,
+      roomLabel: photo?.roomLabel || `${titleCaseLabel(flyerRoomBucket(photo?.roomLabel || 'property'))} photo`,
+    });
+    return true;
+  };
+  for (const photo of seededGalleryPhotos) {
+    addUniqueGalleryPhoto(photo, 'primary');
+  }
+  const replacementPool = selectFlyerGalleryPhotos([...prioritizedPhotos, ...selectedPhotos], 12);
+  for (const photo of replacementPool) {
+    if (resolvedGalleryPhotos.length >= 5) {
+      break;
+    }
+    addUniqueGalleryPhoto(photo, 'fallback');
+  }
+  if (resolvedGalleryPhotos.length < 3) {
+    for (const photo of [...selectedPhotos, ...prioritizedPhotos]) {
+      if (resolvedGalleryPhotos.length >= 3) {
+        break;
+      }
+      addUniqueGalleryPhoto(photo, 'fallback');
+    }
+  }
+  const galleryDuplicateCount = countDuplicateFlyerPhotos(resolvedGalleryPhotos);
   const galleryStatusNote = flyerMode === 'preview'
     ? 'Preview mode: this gallery uses the strongest currently selected listing photos.'
     : '';
@@ -2475,8 +2750,20 @@ function buildMarketingReportHtml({ property, flyer }) {
     property?.selectedListPrice ? `Seller-confirmed list price ${formatCurrency(property.selectedListPrice)}` : '',
     lifestyleContext,
   ], 6);
-  const shouldRenderMapPage = Boolean(neighborhoodMapImageUrl && prioritizedPhotos.length >= 4);
+  const shouldRenderMapPage = Boolean(neighborhoodMapImageUrl);
   const keyHighlightsColumnClass = resolvedGalleryPhotos.length ? 'col-span-5' : 'col-span-12';
+  const neighborhoodHighlights = pickMeaningfulLines([
+    topReasonsToBuy.find((line) => /(school|park|trail|community|walk|retail|dining)/i.test(String(line || ''))),
+    lifestyleContext,
+    property?.city ? `${property.city} location supports daily convenience, lifestyle access, and showing appeal.` : '',
+    property?.selectedListPrice ? `Price point ${formatCurrency(property.selectedListPrice)} aligns with current buyer search bands in this area.` : '',
+    'Balanced neighborhood positioning supports both immediate move-in buyers and long-term value-focused buyers.',
+  ], 4);
+  const commuteNotes = pickMeaningfulLines([
+    property?.city && property?.state ? `Commuter note: ${property.city}, ${property.state} offers multiple corridor options for daily travel patterns.` : '',
+    'Local retail corridors and services are positioned for practical day-to-day access.',
+    'Nearby amenities can improve showing conversations by helping buyers visualize everyday routines.',
+  ], 3);
   const brochureFactBadges = pickMeaningfulLines([
     property?.bedrooms ? `${property.bedrooms} bedrooms` : '',
     property?.bathrooms ? `${property.bathrooms} bathrooms` : '',
@@ -2484,6 +2771,8 @@ function buildMarketingReportHtml({ property, flyer }) {
     formatPropertyTypeLabel(property?.propertyType),
     modeLabel ? `${modeLabel} mode` : '',
   ], 4);
+  const flyerMapCount = shouldRenderMapPage ? 1 : 0;
+  const combinedDuplicateCount = countDuplicateFlyerPhotos([...coverPhotos, ...resolvedGalleryPhotos]);
   if (resolvedGalleryPhotos.length < 3) {
     console.warn(
       `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_photo_count_low count=${resolvedGalleryPhotos.length}`,
@@ -2492,6 +2781,31 @@ function buildMarketingReportHtml({ property, flyer }) {
   if (!resolvedGalleryPhotos.length) {
     console.warn(
       `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_gallery_empty`,
+    );
+  }
+  if (replacedDuplicateImages > 0) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_duplicate_images_replaced count=${replacedDuplicateImages}`,
+    );
+  }
+  if (galleryDuplicateCount > 0) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_duplicate_images_remaining count=${galleryDuplicateCount}`,
+    );
+  }
+  if (combinedDuplicateCount > 0) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_cover_gallery_duplicates count=${combinedDuplicateCount}`,
+    );
+  }
+  if (flyerMapCount > 1) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_map_count_invalid count=${flyerMapCount}`,
+    );
+  }
+  if (shouldRenderMapPage && neighborhoodHighlights.length < 2 && commuteNotes.length < 1) {
+    console.warn(
+      `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_context_sparse`,
     );
   }
   if (
@@ -2608,12 +2922,13 @@ function buildMarketingReportHtml({ property, flyer }) {
           <div class="page-spacer"></div>
           <div class="section-kicker">Neighborhood context</div>
           <p class="compact-copy">${escapeHtml(lifestyleContext)}</p>
+          ${renderBulletList(neighborhoodHighlights.slice(0, 3), '')}
           ${
-            neighborhoodMapImageUrl
+            commuteNotes.length
               ? `
-                <div class="map-frame compact" style="margin-top:12px;">
-                  <img src="${escapeHtml(neighborhoodMapImageUrl)}" alt="Neighborhood map" onerror="this.closest('.map-frame').style.display='none';" />
-                </div>
+                <div class="page-spacer"></div>
+                <div class="section-kicker">Commute notes</div>
+                ${renderBulletList(commuteNotes, '')}
               `
               : ''
           }
@@ -2648,7 +2963,7 @@ function buildMarketingReportHtml({ property, flyer }) {
                 <p class="muted">A cleaner neighborhood view and contact block designed for seller-facing brochure review.</p>
               </div>
             </div>
-            <div class="two-col">
+            <div class="two-col flyer-context-grid">
               <div class="content-card">
                 <div class="section-kicker">Neighborhood</div>
                 <h3>Local context</h3>
@@ -2660,6 +2975,12 @@ function buildMarketingReportHtml({ property, flyer }) {
                   <div class="badge">${escapeHtml(property?.selectedListPrice ? `Starting at ${formatCurrency(property.selectedListPrice)}` : flyer.priceText || 'Pricing on request')}</div>
                   <div class="badge">${escapeHtml(topReasonsToBuy[0] || 'Move-in ready positioning')}</div>
                 </div>
+                <div class="page-spacer"></div>
+                <div class="section-kicker">Area benefits</div>
+                ${renderBulletList(
+                  neighborhoodHighlights,
+                  'Neighborhood positioning aligns with buyer priorities and showing-readiness goals.',
+                )}
               </div>
               <div class="content-card">
                 <div class="section-kicker">Why this home wins</div>
@@ -2671,6 +2992,13 @@ function buildMarketingReportHtml({ property, flyer }) {
                     'A polished listing package helps move buyers from browsing to booking a showing.',
                   ], 3),
                   '',
+                )}
+                <div class="page-spacer"></div>
+                <div class="section-kicker">Commute and local convenience</div>
+                <h3>How the area supports day-to-day living</h3>
+                ${renderBulletList(
+                  commuteNotes,
+                  'Everyday convenience and local access strengthen this home’s buyer appeal.',
                 )}
                 <div class="page-spacer"></div>
                 <div class="section-kicker">Urgency and contact</div>
