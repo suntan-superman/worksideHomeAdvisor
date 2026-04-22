@@ -370,19 +370,32 @@ function buildRiskOpportunitySummary({
   checklist,
   consequenceFraming,
 }) {
-  const biggestRisk = photoSummary?.retakeCount
-    ? `${photoSummary.retakeCount} photo retake recommendation${photoSummary.retakeCount === 1 ? '' : 's'} still need attention before launch.`
-    : pricing?.risks?.[0] || 'The launch plan still needs review before going to market.';
-  const biggestOpportunity =
-    improvementItems[0] ||
-    checklist?.nextTask?.title ||
-    pricing?.strengths?.[0] ||
-    'Tighten presentation and pricing alignment before publishing the listing.';
+  const retakeCount = Number(photoSummary?.retakeCount || 0);
+  const openChecklistCount = Number(checklist?.summary?.openCount || 0);
+  const biggestRisk = retakeCount > 0
+    ? `Current photo quality may suppress early buyer confidence until ${retakeCount} priority retakes are completed.`
+    : openChecklistCount > 0
+      ? `${openChecklistCount} open checklist item${openChecklistCount === 1 ? '' : 's'} may delay launch timing and consistency.`
+      : pricing?.risks?.[0] || 'The launch plan still needs review before going to market.';
+  const biggestOpportunity = retakeCount > 0
+    ? 'Improving kitchen, exterior, and living-room visuals can materially strengthen showing interest quality.'
+    : improvementItems[0] ||
+      checklist?.nextTask?.title ||
+      pricing?.strengths?.[0] ||
+      'Tighten presentation and pricing alignment before publishing the listing.';
+  const distinctPair = ensureRiskOpportunitySeparation({
+    risk: biggestRisk,
+    opportunity: biggestOpportunity,
+    pricing,
+    checklist,
+    photoSummary,
+    improvementItems,
+  });
 
   return {
-    biggestRisk,
-    biggestOpportunity,
-    narrative: `Primary risk: ${biggestRisk} Primary opportunity: ${biggestOpportunity}`,
+    biggestRisk: distinctPair.risk,
+    biggestOpportunity: distinctPair.opportunity,
+    narrative: `Primary risk: ${distinctPair.risk} Primary opportunity: ${distinctPair.opportunity}`,
     consequence:
       consequenceFraming?.summary ||
       'Incomplete prep may reduce buyer confidence and delay launch momentum.',
@@ -679,6 +692,73 @@ function normalizeReportCustomizations(customizations = {}) {
   };
 }
 
+function stripMarketingTerms(value = '') {
+  return String(value || '')
+    .replace(/\bbeautifully updated\b/gi, 'well-maintained')
+    .replace(/\bstunning\b/gi, 'well-presented')
+    .replace(/\bperfect\b/gi, 'strong')
+    .replace(/\bluxury\b/gi, 'quality')
+    .replace(/\bturnkey-feeling\b/gi, 'ready-to-show')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function lexicalSimilarity(left = '', right = '') {
+  const normalize = (input) =>
+    String(input || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((token) => token.length >= 4);
+  const leftTokens = new Set(normalize(left));
+  const rightTokens = new Set(normalize(right));
+  if (!leftTokens.size || !rightTokens.size) {
+    return 0;
+  }
+  let overlap = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) {
+      overlap += 1;
+    }
+  }
+  return overlap / Math.max(leftTokens.size, rightTokens.size, 1);
+}
+
+function ensureRiskOpportunitySeparation({
+  risk = '',
+  opportunity = '',
+  pricing,
+  checklist,
+  photoSummary,
+  improvementItems = [],
+}) {
+  const similarity = lexicalSimilarity(risk, opportunity);
+  if (similarity < 0.55) {
+    return { risk, opportunity };
+  }
+
+  const fallbackOpportunity = [
+    pricing?.strengths?.[0]
+      ? 'Pricing clarity can improve qualified showing quality when messaging stays consistent.'
+      : '',
+    checklist?.nextTask?.title
+      ? `Closing "${checklist.nextTask.title}" can unlock faster launch momentum.`
+      : '',
+    improvementItems[0]
+      ? `Executing "${improvementItems[0]}" is the fastest path to visible launch improvement.`
+      : '',
+    photoSummary?.roomCoverageCount
+      ? 'Tightening the final presentation sequence can strengthen first-impression quality and response confidence.'
+      : '',
+  ]
+    .filter(Boolean)[0] || 'Completing the next highest-impact step can improve launch confidence and buyer response quality.';
+
+  return {
+    risk,
+    opportunity: fallbackOpportunity,
+  };
+}
+
 function buildExecutiveSummary({
   property,
   pricing,
@@ -689,10 +769,22 @@ function buildExecutiveSummary({
   biggestRisk,
   consequenceFraming,
 }) {
+  const readinessScore = Number(readinessSummary?.overallScore || 0);
+  const isPrepState = readinessScore < 50;
+  const isNearLaunchState = readinessScore >= 65 && Boolean(property?.selectedListPrice);
+  const sanitizedOpportunity = stripMarketingTerms(strongestOpportunity || '');
+  const sanitizedRisk = stripMarketingTerms(biggestRisk || '');
+  const sanitizedConsequence = stripMarketingTerms(consequenceFraming?.summary || '');
+
   return [
-    `${property.title} is currently rated ${readinessSummary.label.toLowerCase()} at ${readinessSummary.overallScore}/100.`,
+    `${property.title} is currently ${readinessSummary.label.toLowerCase()} at ${readinessSummary.overallScore}/100 readiness.`,
+    isNearLaunchState
+      ? 'Launch posture is near-ready, with final polish focused on consistency and conversion quality.'
+      : isPrepState
+        ? 'This property is still in a preparation-first phase before full buyer-facing launch.'
+        : 'This property is in a balanced pre-launch phase with targeted improvements still in progress.',
     property?.selectedListPrice
-      ? `Selected list price is ${formatCurrency(property.selectedListPrice)}. Recommended pricing confidence remains ${Math.round((pricing?.confidenceScore || 0) * 100)}%.`
+      ? `Selected list price is ${formatCurrency(property.selectedListPrice)} with ${Math.round((pricing?.confidenceScore || 0) * 100)}% pricing confidence.`
       : pricing?.recommendedListMid
         ? `Pricing centers around ${formatCurrency(pricing.recommendedListMid)} with ${Math.round((pricing.confidenceScore || 0) * 100)}% confidence.`
         : 'Pricing still needs a fresh analysis.',
@@ -700,9 +792,9 @@ function buildExecutiveSummary({
     checklist?.summary?.totalCount
       ? `${checklist.summary.completedCount} of ${checklist.summary.totalCount} checklist items are complete.`
       : 'Checklist guidance is included for launch planning.',
-    strongestOpportunity ? `Top opportunity: ${strongestOpportunity}.` : 'There is room to strengthen launch readiness.',
-    biggestRisk ? `Top risk: ${biggestRisk}.` : 'No single launch risk currently dominates the report.',
-    consequenceFraming?.summary || 'Delays on top prep items may weaken first impressions and launch momentum.',
+    sanitizedOpportunity ? `Top opportunity: ${sanitizedOpportunity}.` : 'There is room to strengthen launch readiness.',
+    sanitizedRisk ? `Top risk: ${sanitizedRisk}.` : 'No single launch risk currently dominates the report.',
+    sanitizedConsequence || 'Delays on top prep items may weaken first impressions and launch momentum.',
   ].join(' ');
 }
 
@@ -851,10 +943,12 @@ async function buildReportPayload({
   const improvementItems = recommendationActions.length
     ? recommendationActions.map((action) => action.title).slice(0, 5)
     : draftImprovementItems;
-  const strongestOpportunity = improvementItems[0] || checklist?.nextTask?.title || null;
+  const strongestOpportunity = readinessSummary.overallScore >= 65 && property?.selectedListPrice
+    ? pricing?.strengths?.[0] || improvementItems[0] || checklist?.nextTask?.title || null
+    : improvementItems[0] || checklist?.nextTask?.title || null;
   const biggestRisk = consequenceFraming?.lines?.[0] || (
     photoSummary.retakeCount
-      ? `${photoSummary.retakeCount} photo retake recommendation${photoSummary.retakeCount === 1 ? '' : 's'} remain`
+      ? `Current photo quality may suppress early buyer confidence until ${photoSummary.retakeCount} priority retakes are completed.`
       : pricing?.risks?.[0] || null
   );
   const improvementEconomics = buildImprovementEconomics({
@@ -894,7 +988,7 @@ async function buildReportPayload({
   return {
     reportType: 'seller_intelligence_report',
     status: 'completed',
-    reportVersion: 3,
+    reportVersion: 4,
     title: customizations.title || `${property.title} Seller Intelligence Report`,
     executiveSummary:
       customizations.executiveSummary ||

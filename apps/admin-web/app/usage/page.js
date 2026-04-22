@@ -1,6 +1,7 @@
 import { AdminSection } from '../_components/AdminSection';
 import { DataTable } from '../_components/DataTable';
 import { MetricCard } from '../_components/MetricCard';
+import { DocumentHistoryCleanupCard } from './DocumentHistoryCleanupCard';
 import { PricingQueryPolicyCard } from './PricingQueryPolicyCard';
 import { ResetFreeTeasersCard } from './ResetFreeTeasersCard';
 import { getAdminUsage } from '../../lib/admin-api';
@@ -29,6 +30,7 @@ export default async function AdminUsagePage() {
 
       <PricingQueryPolicyCard initialPolicy={payload.pricingQueryPolicy} />
       <ResetFreeTeasersCard />
+      <DocumentHistoryCleanupCard />
 
       <DataTable
         columns={[

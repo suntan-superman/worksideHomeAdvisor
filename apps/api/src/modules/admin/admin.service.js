@@ -4,6 +4,7 @@ import { listBillingPlans } from '../billing/billing.service.js';
 import { BillingSubscriptionModel, BillingWebhookEventModel } from '../billing/billing.model.js';
 import { UserModel } from '../auth/auth.model.js';
 import { FlyerModel } from '../documents/flyer.model.js';
+import { ReportModel } from '../documents/report.model.js';
 import { MediaAssetModel } from '../media/media.model.js';
 import { MediaVariantModel } from '../media/media-variant.model.js';
 import {
@@ -746,6 +747,156 @@ export async function getAdminWorkerSnapshot() {
 
 export async function runAdminMediaVariantCleanup() {
   return cleanupExpiredMediaVariants();
+}
+
+async function buildDocumentCleanupPlan({
+  model,
+  keepLatest = 1,
+  olderThanDate,
+}) {
+  const documents = await model
+    .find({})
+    .select({ _id: 1, propertyId: 1, createdAt: 1 })
+    .sort({ propertyId: 1, createdAt: -1 })
+    .lean();
+
+  let scanned = 0;
+  let eligible = 0;
+  let retainedAsLatest = 0;
+  let retainedByAge = 0;
+  let distinctProperties = 0;
+  const idsToDelete = [];
+  const rankByPropertyId = new Map();
+
+  for (const document of documents) {
+    scanned += 1;
+    const propertyId = document.propertyId?.toString?.() || String(document.propertyId || '');
+    const currentRank = rankByPropertyId.get(propertyId) || 0;
+    rankByPropertyId.set(propertyId, currentRank + 1);
+    if (currentRank === 0) {
+      distinctProperties += 1;
+    }
+
+    if (currentRank < keepLatest) {
+      retainedAsLatest += 1;
+      continue;
+    }
+
+    const createdAt = document.createdAt ? new Date(document.createdAt) : null;
+    const isOlderThanCutoff =
+      createdAt instanceof Date &&
+      !Number.isNaN(createdAt.getTime()) &&
+      createdAt <= olderThanDate;
+    if (!isOlderThanCutoff) {
+      retainedByAge += 1;
+      continue;
+    }
+
+    eligible += 1;
+    idsToDelete.push(document._id);
+  }
+
+  return {
+    scanned,
+    distinctProperties,
+    eligible,
+    retainedAsLatest,
+    retainedByAge,
+    idsToDelete,
+  };
+}
+
+export async function runAdminDocumentHistoryCleanup({
+  olderThanDays = 45,
+  keepLatest = 1,
+  target = 'both',
+  dryRun = true,
+} = {}) {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('Database connection is required to cleanup document history.');
+  }
+
+  const normalizedDays = Math.max(1, Number(olderThanDays) || 45);
+  const normalizedKeepLatest = Math.max(1, Number(keepLatest) || 1);
+  const normalizedTarget = ['flyer', 'report', 'both'].includes(String(target))
+    ? String(target)
+    : 'both';
+  const executeDelete = !Boolean(dryRun);
+  const olderThanDate = new Date(
+    Date.now() - normalizedDays * 24 * 60 * 60 * 1000,
+  );
+
+  const includeFlyers = normalizedTarget === 'flyer' || normalizedTarget === 'both';
+  const includeReports = normalizedTarget === 'report' || normalizedTarget === 'both';
+  const results = {};
+
+  if (includeFlyers) {
+    const plan = await buildDocumentCleanupPlan({
+      model: FlyerModel,
+      keepLatest: normalizedKeepLatest,
+      olderThanDate,
+    });
+    const deletedCount =
+      executeDelete && plan.idsToDelete.length
+        ? (await FlyerModel.deleteMany({ _id: { $in: plan.idsToDelete } })).deletedCount || 0
+        : 0;
+    results.flyer = {
+      scanned: plan.scanned,
+      distinctProperties: plan.distinctProperties,
+      eligible: plan.eligible,
+      deleted: deletedCount,
+      retainedAsLatest: plan.retainedAsLatest,
+      retainedByAge: plan.retainedByAge,
+    };
+  }
+
+  if (includeReports) {
+    const plan = await buildDocumentCleanupPlan({
+      model: ReportModel,
+      keepLatest: normalizedKeepLatest,
+      olderThanDate,
+    });
+    const deletedCount =
+      executeDelete && plan.idsToDelete.length
+        ? (await ReportModel.deleteMany({ _id: { $in: plan.idsToDelete } })).deletedCount || 0
+        : 0;
+    results.report = {
+      scanned: plan.scanned,
+      distinctProperties: plan.distinctProperties,
+      eligible: plan.eligible,
+      deleted: deletedCount,
+      retainedAsLatest: plan.retainedAsLatest,
+      retainedByAge: plan.retainedByAge,
+    };
+  }
+
+  const totals = Object.values(results).reduce(
+    (aggregate, current) => ({
+      scanned: aggregate.scanned + Number(current?.scanned || 0),
+      eligible: aggregate.eligible + Number(current?.eligible || 0),
+      deleted: aggregate.deleted + Number(current?.deleted || 0),
+      retainedAsLatest: aggregate.retainedAsLatest + Number(current?.retainedAsLatest || 0),
+      retainedByAge: aggregate.retainedByAge + Number(current?.retainedByAge || 0),
+    }),
+    {
+      scanned: 0,
+      eligible: 0,
+      deleted: 0,
+      retainedAsLatest: 0,
+      retainedByAge: 0,
+    },
+  );
+
+  return {
+    success: true,
+    dryRun: !executeDelete,
+    target: normalizedTarget,
+    keepLatest: normalizedKeepLatest,
+    olderThanDays: normalizedDays,
+    cutoffDate: olderThanDate.toISOString(),
+    totals,
+    results,
+  };
 }
 
 export async function getAdminProviderSnapshot({ limit = 50 } = {}) {

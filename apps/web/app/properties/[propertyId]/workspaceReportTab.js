@@ -60,9 +60,13 @@ export function WorkspaceReportTab({
                 onClick={handleDownloadReportPdf}
                 disabled={Boolean(status)}
               >
-                Download report PDF
+                Download latest report PDF
               </button>
             </div>
+            <p className="workspace-control-note">
+              Generate report creates a new saved report version. Download latest report PDF exports
+              the most recent saved version for this property.
+            </p>
             {documentGenerationState?.kind === 'report' ? (
               <p className="workspace-control-note">
                 <strong>Report generation in progress:</strong>{' '}

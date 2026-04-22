@@ -18,6 +18,7 @@ import {
   linkAdminProviderAccountAction,
   listAdminProperties,
   listAdminUsers,
+  runAdminDocumentHistoryCleanup,
   resetAdminUserFreeTeasersAction,
   resendAdminProviderLeadAction,
   runAdminMediaVariantCleanup,
@@ -128,6 +129,13 @@ const resetUsageTeasersSchema = z
     }
   });
 
+const cleanupDocumentHistorySchema = z.object({
+  olderThanDays: z.coerce.number().int().min(1).max(3650).default(45),
+  keepLatest: z.coerce.number().int().min(1).max(10).default(1),
+  target: z.enum(['flyer', 'report', 'both']).default('both'),
+  dryRun: z.boolean().default(true),
+});
+
 export async function adminRoutes(fastify) {
   fastify.addHook('preHandler', async (request, reply) => {
     try {
@@ -233,6 +241,15 @@ export async function adminRoutes(fastify) {
   fastify.post('/media/cleanup-variants', async (_request, reply) => {
     try {
       return reply.send(await runAdminMediaVariantCleanup());
+    } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/documents/cleanup-history', async (request, reply) => {
+    try {
+      const payload = cleanupDocumentHistorySchema.parse(request.body || {});
+      return reply.send(await runAdminDocumentHistoryCleanup(payload));
     } catch (error) {
       return reply.code(400).send({ message: error.message });
     }

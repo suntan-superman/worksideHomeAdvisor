@@ -72,9 +72,17 @@ const ACTION_PLAN_DEPTH_BY_CLASS = Object.freeze({
 
 export function buildPhotoReadinessMetrics({ photoSummary = {}, selectedPhotos = [], recommendationActions = [] } = {}) {
   const selected = (selectedPhotos || []).filter((photo) => photo?.imageUrl);
+  const totalSelectedPhotos = selected.length;
   const marketplaceReadyFromSummary = Number(photoSummary?.listingCandidateCount || 0);
   const marketplaceReadyFromSelection = selected.filter((photo) => photo?.listingCandidate).length;
-  const marketplaceReadyPhotos = Math.max(marketplaceReadyFromSummary, marketplaceReadyFromSelection, 0);
+  const unclampedMarketplaceReadyPhotos = Math.max(marketplaceReadyFromSummary, marketplaceReadyFromSelection, 0);
+  const marketplaceReadyPhotos = Math.min(totalSelectedPhotos, unclampedMarketplaceReadyPhotos);
+  const metricsValidationWarnings = [];
+  if (unclampedMarketplaceReadyPhotos > totalSelectedPhotos) {
+    metricsValidationWarnings.push(
+      `marketplace_ready_clamped_${unclampedMarketplaceReadyPhotos}_to_${totalSelectedPhotos}`,
+    );
+  }
 
   const savedPhotosFlaggedForImprovement = selected.filter((photo) => {
     const score = Number(photo?.score || 0);
@@ -95,11 +103,12 @@ export function buildPhotoReadinessMetrics({ photoSummary = {}, selectedPhotos =
   );
 
   return {
-    totalSelectedPhotos: selected.length,
+    totalSelectedPhotos,
     marketplaceReadyPhotos,
     savedPhotosFlaggedForImprovement,
     priorityRetakes,
     mustFixBeforeLaunchCount,
+    metricsValidationWarnings,
   };
 }
 
@@ -137,6 +146,15 @@ export function decideOutputClasses({
     return {
       sellerReportClass: SELLER_REPORT_CLASS.LAUNCH,
       flyerClass: FLYER_CLASS.MARKETING,
+      reasons,
+    };
+  }
+
+  if (readiness >= 65 && marketplaceReady >= 3 && hasChosenPrice) {
+    reasons.push('near_launch_strength_profile');
+    return {
+      sellerReportClass: SELLER_REPORT_CLASS.BALANCED,
+      flyerClass: FLYER_CLASS.PRELAUNCH,
       reasons,
     };
   }

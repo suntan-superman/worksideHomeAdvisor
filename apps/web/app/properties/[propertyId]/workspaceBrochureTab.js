@@ -225,9 +225,13 @@ export function WorkspaceBrochureTab({
                 onClick={handleDownloadFlyerPdf}
                 disabled={Boolean(status)}
               >
-                Download PDF
+                Download latest flyer PDF
               </button>
             </div>
+            <p className="workspace-control-note">
+              Generate flyer creates a new saved flyer version. Download latest flyer PDF exports the
+              most recent saved flyer for this property.
+            </p>
             {documentGenerationState?.kind === 'flyer' ? (
               <p className="workspace-control-note">
                 <strong>Flyer generation in progress:</strong>{' '}

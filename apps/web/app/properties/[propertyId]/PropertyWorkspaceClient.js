@@ -2578,7 +2578,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           title: isFreeTeaserAccess ? 'Teaser flyer ready' : 'Flyer generated',
           message: isFreeTeaserAccess
             ? 'Your teaser flyer is ready using the uploaded photos. Upgrade to unlock Vision-enhanced photo selection and additional flyer attempts.'
-            : 'The flyer is ready. You can review it here or download the PDF now.',
+            : 'The flyer is ready. You can review it here or download the latest saved flyer PDF now.',
           autoDismissMs: isFreeTeaserAccess ? 0 : undefined,
         });
         openGenerationPrompt('flyer');
@@ -2613,7 +2613,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         title: isFreeTeaserAccess ? 'Teaser flyer ready' : 'Flyer generated',
         message: isFreeTeaserAccess
           ? 'Your teaser flyer is ready using the uploaded photos. Upgrade to unlock Vision-enhanced photo selection and additional flyer attempts.'
-          : 'The flyer is ready. You can review it here or download the PDF now.',
+          : 'The flyer is ready. You can review it here or download the latest saved flyer PDF now.',
         autoDismissMs: isFreeTeaserAccess ? 0 : undefined,
       });
       openGenerationPrompt('flyer');
@@ -2679,7 +2679,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           title: isFreeTeaserAccess ? 'Teaser report ready' : 'Report generated',
           message: isFreeTeaserAccess
             ? 'Your teaser seller report is ready using the uploaded photos. Upgrade to unlock Vision-enhanced photo selection and additional report attempts.'
-            : 'The seller intelligence report is ready. You can review it here or download the PDF now.',
+            : 'The seller intelligence report is ready. You can review it here or download the latest saved report PDF now.',
           autoDismissMs: isFreeTeaserAccess ? 0 : undefined,
         });
         openGenerationPrompt('report');
@@ -2714,7 +2714,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         title: isFreeTeaserAccess ? 'Teaser report ready' : 'Report generated',
         message: isFreeTeaserAccess
           ? 'Your teaser seller report is ready using the uploaded photos. Upgrade to unlock Vision-enhanced photo selection and additional report attempts.'
-          : 'The seller intelligence report is ready. You can review it here or download the PDF now.',
+          : 'The seller intelligence report is ready. You can review it here or download the latest saved report PDF now.',
         autoDismissMs: isFreeTeaserAccess ? 0 : undefined,
       });
       openGenerationPrompt('report');
@@ -4217,7 +4217,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     return handleFileDownload(
       getFlyerExportUrl(propertyId, flyerType),
       `${property?.slug || property?.title || 'property'}-flyer.pdf`,
-      'Flyer PDF downloaded',
+      'Latest flyer PDF downloaded',
     );
   }
 
@@ -4225,7 +4225,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     return handleFileDownload(
       getReportExportUrl(propertyId),
       `${property?.slug || property?.title || 'property'}-seller-report.pdf`,
-      'Seller report PDF downloaded',
+      'Latest seller report PDF downloaded',
     );
   }
 
@@ -4234,8 +4234,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       setGenerationPrompt({
         kind,
         title: 'Flyer ready',
-        message: 'Your flyer finished generating. You can stay here, view the PDF, or download it now.',
-        downloadLabel: 'Download PDF',
+        message:
+          'Your flyer finished generating. View opens the latest saved flyer in a new tab, and download exports that same latest saved version.',
+        downloadLabel: 'Download latest flyer PDF',
       });
       return;
     }
@@ -4244,8 +4245,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
       kind,
       title: 'Seller report ready',
       message:
-        'Your seller intelligence report finished generating. You can stay here, view the PDF, or download it now.',
-      downloadLabel: 'Download report PDF',
+        'Your seller intelligence report finished generating. View opens the latest saved report in a new tab, and download exports that same latest saved version.',
+      downloadLabel: 'Download latest report PDF',
     });
   }
 

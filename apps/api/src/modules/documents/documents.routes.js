@@ -63,7 +63,7 @@ function resolvePdfDisposition(query) {
 
 function resolveDocumentsUpgradeRequiredMessage(reason) {
   if (reason === 'FREE_FLYER_TEASER_USED') {
-    return 'Your free teaser brochure is already generated. Upgrade to create additional brochure versions and unlock advanced photo workflows.';
+    return 'Your free teaser flyer is already generated. Upgrade to create additional flyer versions and unlock advanced photo workflows.';
   }
 
   if (reason === 'FREE_REPORT_TEASER_USED') {

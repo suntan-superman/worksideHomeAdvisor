@@ -407,6 +407,10 @@ function rewriteGenericFlyerCopy(value = '') {
     { pattern: /\bcharming\b/gi, replacement: 'well-positioned' },
     { pattern: /\bbeautiful\b/gi, replacement: 'well-presented' },
     { pattern: /\bcozy\b/gi, replacement: 'efficiently arranged' },
+    { pattern: /\bshould be\b/gi, replacement: 'is designed to be' },
+    { pattern: /\bshould\b/gi, replacement: 'is designed to' },
+    { pattern: /\brecommended\b/gi, replacement: 'focused' },
+    { pattern: /\badvise(?:d)?\b/gi, replacement: 'positioned' },
   ];
   for (const { pattern, replacement } of replacements) {
     text = text.replace(pattern, replacement);
@@ -536,39 +540,152 @@ function toSecondaryInsightReference(line = '') {
   return shortenNarrative(line, 1);
 }
 
+function lexicalSimilarity(left = '', right = '') {
+  const normalize = (input) =>
+    String(input || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((token) => token.length >= 4);
+  const leftTokens = new Set(normalize(left));
+  const rightTokens = new Set(normalize(right));
+  if (!leftTokens.size || !rightTokens.size) {
+    return 0;
+  }
+  let overlap = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) {
+      overlap += 1;
+    }
+  }
+  return overlap / Math.max(leftTokens.size, rightTokens.size, 1);
+}
+
+function ensureDistinctRiskOpportunity({
+  risk = '',
+  opportunity = '',
+  checklistSummary = {},
+  pricingInsightLines = [],
+  topActionLines = [],
+}) {
+  const similarity = lexicalSimilarity(risk, opportunity);
+  if (similarity < 0.55) {
+    return { risk, opportunity };
+  }
+  const fallbackOpportunity = pickMeaningfulLines([
+    pricingInsightLines?.[0] ? 'Tighter pricing posture and message consistency can improve qualified response quality.' : '',
+    Number(checklistSummary?.openCount || 0) > 0
+      ? `Closing ${checklistSummary.openCount} remaining checklist item${checklistSummary.openCount === 1 ? '' : 's'} can accelerate launch confidence.`
+      : '',
+    topActionLines?.[0] ? `Completing "${topActionLines[0]}" is the fastest path to unlock momentum.` : '',
+    'Executing the next highest-impact action can improve buyer confidence and showing quality.',
+  ], 1)[0];
+  return {
+    risk,
+    opportunity: fallbackOpportunity,
+  };
+}
+
+function limitThemeMentions(lines = [], maxMentionsPerTheme = 2) {
+  const safeLimit = Math.max(1, Number(maxMentionsPerTheme) || 2);
+  const counts = new Map();
+  const output = [];
+  for (const line of lines || []) {
+    if (!line) {
+      continue;
+    }
+    const theme = resolveInsightTheme(line);
+    const currentCount = counts.get(theme) || 0;
+    if (theme === 'photo' && currentCount >= safeLimit) {
+      continue;
+    }
+    counts.set(theme, currentCount + 1);
+    output.push(line);
+  }
+  return output;
+}
+
+function alignSummaryTone({
+  text = '',
+  property = {},
+  readinessScore = 0,
+  readinessLabel = '',
+  sellerReportClass = '',
+}) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  const readinessLine = `${property?.title || 'This property'} is currently ${String(readinessLabel || 'in progress').toLowerCase()} at ${readinessScore}/100 readiness.`;
+  const withoutBuzzyTerms = normalized
+    .replace(/\bbeautifully updated\b/gi, 'well-maintained')
+    .replace(/\bstunning\b/gi, 'well-presented')
+    .replace(/\babundant natural light\b/gi, 'consistent natural light support')
+    .replace(/\bturnkey\b/gi, 'launch-ready')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!withoutBuzzyTerms) {
+    return readinessLine;
+  }
+  const sentenceList = withoutBuzzyTerms
+    .split(/(?<=[.!?])\s+/)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+  const filtered = sentenceList.filter((sentence) => !/(beautiful|stunning|charming|cozy)/i.test(sentence));
+  const tail = filtered.slice(0, sellerReportClass === 'launch_report' ? 2 : 3).join(' ');
+  if (sellerReportClass === 'prep_report') {
+    return `${readinessLine} ${tail}`.trim();
+  }
+  if (Number(readinessScore || 0) >= 65) {
+    const positiveLead = 'Launch posture is near-ready, with final refinements focused on consistency and conversion quality.';
+    return `${readinessLine} ${positiveLead} ${tail}`.trim();
+  }
+  return `${readinessLine} ${tail}`.trim();
+}
+
 function deriveReadinessRiskOpportunity({
   photoSummary = {},
   checklistSummary = {},
   summaryRisk = '',
   summaryOpportunity = '',
   pricingInsightLines = [],
+  topActionLines = [],
 }) {
   if (Number(photoSummary?.retakeCount || 0) > 0) {
-    return {
+    return ensureDistinctRiskOpportunity({
       risk: `Current photo quality may reduce listing click-through until ${photoSummary.retakeCount} priority retakes are completed.`,
       opportunity:
-        'Completing targeted photo retakes can improve first-impression confidence and increase showing requests.',
-    };
+        'Upgrading the most visible kitchen, exterior, and living-room images can materially improve showing quality.',
+      checklistSummary,
+      pricingInsightLines,
+      topActionLines,
+    });
   }
   if (Number(checklistSummary?.openCount || 0) > 0) {
-    return {
+    return ensureDistinctRiskOpportunity({
       risk: `${checklistSummary.openCount} open checklist items may delay launch confidence and buyer momentum.`,
       opportunity:
         'Closing the remaining checklist items can shorten prep time and improve launch consistency.',
-    };
+      checklistSummary,
+      pricingInsightLines,
+      topActionLines,
+    });
   }
   if (hasMeaningfulValue(pricingInsightLines?.[0])) {
-    return {
+    return ensureDistinctRiskOpportunity({
       risk: 'Pricing and positioning drift can weaken buyer confidence when messaging is inconsistent.',
       opportunity: 'Consistent pricing posture and feature-backed copy can improve qualified buyer response.',
-    };
+      checklistSummary,
+      pricingInsightLines,
+      topActionLines,
+    });
   }
-  return {
+  return ensureDistinctRiskOpportunity({
     risk: toSecondaryInsightReference(summaryRisk || 'Readiness blockers should be addressed before launch.'),
     opportunity: toSecondaryInsightReference(
       summaryOpportunity || 'Completing top readiness actions can improve launch outcomes.',
     ),
-  };
+    checklistSummary,
+    pricingInsightLines,
+    topActionLines,
+  });
 }
 
 function getReadinessTone({ score, label }) {
@@ -2030,10 +2147,11 @@ function renderHtmlDocument({ title, body }) {
       .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; break-inside: auto; page-break-inside: auto; }
       .map-frame.compact { min-height: 190px; }
       .flyer-context-grid { min-height: auto; align-content: start; align-items: start; }
-      .flyer-context-grid .content-card { padding: 16px 18px; gap: 8px; }
+      .flyer-context-grid .content-card { padding: 14px 16px; gap: 7px; }
+      .flyer-context-grid h3 { font-size: 18px; margin-bottom: 8px; }
       .flyer-context-grid .page-spacer { height: 6px; }
       .flyer-context-grid .bullet-list { margin-top: 6px; }
-      .flyer-context-grid .bullet-list li { margin: 0 0 6px; line-height: 1.46; }
+      .flyer-context-grid .bullet-list li { margin: 0 0 5px; line-height: 1.4; }
       .flyer-context-grid .badge-row { margin-top: 8px; gap: 8px; }
       .flyer-context-grid .cta-button-row { margin-top: 6px; }
       .flyer-context-grid .brochure-cta-button { margin-top: 6px; padding: 12px 18px; }
@@ -2139,7 +2257,7 @@ function renderHtmlDocument({ title, body }) {
       .legend-note { margin-top: 10px; font-size: 11px; line-height: 1.45; color: var(--muted); }
       .marketing-gallery-card { padding: 14px 16px; }
       .closing-band { margin-top: 14px; padding: 14px 16px; border-radius: 18px; background: linear-gradient(135deg, rgba(47,95,143,0.10), rgba(200,116,71,0.12)); border: 1px solid rgba(47,95,143,0.14); }
-      .seller-page { padding: 0.5in 0.52in 0.62in; }
+      .seller-page { padding: 0.46in 0.5in 0.56in; }
       .seller-page .brand-bar { margin-bottom: 10px; }
       .seller-page .content-card, .seller-page .sidebar-card { padding: 16px 18px; gap: 10px; }
       .seller-page .bullet-list { margin-top: 6px; }
@@ -2229,13 +2347,21 @@ function buildPropertySummaryHtml({ property, report }) {
       : 'prep';
   const featureTags = pickMeaningfulLines(propertyDetails.featureTags || [], 6);
   const topReasonsToBuy = pickMeaningfulLines(buyerPersonaSummary.topReasonsToBuy || [], 5);
-  const executiveSummaryText = hasMeaningfulValue(report.executiveSummary)
+  const readinessLabel = hasMeaningfulValue(readinessSummary.label) ? readinessSummary.label : 'Needs work';
+  const executiveSummarySource = hasMeaningfulValue(report.executiveSummary)
     ? report.executiveSummary
     : isLaunchReport
       ? `${property.title || 'This property'} is currently positioned at ${readinessScore}/100 readiness with strong launch momentum and market-facing clarity.`
       : isBalancedReport
         ? `${property.title || 'This property'} is currently positioned at ${readinessScore}/100 readiness with balanced preparation and marketing opportunities.`
       : `${property.title || 'This property'} is currently positioned at ${readinessScore}/100 readiness with the strongest opportunity centered on listing preparation and buyer-facing consistency.`;
+  const executiveSummaryText = alignSummaryTone({
+    text: executiveSummarySource,
+    property,
+    readinessScore,
+    readinessLabel,
+    sellerReportClass,
+  });
   const summaryOpportunityRaw = hasMeaningfulValue(riskOpportunity.biggestOpportunity)
     ? riskOpportunity.biggestOpportunity
     : pickMeaningfulLines(report.improvementItems || [], 1)[0] || (
@@ -2251,14 +2377,23 @@ function buildPropertySummaryHtml({ property, report }) {
         ? 'No single launch risk currently dominates this report.'
         : 'No single launch risk currently dominates the report.';
   const retakeCount = Number(photoSummary.retakeCount || 0);
-  const summaryRisk = retakeCount > 0
-    ? `Photo quality gaps may reduce buyer click-through until ${retakeCount} priority retakes are completed.`
+  const summaryRiskBase = retakeCount > 0
+    ? readinessScore >= 65
+      ? `${retakeCount} photo retake recommendation${retakeCount === 1 ? '' : 's'} still remain before a fully launch-ready gallery is in place.`
+      : `Photo quality gaps may reduce buyer click-through until ${retakeCount} priority retakes are completed.`
     : summaryRiskRaw;
-  const summaryOpportunity = resolveInsightTheme(summaryRisk) === resolveInsightTheme(summaryOpportunityRaw)
+  const summaryOpportunityBase = resolveInsightTheme(summaryRiskBase) === resolveInsightTheme(summaryOpportunityRaw)
     ? retakeCount > 0
       ? 'Completing the priority photo retakes can improve engagement and qualified showing requests.'
       : 'Closing the highest-priority preparation actions can improve launch momentum and buyer confidence.'
     : summaryOpportunityRaw;
+  const summaryRiskOpportunityPair = ensureDistinctRiskOpportunity({
+    risk: summaryRiskBase,
+    opportunity: summaryOpportunityBase,
+    checklistSummary,
+  });
+  const summaryRisk = summaryRiskOpportunityPair.risk;
+  const summaryOpportunity = summaryRiskOpportunityPair.opportunity;
   const economicsSummary = hasMeaningfulValue(improvementEconomics.summary)
     ? improvementEconomics.summary
     : pickMeaningfulLines([
@@ -2304,7 +2439,7 @@ function buildPropertySummaryHtml({ property, report }) {
   const coverKeyInsight = Number(photoSummary.retakeCount || 0) > 0
     ? `Key insight: ${retakeCount} priority photo retakes are still required before launch.`
     : `${checklistSummary.openCount || 0} checklist items still need closure before launch.`;
-  const executiveSummaryBulletPool = pickAdaptivePropertyLines([
+  const executiveSummaryBulletPool = limitThemeMentions(pickAdaptivePropertyLines([
     coverNarrative,
     coverPricingSignal,
     coverKeyInsight,
@@ -2312,7 +2447,7 @@ function buildPropertySummaryHtml({ property, report }) {
       ? report.payload.listingDescriptions.shortDescription
       : '',
     summaryOpportunity,
-  ], { property, limit: isPrepReport ? 4 : 3 });
+  ], { property, limit: isPrepReport ? 4 : 3 }), 2);
   const {
     primary: executiveSummaryBullets,
     overflow: executiveSummaryOverflowBullets,
@@ -2325,7 +2460,7 @@ function buildPropertySummaryHtml({ property, report }) {
       : '',
     medianCompSummary(report.selectedComps || []),
     pricingNarrative,
-  ], { property, limit: isPrepReport ? 5 : 4 });
+  ], { property, limit: isPrepReport ? 4 : 3 });
   const pricingRationaleCompact = pickMeaningfulLines(
     pricingRationaleBullets.map((line) => truncateWords(shortenNarrative(line, 1), 18)),
     2,
@@ -2340,13 +2475,13 @@ function buildPropertySummaryHtml({ property, report }) {
     Number(checklistSummary.openCount || 0) > 0 ? 'Cleaning and prep support' : '',
     hasMeaningfulValue(riskOpportunity.biggestOpportunity) ? 'Staging or presentation support' : '',
   ], isPrepReport ? 3 : 2);
-  const summaryRecommendationPool = dedupeInsightsByTheme(pickAdaptivePropertyLines([
+  const summaryRecommendationPool = dedupeInsightsByTheme(limitThemeMentions(pickAdaptivePropertyLines([
     report.payload?.improvementGuidance?.summary,
     ...recommendationActions.map((action) => action.title),
     ...(report.improvementItems || []).slice(0, 3),
     ...(!isPrepReport ? marketingMomentum : []),
     pricingNarrative,
-  ], { property, limit: isPrepReport ? 8 : isLaunchReport ? 4 : 6 }), isPrepReport ? 6 : 4);
+  ], { property, limit: isPrepReport ? 8 : isLaunchReport ? 4 : 6 }), 2), isPrepReport ? 5 : 4);
   const {
     primary: summaryRecommendations,
     overflow: summaryRecommendationsOverflow,
@@ -2375,19 +2510,19 @@ function buildPropertySummaryHtml({ property, report }) {
     ),
     primaryActionLimit,
   );
-  const topThreeIssues = dedupeInsightsByTheme(pickMeaningfulLines([
+  const topThreeIssues = dedupeInsightsByTheme(limitThemeMentions(pickMeaningfulLines([
     summaryRisk,
     ...(consequenceFraming.lines || []),
     checklistSummary.openCount ? `${checklistSummary.openCount} checklist items still open.` : '',
-  ], 6), 3);
-  const launchStatusHighlightPool = dedupeInsightsByTheme(pickMeaningfulLines([
+  ], 6), 2), 3);
+  const launchStatusHighlightPool = dedupeInsightsByTheme(limitThemeMentions(pickMeaningfulLines([
     photoSummary.averageQualityScore ? `Average photo quality ${photoSummary.averageQualityScore}/100.` : '',
     checklistSummary.totalCount ? `${checklistSummary.completedCount || 0} of ${checklistSummary.totalCount} checklist items are complete.` : '',
     hasSelectedPrice ? `Chosen list price ${formatCurrency(selectedListPrice)}.` : pricingPendingMessage,
     pricingInsightLines[0] || '',
     consequenceFraming.summary || '',
     summaryOpportunity,
-  ], isPrepReport ? 8 : 6), isPrepReport ? 6 : 4);
+  ], isPrepReport ? 8 : 6), 2), isPrepReport ? 5 : 4);
   const {
     primary: launchStatusHighlights,
     overflow: launchStatusHighlightsOverflow,
@@ -2462,7 +2597,7 @@ function buildPropertySummaryHtml({ property, report }) {
     : dedupeInsightsByTheme([...launchStatusHighlights, ...launchStatusHighlightsOverflow], 2);
   const orderedNextStepsDisplay = shouldRenderReadinessContinuation
     ? orderedNextStepsPrimary
-    : pickMeaningfulLines([...orderedNextStepsPrimary, ...orderedNextStepsOverflow], isPrepReport ? 5 : 3);
+    : pickMeaningfulLines([...orderedNextStepsPrimary, ...orderedNextStepsOverflow], isPrepReport ? 4 : 3);
   const actionCardsDisplay = shouldRenderReadinessContinuation
     ? actionCardsPrimary
     : dedupeActionCards([...actionCardsPrimary, ...actionCardsOverflow]).slice(0, 4);
@@ -2470,34 +2605,30 @@ function buildPropertySummaryHtml({ property, report }) {
   const supportSuggestedProviderCategories = suggestedProviderCategories.slice(0, 3);
   const roiUpside = Number(improvementEconomics.estimatedRoi || 0);
   const roiCost = Number(improvementEconomics.estimatedCost || 0);
-  const roiMax = Math.max(roiUpside, roiCost, 1);
-  const roiUpsideWidth = Math.max(4, Math.round((roiUpside / roiMax) * 100));
-  const roiCostWidth = Math.max(4, Math.round((roiCost / roiMax) * 100));
-  const roiUpsideLabel = roiUpside
-    ? `~${formatCurrency(roiUpside)} potential upside`
-    : 'Conservative upside baseline modeled';
-  const roiCostLabel = roiCost
-    ? `Estimated prep cost: ${formatCurrency(roiCost)}`
-    : 'Prep investment modeled from current readiness profile';
-  const roiComparisonLine = roiUpside && roiCost
-    ? `${formatCurrency(roiUpside)} upside vs ${formatCurrency(roiCost)} cost`
-    : '';
-  const readinessEconomicsExplanation = roiComparisonLine
-    ? `A focused prep investment can protect or unlock roughly ${roiComparisonLine.toLowerCase()}.`
-    : (improvementEconomics.summary || 'Prep investments should be tied to the highest-confidence buyer response gains.');
+  const roiUpsideLabel = roiUpside && roiCost
+    ? `${formatCurrency(roiUpside)} potential upside vs ${formatCurrency(roiCost)} prep cost.`
+    : roiUpside
+      ? `${formatCurrency(roiUpside)} modeled upside based on current readiness.`
+      : roiCost
+        ? `${formatCurrency(roiCost)} estimated prep cost before launch.`
+        : 'Prep economics are directionally modeled from current readiness data.';
+  const readinessEconomicsExplanation = hasMeaningfulValue(improvementEconomics.decisionMessage)
+    ? shortenNarrative(improvementEconomics.decisionMessage, 1)
+    : hasMeaningfulValue(improvementEconomics.summary)
+      ? shortenNarrative(improvementEconomics.summary, 1)
+      : 'Cost and upside estimates should guide the next launch-priority move.';
   const readinessEconomicsInterpretation = hasSelectedPrice
-    ? `Interpretation: price is set, so economics should prioritize execution speed and launch consistency.`
-    : `Interpretation: finalize prep and pricing decisions together so launch messaging stays aligned.`;
-  const readinessEconomicsRiskReminder = `Risk reminder: ${toSecondaryInsightReference(readinessRiskHeadline)}`;
+    ? 'Interpretation: list price is set, so economics should prioritize execution speed and consistency.'
+    : 'Interpretation: finalize prep and pricing together so buyer messaging stays aligned.';
   const readinessEconomicsActionLine = topThreeActionLines[0]
     ? `Action now: ${topThreeActionLines[0]}.`
-    : 'Action now: complete the highest-priority prep task before expanding marketing efforts.';
-  const readinessEconomicsNotes = pickMeaningfulLines([
+    : 'Action now: complete the highest-priority prep task before expanding market-facing activity.';
+  const readinessEconomicsNotes = [
+    `Metric: ${roiUpsideLabel}`,
     readinessEconomicsExplanation,
     readinessEconomicsInterpretation,
     readinessEconomicsActionLine,
-    readinessEconomicsRiskReminder,
-  ], 4);
+  ];
   const pricingMetricCards = [
     renderMetricCard('Suggested range', report.pricingSummary?.low && report.pricingSummary?.high ? `${formatCurrency(report.pricingSummary.low)} - ${formatCurrency(report.pricingSummary.high)}` : 'Unavailable', report.pricingSummary?.strategy || 'Market-aligned pricing recommendation'),
     renderMetricCard('Midpoint', report.pricingSummary?.mid ? formatCurrency(report.pricingSummary.mid) : 'Unavailable', report.pricingSummary?.confidence ? `${Math.round(report.pricingSummary.confidence * 100)}% confidence` : 'Comparable signal based'),
@@ -2858,29 +2989,12 @@ function buildPropertySummaryHtml({ property, report }) {
           <p class="muted">A focused cost-versus-upside view for launch decision making.</p>
         </div>
       </div>
-      <div class="roi-hero-card page-flow">
-        <div class="section-kicker">Estimated value at risk</div>
-        <div class="roi-hero-value">${escapeHtml(roiUpsideLabel)}</div>
-        <div class="roi-hero-sub">${escapeHtml(roiCostLabel)}</div>
-        ${roiComparisonLine ? `<div class="roi-hero-compare">${escapeHtml(roiComparisonLine)}</div>` : ''}
-        <div class="roi-hero-sub">${escapeHtml(improvementEconomics.decisionMessage || readinessEconomicsExplanation)}</div>
-        <div class="roi-bar-shell">
-          <div>
-            <div class="metric-label">Potential upside</div>
-            <div class="roi-bar"><div class="roi-bar-fill-upside" style="width:${roiUpsideWidth}%;"></div></div>
-          </div>
-          <div>
-            <div class="metric-label">Estimated prep cost</div>
-            <div class="roi-bar"><div class="roi-bar-fill-cost" style="width:${roiCostWidth}%;"></div></div>
-          </div>
-        </div>
-      </div>
-      <div class="content-card" style="margin-top:12px;">
-        <div class="section-kicker">Interpretation</div>
-        <h3>How to use this estimate</h3>
-        ${renderBulletList(
+      <div class="content-card page-flow">
+        <div class="section-kicker">4-line launch economics</div>
+        <h3>Cost, upside, interpretation, and action</h3>
+        ${renderChecklistItems(
           readinessEconomicsNotes,
-          'Use this estimate as a launch planning signal alongside pricing and checklist progress.',
+          'Use this estimate alongside pricing and checklist progress to sequence launch actions.',
         )}
       </div>
       ${renderFooter('Property Summary Report · Readiness Economics')}
@@ -3403,7 +3517,7 @@ function buildMarketingReportHtml({ property, flyer }) {
   const commuteNotes = pickAdaptivePropertyLines([
     property?.city && property?.state ? `Commuter note: ${property.city}, ${property.state} offers multiple corridor options for daily travel patterns.` : '',
     property?.city ? `Local retail corridors and services in ${property.city} support day-to-day convenience.` : '',
-    isPrepLikeFlyer ? 'Neighborhood messaging should stay factual while preparation is completed.' : '',
+    isPrepLikeFlyer ? 'Neighborhood messaging stays factual while preparation is completed.' : '',
   ], { property, limit: 2 });
   const positioningOutcomeLines = pickAdaptivePropertyLines([
     hasSelectedPrice
@@ -3422,8 +3536,8 @@ function buildMarketingReportHtml({ property, flyer }) {
       commuteNotes.length ||
       positioningOutcomeLines.length,
   );
-  const shouldRenderPricingPage = sectionRegistry.flyer.includePricingPositioningPage;
-  const shouldRenderNeighborhoodPage = sectionRegistry.flyer.includeNeighborhoodPositioningPage && shouldRenderMapPage;
+  const shouldRenderPricingPage = !isPreviewFlyer && sectionRegistry.flyer.includePricingPositioningPage;
+  const shouldRenderNeighborhoodPage = !isPreviewFlyer && sectionRegistry.flyer.includeNeighborhoodPositioningPage && shouldRenderMapPage;
   const brochureFactBadges = pickMeaningfulLines([
     property?.bedrooms ? `${property.bedrooms} bedrooms` : '',
     property?.bathrooms ? `${property.bathrooms} bathrooms` : '',
@@ -3641,8 +3755,8 @@ function buildMarketingReportHtml({ property, flyer }) {
               pricingPostureLine,
               topReasonsToBuy[0] ? `Primary buyer signal: ${topReasonsToBuy[0]}` : '',
               flyerMode === 'preview'
-                ? 'Pricing communication should stay factual while preparation actions are completed.'
-                : 'Pricing communication should stay consistent across listing channels and showing conversations.',
+                ? 'Pricing communication stays factual while preparation actions are completed.'
+                : 'Pricing communication stays consistent across listing channels and showing conversations.',
             ], 3),
             '',
           )}
@@ -3656,7 +3770,7 @@ function buildMarketingReportHtml({ property, flyer }) {
               ...featureTags,
               hasSelectedPrice ? `List-price strategy currently centers on ${formatCurrency(selectedListPrice)}.` : pricingPendingMessage,
             ], 5),
-            'Feature-backed positioning should stay concise and specific.',
+            'Feature-backed positioning stays concise and specific.',
           )}
           ${flyerMode === 'preview' ? `<p class="compact-copy" style="margin-top:8px;"><strong>${escapeHtml(previewUrgencyLine)}</strong></p>` : ''}
         </div>
