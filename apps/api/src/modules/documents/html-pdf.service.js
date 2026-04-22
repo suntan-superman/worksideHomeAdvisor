@@ -4,6 +4,16 @@ import { BRANDING } from '@workside/branding';
 import { formatCurrency } from '@workside/utils';
 
 import { env } from '../../config/env.js';
+import {
+  buildPhotoReadinessMetrics,
+  buildSectionRegistry,
+  decideOutputClasses,
+  getActionPlanDepthProfile,
+  getFlyerToneProfile,
+  getSellerReportToneProfile,
+  SELLER_REPORT_CLASS,
+  FLYER_CLASS,
+} from './output-class-engine.js';
 
 const SUPPORT_EMAIL = BRANDING.supportEmail;
 const SUPPORT_PHONE = BRANDING.supportPhone || String(env.SUPPORT_PHONE || '').trim();
@@ -2165,10 +2175,6 @@ function buildPropertySummaryHtml({ property, report }) {
   const photoSummary = report.payload?.photoSummary || {};
   const readinessSummary = report.payload?.readinessSummary || {};
   const readinessScore = Number(readinessSummary?.overallScore || 0);
-  const readinessBand = getReadinessBand(readinessScore);
-  const isHighReadiness = readinessBand === 'high';
-  const isMidReadiness = readinessBand === 'mid';
-  const isLowReadiness = readinessBand === 'low';
   const propertyDetails = report.payload?.propertyDetails || {};
   const providerRecommendations = ensureProviderRecommendations(report.payload?.providerRecommendations || []);
   const nextSteps = report.payload?.nextSteps || [];
@@ -2190,11 +2196,32 @@ function buildPropertySummaryHtml({ property, report }) {
   const selectedListPrice = Number(property?.selectedListPrice || 0);
   const hasSelectedPrice = Number.isFinite(selectedListPrice) && selectedListPrice > 0;
   const pricingPendingMessage = 'Recommended range available - final pricing decision pending';
-  const reportMarketplaceReadyCount = Number(
-    photoSummary?.listingCandidateCount ||
-      selectedReportPhotos.filter((photo) => photo?.listingCandidate).length ||
-      0,
-  );
+  const photoReadinessMetrics = buildPhotoReadinessMetrics({
+    photoSummary,
+    selectedPhotos: selectedReportPhotos,
+    recommendationActions,
+  });
+  const reportMarketplaceReadyCount = Number(photoReadinessMetrics.marketplaceReadyPhotos || 0);
+  const outputClasses = decideOutputClasses({
+    readinessScore,
+    marketplaceReadyPhotoCount: reportMarketplaceReadyCount,
+    chosenPricePresent: hasSelectedPrice,
+    checklistCompletionPercent: Number(checklistSummary?.progressPercent || 0),
+    priorityRetakeCount: Number(photoReadinessMetrics.priorityRetakes || 0),
+  });
+  const sellerReportClass = outputClasses.sellerReportClass;
+  const flyerClass = outputClasses.flyerClass;
+  const isPrepReport = sellerReportClass === SELLER_REPORT_CLASS.PREP;
+  const isBalancedReport = sellerReportClass === SELLER_REPORT_CLASS.BALANCED;
+  const isLaunchReport = sellerReportClass === SELLER_REPORT_CLASS.LAUNCH;
+  const sellerToneProfile = getSellerReportToneProfile(sellerReportClass);
+  const actionPlanDepth = getActionPlanDepthProfile(sellerReportClass);
+  const sectionRegistry = buildSectionRegistry({
+    sellerReportClass,
+    flyerClass,
+    photoMetrics: photoReadinessMetrics,
+    hasSelectedPrice,
+  });
   const reportPhotoMode = reportMarketplaceReadyCount >= 3
     ? 'full'
     : reportMarketplaceReadyCount >= 1
@@ -2204,15 +2231,15 @@ function buildPropertySummaryHtml({ property, report }) {
   const topReasonsToBuy = pickMeaningfulLines(buyerPersonaSummary.topReasonsToBuy || [], 5);
   const executiveSummaryText = hasMeaningfulValue(report.executiveSummary)
     ? report.executiveSummary
-    : isHighReadiness
+    : isLaunchReport
       ? `${property.title || 'This property'} is currently positioned at ${readinessScore}/100 readiness with strong launch momentum and market-facing clarity.`
-      : isMidReadiness
+      : isBalancedReport
         ? `${property.title || 'This property'} is currently positioned at ${readinessScore}/100 readiness with balanced preparation and marketing opportunities.`
-        : `${property.title || 'This property'} is currently positioned at ${readinessScore}/100 readiness with the strongest opportunity centered on listing preparation and buyer-facing consistency.`;
+      : `${property.title || 'This property'} is currently positioned at ${readinessScore}/100 readiness with the strongest opportunity centered on listing preparation and buyer-facing consistency.`;
   const summaryOpportunityRaw = hasMeaningfulValue(riskOpportunity.biggestOpportunity)
     ? riskOpportunity.biggestOpportunity
     : pickMeaningfulLines(report.improvementItems || [], 1)[0] || (
-      isHighReadiness
+      isLaunchReport
         ? 'Maintain listing consistency while reinforcing the strongest buyer-facing signals.'
         : 'Strengthen buyer confidence with final prep, pricing, and presentation decisions.'
     );
@@ -2220,7 +2247,7 @@ function buildPropertySummaryHtml({ property, report }) {
     ? riskOpportunity.biggestRisk
     : Number(photoSummary.retakeCount || 0) > 0
       ? 'Photo quality upgrades should be completed before listing launch.'
-      : isHighReadiness
+      : isLaunchReport
         ? 'No single launch risk currently dominates this report.'
         : 'No single launch risk currently dominates the report.';
   const retakeCount = Number(photoSummary.retakeCount || 0);
@@ -2285,11 +2312,11 @@ function buildPropertySummaryHtml({ property, report }) {
       ? report.payload.listingDescriptions.shortDescription
       : '',
     summaryOpportunity,
-  ], { property, limit: isLowReadiness ? 4 : 3 });
+  ], { property, limit: isPrepReport ? 4 : 3 });
   const {
     primary: executiveSummaryBullets,
     overflow: executiveSummaryOverflowBullets,
-  } = splitPrimaryAndOverflow(executiveSummaryBulletPool, isLowReadiness ? 3 : 2);
+  } = splitPrimaryAndOverflow(executiveSummaryBulletPool, isPrepReport ? 3 : 2);
   const pricingRationaleBullets = pickAdaptivePropertyLines([
     report.pricingSummary?.strategy,
     ...(report.pricingSummary?.strengths || []),
@@ -2298,7 +2325,7 @@ function buildPropertySummaryHtml({ property, report }) {
       : '',
     medianCompSummary(report.selectedComps || []),
     pricingNarrative,
-  ], { property, limit: isLowReadiness ? 5 : 4 });
+  ], { property, limit: isPrepReport ? 5 : 4 });
   const pricingRationaleCompact = pickMeaningfulLines(
     pricingRationaleBullets.map((line) => truncateWords(shortenNarrative(line, 1), 18)),
     2,
@@ -2312,18 +2339,18 @@ function buildPropertySummaryHtml({ property, report }) {
     photoSummary.retakeCount || photoSummary.roomCoverageCount < 5 ? 'Professional photography' : '',
     Number(checklistSummary.openCount || 0) > 0 ? 'Cleaning and prep support' : '',
     hasMeaningfulValue(riskOpportunity.biggestOpportunity) ? 'Staging or presentation support' : '',
-  ], isLowReadiness ? 3 : 2);
+  ], isPrepReport ? 3 : 2);
   const summaryRecommendationPool = dedupeInsightsByTheme(pickAdaptivePropertyLines([
     report.payload?.improvementGuidance?.summary,
     ...recommendationActions.map((action) => action.title),
     ...(report.improvementItems || []).slice(0, 3),
-    ...(!isLowReadiness ? marketingMomentum : []),
+    ...(!isPrepReport ? marketingMomentum : []),
     pricingNarrative,
-  ], { property, limit: isLowReadiness ? 8 : isHighReadiness ? 4 : 6 }), isLowReadiness ? 6 : 4);
+  ], { property, limit: isPrepReport ? 8 : isLaunchReport ? 4 : 6 }), isPrepReport ? 6 : 4);
   const {
     primary: summaryRecommendations,
     overflow: summaryRecommendationsOverflow,
-  } = splitPrimaryAndOverflow(summaryRecommendationPool, isLowReadiness ? 4 : isHighReadiness ? 2 : 3);
+  } = splitPrimaryAndOverflow(summaryRecommendationPool, isPrepReport ? 4 : isLaunchReport ? 2 : 3);
   const recommendationActionLines = pickMeaningfulLines(
     recommendationActions.map(
       (action) =>
@@ -2332,8 +2359,8 @@ function buildPropertySummaryHtml({ property, report }) {
     8,
   );
   const sortedRecommendationActions = sortRecommendationActions(recommendationActions);
-  const primaryActionLimit = isLowReadiness ? 4 : isHighReadiness ? 2 : 3;
-  const primaryCardLimit = isLowReadiness ? 3 : isHighReadiness ? 1 : 2;
+  const primaryActionLimit = Number(actionPlanDepth.topActionLimit || 3);
+  const primaryCardLimit = Number(actionPlanDepth.actionCardLimit || 2);
   const topPriorityActions = sortedRecommendationActions.slice(0, primaryActionLimit);
   const topThreeActionLines = pickMeaningfulLines(
     topPriorityActions.map((action) => {
@@ -2360,7 +2387,7 @@ function buildPropertySummaryHtml({ property, report }) {
     pricingInsightLines[0] || '',
     consequenceFraming.summary || '',
     summaryOpportunity,
-  ], isLowReadiness ? 8 : 6), isLowReadiness ? 6 : 4);
+  ], isPrepReport ? 8 : 6), isPrepReport ? 6 : 4);
   const {
     primary: launchStatusHighlights,
     overflow: launchStatusHighlightsOverflow,
@@ -2370,7 +2397,7 @@ function buildPropertySummaryHtml({ property, report }) {
     overflow: orderedNextStepsOverflow,
   } = splitPrimaryAndOverflow(orderedNextSteps, primaryActionLimit);
   const actionCardsPrimary = sortedRecommendationActions.slice(0, primaryCardLimit);
-  const actionCardsOverflow = sortedRecommendationActions.slice(primaryCardLimit, isLowReadiness ? 9 : 6);
+  const actionCardsOverflow = sortedRecommendationActions.slice(primaryCardLimit, isPrepReport ? 9 : 6);
   const readinessRiskOpportunity = deriveReadinessRiskOpportunity({
     photoSummary,
     checklistSummary,
@@ -2426,16 +2453,16 @@ function buildPropertySummaryHtml({ property, report }) {
   };
   const executiveSummaryDisplayBullets = shouldRenderExecutiveContinuation
     ? executiveSummaryBullets
-    : pickMeaningfulLines([...executiveSummaryBullets, ...executiveSummaryOverflowBullets], isLowReadiness ? 4 : 3);
+    : pickMeaningfulLines([...executiveSummaryBullets, ...executiveSummaryOverflowBullets], isPrepReport ? 4 : 3);
   const summaryRecommendationsDisplay = shouldRenderExecutiveContinuation
     ? summaryRecommendations
-    : dedupeInsightsByTheme([...summaryRecommendations, ...summaryRecommendationsOverflow], isLowReadiness ? 4 : 3);
+    : dedupeInsightsByTheme([...summaryRecommendations, ...summaryRecommendationsOverflow], isPrepReport ? 4 : 3);
   const launchStatusHighlightsDisplay = shouldRenderExecutiveContinuation
     ? launchStatusHighlights
     : dedupeInsightsByTheme([...launchStatusHighlights, ...launchStatusHighlightsOverflow], 2);
   const orderedNextStepsDisplay = shouldRenderReadinessContinuation
     ? orderedNextStepsPrimary
-    : pickMeaningfulLines([...orderedNextStepsPrimary, ...orderedNextStepsOverflow], isLowReadiness ? 5 : 3);
+    : pickMeaningfulLines([...orderedNextStepsPrimary, ...orderedNextStepsOverflow], isPrepReport ? 5 : 3);
   const actionCardsDisplay = shouldRenderReadinessContinuation
     ? actionCardsPrimary
     : dedupeActionCards([...actionCardsPrimary, ...actionCardsOverflow]).slice(0, 4);
@@ -2455,12 +2482,22 @@ function buildPropertySummaryHtml({ property, report }) {
   const roiComparisonLine = roiUpside && roiCost
     ? `${formatCurrency(roiUpside)} upside vs ${formatCurrency(roiCost)} cost`
     : '';
+  const readinessEconomicsExplanation = roiComparisonLine
+    ? `A focused prep investment can protect or unlock roughly ${roiComparisonLine.toLowerCase()}.`
+    : (improvementEconomics.summary || 'Prep investments should be tied to the highest-confidence buyer response gains.');
+  const readinessEconomicsInterpretation = hasSelectedPrice
+    ? `Interpretation: price is set, so economics should prioritize execution speed and launch consistency.`
+    : `Interpretation: finalize prep and pricing decisions together so launch messaging stays aligned.`;
+  const readinessEconomicsRiskReminder = `Risk reminder: ${toSecondaryInsightReference(readinessRiskHeadline)}`;
+  const readinessEconomicsActionLine = topThreeActionLines[0]
+    ? `Action now: ${topThreeActionLines[0]}.`
+    : 'Action now: complete the highest-priority prep task before expanding marketing efforts.';
   const readinessEconomicsNotes = pickMeaningfulLines([
-    improvementEconomics.decisionMessage,
-    improvementEconomics.summary,
-    `Risk focus: ${toSecondaryInsightReference(readinessRiskHeadline)}`,
-    `Opportunity focus: ${toSecondaryInsightReference(readinessOpportunityHeadline)}`,
-  ], isLowReadiness ? 4 : 3);
+    readinessEconomicsExplanation,
+    readinessEconomicsInterpretation,
+    readinessEconomicsActionLine,
+    readinessEconomicsRiskReminder,
+  ], 4);
   const pricingMetricCards = [
     renderMetricCard('Suggested range', report.pricingSummary?.low && report.pricingSummary?.high ? `${formatCurrency(report.pricingSummary.low)} - ${formatCurrency(report.pricingSummary.high)}` : 'Unavailable', report.pricingSummary?.strategy || 'Market-aligned pricing recommendation'),
     renderMetricCard('Midpoint', report.pricingSummary?.mid ? formatCurrency(report.pricingSummary.mid) : 'Unavailable', report.pricingSummary?.confidence ? `${Math.round(report.pricingSummary.confidence * 100)}% confidence` : 'Comparable signal based'),
@@ -2477,20 +2514,12 @@ function buildPropertySummaryHtml({ property, report }) {
   const reportSecondaryCta = reportPrimaryCta === 'Request Showing' ? 'Get Property Details' : 'Request Showing';
   const contactPhoneLabel = SUPPORT_PHONE || 'Phone available on request';
   const readinessScoreLabel = `${readinessScore}/100`;
-  const summaryIntroText = isHighReadiness
-    ? 'A launch-facing summary of strongest signals, market positioning, and final execution checks.'
-    : isMidReadiness
-      ? 'A balanced seller summary of strongest signals, risks, and launch opportunities.'
-      : 'A prep-focused seller summary of strongest blockers, risks, and next actions.';
-  const readinessIntroText = isHighReadiness
-    ? 'A concise dashboard of launch confidence, residual risks, and final execution checks.'
-    : isMidReadiness
-      ? 'A structured prep dashboard showing score, risk, opportunity, and top actions.'
-      : 'A preparation dashboard prioritizing blockers, risk reduction, and launch sequencing.';
+  const summaryIntroText = sellerToneProfile.summaryIntro;
+  const readinessIntroText = sellerToneProfile.readinessIntro;
   const topActionsKickerLabel = primaryActionLimit > 3 ? 'Top actions' : `Top ${primaryActionLimit} actions`;
-  const topActionsHeading = isHighReadiness
+  const topActionsHeading = isLaunchReport
     ? 'Final checks before launch'
-    : isLowReadiness
+    : isPrepReport
       ? 'Do these preparation moves first'
       : 'What to do first';
   const reportPhotoDetailTitle = reportPhotoMode === 'full'
@@ -2505,6 +2534,9 @@ function buildPropertySummaryHtml({ property, report }) {
       : 'No marketplace-ready photos are currently available. Complete priority retakes before buyer-facing launch.';
 
   const rawRecommendationCount = Number(rawRecommendationItems.length || (report.improvementItems || []).length || 0);
+  console.info(
+    `[pdf] output_class_selection propertyId=${property?.id || property?._id?.toString?.() || ''} sellerReportClass=${sellerReportClass} flyerClass=${flyerClass} reasons=${(outputClasses.reasons || []).join(',')}`,
+  );
   console.info(
     `[pdf] action_pipeline_counts propertyId=${property?.id || property?._id?.toString?.() || ''} rawRecommendations=${rawRecommendationCount} actionCards=${recommendationActions.length}`,
   );
@@ -2815,6 +2847,9 @@ function buildPropertySummaryHtml({ property, report }) {
       ${renderFooter('Property Summary Report · Readiness & Preparation')}
     </section>
 
+    ${
+      sectionRegistry.seller.includeReadinessEconomics
+        ? `
     <section class="page seller-page">
       <div class="brand-bar">
         <div>
@@ -2828,7 +2863,7 @@ function buildPropertySummaryHtml({ property, report }) {
         <div class="roi-hero-value">${escapeHtml(roiUpsideLabel)}</div>
         <div class="roi-hero-sub">${escapeHtml(roiCostLabel)}</div>
         ${roiComparisonLine ? `<div class="roi-hero-compare">${escapeHtml(roiComparisonLine)}</div>` : ''}
-        <div class="roi-hero-sub">${escapeHtml(improvementEconomics.decisionMessage || improvementEconomics.summary || 'Complete the top actions to protect listing value.')}</div>
+        <div class="roi-hero-sub">${escapeHtml(improvementEconomics.decisionMessage || readinessEconomicsExplanation)}</div>
         <div class="roi-bar-shell">
           <div>
             <div class="metric-label">Potential upside</div>
@@ -2850,6 +2885,9 @@ function buildPropertySummaryHtml({ property, report }) {
       </div>
       ${renderFooter('Property Summary Report · Readiness Economics')}
     </section>
+        `
+        : ''
+    }
 
     <section class="page seller-page">
       <div class="brand-bar">
@@ -2861,7 +2899,7 @@ function buildPropertySummaryHtml({ property, report }) {
       </div>
       ${renderPriorityLegend()}
       <div class="metric-grid">
-        ${renderMetricCard('Total photos', String(photoSummary.totalPhotos || 0))}
+        ${renderMetricCard('Total selected photos', String(photoReadinessMetrics.totalSelectedPhotos || 0))}
         ${renderMetricCard(
           'Marketplace-ready',
           String(reportMarketplaceReadyCount),
@@ -2871,7 +2909,27 @@ function buildPropertySummaryHtml({ property, report }) {
               ? 'Partial readiness: add at least one more marketplace-ready photo.'
               : 'No marketplace-ready photos yet. Complete retakes before marketing launch.',
         )}
-        ${renderMetricCard('Retakes needed', String(photoSummary.retakeCount || 0), photoSummary.retakeCount ? 'Prioritize P1 retakes before listing launch.' : 'No high-priority retakes currently flagged.')}
+        ${renderMetricCard(
+          'Saved photos flagged',
+          String(photoReadinessMetrics.savedPhotosFlaggedForImprovement || 0),
+          photoReadinessMetrics.savedPhotosFlaggedForImprovement
+            ? 'Saved photos are usable for prep tracking but still need polish.'
+            : 'No saved photos are currently flagged for additional quality work.',
+        )}
+        ${renderMetricCard(
+          'Priority retakes',
+          String(photoReadinessMetrics.priorityRetakes || 0),
+          photoReadinessMetrics.priorityRetakes
+            ? 'Complete these first to strengthen first impression quality.'
+            : 'No priority retakes are currently required.',
+        )}
+        ${renderMetricCard(
+          'Must fix before launch',
+          String(photoReadinessMetrics.mustFixBeforeLaunchCount || 0),
+          photoReadinessMetrics.mustFixBeforeLaunchCount
+            ? 'These items should close before buyer-facing launch.'
+            : 'No must-fix photo blockers are currently open.',
+        )}
         ${renderMetricCard('Average quality', `${photoSummary.averageQualityScore || 0}/100`)}
       </div>
       ${renderFooter('Property Summary Report · Photo Gallery')}
@@ -2897,7 +2955,8 @@ function buildPropertySummaryHtml({ property, report }) {
             ${renderFooter('Property Summary Report · Photo Gallery Detail')}
           </section>
         `
-        : `
+        : sectionRegistry.seller.includePhotoPreparationPage
+          ? `
           <section class="page seller-page">
             <div class="brand-bar">
               <div>
@@ -2921,6 +2980,7 @@ function buildPropertySummaryHtml({ property, report }) {
             ${renderFooter('Property Summary Report · Photo Preparation')}
           </section>
         `
+          : ''
     }
 
     <section class="page seller-page">
@@ -2929,9 +2989,9 @@ function buildPropertySummaryHtml({ property, report }) {
           <div class="section-kicker">Action plan</div>
           <h2>Top actions to unlock launch readiness</h2>
           <p class="muted">${escapeHtml(
-            isHighReadiness
+            isLaunchReport
               ? 'This page stays concise: final checks first, minimal follow-through after.'
-              : isLowReadiness
+              : isPrepReport
                 ? 'This page is detailed on purpose: top preparation actions first, execution support after.'
                 : 'This page is intentionally concise: top actions first, execution support after.',
           )}</p>
@@ -2940,7 +3000,7 @@ function buildPropertySummaryHtml({ property, report }) {
       <div class="dense-two-col" style="margin-top:14px;">
         <div class="content-card">
           <div class="section-kicker">${escapeHtml(topActionsKickerLabel)}</div>
-          <h3>${escapeHtml(isHighReadiness ? 'Final launch checklist' : 'Do these first')}</h3>
+          <h3>${escapeHtml(isLaunchReport ? 'Final launch checklist' : 'Do these first')}</h3>
           ${renderChecklistItems(
             topThreeActionLines.length ? topThreeActionLines : orderedNextStepsPrimary,
             'Use the guided workflow in the app to continue the launch checklist.',
@@ -2961,7 +3021,7 @@ function buildPropertySummaryHtml({ property, report }) {
           ${renderRecommendationActionCards(
             actionCardsPrimary.length ? actionCardsPrimary : actionCardsDisplay.slice(0, primaryCardLimit),
             'Use these structured actions to keep launch readiness improving.',
-            { maxCards: primaryCardLimit, maxPerCategory: isLowReadiness ? 2 : 1, compact: true },
+            { maxCards: primaryCardLimit, maxPerCategory: isPrepReport ? 2 : 1, compact: true },
           )}
         </div>
       </div>
@@ -2969,7 +3029,7 @@ function buildPropertySummaryHtml({ property, report }) {
     </section>
 
     ${
-      !isHighReadiness && actionCardsOverflow.length
+      sectionRegistry.seller.includeActionSupportPages && actionCardsOverflow.length
         ? `
           <section class="page seller-page">
             <div class="brand-bar">
@@ -2982,12 +3042,12 @@ function buildPropertySummaryHtml({ property, report }) {
             <div class="content-card page-flow">
               <div class="section-kicker">Supporting action cards</div>
               <h3>Photo, interior, and pricing follow-through</h3>
-              ${renderRecommendationActionCards(
-                actionCardsOverflow,
-                'No additional supporting actions are required beyond the top priorities.',
-                { maxCards: isLowReadiness ? 3 : 2, maxPerCategory: isLowReadiness ? 2 : 1, compact: true },
-              )}
-            </div>
+                ${renderRecommendationActionCards(
+                  actionCardsOverflow,
+                  'No additional supporting actions are required beyond the top priorities.',
+                { maxCards: isPrepReport ? 3 : 2, maxPerCategory: isPrepReport ? 2 : 1, compact: true },
+                )}
+              </div>
             ${renderFooter('Property Summary Report · Action Support')}
           </section>
         `
@@ -2995,7 +3055,7 @@ function buildPropertySummaryHtml({ property, report }) {
     }
 
     ${
-      !isHighReadiness && (shouldRenderProviders || suggestedProviderCategories.length)
+      sectionRegistry.seller.includeActionSupportPages && (shouldRenderProviders || suggestedProviderCategories.length)
         ? `
           <section class="page seller-page">
             <div class="brand-bar">
@@ -3112,22 +3172,46 @@ function buildMarketingReportHtml({ property, flyer }) {
   const neighborhoodMapImageUrl = flyer._resolvedNeighborhoodMapImageUrl || buildNeighborhoodMapImageUrl(property);
   const rawFlyerMode = String(flyer.mode || 'launch_ready').toLowerCase();
   const readinessScore = Number(flyer?.readinessScore || flyer?.readinessSignals?.readinessScore || 0);
-  const readinessBand = getReadinessBand(readinessScore);
-  const isLowReadiness = readinessBand === 'low';
-  const marketplaceReadyCount = Number(
-    flyer?.readinessSignals?.marketplaceReadyCount ||
-      (flyer?.selectedPhotos || []).filter((photo) => photo?.listingCandidate).length ||
-      0,
-  );
-  const flyerMode = readinessScore >= 60 ? 'launch_ready' : 'preview';
-  const modeLabel = flyer.modeLabel || titleCaseLabel(flyerMode.replace(/_/g, ' '));
-  const ctaPrimaryLabel = flyerMode === 'preview' ? 'Get Property Details' : 'Request Showing';
-  const ctaSecondaryLabel = ctaPrimaryLabel === 'Request Showing' ? 'Get Property Details' : 'Request Showing';
+  const selectedListPrice = Number(property?.selectedListPrice || 0);
+  const hasSelectedPrice = Number.isFinite(selectedListPrice) && selectedListPrice > 0;
+  const pricingPendingMessage = 'Recommended range available - final pricing decision pending';
+  const selectedPhotos = (flyer.selectedPhotos || []).filter((photo) => photo?.imageUrl);
+  const photoReadinessMetrics = buildPhotoReadinessMetrics({
+    photoSummary: flyer?.readinessSignals || {},
+    selectedPhotos,
+  });
+  const marketplaceReadyCount = Number(photoReadinessMetrics.marketplaceReadyPhotos || 0);
+  const outputClasses = decideOutputClasses({
+    readinessScore,
+    marketplaceReadyPhotoCount: marketplaceReadyCount,
+    chosenPricePresent: hasSelectedPrice,
+    checklistCompletionPercent: Number(flyer?.readinessSignals?.checklistCompletionPercent || flyer?.checklistCompletionPercent || 0),
+    priorityRetakeCount: Number(photoReadinessMetrics.priorityRetakes || 0),
+  });
+  const sellerReportClass = outputClasses.sellerReportClass;
+  const flyerClass = outputClasses.flyerClass;
+  const sectionRegistry = buildSectionRegistry({
+    sellerReportClass,
+    flyerClass,
+    photoMetrics: photoReadinessMetrics,
+    hasSelectedPrice,
+  });
+  const flyerMode = flyerClass === FLYER_CLASS.PREVIEW
+    ? 'preview'
+    : flyerClass === FLYER_CLASS.PRELAUNCH
+      ? 'prelaunch'
+      : 'marketing';
+  const isPreviewFlyer = flyerClass === FLYER_CLASS.PREVIEW;
+  const isPrelaunchFlyer = flyerClass === FLYER_CLASS.PRELAUNCH;
+  const isPrepLikeFlyer = isPreviewFlyer;
+  const flyerToneProfile = getFlyerToneProfile(flyerClass);
+  const modeLabel = flyer.modeLabel || titleCaseLabel(flyerClass.replace(/_/g, ' '));
+  const ctaPrimaryLabel = isPreviewFlyer ? 'Get Property Details' : 'Request Showing';
   const ctaLabel = ctaPrimaryLabel;
   const ctaButtonLabel = ctaPrimaryLabel;
   const contactPhoneLabel = SUPPORT_PHONE || 'Phone available on request';
   const previewUrgencyLine = 'Early inquiries are currently prioritized for this listing.';
-  const expectedFlyerMode = readinessScore >= 60 ? 'launch_ready' : 'preview';
+  const expectedFlyerMode = isPreviewFlyer ? 'preview' : 'launch_ready';
   if (rawFlyerMode !== expectedFlyerMode) {
     console.warn(
       `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_mode_mismatch mode=${rawFlyerMode} expected=${expectedFlyerMode} readiness=${readinessScore} marketplaceReady=${marketplaceReadyCount}`,
@@ -3138,19 +3222,17 @@ function buildMarketingReportHtml({ property, flyer }) {
       `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=cta_not_upgraded flyerMode=${flyerMode}`,
     );
   }
-  const modeHeroSignal = flyerMode === 'preview'
-    ? 'Preview mode: positioning this property as an early opportunity while final prep is completed.'
-    : flyerMode === 'premium'
-      ? 'Premium mode: polished presentation designed to convert high-intent buyer interest.'
-      : 'Launch-ready mode: private showings and property-package requests available now.';
+  console.info(
+    `[pdf] output_class_selection propertyId=${property?.id || property?._id?.toString?.() || ''} sellerReportClass=${sellerReportClass} flyerClass=${flyerClass} reasons=${(outputClasses.reasons || []).join(',')}`,
+  );
+  const modeHeroSignal = flyerToneProfile.modeSignal;
   const flyerPhotoMode = marketplaceReadyCount >= 3
     ? 'full'
     : marketplaceReadyCount >= 1
       ? 'partial'
       : 'prep';
   const flyerGalleryLimit = flyerPhotoMode === 'full' ? 6 : flyerPhotoMode === 'partial' ? 2 : 0;
-  const shouldRenderMarketingGallery = flyerPhotoMode !== 'prep';
-  const selectedPhotos = (flyer.selectedPhotos || []).filter((photo) => photo?.imageUrl);
+  const shouldRenderMarketingGallery = sectionRegistry.flyer.includeMarketingGallery && flyerPhotoMode !== 'prep';
   const prioritizedPhotos = selectFlyerGalleryPhotos(selectedPhotos, 10);
   const coverPhotos = prioritizedPhotos.slice(0, 4);
   const hasFourPhotoCover = coverPhotos.length >= 4;
@@ -3231,9 +3313,6 @@ function buildMarketingReportHtml({ property, flyer }) {
   const hasKitchenIslandSignal = /\bisland\b/.test(flyerTextCorpus);
   const hasCornerLotSignal = /\bcorner lot\b|\bcorner-lot\b/.test(flyerTextCorpus);
   const lotSizeSqFt = Number(property?.lotSizeSqFt || 0);
-  const selectedListPrice = Number(property?.selectedListPrice || 0);
-  const hasSelectedPrice = Number.isFinite(selectedListPrice) && selectedListPrice > 0;
-  const pricingPendingMessage = 'Recommended range available - final pricing decision pending';
   const layoutSeed = hashString32(
     `${property?.id || propertyAddress || property?.title || ''}|${readinessScore}|${marketplaceReadyCount}`,
   );
@@ -3256,14 +3335,14 @@ function buildMarketingReportHtml({ property, flyer }) {
   ], { property, limit: 4 });
   const featureTags = pickAdaptivePropertyLines(
     (flyer.highlights || []).map((line) => rewriteGenericFlyerCopy(line)),
-    { property, limit: isLowReadiness ? 4 : 6 },
+    { property, limit: isPrepLikeFlyer ? 4 : 6 },
   );
   const topReasonsToBuy = pickAdaptivePropertyLines([
     ...specificFeatureLines,
     ...(featureTags || []),
     hasSelectedPrice ? `Positioned at ${formatCurrency(selectedListPrice)}` : '',
-  ], { property, limit: isLowReadiness ? 4 : 6 });
-  const fallbackHeroHeadlineOptions = isLowReadiness
+  ], { property, limit: isPrepLikeFlyer ? 4 : 6 });
+  const fallbackHeroHeadlineOptions = isPrepLikeFlyer
     ? [
         `${property.title || 'Property'} - Launch Preparation Preview`,
         `${property.title || 'Property'} - Flyer Preview`,
@@ -3310,7 +3389,7 @@ function buildMarketingReportHtml({ property, flyer }) {
     ...specificFeatureLines,
     ...featureTags,
     hasSelectedPrice ? `Seller-confirmed list price ${formatCurrency(selectedListPrice)}` : pricingPendingMessage,
-  ], { property, limit: isLowReadiness ? 4 : 5 }), layoutSeed + 13);
+  ], { property, limit: isPrepLikeFlyer ? 4 : 5 }), layoutSeed + 13);
   const coverFeatureItems = featureGridItems.slice(0, 4);
   const highlightsFeatureItems = featureGridItems.slice(0, 4);
   const keyHighlightsColumnClass = narrativeGalleryPhotos.length ? 'col-span-5' : 'col-span-12';
@@ -3319,12 +3398,12 @@ function buildMarketingReportHtml({ property, flyer }) {
     lifestyleContext,
     property?.city ? `${property.city} location supports daily convenience, lifestyle access, and showing appeal.` : '',
     hasSelectedPrice ? `Price point ${formatCurrency(selectedListPrice)} aligns with current buyer search bands in this area.` : pricingPendingMessage,
-    isLowReadiness ? 'Neighborhood positioning is being prepared to support stronger showing conversations.' : '',
+    isPrepLikeFlyer ? 'Neighborhood positioning is being prepared to support stronger showing conversations.' : '',
   ], { property, limit: 2 });
   const commuteNotes = pickAdaptivePropertyLines([
     property?.city && property?.state ? `Commuter note: ${property.city}, ${property.state} offers multiple corridor options for daily travel patterns.` : '',
     property?.city ? `Local retail corridors and services in ${property.city} support day-to-day convenience.` : '',
-    isLowReadiness ? 'Neighborhood messaging should stay factual while preparation is completed.' : '',
+    isPrepLikeFlyer ? 'Neighborhood messaging should stay factual while preparation is completed.' : '',
   ], { property, limit: 2 });
   const positioningOutcomeLines = pickAdaptivePropertyLines([
     hasSelectedPrice
@@ -3333,7 +3412,7 @@ function buildMarketingReportHtml({ property, flyer }) {
     narrativeGalleryPhotos.length
       ? 'Image sequencing is structured from arrival impact to core living flow for faster buyer comprehension.'
       : '',
-    isLowReadiness
+    isPrepLikeFlyer
       ? 'Current copy is intentionally prep-focused until photo and checklist blockers are resolved.'
       : 'Feature-backed copy and neighborhood context are designed to move buyers from interest to showing request.',
   ], { property, limit: 1 });
@@ -3343,6 +3422,8 @@ function buildMarketingReportHtml({ property, flyer }) {
       commuteNotes.length ||
       positioningOutcomeLines.length,
   );
+  const shouldRenderPricingPage = sectionRegistry.flyer.includePricingPositioningPage;
+  const shouldRenderNeighborhoodPage = sectionRegistry.flyer.includeNeighborhoodPositioningPage && shouldRenderMapPage;
   const brochureFactBadges = pickMeaningfulLines([
     property?.bedrooms ? `${property.bedrooms} bedrooms` : '',
     property?.bathrooms ? `${property.bathrooms} bathrooms` : '',
@@ -3392,7 +3473,7 @@ function buildMarketingReportHtml({ property, flyer }) {
       `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_copy_generic`,
     );
   }
-  if (!shouldRenderMapPage) {
+  if (sectionRegistry.flyer.includeNeighborhoodPositioningPage && !shouldRenderMapPage) {
     console.warn(
       `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=flyer_structure_incomplete`,
     );
@@ -3415,7 +3496,11 @@ function buildMarketingReportHtml({ property, flyer }) {
       `[pdf] validation_warning propertyId=${property?.id || property?._id?.toString?.() || ''} issue=placeholder_language_detected flyer=true`,
     );
   }
-  const flyerDocumentLabel = flyerMode === 'preview' ? 'Flyer Preview' : 'Marketing Report';
+  const flyerDocumentLabel = isPreviewFlyer
+    ? 'Flyer Preview'
+    : isPrelaunchFlyer
+      ? 'Pre-Launch Flyer'
+      : 'Marketing Flyer';
   const flyerCoverSectionTitle = flyerMode === 'preview'
     ? 'Current buyer-facing signals'
     : 'Why this home stands out';
@@ -3432,7 +3517,7 @@ function buildMarketingReportHtml({ property, flyer }) {
   const neighborhoodSectionTitle = flyerMode === 'preview'
     ? 'Local context and preparation posture'
     : 'Local context and pricing posture';
-  const ctaHeadingLabel = flyerMode === 'preview' ? 'Preparation and inquiry' : ctaLabel;
+  const ctaHeadingLabel = isPreviewFlyer ? flyerToneProfile.ctaHeading : ctaLabel;
   const pricingPostureLine = hasSelectedPrice
     ? `Positioned at ${formatCurrency(selectedListPrice)} to balance buyer urgency and perceived value.`
     : pricingPendingMessage;
@@ -3536,6 +3621,9 @@ function buildMarketingReportHtml({ property, flyer }) {
       ${renderFooter(`${flyerDocumentLabel} · Highlights & Gallery`)}
     </section>
 
+    ${
+      shouldRenderPricingPage
+        ? `
     <section class="page">
       <div class="brand-bar">
         <div>
@@ -3575,9 +3663,12 @@ function buildMarketingReportHtml({ property, flyer }) {
       </div>
       ${renderFooter(`${flyerDocumentLabel} · Pricing & Positioning`)}
     </section>
+        `
+        : ''
+    }
 
     ${
-      shouldRenderMapPage
+      shouldRenderNeighborhoodPage
         ? `
           <section class="page">
             <div class="brand-bar">
