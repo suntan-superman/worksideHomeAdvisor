@@ -6,6 +6,10 @@ Date: 2026-05-07
 
 HomeAdvisor now mounts a Workside Home Advisor chat widget in the web app root layout. The widget is adapted from the Merxus web app public chat flow and talks directly to the Merxus AI backend public chat endpoints.
 
+For richer HomeAdvisor-specific AI answers and logged-in workflow guidance, also provide the Merxus backend team with:
+
+- [merxus-homeadvisor-product-knowledge.md](./merxus-homeadvisor-product-knowledge.md)
+
 Implemented in HomeAdvisor:
 
 - `apps/web/components/WebsiteChatWidget.js`

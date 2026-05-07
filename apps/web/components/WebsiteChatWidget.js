@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createPublicChatSession,
   isPublicChatClosedError,
@@ -12,6 +12,11 @@ import {
   sendPublicChatTranscript,
   timeoutPublicChatSession,
 } from '../lib/public-chat';
+import {
+  getBillingSummary,
+  getWorkflow,
+  listProperties,
+} from '../lib/api';
 import { getStoredSession } from '../lib/session';
 
 const STORAGE_PREFIX = 'worksideHomeAdvisor.publicChat';
@@ -131,6 +136,95 @@ function isValidLeadEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(value.trim());
 }
 
+function isPropertyAddressComplete(property = {}) {
+  return Boolean(property.addressLine1 && property.city && property.state && property.zip);
+}
+
+function isPropertyDetailsComplete(property = {}) {
+  return Boolean(property.bedrooms && property.bathrooms && property.squareFeet);
+}
+
+function compactUserContext(user = {}) {
+  return {
+    id: user.id || user._id || '',
+    role: user.role || 'seller',
+    emailVerified: Boolean(user.emailVerifiedAt || user.emailVerified || user.verified),
+    isDemoAccount: Boolean(user.isDemoAccount),
+  };
+}
+
+function compactBillingContext(summary = null) {
+  if (!summary) return null;
+  return {
+    planKey: summary.access?.planKey || 'free',
+    status: summary.access?.status || 'free',
+    features: Array.isArray(summary.access?.features) ? summary.access.features : [],
+    propertyCapacity: summary.propertyCapacity
+      ? {
+          activeCount: summary.propertyCapacity.activeCount ?? 0,
+          archivedCount: summary.propertyCapacity.archivedCount ?? 0,
+          activeLimit: summary.propertyCapacity.activeLimit ?? null,
+          remainingActiveSlots: summary.propertyCapacity.remainingActiveSlots ?? null,
+          canCreateActiveProperty: Boolean(summary.propertyCapacity.canCreateActiveProperty),
+        }
+      : null,
+  };
+}
+
+function compactSelectedPropertyContext(property = null) {
+  if (!property) return null;
+  return {
+    id: property.id || property._id || '',
+    title: property.title || property.addressLine1 || 'Selected property',
+    status: property.status || 'active',
+    addressComplete: isPropertyAddressComplete(property),
+    detailsComplete: isPropertyDetailsComplete(property),
+  };
+}
+
+function compactWorkflowContext(workflow = null) {
+  if (!workflow) return null;
+  return {
+    role: workflow.role || 'seller',
+    currentPhase: workflow.currentPhase || '',
+    currentPhaseLabel: workflow.currentPhaseLabel || '',
+    currentStep: workflow.currentStep || '',
+    completionPercent: workflow.completionPercent ?? null,
+    marketReadyScore: workflow.marketReadyScore ?? null,
+    nextAction: workflow.nextAction
+      ? {
+          key: workflow.nextAction.key || '',
+          title: workflow.nextAction.title || '',
+          description: workflow.nextAction.description || '',
+          helperText: workflow.nextAction.helperText || '',
+          actionTarget: workflow.nextAction.actionTarget || '',
+          actionHref: workflow.nextAction.actionHref || '',
+          lockedReason: workflow.nextAction.lockedReason || '',
+        }
+      : null,
+    metrics: workflow.metrics
+      ? {
+          photoCount: workflow.metrics.photoCount ?? 0,
+          roomCoverageCount: workflow.metrics.roomCoverageCount ?? 0,
+          listingCandidateCount: workflow.metrics.listingCandidateCount ?? 0,
+          explicitListingCandidateCount: workflow.metrics.explicitListingCandidateCount ?? 0,
+          preferredVariantCount: workflow.metrics.preferredVariantCount ?? 0,
+          publishableVisionCount: workflow.metrics.publishableVisionCount ?? 0,
+          reviewDraftCount: workflow.metrics.reviewDraftCount ?? 0,
+          checklistProgress: workflow.metrics.checklistProgress ?? 0,
+          providerLeadCount: workflow.metrics.providerLeadCount ?? 0,
+        }
+      : null,
+    readinessSummary: workflow.readinessSummary
+      ? {
+          tone: workflow.readinessSummary.tone || '',
+          label: workflow.readinessSummary.label || '',
+          message: workflow.readinessSummary.message || '',
+        }
+      : null,
+  };
+}
+
 function renderMessageBody(body) {
   const text = String(body || '');
   const parts = text.split(/(https?:\/\/[^\s]+|\/(?:dashboard|auth|sell|agents|providers)\/?[^\s]*)/g);
@@ -213,6 +307,7 @@ export default function WebsiteChatWidget({
   const [conversationEnded, setConversationEnded] = useState(false);
   const [lastActivityAt, setLastActivityAt] = useState(() => Number(getStoredValue('lastActivityAt')) || Date.now());
   const [storedSession, setStoredSession] = useState(null);
+  const [homeAdvisorContext, setHomeAdvisorContext] = useState(null);
   const visitorId = useMemo(getVisitorId, []);
   const threadRef = useRef(null);
   const messagesRef = useRef(messages);
@@ -243,9 +338,65 @@ export default function WebsiteChatWidget({
     setStoredValue('sessionId', '');
   }
 
+  const loadHomeAdvisorContext = useCallback(async () => {
+    const latestStoredSession = getStoredSession();
+    setStoredSession(latestStoredSession);
+
+    if (!latestStoredSession?.token || !latestStoredSession?.user?.id) {
+      setHomeAdvisorContext(null);
+      return null;
+    }
+
+    const user = latestStoredSession.user;
+    const role = user.role === 'agent' ? 'agent' : 'seller';
+    const context = {
+      product,
+      tenantId,
+      tenantType,
+      user: compactUserContext(user),
+      billing: null,
+      selectedProperty: null,
+      workflow: null,
+    };
+
+    try {
+      const [billingSummary, propertiesResponse] = await Promise.allSettled([
+        getBillingSummary(user.id),
+        listProperties(user.id),
+      ]);
+
+      if (billingSummary.status === 'fulfilled') {
+        context.billing = compactBillingContext(billingSummary.value);
+      }
+
+      const properties =
+        propertiesResponse.status === 'fulfilled' && Array.isArray(propertiesResponse.value?.properties)
+          ? propertiesResponse.value.properties
+          : [];
+      const selectedProperty =
+        properties.find((property) => property.id === latestStoredSession.lastPropertyId) ||
+        properties.find((property) => property.status !== 'archived') ||
+        properties[0] ||
+        null;
+
+      if (selectedProperty) {
+        context.selectedProperty = compactSelectedPropertyContext(selectedProperty);
+
+        const workflowResponse = await getWorkflow(selectedProperty.id, role).catch(() => null);
+        context.workflow = compactWorkflowContext(workflowResponse?.workflow || null);
+      }
+
+      setHomeAdvisorContext(context);
+      return context;
+    } catch {
+      setHomeAdvisorContext(context);
+      return context;
+    }
+  }, [product, tenantId, tenantType]);
+
   useEffect(() => {
-    setStoredSession(getStoredSession());
-  }, []);
+    loadHomeAdvisorContext();
+  }, [loadHomeAdvisorContext]);
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -253,6 +404,15 @@ export default function WebsiteChatWidget({
     setLeadEmail(loggedInEmail);
     setLeadTouched({ name: false, email: false });
   }, [isLoggedIn, loggedInName, loggedInEmail]);
+
+  useEffect(() => {
+    if (!isOpen || !isLoggedIn) return undefined;
+    const refreshOnFocus = () => {
+      loadHomeAdvisorContext();
+    };
+    window.addEventListener('focus', refreshOnFocus);
+    return () => window.removeEventListener('focus', refreshOnFocus);
+  }, [isLoggedIn, isOpen, loadHomeAdvisorContext]);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -456,6 +616,13 @@ export default function WebsiteChatWidget({
         authenticated: isLoggedIn,
         appBaseUrl: window.location.origin,
       };
+      const latestHomeAdvisorContext = isLoggedIn
+        ? await loadHomeAdvisorContext()
+        : homeAdvisorContext;
+      if (latestHomeAdvisorContext) {
+        basePayload.homeAdvisorContext = latestHomeAdvisorContext;
+        basePayload.context = latestHomeAdvisorContext;
+      }
 
       const result = sessionId
         ? await sendPublicChatMessage(sessionId, { ...basePayload, message: text })
@@ -495,8 +662,11 @@ export default function WebsiteChatWidget({
     setIsSending(true);
     try {
       let activeSessionId = sessionId;
+      const latestHomeAdvisorContext = isLoggedIn
+        ? await loadHomeAdvisorContext()
+        : homeAdvisorContext;
       if (!activeSessionId) {
-        const result = await createPublicChatSession({
+        const sessionPayload = {
           product,
           tenantId,
           tenantType,
@@ -509,20 +679,30 @@ export default function WebsiteChatWidget({
           leadEmail: effectiveLeadEmail,
           authenticated: isLoggedIn,
           appBaseUrl: window.location.origin,
-        });
+        };
+        if (latestHomeAdvisorContext) {
+          sessionPayload.homeAdvisorContext = latestHomeAdvisorContext;
+          sessionPayload.context = latestHomeAdvisorContext;
+        }
+        const result = await createPublicChatSession(sessionPayload);
         activeSessionId = result.session?.id;
         setSessionId(activeSessionId);
         setStoredValue('sessionId', activeSessionId);
         setMessages(normalizeMessages(result.messages || []));
       }
 
-      const requested = await requestPublicChatHuman(activeSessionId, {
+      const transferPayload = {
         visitorId,
         leadName: effectiveLeadName,
         leadEmail: effectiveLeadEmail,
         authenticated: isLoggedIn,
         appBaseUrl: window.location.origin,
-      });
+      };
+      if (latestHomeAdvisorContext) {
+        transferPayload.homeAdvisorContext = latestHomeAdvisorContext;
+        transferPayload.context = latestHomeAdvisorContext;
+      }
+      const requested = await requestPublicChatHuman(activeSessionId, transferPayload);
       setHumanRequested(true);
       setTeamNotice(true);
       setMessages((current) => normalizeMessages([...current.filter((item) => item.id !== 'welcome'), requested.message].filter(Boolean)));
