@@ -2,6 +2,7 @@ import '@workside/branding';
 
 import '../styles/globals.css';
 import { WebQueryProvider } from '../components/WebQueryProvider';
+import WebsiteChatWidget from '../components/WebsiteChatWidget';
 
 export const metadata = {
   title: 'Workside Home Seller Assistant',
@@ -12,7 +13,10 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body>
-        <WebQueryProvider>{children}</WebQueryProvider>
+        <WebQueryProvider>
+          {children}
+          <WebsiteChatWidget />
+        </WebQueryProvider>
       </body>
     </html>
   );
