@@ -60,7 +60,6 @@ import {
 } from './asyncJobPolling';
 import {
   VISION_WORKFLOW_STAGES,
-  PHOTO_LIBRARY_CATEGORY_DEFINITIONS,
   buildPhotoCategoryGroups,
   buildVisionWorkflowRecommendation,
   formatFreeformPlanHighlights,
@@ -102,6 +101,24 @@ import {
   readFileAsDataUrl,
   readWorkspaceSectionState,
 } from './workspaceClientHelpers';
+import {
+  DASHBOARD_FLASH_TOAST_KEY,
+  DEFAULT_WORKSPACE_SECTION_STATE,
+  HIDDEN_WORKSPACE_TABS,
+  HOME_ADVISOR_GUIDE_STORAGE_KEY_PREFIX,
+  INITIAL_PHOTO_VARIATIONS_STATE,
+  PHOTO_IMPORT_ROOM_LABEL_OPTIONS,
+  PHOTO_IMPORT_SOURCE_OPTIONS,
+  PHOTO_VARIATIONS_PAGE_SIZE,
+  PROPERTY_WORKSPACE_HIDDEN_WORKFLOW_STEPS,
+  REPORT_SECTION_OPTIONS,
+  VISION_COMPLETION_SOUND_MIN_SECONDS,
+  VISION_JOB_BACKGROUND_RECOVERY_TIMEOUT_MS,
+  VISION_JOB_RECOVERY_LOOKBACK_MS,
+  VISION_JOB_RECOVERY_POLL_INTERVAL_MS,
+  VISION_JOB_RECOVERY_TIMEOUT_MS,
+  WORKSPACE_TABS,
+} from './workspaceConstants';
 import { WorkspaceChecklistTab } from './workspaceChecklistTab';
 import { WorkspaceBrochureTab } from './workspaceBrochureTab';
 import { WorkspaceOverviewTab } from './workspaceOverviewTab';
@@ -109,85 +126,6 @@ import { WorkspacePhotosTab } from './workspacePhotosTab';
 import { WorkspacePricingTab } from './workspacePricingTab';
 import { WorkspaceReportTab } from './workspaceReportTab';
 import { WorkspaceSellerPicksTab } from './workspaceSellerPicksTab';
-
-const WORKSPACE_TABS = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'pricing', label: 'Pricing' },
-  { id: 'photos', label: 'Photos' },
-  { id: 'seller_picks', label: 'Seller Picks' },
-  { id: 'brochure', label: 'Flyer' },
-  { id: 'report', label: 'Report' },
-  { id: 'checklist', label: 'Checklist' },
-];
-const HIDDEN_WORKSPACE_TABS = [{ id: 'vision', label: 'Vision workspace' }];
-
-const PHOTO_IMPORT_SOURCE_OPTIONS = [
-  { value: 'web_upload', label: 'Web upload' },
-  { value: 'third_party_import', label: 'Third-party import' },
-];
-const PHOTO_IMPORT_ROOM_LABEL_OPTIONS = [
-  ...PHOTO_LIBRARY_CATEGORY_DEFINITIONS.filter((category) => category.key !== 'other').map(
-    (category) => category.label,
-  ),
-  'Other',
-];
-
-const PHOTO_VARIATIONS_PAGE_SIZE = 12;
-const INITIAL_PHOTO_VARIATIONS_STATE = {
-  assetId: '',
-  variants: [],
-  totalCount: 0,
-  loadedCount: 0,
-  isLoading: false,
-  hasMore: false,
-  error: '',
-};
-
-const PROPERTY_WORKSPACE_HIDDEN_WORKFLOW_STEPS = new Set([
-  'account_created',
-  'profile_complete',
-  'property_added',
-]);
-const DASHBOARD_FLASH_TOAST_KEY = 'worksideDashboardFlashToast';
-const HOME_ADVISOR_GUIDE_STORAGE_KEY_PREFIX = 'workside.homeAdvisorGuide.hidden';
-
-const REPORT_SECTION_OPTIONS = [
-  { id: 'executive_summary', label: 'Executive Summary' },
-  { id: 'pricing_analysis', label: 'Pricing Analysis' },
-  { id: 'comparable_properties', label: 'Comparable Properties' },
-  { id: 'photo_review', label: 'Photo Review Summary' },
-  { id: 'visual_improvement_previews', label: 'Visual Improvement Previews' },
-  { id: 'readiness_score', label: 'Readiness Score' },
-  { id: 'improvement_recommendations', label: 'Improvement Recommendations' },
-  { id: 'seller_checklist', label: 'Seller Checklist' },
-  { id: 'marketing_guidance', label: 'Marketing Guidance' },
-  { id: 'draft_listing_description', label: 'Draft Listing Description' },
-];
-
-const VISION_COMPLETION_SOUND_MIN_SECONDS = 15;
-const VISION_JOB_RECOVERY_LOOKBACK_MS = 90 * 1000;
-const VISION_JOB_RECOVERY_POLL_INTERVAL_MS = 4000;
-const VISION_JOB_RECOVERY_TIMEOUT_MS = 45 * 1000;
-const VISION_JOB_BACKGROUND_RECOVERY_TIMEOUT_MS = 10 * 60 * 1000;
-const DEFAULT_WORKSPACE_SECTION_STATE = {
-  photos_import: true,
-  photos_room_kitchen: true,
-  photos_room_living_room: true,
-  photos_room_master_bedroom: true,
-  photos_room_master_bathroom: true,
-  photos_room_other: false,
-  photos_room_exterior: true,
-  seller_picks_summary: true,
-  brochure_controls: true,
-  brochure_preview: true,
-  brochure_social: false,
-  report_builder: true,
-  report_preview: true,
-  checklist_tasks: true,
-  checklist_summary: true,
-  checklist_custom: false,
-  checklist_providers: false,
-};
 
 export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const router = useRouter();

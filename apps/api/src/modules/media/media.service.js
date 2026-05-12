@@ -59,6 +59,33 @@ const SELECTED_VARIANT_PROJECTION = {
   updatedAt: 1,
 };
 
+const MEDIA_ASSET_SOURCE_VALUES = new Set([
+  'mobile_capture',
+  'mobile_library',
+  'web_upload',
+  'third_party_import',
+  'vision_generated',
+]);
+
+export function normalizeMediaAssetSource(source, fallback = 'mobile_capture') {
+  const normalizedSource = String(source || '')
+    .trim()
+    .toLowerCase();
+  const normalizedFallback = String(fallback || '')
+    .trim()
+    .toLowerCase();
+
+  if (MEDIA_ASSET_SOURCE_VALUES.has(normalizedSource)) {
+    return normalizedSource;
+  }
+
+  return MEDIA_ASSET_SOURCE_VALUES.has(normalizedFallback) ? normalizedFallback : 'mobile_capture';
+}
+
+export function normalizeMediaAssetNotes(notes) {
+  return String(notes || '').trim().slice(0, 500);
+}
+
 function shouldIgnorePersistedMediaUrl(url) {
   if (!url) {
     return true;
@@ -407,14 +434,14 @@ export async function createMediaAssetAndAnalysis({
   const asset = await MediaAssetModel.create({
     propertyId,
     roomLabel,
-    source,
+    source: normalizeMediaAssetSource(source),
     assetType: 'original',
     generationStage: null,
     sourceMediaId: null,
     sourceVariantId: null,
     savedFromVision: false,
     generationLabel: '',
-    notes: String(notes || '').trim().slice(0, 500),
+    notes: normalizeMediaAssetNotes(notes),
     mimeType,
     width,
     height,
@@ -451,7 +478,7 @@ export async function updateMediaAsset(assetId, updates) {
   }
 
   if (typeof updates.notes === 'string') {
-    asset.notes = updates.notes.trim().slice(0, 500);
+    asset.notes = normalizeMediaAssetNotes(updates.notes);
   }
 
   if (typeof updates.listingCandidate === 'boolean') {

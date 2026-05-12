@@ -72,7 +72,7 @@ The intent is to keep the roadmap actionable while web/mobile deployment testing
 - [x] add focused coverage for forgot-password flows
 - [x] add coverage for seller profile update flows
 - [ ] add coverage for attribution persistence
-- [ ] add coverage for media source/notes flows
+- [x] add coverage for media source/notes flows
 - [x] add coverage for freeform enhancement requests
 - [x] add coverage for social-pack generation
 - [x] add focused coverage for provider billing state transitions

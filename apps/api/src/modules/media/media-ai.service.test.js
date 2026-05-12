@@ -44,6 +44,8 @@ import {
   buildGeneratedAssetAnalysisSnapshot,
   countMarketplaceReadyAssets,
   getMediaAssetMarketplaceState,
+  normalizeMediaAssetNotes,
+  normalizeMediaAssetSource,
   resolveSavedVariantGenerationStage,
   resolveSavedVariantListingCandidate,
   sortMarketplaceReadyAssets,
@@ -62,6 +64,25 @@ test('task specific mask strategy uses adaptive masks for wall and floor presets
   assert.equal(getTaskSpecificMaskStrategy('paint_bright_white'), 'adaptive_wall');
   assert.equal(getTaskSpecificMaskStrategy('floor_tile_stone'), 'adaptive_floor');
   assert.equal(getTaskSpecificMaskStrategy('remove_furniture'), 'generic');
+});
+
+test('media asset source normalization preserves supported import sources', () => {
+  assert.equal(normalizeMediaAssetSource(), 'mobile_capture');
+  assert.equal(normalizeMediaAssetSource(' web_upload '), 'web_upload');
+  assert.equal(normalizeMediaAssetSource('third_party_import'), 'third_party_import');
+  assert.equal(normalizeMediaAssetSource('mobile_library'), 'mobile_library');
+  assert.equal(normalizeMediaAssetSource('unsupported_source'), 'mobile_capture');
+  assert.equal(normalizeMediaAssetSource('unsupported_source', 'web_upload'), 'web_upload');
+});
+
+test('media asset notes normalization trims and caps imported photo context', () => {
+  assert.equal(normalizeMediaAssetNotes('  MLS import: photographer notes  '), 'MLS import: photographer notes');
+  assert.equal(normalizeMediaAssetNotes(null), '');
+
+  const longNotes = ` ${'a'.repeat(550)} `;
+  const normalizedNotes = normalizeMediaAssetNotes(longNotes);
+  assert.equal(normalizedNotes.length, 500);
+  assert.equal(normalizedNotes, 'a'.repeat(500));
 });
 
 async function createSyntheticLivingRoomBuffer() {
