@@ -28,6 +28,7 @@ import {
   calculateObjectRemovalScore,
   classifyQuality,
   getReplicateSettings,
+  isConceptStudioPreset,
   resolveVisionUserPlan,
 } from './vision-orchestrator.helpers.js';
 import { listVisionPresets, resolveVisionPreset } from './vision-presets.js';
@@ -6065,14 +6066,22 @@ async function buildImmutableWindowCompositeMask(sourceBuffer) {
     probeHeight,
     1,
   );
-  const coverageRatio = calculateBinaryMaskCoverageRatio(expandedWindowMask);
-  if (coverageRatio < 0.002 || coverageRatio > 0.38) {
+  const protectedMask = new Uint8Array(expandedWindowMask);
+  const topBandHeight = Math.max(2, Math.round(probeHeight * 0.055));
+  for (let y = 0; y < topBandHeight; y += 1) {
+    for (let x = 0; x < probeWidth; x += 1) {
+      protectedMask[y * probeWidth + x] = 1;
+    }
+  }
+
+  const coverageRatio = calculateBinaryMaskCoverageRatio(protectedMask);
+  if (coverageRatio < 0.002 || coverageRatio > 0.48) {
     return null;
   }
 
   return {
     maskBuffer: await buildBinaryMaskPngBuffer({
-      binaryMask: expandedWindowMask,
+      binaryMask: protectedMask,
       inputWidth: probeWidth,
       inputHeight: probeHeight,
       outputWidth: width,
@@ -6080,6 +6089,23 @@ async function buildImmutableWindowCompositeMask(sourceBuffer) {
     }),
     coverageRatio,
   };
+}
+
+export async function compositeProtectedRegions({
+  sourceBuffer,
+  variantBuffer,
+  protectedMaskBuffer,
+}) {
+  if (!protectedMaskBuffer) {
+    return variantBuffer;
+  }
+
+  return blendVariantWithSourceMask({
+    sourceBuffer: variantBuffer,
+    variantBuffer: sourceBuffer,
+    maskBuffer: protectedMaskBuffer,
+    maskBlur: 0.5,
+  });
 }
 
 async function restoreImmutableWindowRegions({
@@ -6091,11 +6117,10 @@ async function restoreImmutableWindowRegions({
     return variantBuffer;
   }
 
-  return blendVariantWithSourceMask({
+  return compositeProtectedRegions({
     sourceBuffer: variantBuffer,
     variantBuffer: sourceBuffer,
-    maskBuffer: immutableWindowMask.maskBuffer,
-    maskBlur: 0.5,
+    protectedMaskBuffer: immutableWindowMask.maskBuffer,
   });
 }
 
@@ -6972,6 +6997,7 @@ async function buildReviewedReplicateCandidates({
   const maskBuffer = resolvedMask.maskBuffer;
   const isDeclutterPreset =
     preset.key === 'declutter_light' || preset.key === 'declutter_medium';
+  const shouldProtectGeneratedStructure = isConceptStudioPreset(preset.key) || isDeclutterPreset;
   const immutableWindowMask = await buildImmutableWindowCompositeMask(sourceBuffer).catch((error) => {
     console.warn('Immutable window mask unavailable', {
       presetKey: preset.key,
@@ -7127,7 +7153,13 @@ async function buildReviewedReplicateCandidates({
         !preset.key.startsWith('floor_')) ||
       !maskBuffer
     ) {
-      return candidateBuffer;
+      return shouldProtectGeneratedStructure
+        ? restoreImmutableWindowRegions({
+            sourceBuffer,
+            variantBuffer: candidateBuffer,
+            immutableWindowMask,
+          })
+        : candidateBuffer;
     }
 
     const blendMaskBuffer =
@@ -7741,6 +7773,7 @@ async function buildReviewedOpenAiCandidates({
           debug: { strategy: 'geometric_fallback', maskCoverageRatio: null },
         };
   const maskBuffer = resolvedMask.maskBuffer;
+  const shouldProtectGeneratedStructure = isConceptStudioPreset(preset.key);
   const immutableWindowMask = await buildImmutableWindowCompositeMask(sourceBuffer).catch((error) => {
     console.warn('Immutable window mask unavailable', {
       presetKey: preset.key,
@@ -7803,14 +7836,12 @@ async function buildReviewedOpenAiCandidates({
   };
 
   const providerPrompt =
-    preset.key === 'remove_furniture'
-      ? `${fullPrompt} CRITICAL: remove the movable furniture inside the editable mask. Do not replace it with new chairs, tables, sofas, rugs, decor, statues, plants, or staging. Reconstruct believable empty floor, wall, baseboard, and window-adjacent areas only. Keep the actual architecture, windows, trim, lighting direction, and perspective stable. If a region is uncertain, leave it simpler and emptier rather than inventing objects.`
-      : `${fullPrompt} Produce the strongest usable edit while preserving the true room structure. Prefer subtraction over restaging.`;
+    `Edit this real estate image realistically. Apply only the requested concept edit. Preserve all windows, blinds, trim, ceiling lines, baseboards, doors, built-ins, structural geometry, lighting direction, and camera perspective. Do not add unrelated objects. Do not restage unless explicitly requested. Keep the result believable as a planning concept. ${fullPrompt}`;
   const providerOutputs = await runOpenAIImageEdit({
     sourceBuffer,
     maskBuffer,
     prompt: providerPrompt,
-    outputCount: preset.key === 'remove_furniture' ? 1 : Math.min(2, Number(preset.outputCount || 1)),
+    outputCount: Math.min(3, Math.max(1, Number(preset.outputCount || 1))),
     timeoutMs: preset.key === 'remove_furniture' ? 120_000 : 120_000,
   });
   const evaluationRegions = getPresetEvaluationRegions(preset.key);
@@ -7864,7 +7895,13 @@ async function buildReviewedOpenAiCandidates({
         !preset.key.startsWith('floor_')) ||
       !maskBuffer
     ) {
-      return candidateBuffer;
+      return shouldProtectGeneratedStructure
+        ? restoreImmutableWindowRegions({
+            sourceBuffer,
+            variantBuffer: candidateBuffer,
+            immutableWindowMask,
+          })
+        : candidateBuffer;
     }
 
     const blendMaskBuffer =

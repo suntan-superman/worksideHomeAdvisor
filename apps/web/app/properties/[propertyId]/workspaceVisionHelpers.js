@@ -9,7 +9,7 @@ export const VISION_WORKFLOW_STAGES = [
     groups: [
       {
         key: 'first_impression',
-        label: 'Fast baseline',
+        label: 'Safe for listing preparation',
         items: ['enhance_listing_quality'],
       },
     ],
@@ -25,7 +25,7 @@ export const VISION_WORKFLOW_STAGES = [
     groups: [
       {
         key: 'smart_cleanup',
-        label: 'High-confidence cleanup',
+        label: 'Clean up visible distractions',
         items: [
           'declutter_light',
           'declutter_medium',
@@ -34,7 +34,7 @@ export const VISION_WORKFLOW_STAGES = [
       },
       {
         key: 'finish_concepts',
-        label: 'Optional concept directions',
+        label: 'Concept previews for planning only',
         items: [
           'remove_furniture',
           'cleanup_empty_room',
@@ -49,7 +49,7 @@ export const VISION_WORKFLOW_STAGES = [
       },
       {
         key: 'room_upgrades',
-        label: 'Additional room upgrades',
+        label: 'Concept previews for planning only',
         items: [
           'kitchen_white_cabinets_granite',
           'kitchen_white_cabinets_quartz',
@@ -73,7 +73,7 @@ export const VISION_WORKFLOW_STAGES = [
     groups: [
       {
         key: 'listing_ready',
-        label: 'Final publish pass',
+        label: 'Safe for listing preparation',
         items: ['combined_listing_refresh'],
       },
     ],

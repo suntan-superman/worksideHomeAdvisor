@@ -53,14 +53,14 @@ export const VISION_PRESETS = [
     recommendedUse: ['brochure', 'report'],
     upgradeTier: 'standard',
     basePrompt:
-      'Clean up this residential interior photo for real estate listing use. Remove or visually simplify small movable distractions only: loose throws, remotes, cords, scattered papers, small countertop items, shelf clutter, table clutter, and floor-edge clutter. Keep all sofas, chairs, tables, rugs, lamps, shelving, windows, architecture, layout, and finishes intact. Make the photo visibly tidier, brighter, and more buyer-friendly while staying realistic.',
+      'Clean up this residential interior photo for real estate listing use. Remove small movable distractions such as loose throws, remotes, cords, papers, small decor clusters, shelf clutter, table clutter, and floor-edge clutter. Preserve the main furniture, rug, windows, walls, flooring, lamps, shelving, architecture, and room layout. Make the room visibly tidier and more buyer-friendly while staying realistic.',
     helperText:
       'Reduce small distractions and improve presentation while keeping the room believable.',
-    strength: 0.68,
-    guidanceScale: 8.2,
-    numInferenceSteps: 38,
+    strength: 0.62,
+    guidanceScale: 7.6,
+    numInferenceSteps: 32,
     negativePrompt:
-      'removed sofa, removed chair, removed table, changed rug, changed windows, changed walls, changed flooring, new furniture, restaging, warped furniture, distorted architecture, unrealistic shadows, blurry, low quality',
+      'changed windows, changed walls, changed flooring, changed rug, new furniture, restaging, empty room, warped furniture, distorted architecture, fake geometry, unrealistic shadows, blurry, low quality',
     replicateModel: REPLICATE_INPAINT_MODEL,
   },
   {
@@ -72,19 +72,19 @@ export const VISION_PRESETS = [
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'unknown'],
     providerPreference: 'replicate',
     promptVersion: 1,
-    outputCount: 2,
+    outputCount: 3,
     disclaimerType: 'truthful_enhancement',
     recommendedUse: ['report'],
     upgradeTier: 'standard',
     basePrompt:
-      'Create a visibly cleaner listing-photo version of this residential interior. Remove or simplify loose throws, remotes, cords, papers, small decor clusters, shelf clutter, table clutter, and floor-edge clutter. Straighten the visual presentation and make surfaces read cleaner. Preserve all major furniture, rugs, lamps, windows, walls, flooring, built-ins, architecture, and room layout. Do not restage the room or invent replacement objects.',
+      'Create a visibly cleaner listing-photo version of this residential interior. Remove loose throws, remotes, cords, papers, small decor clusters, shelf clutter, table clutter, and floor-edge clutter. Simplify visually noisy surfaces and make the room read cleaner at thumbnail size. Preserve major furniture, windows, walls, flooring, rug, lamps, built-ins, architecture, lighting direction, and room layout. Do not fully empty or restage the room.',
     helperText:
       'A stronger cleanup pass that pushes the room toward listing-readiness without restaging it.',
-    strength: 0.84,
-    guidanceScale: 8.8,
-    numInferenceSteps: 42,
+    strength: 0.74,
+    guidanceScale: 8,
+    numInferenceSteps: 38,
     negativePrompt:
-      'removed sofa, removed chair, removed coffee table, removed rug, changed windows, changed walls, changed flooring, new furniture, restaging, empty room, warped furniture, distorted architecture, fake geometry, unrealistic shadows, blurry, low quality',
+      'changed windows, changed walls, changed flooring, changed rug, new furniture, full restaging, empty room, warped furniture, distorted architecture, fake geometry, unrealistic shadows, blurry, low quality',
     replicateModel: REPLICATE_INPAINT_MODEL,
   },
   {
@@ -96,19 +96,19 @@ export const VISION_PRESETS = [
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'exterior', 'unknown'],
     providerPreference: 'replicate',
     promptVersion: 9,
-    outputCount: 1,
+    outputCount: 3,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     upgradeTier: 'premium',
     basePrompt:
-      'Create a conservative open-room preview for this real estate photo. Reduce visual distractions, simplify clutter, soften dark bulky furniture, brighten around furnishings, and remove only small portable items when the edit is safe. Do not attempt to fully empty the room or reconstruct architecture. Preserve sofas, beds, large chairs, cabinets, built-ins, windows, trim, floors, walls, ceiling lines, lighting direction, and room perspective. Keep the result realistic, subtle, and trustworthy.',
+      'Create a realistic open-room concept preview for this real estate photo. Remove or simplify movable furniture and visual distractions when it can be done believably. Prioritize clearing portable seating, small tables, decor, throws, clutter, and bulky visual distractions while preserving the true room architecture. Keep windows, blinds, trim, ceiling lines, baseboards, built-ins, doors, permanent fixtures, lighting direction, and perspective intact. The room should feel more open and easier to understand, but must remain realistic.',
     helperText:
-      'Reduce visual distractions and simplify the room to help buyers focus on space and layout.',
-    strength: 0.58,
-    guidanceScale: 6.4,
-    numInferenceSteps: 28,
+      'Create a concept preview that makes the room feel more open while preserving structural truth.',
+    strength: 0.76,
+    guidanceScale: 7.8,
+    numInferenceSteps: 38,
     negativePrompt:
-      'empty room reconstruction, removed sofa, removed bed, removed large chair, new furniture, replacement staging, changed windows, altered trim, changed flooring, changed walls, changed ceiling, fake geometry, warped lines, distorted windows, unrealistic shadows, low quality',
+      'warped windows, distorted blinds, changed windows, altered trim, changed ceiling, changed wall geometry, changed floor perspective, fake architecture, added furniture, new staging, unrealistic shadows, blurry, low quality',
     replicateModel: REPLICATE_INPAINT_MODEL,
   },
   {
@@ -120,7 +120,7 @@ export const VISION_PRESETS = [
     roomCompatibility: ['kitchen', 'living_room', 'bedroom', 'bathroom', 'exterior', 'unknown'],
     providerPreference: 'replicate',
     promptVersion: 1,
-    outputCount: 2,
+    outputCount: 3,
     disclaimerType: 'concept_preview',
     recommendedUse: ['report'],
     upgradeTier: 'premium',

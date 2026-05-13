@@ -28,14 +28,19 @@ import {
 } from './media-ai.service.js';
 import {
   buildProviderChain,
+  calculateConceptUtilityScore,
   calculatePerceptibilityScore,
   classifyQuality,
   evaluatePaintStrength,
   getReplicateSettings,
+  isConceptStudioPreset,
   isCandidateSufficient,
+  isListingSafePreset,
   isUsablePaintStrength,
+  meetsMinimumTrustThreshold,
   PAINT_STRENGTH_MIN_USABLE_PERCEPTIBILITY,
   rankCandidates,
+  resolveVisionPipelineMode,
   resolveVisionUserPlan,
   scorePaintCandidate,
   selectReturnCandidate,
@@ -793,6 +798,62 @@ test('selectReturnCandidate returns the strongest trustworthy ranked candidate w
   assert.equal(selection.deliveryMode, 'trustworthy_best_candidate');
 });
 
+test('concept trust allows useful open room change while rejecting window drift', () => {
+  const visibleCandidate = {
+    focusRegionChangeRatio: 0.28,
+    maskedChangeRatio: 0.32,
+    outsideMaskChangeRatio: 0.12,
+    topHalfChangeRatio: 0.04,
+    newFurnitureAdditionRatio: 0,
+    windowIntegrityChangeRatio: 0.005,
+  };
+  const windowDriftCandidate = {
+    focusRegionChangeRatio: 0.42,
+    maskedChangeRatio: 0.45,
+    outsideMaskChangeRatio: 0.1,
+    topHalfChangeRatio: 0.04,
+    newFurnitureAdditionRatio: 0,
+    windowIntegrityChangeRatio: 0.08,
+  };
+
+  assert.equal(meetsMinimumTrustThreshold(visibleCandidate, 'remove_furniture'), true);
+  assert.equal(meetsMinimumTrustThreshold(windowDriftCandidate, 'remove_furniture'), false);
+});
+
+test('concept ranking prefers visible safe utility over a no-op safe candidate', () => {
+  const ranked = rankCandidates(
+    [
+      {
+        label: 'Safe no-op',
+        overallScore: 92,
+        focusRegionChangeRatio: 0.02,
+        maskedChangeRatio: 0.02,
+        objectRemovalScore: 0.01,
+        outsideMaskChangeRatio: 0.02,
+        topHalfChangeRatio: 0.01,
+        windowIntegrityChangeRatio: 0,
+      },
+      {
+        label: 'Visible concept',
+        overallScore: 82,
+        focusRegionChangeRatio: 0.26,
+        maskedChangeRatio: 0.3,
+        objectRemovalScore: 0.22,
+        outsideMaskChangeRatio: 0.08,
+        topHalfChangeRatio: 0.03,
+        windowIntegrityChangeRatio: 0.004,
+      },
+    ],
+    'remove_furniture',
+  );
+
+  assert.equal(ranked[0]?.label, 'Visible concept');
+  assert.ok(
+    calculateConceptUtilityScore(ranked[0], 'remove_furniture') >
+      calculateConceptUtilityScore(ranked[1], 'remove_furniture'),
+  );
+});
+
 test('classifyListingReadiness returns listing-ready badge for strong clean outputs', () => {
   const result = classifyListingReadiness({
     review: {
@@ -877,33 +938,46 @@ test('resolveVisionUserPlan treats remove_furniture as premium by default', () =
   );
 });
 
-test('buildProviderChain keeps open room preview on a bounded single provider', () => {
+test('vision pipeline mode splits listing safe from concept studio', () => {
+  assert.equal(isListingSafePreset('combined_listing_refresh'), true);
+  assert.equal(isListingSafePreset('remove_furniture'), false);
+  assert.equal(isConceptStudioPreset('remove_furniture'), true);
+  assert.equal(isConceptStudioPreset('floor_dark_hardwood'), true);
+  assert.equal(resolveVisionPipelineMode('enhance_listing_quality'), 'listing_safe');
+  assert.equal(resolveVisionPipelineMode('remove_furniture'), 'concept_studio');
+  assert.equal(resolveVisionPipelineMode('declutter_medium'), 'enhancement');
+});
+
+test('listing-safe presets remain local only', () => {
   assert.deepEqual(
     buildProviderChain({
-      preset: {
-        key: 'remove_furniture',
-        category: 'concept_preview',
-        providerPreference: 'replicate',
-      },
-      userPlan: 'premium',
+      preset: resolveVisionPreset('combined_listing_refresh'),
+      userPlan: 'standard',
       openAiAvailable: true,
     }),
-    ['replicate_basic'],
+    ['local_sharp'],
   );
 });
 
-test('buildProviderChain uses the same bounded open room path without OpenAI', () => {
+test('open room preview uses full concept provider chain when OpenAI is available', () => {
   assert.deepEqual(
     buildProviderChain({
-      preset: {
-        key: 'remove_furniture',
-        category: 'concept_preview',
-        providerPreference: 'replicate',
-      },
+      preset: resolveVisionPreset('remove_furniture'),
+      userPlan: 'premium',
+      openAiAvailable: true,
+    }),
+    ['replicate_basic', 'replicate_advanced', 'openai_edit'],
+  );
+});
+
+test('open room preview uses replicate concept chain when OpenAI is unavailable', () => {
+  assert.deepEqual(
+    buildProviderChain({
+      preset: resolveVisionPreset('remove_furniture'),
       userPlan: 'premium',
       openAiAvailable: false,
     }),
-    ['replicate_basic'],
+    ['replicate_basic', 'replicate_advanced'],
   );
 });
 
@@ -1191,7 +1265,7 @@ test('floor tone presets now use the replicate finish pipeline', () => {
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['replicate_basic', 'replicate_advanced', 'openai_edit'],
+    ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp'],
   );
 });
 
@@ -1202,7 +1276,7 @@ test('tile or stone floors now use the realism-first replicate finish pipeline',
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['replicate_basic', 'replicate_advanced'],
+    ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp'],
   );
 });
 
@@ -1296,9 +1370,9 @@ test('floor presets use the replicate chain when tile or stone is requested', as
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced']);
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'local_sharp']);
   assert.equal(result.providerUsed, 'replicate_advanced');
-  assert.equal(result.providerAttemptCount, 2);
+  assert.equal(result.providerAttemptCount, 3);
 });
 
 test('tile or stone floors keep the best safe replicate candidate when strict thresholds are missed', async () => {
@@ -1969,7 +2043,7 @@ test('paint presets accept a strong local candidate after weak ai outputs', asyn
   assert.equal(result.quality, 'high');
 });
 
-test('getReplicateSettings keeps remove_furniture generation bounded', () => {
+test('getReplicateSettings restores visible open room generation settings', () => {
   const basicSettings = getReplicateSettings('replicate_basic', {
     key: 'remove_furniture',
     outputCount: 3,
@@ -1985,24 +2059,37 @@ test('getReplicateSettings keeps remove_furniture generation bounded', () => {
     strength: 0.93,
   });
 
-  assert.equal(basicSettings.outputCount, 1);
-  assert.equal(basicSettings.numInferenceSteps, 28);
-  assert.equal(basicSettings.timeoutMs, 40_000);
-  assert.equal(advancedSettings.outputCount, 1);
-  assert.equal(advancedSettings.numInferenceSteps, 30);
-  assert.equal(advancedSettings.timeoutMs, 45_000);
+  assert.equal(basicSettings.outputCount, 3);
+  assert.equal(basicSettings.numInferenceSteps, 43);
+  assert.equal(basicSettings.timeoutMs, 120_000);
+  assert.equal(advancedSettings.outputCount, 3);
+  assert.equal(advancedSettings.numInferenceSteps, 47);
+  assert.equal(advancedSettings.timeoutMs, 120_000);
 });
 
 test('declutter presets request stronger targeted small-object cleanup', () => {
   const mediumPreset = resolveVisionPreset('declutter_medium');
   const settings = getReplicateSettings('replicate_basic', mediumPreset);
 
-  assert.equal(mediumPreset.strength, 0.84);
-  assert.equal(settings.guidanceScale, 8.8);
-  assert.equal(settings.numInferenceSteps, 42);
+  assert.equal(mediumPreset.strength, 0.74);
+  assert.equal(mediumPreset.outputCount, 3);
+  assert.equal(settings.guidanceScale, 8);
+  assert.equal(settings.numInferenceSteps, 38);
   assert.match(mediumPreset.basePrompt, /loose throws/i);
-  assert.match(mediumPreset.basePrompt, /Preserve all major furniture/i);
-  assert.match(mediumPreset.negativePrompt, /removed sofa/i);
+  assert.match(mediumPreset.basePrompt, /Preserve major furniture/i);
+  assert.doesNotMatch(mediumPreset.negativePrompt, /removed sofa|removed chair|removed coffee table/i);
+});
+
+test('open room preset allows visible furniture simplification without blocking removal terms', () => {
+  const preset = resolveVisionPreset('remove_furniture');
+
+  assert.ok(preset.strength >= 0.72);
+  assert.ok(preset.outputCount >= 3);
+  assert.match(preset.basePrompt, /Remove or simplify movable furniture/i);
+  assert.doesNotMatch(
+    preset.negativePrompt,
+    /removed sofa|removed chair|removed coffee table/i,
+  );
 });
 
 test('declutter sufficiency rejects near-original cleanup results', () => {
@@ -2485,7 +2572,7 @@ test('tile or stone floor ranking prefers a stronger tile-material signal over a
   assert.equal(ranked[0]?.label, 'Tile-like local floor');
 });
 
-test('remove_furniture orchestration uses the bounded single-provider open room chain', async () => {
+test('remove_furniture orchestration uses the full replicate open room concept chain', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
@@ -2534,12 +2621,12 @@ test('remove_furniture orchestration uses the bounded single-provider open room 
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic']);
-  assert.equal(result.providerUsed, 'replicate_basic');
-  assert.equal(result.providerAttemptCount, 1);
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced']);
+  assert.equal(result.providerUsed, 'replicate_advanced');
+  assert.equal(result.providerAttemptCount, 2);
 });
 
-test('remove_furniture orchestration exits after a trustworthy basic open room candidate', async () => {
+test('remove_furniture orchestration keeps the best trustworthy open room candidate after the concept chain', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
@@ -2596,12 +2683,12 @@ test('remove_furniture orchestration exits after a trustworthy basic open room c
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic']);
-  assert.equal(result.providerUsed, 'replicate_basic');
-  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced']);
+  assert.equal(result.providerUsed, 'replicate_advanced');
+  assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
 });
 
-test('remove_furniture orchestration keeps a trustworthy single-provider candidate even after budget time', async () => {
+test('remove_furniture orchestration keeps a trustworthy concept candidate when budget time is near', async () => {
   let now = 0;
   const callOrder = [];
   const result = await orchestrateVisionJob({
@@ -2642,7 +2729,7 @@ test('remove_furniture orchestration keeps a trustworthy single-provider candida
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic']);
+  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced']);
   assert.equal(result.providerUsed, 'replicate_basic');
   assert.equal(result.timeBudgetReached, false);
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');

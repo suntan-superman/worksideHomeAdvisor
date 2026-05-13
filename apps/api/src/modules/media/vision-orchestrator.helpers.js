@@ -30,9 +30,9 @@ const PREMIUM_PRESET_KEYS = new Set([
 ]);
 
 export const VISION_PLAN_VALUES = ['standard', 'pro', 'premium'];
-const REMOVE_FURNITURE_MAX_EXECUTION_TIME_MS = 45_000;
-const REMOVE_FURNITURE_BASIC_PROVIDER_TIMEOUT_MS = 40_000;
-const REMOVE_FURNITURE_ADVANCED_PROVIDER_TIMEOUT_MS = 45_000;
+const REMOVE_FURNITURE_MAX_EXECUTION_TIME_MS = 180_000;
+const REMOVE_FURNITURE_BASIC_PROVIDER_TIMEOUT_MS = 120_000;
+const REMOVE_FURNITURE_ADVANCED_PROVIDER_TIMEOUT_MS = 120_000;
 export const PAINT_STRENGTH_MIN_COLOR_SHIFT = 0.12;
 export const PAINT_STRENGTH_MIN_LUMINANCE_DELTA = 0.08;
 export const PAINT_STRENGTH_MIN_PERCEPTIBILITY = 0.35;
@@ -104,21 +104,58 @@ export function resolveVisionUserPlan({ preset, userPlan } = {}) {
   return 'standard';
 }
 
+export function isListingSafePreset(presetKey = '') {
+  return [
+    'enhance_listing_quality',
+    'lighting_boost',
+    'combined_listing_refresh',
+  ].includes(String(presetKey || ''));
+}
+
+export function isConceptStudioPreset(presetKey = '') {
+  const key = String(presetKey || '');
+  return (
+    key === 'remove_furniture' ||
+    key === 'cleanup_empty_room' ||
+    key.startsWith('paint_') ||
+    key.startsWith('floor_') ||
+    key.startsWith('kitchen_') ||
+    key.startsWith('exterior_') ||
+    key.startsWith('backyard_')
+  );
+}
+
+export function resolveVisionPipelineMode(presetKey = '') {
+  if (isListingSafePreset(presetKey)) {
+    return 'listing_safe';
+  }
+
+  if (isConceptStudioPreset(presetKey)) {
+    return 'concept_studio';
+  }
+
+  return 'enhancement';
+}
+
 export function buildProviderChain({ preset, userPlan, openAiAvailable = false } = {}) {
   const key = String(preset?.key || '');
   const isPaintPreset = key.startsWith('paint_');
   const isFloorPreset = key.startsWith('floor_');
-  const isDeterministicOnly =
-    key === 'enhance_listing_quality' ||
-    key === 'lighting_boost' ||
-    key === 'combined_listing_refresh';
 
-  if (isDeterministicOnly) {
+  if (isListingSafePreset(key)) {
     return ['local_sharp'];
   }
 
-  if (key === 'floor_tile_stone') {
-    return ['replicate_basic', 'replicate_advanced'];
+  if (key === 'remove_furniture' || key === 'cleanup_empty_room') {
+    return openAiAvailable
+      ? ['replicate_basic', 'replicate_advanced', 'openai_edit']
+      : ['replicate_basic', 'replicate_advanced'];
+  }
+
+  if (isFloorPreset) {
+    return openAiAvailable
+      ? ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp']
+      : ['replicate_basic', 'replicate_advanced', 'local_sharp'];
   }
 
   if (isPaintPreset) {
@@ -137,6 +174,12 @@ export function buildProviderChain({ preset, userPlan, openAiAvailable = false }
 
   if (STANDARD_ONLY_PRESET_KEYS.has(key)) {
     return ['replicate_basic'];
+  }
+
+  if (isConceptStudioPreset(key)) {
+    return openAiAvailable
+      ? ['replicate_basic', 'replicate_advanced', 'openai_edit']
+      : ['replicate_basic', 'replicate_advanced'];
   }
 
   if (PREMIUM_PRESET_KEYS.has(key) && userPlan === 'premium' && openAiAvailable) {
@@ -175,10 +218,10 @@ export function getReplicateSettings(providerKey, preset = {}) {
     if (isRemoveFurniture) {
       return {
         model: preset.replicateModel,
-        outputCount: 1,
-        guidanceScale: Math.min(7, Number((baseGuidanceScale + 0.2).toFixed(2))),
-        numInferenceSteps: Math.min(30, baseInferenceSteps),
-        strength: Number(Math.min(0.68, baseStrength + 0.05).toFixed(2)),
+        outputCount: Math.max(3, baseOutputCount),
+        guidanceScale: Math.min(8.5, Number((baseGuidanceScale + 0.3).toFixed(2))),
+        numInferenceSteps: Math.max(38, baseInferenceSteps + 4),
+        strength: Number(Math.min(0.86, baseStrength + 0.06).toFixed(2)),
         scheduler: preset.scheduler,
         negativePrompt: preset.negativePrompt,
         timeoutMs: REMOVE_FURNITURE_ADVANCED_PROVIDER_TIMEOUT_MS,
@@ -250,13 +293,13 @@ export function getReplicateSettings(providerKey, preset = {}) {
     model: preset.replicateModel,
     outputCount:
       isRemoveFurniture
-        ? 1
+        ? Math.max(3, baseOutputCount)
         : isTileStonePreset
           ? Math.max(2, baseOutputCount)
           : baseOutputCount,
     guidanceScale: baseGuidanceScale,
-    numInferenceSteps: isRemoveFurniture ? Math.min(28, baseInferenceSteps) : baseInferenceSteps,
-    strength: isRemoveFurniture ? Math.min(0.62, baseStrength) : baseStrength,
+    numInferenceSteps: isRemoveFurniture ? Math.max(38, baseInferenceSteps) : baseInferenceSteps,
+    strength: isRemoveFurniture ? Math.min(0.82, baseStrength) : baseStrength,
     scheduler: preset.scheduler,
     negativePrompt: preset.negativePrompt,
     timeoutMs: isRemoveFurniture ? REMOVE_FURNITURE_BASIC_PROVIDER_TIMEOUT_MS : 120_000,
@@ -318,10 +361,16 @@ export function calculateRealEstateTrustScore(candidate = {}, presetKey = '') {
   const largestComponentPersistenceRatio = Number(candidate.largestComponentPersistenceRatio || 0);
 
   if (windowIntegrityChangeRatio > 0.015) {
-    score -= Math.min(45, (windowIntegrityChangeRatio - 0.015) * 500);
+    score -= Math.min(70, (windowIntegrityChangeRatio - 0.015) * 700);
   }
 
-  const structuralLimit = normalizedPresetKey === 'remove_furniture' ? 0.1 : 0.08;
+  const structuralLimit =
+    normalizedPresetKey === 'remove_furniture' ||
+    normalizedPresetKey === 'cleanup_empty_room'
+      ? 0.12
+      : isConceptStudioPreset(normalizedPresetKey)
+        ? 0.1
+        : 0.08;
   if (topHalfChangeRatio > structuralLimit) {
     score -= Math.min(36, (topHalfChangeRatio - structuralLimit) * 260);
   }
@@ -370,24 +419,48 @@ export function calculateRealEstateTrustScore(candidate = {}, presetKey = '') {
 
 export function getMinimumTrustThreshold(presetKey = '') {
   const normalizedPresetKey = String(presetKey || '');
-  if (
-    normalizedPresetKey === 'combined_listing_refresh' ||
-    normalizedPresetKey === 'enhance_listing_quality' ||
-    normalizedPresetKey === 'lighting_boost'
-  ) {
+  if (isListingSafePreset(normalizedPresetKey)) {
     return 78;
   }
-  if (normalizedPresetKey === 'remove_furniture') {
-    return 74;
+  if (
+    normalizedPresetKey === 'remove_furniture' ||
+    normalizedPresetKey === 'cleanup_empty_room'
+  ) {
+    return 64;
   }
   if (normalizedPresetKey.startsWith('paint_') || normalizedPresetKey.startsWith('floor_')) {
-    return 68;
+    return 66;
   }
   return 64;
 }
 
 export function meetsMinimumTrustThreshold(candidate = {}, presetKey = '') {
   return calculateRealEstateTrustScore(candidate, presetKey) >= getMinimumTrustThreshold(presetKey);
+}
+
+export function calculateConceptUtilityScore(candidate = {}, presetKey = '') {
+  const trust = calculateRealEstateTrustScore(candidate, presetKey) / 100;
+  const visibleChange = Math.min(
+    1,
+    Number(candidate.focusRegionChangeRatio || candidate.maskedChangeRatio || 0) * 3,
+  );
+  const objectRemoval = Math.min(1, Number(candidate.objectRemovalScore || 0) * 2.2);
+  const paintOrFloorChange = Math.min(
+    1,
+    Number(candidate.maskedChangeRatio || 0) * 1.8 +
+      Math.abs(Number(candidate.maskedLuminanceDelta || 0)) * 1.2 +
+      Number(candidate.maskedColorShiftRatio || 0) * 1.3,
+  );
+
+  let taskScore = visibleChange;
+
+  if (presetKey === 'remove_furniture' || presetKey === 'cleanup_empty_room') {
+    taskScore = Math.max(visibleChange, objectRemoval);
+  } else if (String(presetKey || '').startsWith('paint_') || String(presetKey || '').startsWith('floor_')) {
+    taskScore = Math.max(visibleChange, paintOrFloorChange);
+  }
+
+  return Number((trust * 0.58 + taskScore * 0.42).toFixed(4));
 }
 
 export function scorePaintCandidate(candidate = {}, presetKey = '') {
@@ -862,6 +935,18 @@ export function getPreferredFinishFallbackCandidates(candidates = [], presetKey)
 
 export function rankCandidates(candidates = [], presetKey) {
   return [...candidates].sort((left, right) => {
+    if (
+      isConceptStudioPreset(presetKey) &&
+      !String(presetKey || '').startsWith('paint_') &&
+      !String(presetKey || '').startsWith('floor_')
+    ) {
+      const leftUtilityScore = calculateConceptUtilityScore(left, presetKey);
+      const rightUtilityScore = calculateConceptUtilityScore(right, presetKey);
+      if (Math.abs(leftUtilityScore - rightUtilityScore) >= 0.015) {
+        return rightUtilityScore - leftUtilityScore;
+      }
+    }
+
     const leftTrustScore = calculateRealEstateTrustScore(left, presetKey);
     const rightTrustScore = calculateRealEstateTrustScore(right, presetKey);
     if (Math.abs(leftTrustScore - rightTrustScore) >= 6) {
