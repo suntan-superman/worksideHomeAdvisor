@@ -30,7 +30,9 @@ const PREMIUM_PRESET_KEYS = new Set([
 ]);
 
 export const VISION_PLAN_VALUES = ['standard', 'pro', 'premium'];
-const REMOVE_FURNITURE_MAX_EXECUTION_TIME_MS = 150_000;
+const REMOVE_FURNITURE_MAX_EXECUTION_TIME_MS = 45_000;
+const REMOVE_FURNITURE_BASIC_PROVIDER_TIMEOUT_MS = 40_000;
+const REMOVE_FURNITURE_ADVANCED_PROVIDER_TIMEOUT_MS = 45_000;
 export const PAINT_STRENGTH_MIN_COLOR_SHIFT = 0.12;
 export const PAINT_STRENGTH_MIN_LUMINANCE_DELTA = 0.08;
 export const PAINT_STRENGTH_MIN_PERCEPTIBILITY = 0.35;
@@ -129,6 +131,10 @@ export function buildProviderChain({ preset, userPlan, openAiAvailable = false }
     return ['local_sharp'];
   }
 
+  if (key === 'remove_furniture') {
+    return ['replicate_basic'];
+  }
+
   if (STANDARD_ONLY_PRESET_KEYS.has(key)) {
     return ['replicate_basic'];
   }
@@ -169,12 +175,13 @@ export function getReplicateSettings(providerKey, preset = {}) {
     if (isRemoveFurniture) {
       return {
         model: preset.replicateModel,
-        outputCount: Math.min(3, Math.max(2, baseOutputCount)),
-        guidanceScale: Math.min(10, Number((baseGuidanceScale + 0.35).toFixed(2))),
-        numInferenceSteps: baseInferenceSteps + 4,
-        strength: Number(Math.min(0.98, baseStrength + 0.03).toFixed(2)),
+        outputCount: 1,
+        guidanceScale: Math.min(7, Number((baseGuidanceScale + 0.2).toFixed(2))),
+        numInferenceSteps: Math.min(30, baseInferenceSteps),
+        strength: Number(Math.min(0.68, baseStrength + 0.05).toFixed(2)),
         scheduler: preset.scheduler,
         negativePrompt: preset.negativePrompt,
+        timeoutMs: REMOVE_FURNITURE_ADVANCED_PROVIDER_TIMEOUT_MS,
       };
     }
 
@@ -243,15 +250,16 @@ export function getReplicateSettings(providerKey, preset = {}) {
     model: preset.replicateModel,
     outputCount:
       isRemoveFurniture
-        ? Math.min(3, Math.max(2, baseOutputCount))
+        ? 1
         : isTileStonePreset
           ? Math.max(2, baseOutputCount)
           : baseOutputCount,
     guidanceScale: baseGuidanceScale,
-    numInferenceSteps: baseInferenceSteps,
-    strength: baseStrength,
+    numInferenceSteps: isRemoveFurniture ? Math.min(28, baseInferenceSteps) : baseInferenceSteps,
+    strength: isRemoveFurniture ? Math.min(0.62, baseStrength) : baseStrength,
     scheduler: preset.scheduler,
     negativePrompt: preset.negativePrompt,
+    timeoutMs: isRemoveFurniture ? REMOVE_FURNITURE_BASIC_PROVIDER_TIMEOUT_MS : 120_000,
   };
 }
 
@@ -295,6 +303,91 @@ export function calculatePerceptibilityScore(candidate = {}) {
       Math.abs(Number(candidate.maskedLuminanceDelta || 0)) * 0.2
     ).toFixed(4),
   );
+}
+
+export function calculateRealEstateTrustScore(candidate = {}, presetKey = '') {
+  const normalizedPresetKey = String(presetKey || '');
+  let score = 100;
+  const windowIntegrityChangeRatio = Number(candidate.windowIntegrityChangeRatio || 0);
+  const topHalfChangeRatio = Number(candidate.topHalfChangeRatio || 0);
+  const outsideMaskChangeRatio = Number(candidate.outsideMaskChangeRatio || 0);
+  const newFurnitureAdditionRatio = Number(candidate.newFurnitureAdditionRatio || 0);
+  const furnitureCoverageIncreaseRatio = Number(candidate.furnitureCoverageIncreaseRatio || 0);
+  const maskedEdgeDensityDelta = Number(candidate.maskedEdgeDensityDelta || 0);
+  const remainingFurnitureOverlapRatio = Number(candidate.remainingFurnitureOverlapRatio || 0);
+  const largestComponentPersistenceRatio = Number(candidate.largestComponentPersistenceRatio || 0);
+
+  if (windowIntegrityChangeRatio > 0.015) {
+    score -= Math.min(45, (windowIntegrityChangeRatio - 0.015) * 500);
+  }
+
+  const structuralLimit = normalizedPresetKey === 'remove_furniture' ? 0.1 : 0.08;
+  if (topHalfChangeRatio > structuralLimit) {
+    score -= Math.min(36, (topHalfChangeRatio - structuralLimit) * 260);
+  }
+
+  const outsideLimit = normalizedPresetKey.startsWith('paint_')
+    ? 0.16
+    : normalizedPresetKey.startsWith('floor_')
+      ? 0.14
+      : normalizedPresetKey === 'remove_furniture'
+        ? 0.18
+        : 0.22;
+  if (outsideMaskChangeRatio > outsideLimit) {
+    score -= Math.min(28, (outsideMaskChangeRatio - outsideLimit) * 150);
+  }
+
+  if (newFurnitureAdditionRatio > 0.015) {
+    score -= Math.min(32, (newFurnitureAdditionRatio - 0.015) * 180);
+  }
+
+  if (furnitureCoverageIncreaseRatio > 0.01) {
+    score -= Math.min(28, (furnitureCoverageIncreaseRatio - 0.01) * 420);
+  }
+
+  if (normalizedPresetKey === 'remove_furniture') {
+    if (remainingFurnitureOverlapRatio > 0.5) {
+      score -= Math.min(24, (remainingFurnitureOverlapRatio - 0.5) * 80);
+    }
+    if (largestComponentPersistenceRatio > 0.65) {
+      score -= Math.min(22, (largestComponentPersistenceRatio - 0.65) * 85);
+    }
+    if (maskedEdgeDensityDelta > 0.004) {
+      score -= Math.min(18, maskedEdgeDensityDelta * 600);
+    }
+  }
+
+  if (candidate.rejectionCategory === 'architectural_drift') {
+    score -= 24;
+  } else if (candidate.rejectionCategory === 'furniture_restaging') {
+    score -= 22;
+  } else if (candidate.rejectionCategory === 'wall_feature_addition') {
+    score -= 20;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+export function getMinimumTrustThreshold(presetKey = '') {
+  const normalizedPresetKey = String(presetKey || '');
+  if (
+    normalizedPresetKey === 'combined_listing_refresh' ||
+    normalizedPresetKey === 'enhance_listing_quality' ||
+    normalizedPresetKey === 'lighting_boost'
+  ) {
+    return 78;
+  }
+  if (normalizedPresetKey === 'remove_furniture') {
+    return 74;
+  }
+  if (normalizedPresetKey.startsWith('paint_') || normalizedPresetKey.startsWith('floor_')) {
+    return 68;
+  }
+  return 64;
+}
+
+export function meetsMinimumTrustThreshold(candidate = {}, presetKey = '') {
+  return calculateRealEstateTrustScore(candidate, presetKey) >= getMinimumTrustThreshold(presetKey);
 }
 
 export function scorePaintCandidate(candidate = {}, presetKey = '') {
@@ -523,6 +616,10 @@ export function isCandidateSufficient(candidate, presetKey) {
     return false;
   }
 
+  if (!meetsMinimumTrustThreshold(candidate, presetKey)) {
+    return false;
+  }
+
   if (presetKey === 'remove_furniture') {
     return (
       (
@@ -748,6 +845,12 @@ export function getPreferredFinishFallbackCandidates(candidates = [], presetKey)
 
 export function rankCandidates(candidates = [], presetKey) {
   return [...candidates].sort((left, right) => {
+    const leftTrustScore = calculateRealEstateTrustScore(left, presetKey);
+    const rightTrustScore = calculateRealEstateTrustScore(right, presetKey);
+    if (Math.abs(leftTrustScore - rightTrustScore) >= 6) {
+      return rightTrustScore - leftTrustScore;
+    }
+
     if (presetKey === 'remove_furniture') {
       if (Number(left?.objectRemovalScore || 0) !== Number(right?.objectRemovalScore || 0)) {
         return Number(right?.objectRemovalScore || 0) - Number(left?.objectRemovalScore || 0);
@@ -1062,6 +1165,9 @@ export function classifyQuality(candidate, presetKey = '') {
   }
 
   const normalizedQualityPresetKey = String(presetKey || '');
+  if (!meetsMinimumTrustThreshold(candidate, normalizedQualityPresetKey)) {
+    return 'poor';
+  }
   const perceptibility = calculatePerceptibilityScore(candidate);
   const outsideMask = Number(candidate.outsideMaskChangeRatio || 0);
   const topHalfChangeRatio = Number(candidate.topHalfChangeRatio || 0);
@@ -1139,12 +1245,17 @@ export function classifyQuality(candidate, presetKey = '') {
 
 export function selectReturnCandidate(candidates = [], presetKey = '') {
   const ranked = rankCandidates(candidates, presetKey);
-  const bestCandidate = ranked[0] || null;
+  const bestCandidate =
+    ranked.find((candidate) => meetsMinimumTrustThreshold(candidate, presetKey)) || null;
 
   return {
     variant: bestCandidate,
     quality: classifyQuality(bestCandidate, presetKey),
-    stoppedEarlyReason: bestCandidate ? 'ranked_best_candidate' : 'no_candidates_available',
-    deliveryMode: bestCandidate ? 'always_return_best' : 'none',
+    stoppedEarlyReason: bestCandidate
+      ? 'ranked_best_candidate'
+      : ranked.length
+        ? 'minimum_trust_threshold_not_met'
+        : 'no_candidates_available',
+    deliveryMode: bestCandidate ? 'trustworthy_best_candidate' : 'none',
   };
 }

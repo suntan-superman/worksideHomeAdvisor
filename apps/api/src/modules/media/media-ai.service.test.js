@@ -63,7 +63,7 @@ test('normalizeRoomType maps common room labels to canonical room types', () => 
 test('task specific mask strategy uses adaptive masks for wall and floor presets', () => {
   assert.equal(getTaskSpecificMaskStrategy('paint_bright_white'), 'adaptive_wall');
   assert.equal(getTaskSpecificMaskStrategy('floor_tile_stone'), 'adaptive_floor');
-  assert.equal(getTaskSpecificMaskStrategy('remove_furniture'), 'generic');
+  assert.equal(getTaskSpecificMaskStrategy('remove_furniture'), 'adaptive_furniture');
 });
 
 test('media asset source normalization preserves supported import sources', () => {
@@ -440,7 +440,7 @@ test('buildSceneAwareEnhancementRecipe keeps first-impression boosts stronger th
   assert.ok(listingRecipe.improvementsApplied.includes('tone balancing'));
 });
 
-test('resolveSmartEnhancementExecution routes listing refresh through declutter when clutter is high', () => {
+test('resolveSmartEnhancementExecution keeps listing refresh deterministic when clutter is high', () => {
   const routed = resolveSmartEnhancementExecution({
     requestedPresetKey: 'combined_listing_refresh',
     sceneAnalysis: {
@@ -453,9 +453,9 @@ test('resolveSmartEnhancementExecution routes listing refresh through declutter 
     },
   });
 
-  assert.equal(routed.executionPresetKey, 'declutter_medium');
-  assert.equal(routed.routingApplied, true);
-  assert.match(routed.reason, /clutter/i);
+  assert.equal(routed.executionPresetKey, 'combined_listing_refresh');
+  assert.equal(routed.routingApplied, false);
+  assert.equal(routed.reason, '');
 });
 
 test('resolveSmartEnhancementExecution keeps listing refresh direct when the scene is already stable', () => {
@@ -761,7 +761,7 @@ test('classifyQuality keeps subtle but usable smart-enhancement candidates inste
   assert.equal(quality, 'concept');
 });
 
-test('selectReturnCandidate always returns the strongest ranked candidate when one exists', () => {
+test('selectReturnCandidate returns the strongest trustworthy ranked candidate when one exists', () => {
   const selection = selectReturnCandidate(
     [
       {
@@ -784,7 +784,7 @@ test('selectReturnCandidate always returns the strongest ranked candidate when o
 
   assert.equal(selection.variant?.providerKey, 'local_sharp');
   assert.equal(selection.quality, 'high');
-  assert.equal(selection.deliveryMode, 'always_return_best');
+  assert.equal(selection.deliveryMode, 'trustworthy_best_candidate');
 });
 
 test('classifyListingReadiness returns listing-ready badge for strong clean outputs', () => {
@@ -871,7 +871,7 @@ test('resolveVisionUserPlan treats remove_furniture as premium by default', () =
   );
 });
 
-test('buildProviderChain includes openai_edit for premium remove_furniture when available', () => {
+test('buildProviderChain keeps open room preview on a bounded single provider', () => {
   assert.deepEqual(
     buildProviderChain({
       preset: {
@@ -882,7 +882,22 @@ test('buildProviderChain includes openai_edit for premium remove_furniture when 
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['replicate_basic', 'replicate_advanced', 'openai_edit'],
+    ['replicate_basic'],
+  );
+});
+
+test('buildProviderChain uses the same bounded open room path without OpenAI', () => {
+  assert.deepEqual(
+    buildProviderChain({
+      preset: {
+        key: 'remove_furniture',
+        category: 'concept_preview',
+        providerPreference: 'replicate',
+      },
+      userPlan: 'premium',
+      openAiAvailable: false,
+    }),
+    ['replicate_basic'],
   );
 });
 
@@ -1311,7 +1326,7 @@ test('tile or stone floors keep the best safe replicate candidate when strict th
   assert.equal(result.providerUsed, 'replicate_advanced');
   assert.equal(result.bestVariant?.providerKey, 'replicate_advanced');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
-  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'poor');
 });
 
@@ -1348,7 +1363,7 @@ test('paint presets reject a subtle replicate wall repaint that misses strength 
   assert.equal(result.providerUsed, 'replicate_basic');
   assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
-  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'poor');
 });
 
@@ -1384,7 +1399,7 @@ test('paint presets accept a visibly changed warm wall candidate when the usable
   assert.equal(result.providerUsed, 'replicate_basic');
   assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
-  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'high');
 });
 
@@ -1424,7 +1439,7 @@ test('paint presets accept window-heavy warm wall candidates with high outside-m
   assert.equal(result.providerUsed, 'openai_edit');
   assert.equal(result.bestVariant?.providerKey, 'openai_edit');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
-  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'good');
 });
 
@@ -1460,7 +1475,7 @@ test('paint presets keep a strong local fallback preview when strict review fiel
   assert.equal(result.providerUsed, 'local_sharp');
   assert.equal(result.bestVariant?.providerKey, 'local_sharp');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
-  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'high');
 });
 
@@ -1496,11 +1511,11 @@ test('dark charcoal test preset keeps the first safe visible candidate without s
   assert.equal(result.providerUsed, 'replicate_basic');
   assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
-  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'high');
 });
 
-test('dark charcoal test preset surfaces a strong but spillier diagnostic candidate as best effort', async () => {
+test('dark charcoal test preset rejects a strong but structurally unsafe diagnostic candidate', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('paint_dark_charcoal_test'),
@@ -1531,11 +1546,11 @@ test('dark charcoal test preset surfaces a strong but spillier diagnostic candid
     },
   });
 
-  assert.equal(result.providerUsed, 'openai_edit');
-  assert.equal(result.bestVariant?.providerKey, 'openai_edit');
-  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
-  assert.equal(result.deliveryMode, 'always_return_best');
-  assert.equal(result.quality, 'concept');
+  assert.equal(result.providerUsed, null);
+  assert.equal(result.bestVariant, null);
+  assert.equal(result.stoppedEarlyReason, 'minimum_trust_threshold_not_met');
+  assert.equal(result.deliveryMode, 'none');
+  assert.equal(result.quality, 'poor');
 });
 
 test('paint presets return best available advisory candidate when the time budget is reached', async () => {
@@ -1585,7 +1600,7 @@ test('paint presets return best available advisory candidate when the time budge
   assert.equal(result.providerUsed, 'replicate_basic');
   assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
   assert.equal(result.stoppedEarlyReason, 'time_budget_best_available');
-  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'concept');
   assert.equal(result.timeBudgetReached, true);
 });
@@ -1624,7 +1639,7 @@ test('paint presets return a best-effort preview instead of advisor-only when a 
   assert.equal(result.providerUsed, 'openai_edit');
   assert.equal(result.bestVariant?.providerKey, 'openai_edit');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
-  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'poor');
 });
 
@@ -1699,7 +1714,7 @@ test('paint presets fall through to openai_edit when replicate returns nothing u
   assert.equal(result.providerUsed, 'openai_edit');
   assert.equal(result.bestVariant?.providerKey, 'openai_edit');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
-  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'high');
 });
 
@@ -1746,7 +1761,7 @@ test('paint presets fall through to local_sharp when ai providers return nothing
   assert.equal(result.providerUsed, 'local_sharp');
   assert.equal(result.bestVariant?.providerKey, 'local_sharp');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
-  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'high');
 });
 
@@ -1864,7 +1879,7 @@ test('floor presets keep a subtle candidate instead of dropping everything as a 
   assert.equal(result.providerUsed, 'replicate_basic');
   assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
-  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'poor');
 });
 
@@ -1898,7 +1913,7 @@ test('floor presets keep even extremely subtle raw candidates instead of filteri
   assert.equal(result.providerUsed, 'replicate_basic');
   assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
-  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'poor');
 });
 
@@ -1944,11 +1959,11 @@ test('paint presets accept a strong local candidate after weak ai outputs', asyn
   assert.equal(result.providerUsed, 'local_sharp');
   assert.equal(result.bestVariant?.providerKey, 'local_sharp');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
-  assert.equal(result.deliveryMode, 'always_return_best');
+  assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'high');
 });
 
-test('getReplicateSettings reduces remove_furniture sample counts for faster execution', () => {
+test('getReplicateSettings keeps remove_furniture generation bounded', () => {
   const basicSettings = getReplicateSettings('replicate_basic', {
     key: 'remove_furniture',
     outputCount: 3,
@@ -1964,9 +1979,12 @@ test('getReplicateSettings reduces remove_furniture sample counts for faster exe
     strength: 0.93,
   });
 
-  assert.equal(basicSettings.outputCount, 3);
-  assert.equal(advancedSettings.outputCount, 3);
-  assert.equal(advancedSettings.numInferenceSteps, 47);
+  assert.equal(basicSettings.outputCount, 1);
+  assert.equal(basicSettings.numInferenceSteps, 28);
+  assert.equal(basicSettings.timeoutMs, 40_000);
+  assert.equal(advancedSettings.outputCount, 1);
+  assert.equal(advancedSettings.numInferenceSteps, 30);
+  assert.equal(advancedSettings.timeoutMs, 45_000);
 });
 
 test('getReplicateSettings caps bright white wall samples at four outputs', () => {
@@ -2413,7 +2431,7 @@ test('tile or stone floor ranking prefers a stronger tile-material signal over a
   assert.equal(ranked[0]?.label, 'Tile-like local floor');
 });
 
-test('remove_furniture orchestration evaluates the full provider chain before selecting a winner', async () => {
+test('remove_furniture orchestration uses the bounded single-provider open room chain', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
@@ -2459,30 +2477,15 @@ test('remove_furniture orchestration evaluates the full provider chain before se
           },
         ];
       },
-      runOpenAiEdit: async () => {
-        callOrder.push('openai_edit');
-        return [
-          {
-            overallScore: 80,
-            objectRemovalScore: 0.26,
-            remainingFurnitureOverlapRatio: 0.16,
-            largestComponentPersistenceRatio: 0.22,
-            newFurnitureAdditionRatio: 0.02,
-            focusRegionChangeRatio: 0.19,
-            maskedChangeRatio: 0.27,
-            maskedEdgeDensityDelta: -0.015,
-          },
-        ];
-      },
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit']);
-  assert.equal(result.providerUsed, 'replicate_advanced');
-  assert.equal(result.providerAttemptCount, 3);
+  assert.deepEqual(callOrder, ['replicate_basic']);
+  assert.equal(result.providerUsed, 'replicate_basic');
+  assert.equal(result.providerAttemptCount, 1);
 });
 
-test('remove_furniture orchestration exits early when an advanced candidate is already exceptional', async () => {
+test('remove_furniture orchestration exits after a trustworthy basic open room candidate', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
@@ -2536,19 +2539,15 @@ test('remove_furniture orchestration exits early when an advanced candidate is a
           },
         ];
       },
-      runOpenAiEdit: async () => {
-        callOrder.push('openai_edit');
-        return [];
-      },
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced']);
-  assert.equal(result.providerUsed, 'replicate_advanced');
-  assert.equal(result.stoppedEarlyReason, 'high_confidence_candidate');
+  assert.deepEqual(callOrder, ['replicate_basic']);
+  assert.equal(result.providerUsed, 'replicate_basic');
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
 });
 
-test('remove_furniture orchestration does not stop at the time budget before stronger providers run', async () => {
+test('remove_furniture orchestration keeps a trustworthy single-provider candidate even after budget time', async () => {
   let now = 0;
   const callOrder = [];
   const result = await orchestrateVisionJob({
@@ -2586,31 +2585,13 @@ test('remove_furniture orchestration does not stop at the time budget before str
           },
         ];
       },
-      runOpenAiEdit: async () => {
-        callOrder.push('openai_edit');
-        return [
-          {
-            overallScore: 88,
-            objectRemovalScore: 0.27,
-            remainingFurnitureOverlapRatio: 0.14,
-            largestComponentPersistenceRatio: 0.2,
-            newFurnitureAdditionRatio: 0.03,
-            focusRegionChangeRatio: 0.21,
-            maskedChangeRatio: 0.29,
-            maskedEdgeDensityDelta: -0.014,
-            outsideMaskChangeRatio: 0.16,
-            topHalfChangeRatio: 0.07,
-            clearedMajorComponentCount: 4,
-            totalMajorComponentCount: 4,
-          },
-        ];
-      },
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit']);
-  assert.equal(result.providerUsed, 'openai_edit');
+  assert.deepEqual(callOrder, ['replicate_basic']);
+  assert.equal(result.providerUsed, 'replicate_basic');
   assert.equal(result.timeBudgetReached, false);
+  assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
 });
 
 test('vision orchestration stops after cancellation is requested between providers', async () => {

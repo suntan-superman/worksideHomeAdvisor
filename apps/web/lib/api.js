@@ -1,9 +1,64 @@
 import { formatApiErrorMessage } from './errors';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const REQUEST_RETRY_DELAYS_MS = [500, 1500];
+const RETRYABLE_STATUS_CODES = new Set([502, 503, 504]);
 
 export function getApiBaseUrl() {
   return API_BASE_URL;
+}
+
+function getRequestMethod(options) {
+  return (options.method || 'GET').toUpperCase();
+}
+
+function canRetryRequest(options) {
+  const method = getRequestMethod(options);
+  return method === 'GET' || method === 'HEAD';
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function fetchWithRetry(url, fetchOptions, requestOptions) {
+  const shouldRetry = canRetryRequest(requestOptions);
+
+  for (let attempt = 0; attempt <= REQUEST_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = await fetch(url, fetchOptions);
+      const hasRetryLeft = attempt < REQUEST_RETRY_DELAYS_MS.length;
+
+      if (
+        shouldRetry &&
+        hasRetryLeft &&
+        RETRYABLE_STATUS_CODES.has(response.status)
+      ) {
+        await wait(REQUEST_RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+
+      return response;
+    } catch (error) {
+      const hasRetryLeft = attempt < REQUEST_RETRY_DELAYS_MS.length;
+
+      if (shouldRetry && hasRetryLeft) {
+        await wait(REQUEST_RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+
+      const requestError = new Error(
+        formatApiErrorMessage('The server is temporarily unavailable. Please try again.'),
+      );
+      requestError.status = 0;
+      requestError.cause = error;
+      throw requestError;
+    }
+  }
+
+  throw new Error(formatApiErrorMessage('Request failed.'));
 }
 
 async function request(path, options = {}) {
@@ -15,11 +70,11 @@ async function request(path, options = {}) {
     headers['Content-Type'] = 'application/json';
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchWithRetry(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
     cache: 'no-store',
-  });
+  }, options);
 
   const data = await response.json().catch(() => ({}));
 

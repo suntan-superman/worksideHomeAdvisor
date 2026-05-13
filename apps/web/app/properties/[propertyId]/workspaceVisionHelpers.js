@@ -30,14 +30,14 @@ export const VISION_WORKFLOW_STAGES = [
           'declutter_light',
           'declutter_medium',
           'lighting_boost',
-          'remove_furniture',
-          'cleanup_empty_room',
         ],
       },
       {
         key: 'finish_concepts',
         label: 'Optional concept directions',
         items: [
+          'remove_furniture',
+          'cleanup_empty_room',
           'paint_warm_neutral',
           'paint_bright_white',
           'paint_soft_greige',
@@ -656,7 +656,7 @@ export function formatFreeformPlanHighlights(normalizedPlan) {
   const highlights = [];
 
   if (normalizedPlan.removeObjects?.includes('furniture')) {
-    highlights.push('Furniture removal requested');
+    highlights.push('Open-room simplification requested');
   }
   if (normalizedPlan.removeObjects?.includes('clutter')) {
     highlights.push('Declutter requested');

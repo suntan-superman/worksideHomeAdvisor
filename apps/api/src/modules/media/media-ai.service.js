@@ -24,7 +24,9 @@ import {
 } from './variant-lifecycle.service.js';
 import { orchestrateVisionJob } from './vision-orchestrator.service.js';
 import {
+  calculateRealEstateTrustScore,
   calculateObjectRemovalScore,
+  classifyQuality,
   getReplicateSettings,
   resolveVisionUserPlan,
 } from './vision-orchestrator.helpers.js';
@@ -535,11 +537,11 @@ function getPresetPromptAddon(presetKey, roomType) {
   }
 
   if (presetKey === 'remove_furniture') {
-    return 'Remove movable furniture if possible, but preserve all structural elements, built-ins, windows, doors, and permanent fixtures.';
+    return 'Create a conservative open-room preview. Reduce small portable distractions and soften visual dominance, but preserve large furniture, windows, floors, walls, ceiling lines, built-ins, doors, trim, and all permanent fixtures.';
   }
 
   if (presetKey === 'cleanup_empty_room') {
-    return 'Refine an already-cleared room concept. Remove leftover fragments, rug remnants, patchy floor transitions, and uneven wall or trim artifacts while preserving all structural elements, built-ins, shelving, windows, doors, and permanent fixtures.';
+    return 'Refine an open-room concept. Reduce leftover fragments, small distractions, patchy floor transitions, and rough wall or trim edges while preserving all structural elements, built-ins, shelving, windows, doors, and permanent fixtures.';
   }
 
   if (wallColorPresetKeys.has(presetKey)) {
@@ -1110,28 +1112,28 @@ function buildPresetRenderPlan(presetKey) {
   if (preset.key === 'remove_furniture') {
     return {
       preset,
-      label: 'Furniture Removal Preview',
+      label: 'Open Room Preview',
       warning:
-        'This is a concept preview only. It is intended for planning and seller discussion, not silent replacement of the actual room photo.',
+        'Concept preview. Use this to explore possibilities before preparing final listing photos.',
       summary:
-        'A concept preview that removes most movable furniture to show how the room could feel more open.',
+        'A conservative preview that reduces visual distractions so the room feels more open without rebuilding the space.',
       differenceHint:
-        'Look at the perceived openness of the room rather than exact decor details.',
-      effects: ['Furniture removal', 'Open-room concept', 'Planning preview'],
+        'Look for a calmer first impression and easier read of the room layout.',
+      effects: ['Visual simplification', 'Open-room feel', 'Planning preview'],
     };
   }
 
   if (preset.key === 'cleanup_empty_room') {
     return {
       preset,
-      label: 'Empty-Room Cleanup Preview',
+      label: 'Open Room Cleanup Preview',
       warning:
         'This is a concept preview only. It refines a cleared-room draft for planning and seller discussion, not as silent replacement of the original photo.',
       summary:
-        'A lighter cleanup pass that smooths leftover artifacts after furniture removal while preserving the room structure.',
+        'A lighter cleanup pass that smooths leftover visual roughness in an open-room concept while preserving the room structure.',
       differenceHint:
-        'Look for cleaner floor and wall transitions, fewer leftovers, and a more believable empty-room presentation.',
-      effects: ['Artifact cleanup', 'Geometry preservation', 'Clean-room refinement'],
+        'Look for cleaner floor and wall transitions, fewer leftovers, and a more believable open-room presentation.',
+      effects: ['Concept cleanup', 'Structure preservation', 'Open-room refinement'],
     };
   }
 
@@ -2138,6 +2140,40 @@ export function buildVisionPipelineDescriptor({
   };
 }
 
+function sanitizeVisionUserMessage(message = '', { presetKey = '' } = {}) {
+  const text = String(message || '').trim();
+  if (!text) {
+    return '';
+  }
+
+  const normalized = text.toLowerCase();
+  if (
+    normalized.includes('low-confidence') ||
+    normalized.includes('artifact') ||
+    normalized.includes('hallucination') ||
+    normalized.includes('distortion') ||
+    normalized.includes('geometry') ||
+    normalized.includes('masking') ||
+    normalized.includes('pipeline') ||
+    normalized.includes('failed')
+  ) {
+    if (presetKey === 'remove_furniture') {
+      return 'Concept preview. Use this to explore possibilities before preparing final listing photos.';
+    }
+
+    if (presetKey === 'combined_listing_refresh') {
+      return 'Enhanced preview generated. Changes were intentionally kept conservative to preserve a realistic listing photo.';
+    }
+
+    return 'Subtle preview generated. This room already photographs well, so changes were intentionally kept conservative.';
+  }
+
+  return text
+    .replace(/low-confidence preview/gi, 'subtle preview')
+    .replace(/premium fallback/gi, 'preview')
+    .replace(/fallback/gi, 'preview');
+}
+
 async function renderSceneAwareEnhancementBuffer(
   sourceBuffer,
   presetKey,
@@ -2598,8 +2634,8 @@ function buildFreeformRenderPlan(normalizedPlan = {}) {
   const effects = ['Custom request saved', 'Manual review recommended'];
 
   if (normalizedPlan.removeObjects?.includes('furniture')) {
-    requestedChanges.push('furniture removal');
-    effects.push('Furniture-removal route');
+    requestedChanges.push('open room simplification');
+    effects.push('Open-room route');
   }
   if (normalizedPlan.removeObjects?.includes('clutter')) {
     requestedChanges.push('declutter');
@@ -3339,24 +3375,24 @@ function buildMaskShapes(metadata, presetKey, roomType) {
       return [
         {
           type: 'rect',
-          left: Math.round(width * 0.04),
-          top: Math.round(height * 0.34),
-          width: Math.round(width * 0.92),
-          height: Math.round(height * 0.6),
+          left: Math.round(width * 0.08),
+          top: Math.round(height * 0.5),
+          width: Math.round(width * 0.84),
+          height: Math.round(height * 0.38),
         },
         {
           type: 'ellipse',
           cx: Math.round(width * 0.27),
-          cy: Math.round(height * 0.66),
-          rx: Math.round(width * 0.22),
-          ry: Math.round(height * 0.18),
+          cy: Math.round(height * 0.68),
+          rx: Math.round(width * 0.16),
+          ry: Math.round(height * 0.12),
         },
         {
           type: 'ellipse',
           cx: Math.round(width * 0.74),
-          cy: Math.round(height * 0.64),
-          rx: Math.round(width * 0.24),
-          ry: Math.round(height * 0.19),
+          cy: Math.round(height * 0.67),
+          rx: Math.round(width * 0.17),
+          ry: Math.round(height * 0.12),
         },
       ];
     }
@@ -3364,17 +3400,17 @@ function buildMaskShapes(metadata, presetKey, roomType) {
     return [
       {
         type: 'rect',
-        left: Math.round(width * 0.08),
-        top: Math.round(height * 0.3),
+        left: Math.round(width * 0.12),
+        top: Math.round(height * 0.48),
         width: Math.round(width * 0.84),
-        height: Math.round(height * 0.64),
+        height: Math.round(height * 0.4),
       },
       {
         type: 'ellipse',
         cx: Math.round(width * 0.5),
-        cy: Math.round(height * 0.64),
-        rx: Math.round(width * 0.35),
-        ry: Math.round(height * 0.23),
+        cy: Math.round(height * 0.68),
+        rx: Math.round(width * 0.28),
+        ry: Math.round(height * 0.16),
       },
     ];
   }
@@ -5224,6 +5260,9 @@ export function getTaskSpecificMaskStrategy(presetKey = '') {
   if (isFloorPreset(normalizedPresetKey)) {
     return 'adaptive_floor';
   }
+  if (normalizedPresetKey === 'remove_furniture') {
+    return 'adaptive_furniture';
+  }
 
   return 'generic';
 }
@@ -5246,6 +5285,30 @@ function validateMaskCoverage({ presetKey, coverageRatio, roomType }) {
 }
 
 export async function resolveSurfaceMaskAtSourceSize(sourceBuffer, presetKey, roomType) {
+  if (presetKey === 'remove_furniture') {
+    try {
+      const furniture = await buildAdaptiveFurnitureMaskAtSourceSize(sourceBuffer);
+      const coverageRatio = await calculateMaskCoverageRatio(furniture.adaptiveMaskBuffer);
+      if (coverageRatio < 0.03 || coverageRatio > 0.62) {
+        throw new Error(`Furniture mask coverage out of range: ${coverageRatio}`);
+      }
+      return {
+        maskBuffer: furniture.adaptiveMaskBuffer,
+        debug: { strategy: 'adaptive_furniture', maskCoverageRatio: coverageRatio },
+      };
+    } catch (error) {
+      console.warn('Adaptive furniture mask fallback triggered', {
+        presetKey,
+        roomType,
+        message: error?.message || String(error),
+      });
+      return {
+        maskBuffer: await buildInpaintingMaskBuffer(sourceBuffer, presetKey, roomType),
+        debug: { strategy: 'geometric_fallback', maskCoverageRatio: null },
+      };
+    }
+  }
+
   if (isWallPreset(presetKey)) {
     try {
       const semanticWall = await segmentWallPlanesAtSourceSize(sourceBuffer, roomType, presetKey);
@@ -5902,6 +5965,69 @@ async function blendVariantWithSourceMask({
     .toBuffer();
 }
 
+async function buildImmutableWindowCompositeMask(sourceBuffer) {
+  const metadata = await sharp(sourceBuffer).rotate().metadata();
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  if (!width || !height) {
+    return null;
+  }
+
+  const probeWidth = Math.max(160, Math.min(360, width));
+  const probeHeight = Math.max(120, Math.round((height / Math.max(1, width)) * probeWidth));
+  const sourceProbe = await sharp(sourceBuffer)
+    .rotate()
+    .resize(probeWidth, probeHeight, { fit: 'fill' })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+  const windowMask = buildWindowRejectionMask({
+    sourceProbe,
+    width: probeWidth,
+    height: probeHeight,
+    startY: 0,
+    endY: Math.round(probeHeight * 0.86),
+  });
+  const expandedWindowMask = dilateBinaryMask(
+    windowMask.binaryMask,
+    probeWidth,
+    probeHeight,
+    1,
+  );
+  const coverageRatio = calculateBinaryMaskCoverageRatio(expandedWindowMask);
+  if (coverageRatio < 0.002 || coverageRatio > 0.38) {
+    return null;
+  }
+
+  return {
+    maskBuffer: await buildBinaryMaskPngBuffer({
+      binaryMask: expandedWindowMask,
+      inputWidth: probeWidth,
+      inputHeight: probeHeight,
+      outputWidth: width,
+      outputHeight: height,
+    }),
+    coverageRatio,
+  };
+}
+
+async function restoreImmutableWindowRegions({
+  sourceBuffer,
+  variantBuffer,
+  immutableWindowMask = null,
+}) {
+  if (!immutableWindowMask?.maskBuffer) {
+    return variantBuffer;
+  }
+
+  return blendVariantWithSourceMask({
+    sourceBuffer: variantBuffer,
+    variantBuffer: sourceBuffer,
+    maskBuffer: immutableWindowMask.maskBuffer,
+    maskBlur: 0.5,
+  });
+}
+
 async function readBinaryMask(maskBuffer, threshold = 32) {
   const metadata = await sharp(maskBuffer).metadata();
   const width = Number(metadata.width || 0);
@@ -6165,7 +6291,6 @@ export function resolveSmartEnhancementExecution({
 } = {}) {
   const requestedPreset = resolveVisionPreset(requestedPresetKey);
   const smartEnhancementPlan = planSmartEnhancements(sceneAnalysis);
-  const clutterLevel = Number(sceneAnalysis.clutterLevel || sceneAnalysis.clutterScore || 0);
   const lightingQuality = Number(sceneAnalysis.lightingQuality || 0);
   const requestKey = requestedPreset.key;
 
@@ -6177,21 +6302,6 @@ export function resolveSmartEnhancementExecution({
       routingApplied: false,
       pathLabel: requestedPreset.displayName,
       reason: '',
-    };
-  }
-
-  if (smartEnhancementPlan.includes('declutter')) {
-    const executionPresetKey = clutterLevel >= 0.68 ? 'declutter_medium' : 'declutter_light';
-    return {
-      requestedPresetKey: requestKey,
-      executionPresetKey,
-      smartEnhancementPlan,
-      routingApplied: executionPresetKey !== requestKey,
-      pathLabel: executionPresetKey === 'declutter_medium' ? 'Stronger declutter first' : 'Light declutter first',
-      reason:
-        clutterLevel >= 0.68
-          ? 'visible clutter is still too strong for a trustworthy final listing pass'
-          : 'visible distractions should be reduced before the final listing polish',
     };
   }
 
@@ -6704,6 +6814,60 @@ async function buildGuaranteedMarketplaceFallbackCandidate({
   };
 }
 
+function isUnusableFurnitureRemovalResult(orchestrationResult) {
+  const candidate = orchestrationResult?.bestVariant;
+  if (!candidate) {
+    return true;
+  }
+
+  const quality = classifyQuality(candidate, 'remove_furniture');
+  return (
+    quality === 'poor' ||
+    calculateRealEstateTrustScore(candidate, 'remove_furniture') < 74 ||
+    Number(candidate.windowIntegrityChangeRatio || 0) > 0.035 ||
+    Number(candidate.topHalfChangeRatio || 0) > 0.16 ||
+    Number(candidate.outsideMaskChangeRatio || 0) > 0.28 ||
+    candidate.rejectionCategory === 'furniture_persistence' ||
+    candidate.rejectionCategory === 'furniture_restaging'
+  );
+}
+
+async function completeUnusableFurnitureRemovalJob({ job, orchestrationResult }) {
+  job.status = 'failed';
+  job.provider = orchestrationResult?.providerUsed || 'vision_orchestrator';
+  job.attemptCount = Number(orchestrationResult?.providerAttemptCount || 0);
+  job.maxAttempts = Number(orchestrationResult?.orchestration?.chain?.length || 1);
+  job.currentStage = 'failed';
+  job.fallbackMode = null;
+  job.failureReason = 'no_usable_open_room_preview';
+  job.outputVariantIds = [];
+  job.selectedVariantId = null;
+  job.input = {
+    ...(job.input || {}),
+    userPlan: orchestrationResult?.userPlan,
+    orchestrationChain: orchestrationResult?.orchestration?.chain || [],
+    orchestrationAttempts: orchestrationResult?.orchestration?.attempts || [],
+    orchestrationElapsedMs: Number(orchestrationResult?.elapsedTimeMs || 0),
+    orchestrationTimeBudgetMs: Number(orchestrationResult?.maxExecutionTimeMs || 0),
+    orchestrationStoppedEarlyReason: orchestrationResult?.stoppedEarlyReason || '',
+    orchestrationTimeBudgetReached: Boolean(orchestrationResult?.timeBudgetReached),
+    orchestrationQuality: orchestrationResult?.quality || 'poor',
+    orchestrationDeliveryMode: 'no_usable_preview',
+  };
+  job.message = 'Open Room Preview did not produce a usable result.';
+  job.warning =
+    'No new preview was saved because the generated result did not preserve the room well enough.';
+  await job.save();
+
+  return {
+    cached: false,
+    preset: resolveVisionPreset('remove_furniture'),
+    job: serializeImageJob(job.toObject(), []),
+    variants: [],
+    variant: null,
+  };
+}
+
 async function buildReviewedReplicateCandidates({
   providerKey,
   asset,
@@ -6735,6 +6899,14 @@ async function buildReviewedReplicateCandidates({
     };
   });
   const maskBuffer = resolvedMask.maskBuffer;
+  const immutableWindowMask = await buildImmutableWindowCompositeMask(sourceBuffer).catch((error) => {
+    console.warn('Immutable window mask unavailable', {
+      presetKey: preset.key,
+      providerKey,
+      message: error?.message || String(error),
+    });
+    return null;
+  });
   let removeFurnitureEvaluationMaskBuffer = null;
   let sourceFurnitureEdgeDensity = null;
   let paintEvaluationMaskBuffer = null;
@@ -6823,6 +6995,7 @@ async function buildReviewedReplicateCandidates({
     scheduler: settings.scheduler,
     negativePrompt: settings.negativePrompt,
     seed: Math.floor(Math.random() * 1_000_000_000),
+    timeoutMs: settings.timeoutMs,
   });
 
   const evaluationRegions = getPresetEvaluationRegions(preset.key);
@@ -6884,15 +7057,19 @@ async function buildReviewedReplicateCandidates({
         ? removeFurnitureEvaluationMaskBuffer
         : maskBuffer;
 
-    return blendVariantWithSourceMask({
+    const scopedBuffer = await blendVariantWithSourceMask({
       sourceBuffer,
       variantBuffer: candidateBuffer,
       maskBuffer: blendMaskBuffer,
       maskBlur: preset.key === 'remove_furniture' ? 2.2 : 1.8,
     });
+    return restoreImmutableWindowRegions({
+      sourceBuffer,
+      variantBuffer: scopedBuffer,
+      immutableWindowMask,
+    });
   };
-  const maxRefinementAttempts =
-    preset.key === 'remove_furniture' && providerKey === 'replicate_advanced' ? 1 : Infinity;
+  const maxRefinementAttempts = 0;
   let refinementAttempts = 0;
 
   const candidates = [];
@@ -6914,6 +7091,14 @@ async function buildReviewedReplicateCandidates({
     let clearedMajorComponentCount = 0;
     let totalMajorComponentCount = 0;
     let furnitureCoverageIncreaseRatio = 0;
+    let windowIntegrityChangeRatio = 0;
+    if (immutableWindowMask?.maskBuffer) {
+      windowIntegrityChangeRatio = await calculateMaskedVisualChangeRatio(
+        sourceBuffer,
+        buffer,
+        immutableWindowMask.maskBuffer,
+      );
+    }
     if (preset.key === 'remove_furniture') {
       ({
         maskedChangeRatio,
@@ -6981,6 +7166,7 @@ async function buildReviewedReplicateCandidates({
         scheduler: settings.scheduler,
         negativePrompt: settings.negativePrompt,
         seed: Math.floor(Math.random() * 1_000_000_000),
+        timeoutMs: Math.min(45_000, Number(settings.timeoutMs || 75_000)),
       });
       if (refinementOutputs.length) {
         output = refinementOutputs[0];
@@ -7365,6 +7551,7 @@ async function buildReviewedReplicateCandidates({
       windowRejectionCoverageRatio: resolvedMask.debug?.windowRejectionCoverageRatio ?? null,
       windowBrightPixelRatio: resolvedMask.debug?.windowBrightPixelRatio ?? null,
       windowStructuredPixelRatio: resolvedMask.debug?.windowStructuredPixelRatio ?? null,
+      windowIntegrityChangeRatio,
       review,
       overallScore,
       visualChangeRatio,
@@ -7424,6 +7611,14 @@ async function buildReviewedOpenAiCandidates({
           debug: { strategy: 'geometric_fallback', maskCoverageRatio: null },
         };
   const maskBuffer = resolvedMask.maskBuffer;
+  const immutableWindowMask = await buildImmutableWindowCompositeMask(sourceBuffer).catch((error) => {
+    console.warn('Immutable window mask unavailable', {
+      presetKey: preset.key,
+      providerKey: 'openai_edit',
+      message: error?.message || String(error),
+    });
+    return null;
+  });
   let removeFurnitureEvaluationMaskBuffer = null;
   let sourceFurnitureEdgeDensity = null;
   let paintEvaluationMaskBuffer = null;
@@ -7477,12 +7672,16 @@ async function buildReviewedOpenAiCandidates({
     );
   };
 
-  const providerPrompt = `${fullPrompt} Produce the strongest usable edit while preserving the true room structure. Prefer subtraction over restaging.`;
+  const providerPrompt =
+    preset.key === 'remove_furniture'
+      ? `${fullPrompt} CRITICAL: remove the movable furniture inside the editable mask. Do not replace it with new chairs, tables, sofas, rugs, decor, statues, plants, or staging. Reconstruct believable empty floor, wall, baseboard, and window-adjacent areas only. Keep the actual architecture, windows, trim, lighting direction, and perspective stable. If a region is uncertain, leave it simpler and emptier rather than inventing objects.`
+      : `${fullPrompt} Produce the strongest usable edit while preserving the true room structure. Prefer subtraction over restaging.`;
   const providerOutputs = await runOpenAIImageEdit({
     sourceBuffer,
     maskBuffer,
     prompt: providerPrompt,
     outputCount: preset.key === 'remove_furniture' ? 1 : Math.min(2, Number(preset.outputCount || 1)),
+    timeoutMs: preset.key === 'remove_furniture' ? 120_000 : 120_000,
   });
   const evaluationRegions = getPresetEvaluationRegions(preset.key);
   const computeFurnitureRemovalMetrics = async (candidateBuffer) => {
@@ -7543,11 +7742,16 @@ async function buildReviewedOpenAiCandidates({
         ? removeFurnitureEvaluationMaskBuffer
         : maskBuffer;
 
-    return blendVariantWithSourceMask({
+    const scopedBuffer = await blendVariantWithSourceMask({
       sourceBuffer,
       variantBuffer: candidateBuffer,
       maskBuffer: blendMaskBuffer,
       maskBlur: preset.key === 'remove_furniture' ? 2.2 : 1.8,
+    });
+    return restoreImmutableWindowRegions({
+      sourceBuffer,
+      variantBuffer: scopedBuffer,
+      immutableWindowMask,
     });
   };
 
@@ -7572,6 +7776,14 @@ async function buildReviewedOpenAiCandidates({
     let clearedMajorComponentCount = 0;
     let totalMajorComponentCount = 0;
     let furnitureCoverageIncreaseRatio = 0;
+    let windowIntegrityChangeRatio = 0;
+    if (immutableWindowMask?.maskBuffer) {
+      windowIntegrityChangeRatio = await calculateMaskedVisualChangeRatio(
+        sourceBuffer,
+        buffer,
+        immutableWindowMask.maskBuffer,
+      );
+    }
     if (preset.key === 'remove_furniture') {
       ({
         maskedChangeRatio,
@@ -7948,6 +8160,7 @@ async function buildReviewedOpenAiCandidates({
       windowRejectionCoverageRatio: resolvedMask.debug?.windowRejectionCoverageRatio ?? null,
       windowBrightPixelRatio: resolvedMask.debug?.windowBrightPixelRatio ?? null,
       windowStructuredPixelRatio: resolvedMask.debug?.windowStructuredPixelRatio ?? null,
+      windowIntegrityChangeRatio,
       review,
       overallScore,
       visualChangeRatio,
@@ -8033,6 +8246,7 @@ async function persistOrchestratedVisionCandidates({
       pipelineDescriptor.stageKey === 'listing_ready'
         ? candidate.confidenceBadge || pipelineDescriptor.statusLabel
         : pipelineDescriptor.statusLabel;
+    const trustScore = calculateRealEstateTrustScore(candidate, executionPresetKey);
 
     const variant = await MediaVariantModel.create({
       visionJobId: job._id,
@@ -8050,7 +8264,9 @@ async function persistOrchestratedVisionCandidates({
       useInBrochure: false,
       useInReport: false,
       metadata: {
-        warning: candidate.warning || renderPlan.warning,
+        warning: sanitizeVisionUserMessage(candidate.warning || renderPlan.warning, {
+          presetKey: executionPresetKey,
+        }),
         summary: candidate.summary || renderPlan.summary,
         differenceHint: candidate.differenceHint || renderPlan.differenceHint,
         effects: candidate.effects || renderPlan.effects,
@@ -8089,6 +8305,7 @@ async function persistOrchestratedVisionCandidates({
         confidenceBadge: variantConfidenceBadge,
         qualityClassification: pipelineDescriptor.statusKey,
         qualityLabel: pipelineDescriptor.statusLabel,
+        trustScore,
         publishable: pipelineDescriptor.publishable,
         pipelineDescriptor,
         listingReadyScore: candidate.listingReadyScore ?? null,
@@ -8121,6 +8338,8 @@ async function persistOrchestratedVisionCandidates({
           windowRejectionCoverageRatio: candidate.windowRejectionCoverageRatio ?? null,
           windowBrightPixelRatio: candidate.windowBrightPixelRatio ?? null,
           windowStructuredPixelRatio: candidate.windowStructuredPixelRatio ?? null,
+          windowIntegrityChangeRatio: candidate.windowIntegrityChangeRatio ?? null,
+          trustScore,
         },
         fallbackApplied:
           Boolean(orchestrationResult?.fallbackApplied) ||
@@ -8153,6 +8372,8 @@ async function persistOrchestratedVisionCandidates({
           furnitureCoverageIncreaseRatio: candidate.furnitureCoverageIncreaseRatio,
           windowCoverageRatio:
             candidate.windowCoverageRatio ?? candidate.windowRejectionCoverageRatio ?? null,
+          windowIntegrityChangeRatio: candidate.windowIntegrityChangeRatio ?? null,
+          trustScore,
           objectRemovalScore: candidate.objectRemovalScore,
           shouldHideByDefault: Boolean(candidate.shouldHideByDefault),
           rejectionCategory: candidate.rejectionCategory || '',
@@ -8545,6 +8766,16 @@ export async function createImageEnhancementJob({
     let responseRenderPlan = renderPlan;
     let finalOrchestrationResult = orchestrationResult;
 
+    if (
+      preset.key === 'remove_furniture' &&
+      isUnusableFurnitureRemovalResult(finalOrchestrationResult)
+    ) {
+      return completeUnusableFurnitureRemovalJob({
+        job,
+        orchestrationResult: finalOrchestrationResult,
+      });
+    }
+
     if (!finalOrchestrationResult.bestVariant) {
       const marketplaceFallback = await buildGuaranteedMarketplaceFallbackCandidate({
         asset,
@@ -8606,7 +8837,7 @@ export async function createImageEnhancementJob({
       };
       job.message = 'No visual preview was returned for this image.';
       job.warning =
-        'All providers finished without producing a savable preview. Try a stronger request or retry the generation.';
+        'No new preview was saved because the conservative review could not produce a trustworthy result.';
       await job.save();
 
       return {
@@ -8678,21 +8909,21 @@ export async function createImageEnhancementJob({
       orchestrationQuality === 'high'
         ? ''
         : orchestrationQuality === 'good'
-          ? 'Strong preview — the change is clear, with only minor imperfections to review before listing use.'
+          ? 'Enhanced preview generated. Review it before using it in final listing materials.'
           : orchestrationQuality === 'concept'
             ? responsePreset.key === 'paint_dark_charcoal_test'
-              ? 'Concept preview — the wall-color change is obvious, but bright upper-wall or window-adjacent spill may still be present.'
-              : 'Concept preview — the requested direction is visible, though minor edge spill or cleanup issues may still exist.'
-            : 'Low-confidence preview — limited change was detected, so the result may not fully reflect the intended update.';
+              ? 'Concept preview generated. Use it to compare a stronger design direction before final photo preparation.'
+              : 'Concept preview generated. Use it to explore possibilities before preparing final listing photos.'
+            : 'Subtle preview generated. Changes were intentionally kept conservative to preserve realism.';
     const safeMarketplaceFallback =
       finalOrchestrationResult.deliveryMode === 'safe_marketplace_fallback';
     job.warning = safeMarketplaceFallback
-      ? 'Advanced edits were limited to preserve realism and trust.'
+      ? 'Enhanced preview generated. Changes were intentionally kept conservative to preserve realism.'
       : qualityWarning
-      ? qualityWarning
+      ? sanitizeVisionUserMessage(qualityWarning, { presetKey: responsePreset.key })
       : usedFallbackVariant
-        ? 'Primary provider was insufficient, so an advanced AI fallback was used.'
-        : responseRenderPlan.warning;
+        ? 'Enhanced preview generated. Changes were intentionally kept conservative to preserve realism.'
+        : sanitizeVisionUserMessage(responseRenderPlan.warning, { presetKey: responsePreset.key });
     job.message = safeMarketplaceFallback
       ? requestedMode === 'freeform'
         ? 'Custom enhancement returned as a safe fallback preview.'
@@ -8706,14 +8937,14 @@ export async function createImageEnhancementJob({
             ? `Custom enhancement ready with a strong preview via ${providerLabel}.`
             : orchestrationQuality === 'concept'
               ? `Custom enhancement ready as a concept preview via ${providerLabel}.`
-              : `Custom enhancement generated with low confidence via ${providerLabel}.`
+              : `Custom enhancement ready as a subtle preview via ${providerLabel}.`
         : orchestrationQuality === 'high'
           ? `Generated via ${providerLabel}${usedFallbackVariant ? ' after fallback' : ''}.`
           : orchestrationQuality === 'good'
             ? `Strong preview generated via ${providerLabel}.`
             : orchestrationQuality === 'concept'
               ? `Concept preview generated via ${providerLabel}.`
-              : `Low-confidence preview generated via ${providerLabel}.`;
+              : `Subtle preview generated via ${providerLabel}.`;
     await job.save();
 
     return {

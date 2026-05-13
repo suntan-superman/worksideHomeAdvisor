@@ -501,7 +501,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               job: settledJob,
               successTitle: visionRecoveryState.successTitle,
               successMessage: visionRecoveryState.successMessage,
-              warningTitle: 'Preview ready with warning',
+              warningTitle: 'Subtle preview generated',
             });
             setToast(completionToast);
             if (completionToast.nextVariantId) {
@@ -729,7 +729,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     variant = null,
     successTitle,
     successMessage,
-    warningTitle = 'Preview ready with warning',
+    warningTitle = 'Subtle preview generated',
   }) {
     const nextVariantId = resolveVisionResultVariantId(job, variant);
     const isAdvisorOnly = job?.fallbackMode === 'advisor_only' || !nextVariantId;
@@ -738,22 +738,22 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
     if (isAdvisorOnly) {
       return {
-        tone: 'warning',
-        title: 'No strong visual change detected',
+        tone: 'success',
+        title: 'Subtle preview generated',
         message:
           job?.warning ||
           job?.message ||
-          'The room may already present well, or the requested change was too subtle to preview reliably.',
-        autoDismissMs: 0,
+          'This room already photographs well, so changes were intentionally kept conservative.',
+        autoDismissMs: 9000,
         shouldScroll: false,
         nextVariantId: '',
       };
     }
 
     return {
-      tone: isSafeMarketplaceFallback || job?.warning ? 'warning' : 'success',
+      tone: 'success',
       title: isSafeMarketplaceFallback
-        ? 'Safe fallback preview ready'
+        ? 'Enhanced preview ready'
         : job?.warning
           ? warningTitle
           : successTitle,
@@ -761,9 +761,9 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         job?.warning ||
         job?.message ||
         (isSafeMarketplaceFallback
-          ? 'A reliable deterministic preview was returned because the advanced pass did not produce a trustworthy result.'
+          ? 'A reliable conservative preview was returned to preserve a realistic listing photo.'
           : successMessage),
-      autoDismissMs: isSafeMarketplaceFallback || job?.warning ? 0 : 9000,
+      autoDismissMs: 9000,
       shouldScroll: true,
       nextVariantId,
     };
@@ -789,7 +789,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     }
 
     if (job.status === 'failed') {
-      const failureMessage = job.warning || job.message || 'The vision job failed before producing a usable variant.';
+      const failureMessage = job.warning || job.message || 'The preview could not be completed with a trustworthy result.';
       throw new Error(failureMessage);
     }
 
@@ -850,7 +850,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     startedAt = 0,
     successTitle = 'Vision job recovered',
     successMessage = 'The browser lost the original request, but the vision job finished and the generated variant has been recovered.',
-    failureTitle = 'Variant generation failed',
+    failureTitle = 'Preview not completed',
   }) {
     if (!job?.id || !assetId) {
       return;
@@ -3109,7 +3109,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setVisionCancellationPending(false);
     setStatus(
       isFurnitureRemovalPreset
-        ? 'Generating furniture-removal preview...'
+        ? 'Generating open-room preview...'
         : isCleanupPreset
         ? 'Generating cleanup pass...'
         : isDeclutterPreset
@@ -3127,18 +3127,18 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         ? 'declutter'
         : 'preset',
       title: isFurnitureRemovalPreset
-        ? 'Furniture removal preview'
+        ? 'Open Room Preview'
         : isCleanupPreset
-        ? 'Empty-room cleanup pass'
+        ? 'Open-room cleanup pass'
         : isDeclutterPreset
         ? 'Smart cleanup pass'
         : presetKey === 'combined_listing_refresh'
           ? 'Listing Ready pass'
           : 'First Impression pass',
       detail: isFurnitureRemovalPreset
-        ? 'Generating a concept preview and checking whether fallback providers are needed.'
+        ? 'Generating a conservative concept preview that keeps the room structure intact.'
         : isCleanupPreset
-        ? 'Refining the currently selected clean-room source and smoothing leftover artifacts.'
+        ? 'Refining the currently selected open-room source while preserving room structure.'
         : isDeclutterPreset
         ? 'Cleaning the photo up and reviewing the strongest targeted enhancement.'
         : presetKey === 'combined_listing_refresh'
@@ -3173,7 +3173,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           successTitle: 'Vision job completed',
           successMessage:
             'The new image is now shown in the Vision compare area and the Generated options panel.',
-          failureTitle: 'Variant generation failed',
+          failureTitle: 'Preview not completed',
         });
         keepVisionGenerationState = true;
         return;
@@ -3184,7 +3184,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         job: response.job,
         variant: response.variant,
         successTitle: isFurnitureRemovalPreset
-          ? 'Furniture removal preview ready'
+          ? 'Open Room Preview ready'
         : isCleanupPreset
           ? 'Cleanup pass ready'
         : isDeclutterPreset
@@ -3227,7 +3227,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 successTitle: 'Vision job recovered',
                 successMessage:
                   'The browser lost the original request, but the vision job finished and the generated variant has been recovered.',
-                warningTitle: 'Recovered with warning',
+                warningTitle: 'Subtle preview generated',
               });
               setToast(completionToast);
               if (completionToast.nextVariantId) {
@@ -3250,7 +3250,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               successTitle: 'Vision job recovered',
               successMessage:
                 'The browser lost the original request, but the vision job finished and the generated variant has been recovered.',
-              failureTitle: 'Variant generation failed',
+              failureTitle: 'Preview not completed',
             });
             keepVisionGenerationState = true;
             return;
@@ -3258,7 +3258,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         } catch (recoveryError) {
           setToast({
             tone: 'error',
-            title: 'Variant generation failed',
+            title: 'Preview not completed',
             message: `${recoveryError.message} No new variant was selected, so the compare view is still showing the last successful preview.`,
             autoDismissMs: 0,
           });
@@ -3272,7 +3272,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
       setToast({
         tone: 'error',
-        title: 'Variant generation failed',
+        title: 'Preview not completed',
         message: `${requestError.message} No new variant was selected, so the compare view is still showing the last successful preview.`,
         autoDismissMs: 0,
       });
@@ -3401,7 +3401,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
           successTitle: 'Custom enhancement ready',
           successMessage:
             'The new image is now shown in the Vision compare area and the Generated options panel.',
-          failureTitle: 'Custom enhancement failed',
+          failureTitle: 'Custom preview not completed',
         });
         keepVisionGenerationState = true;
         return;
@@ -3427,7 +3427,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         successTitle: 'Custom enhancement ready',
         successMessage:
           'Your freeform enhancement request was processed and the generated result is now selected in the Vision compare area.',
-        warningTitle: 'Custom enhancement ready with warning',
+        warningTitle: 'Custom enhancement ready',
       });
       if (completionToast.nextVariantId) {
         setLatestGeneratedVariantId(completionToast.nextVariantId);
@@ -3469,7 +3469,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 successTitle: 'Custom enhancement recovered',
                 successMessage:
                   'The browser lost the original request, but the custom enhancement finished and the generated variant has been recovered.',
-                warningTitle: 'Custom enhancement recovered with warning',
+                warningTitle: 'Custom enhancement ready',
               });
               setToast(completionToast);
               if (completionToast.nextVariantId) {
@@ -3490,7 +3490,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
               successTitle: 'Custom enhancement recovered',
               successMessage:
                 'The browser lost the original request, but the custom enhancement finished and the generated variant has been recovered.',
-              failureTitle: 'Custom enhancement failed',
+              failureTitle: 'Custom preview not completed',
             });
             keepVisionGenerationState = true;
             return;
@@ -3498,7 +3498,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         } catch (recoveryError) {
           setToast({
             tone: 'error',
-            title: 'Custom enhancement failed',
+            title: 'Custom preview not completed',
             message: `${recoveryError.message} No new variant was selected, so the compare view is still showing the last successful preview.`,
             autoDismissMs: 0,
           });
@@ -3512,7 +3512,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
 
       setToast({
         tone: 'error',
-        title: 'Custom enhancement failed',
+        title: 'Custom preview not completed',
         message: `${requestError.message} No new variant was selected, so the compare view is still showing the last successful preview.`,
         autoDismissMs: 0,
       });
@@ -4541,8 +4541,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
             ) : null}
             {selectedVariant?.metadata?.review?.shouldHideByDefault ? (
               <div className="property-media-review-note">
-                <strong>Needs extra review</strong>
-                <p>{selectedVariant.metadata.review.summary || 'This output ranked lower due to realism or artifact risk.'}</p>
+                <strong>Concept preview</strong>
+                <p>{selectedVariant.metadata.review.summary || 'Use this to explore possibilities before preparing final listing photos.'}</p>
               </div>
             ) : null}
             {selectedVariant ? <p className="workspace-control-note">{getVariantDisclaimer(selectedVariant)}</p> : null}
@@ -5779,7 +5779,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                             {variant.isSelected ? <span>Kept</span> : null}
                             {savedPhotoForVariant ? <span>Saved in Photos</span> : null}
                             {getVariantReviewScore(variant) ? <span>{getVariantReviewScore(variant)}/100</span> : null}
-                            {variant.metadata?.review?.shouldHideByDefault ? <span>Lower confidence</span> : null}
+                            {variant.metadata?.review?.shouldHideByDefault ? <span>Review draft</span> : null}
                           </div>
                           <p className="workspace-control-note vision-attempt-card-timestamp">
                             {formatDateTimeLabel(variant.createdAt)}

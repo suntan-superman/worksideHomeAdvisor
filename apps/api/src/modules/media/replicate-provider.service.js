@@ -30,6 +30,7 @@ export async function runReplicateInpainting({
   scheduler = 'K_EULER',
   negativePrompt = 'monochrome, lowres, bad anatomy, worst quality, low quality',
   seed,
+  timeoutMs = 120_000,
 }) {
   const sanitizedOutputCount = Math.max(1, Math.min(4, Number(outputCount || 1)));
   const sanitizedGuidanceScale = Math.max(1, Math.min(10, Number(guidanceScale || 7.5)));
@@ -58,9 +59,29 @@ export async function runReplicateInpainting({
     mask,
     promptLength: prompt?.length,
   });
-  const output = await replicate.run(model, {
-    input,
-  });
+  const controller = new AbortController();
+  const sanitizedTimeoutMs = Math.max(15_000, Number(timeoutMs || 120_000));
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, sanitizedTimeoutMs);
+  let output;
+
+  try {
+    output = await replicate.run(model, {
+      input,
+      signal: controller.signal,
+      wait: { mode: 'poll', interval: 1000 },
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(
+        `Replicate generation timed out after ${Math.round(sanitizedTimeoutMs / 1000)} seconds.`,
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!Array.isArray(output)) {
     return output ? [output] : [];

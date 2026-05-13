@@ -85,6 +85,7 @@ export async function runOpenAIImageEdit({
   quality = 'high',
   size = 'auto',
   inputFidelity = 'high',
+  timeoutMs = 120_000,
 }) {
   if (!env.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is not configured.');
@@ -114,13 +115,32 @@ export async function runOpenAIImageEdit({
   form.append('output_format', 'png');
   form.append('n', String(Math.max(1, Math.min(2, Number(outputCount || 1)))));
 
-  const response = await fetch(`${env.OPENAI_BASE_URL}/images/edits`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-    },
-    body: form,
-  });
+  const controller = new AbortController();
+  const sanitizedTimeoutMs = Math.max(15_000, Number(timeoutMs || 120_000));
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, sanitizedTimeoutMs);
+
+  let response;
+  try {
+    response = await fetch(`${env.OPENAI_BASE_URL}/images/edits`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      },
+      body: form,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(
+        `OpenAI image edit timed out after ${Math.round(sanitizedTimeoutMs / 1000)} seconds.`,
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const data = await response.json();
   if (!response.ok) {

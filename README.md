@@ -142,7 +142,13 @@ gcloud builds submit . `
 
 gcloud run deploy workside-api `
   --image us-central1-docker.pkg.dev/worksidehomeadvisor/homeadvisor-api/workside-api:latest `
-  --region us-central1
+  --region us-central1 `
+  --memory 2Gi `
+  --cpu 2 `
+  --concurrency 10 `
+  --timeout 900 `
+  --min-instances 1 `
+  --max-instances 12
 
 //////////////////////////////////////////////////////////
 to run the admin web app:

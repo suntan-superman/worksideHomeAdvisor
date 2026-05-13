@@ -67,12 +67,7 @@ export async function orchestrateVisionJob({
     }
 
     if (normalizedPresetKey === 'remove_furniture') {
-      const openAiPlanned = chain.includes('openai_edit');
-      if (openAiPlanned) {
-        return attempts.some((attempt) => attempt.providerKey === 'openai_edit');
-      }
-
-      return attempts.some((attempt) => attempt.providerKey === 'replicate_advanced');
+      return true;
     }
 
     return attempts.some(
@@ -488,7 +483,7 @@ export async function orchestrateVisionJob({
             bestVariant: sufficient,
             quality: classifyQuality(sufficient, activePreset.key),
             stoppedEarlyReason: 'sufficient_candidate',
-            deliveryMode: 'always_return_best',
+            deliveryMode: 'trustworthy_best_candidate',
           });
         }
 
@@ -502,7 +497,7 @@ export async function orchestrateVisionJob({
             bestVariant: sufficient,
             quality: classifyQuality(sufficient, activePreset.key),
             stoppedEarlyReason: 'high_confidence_candidate',
-            deliveryMode: 'always_return_best',
+            deliveryMode: 'trustworthy_best_candidate',
           });
         }
 
