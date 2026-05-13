@@ -35,6 +35,7 @@ import {
   getReplicateSettings,
   isConceptStudioPreset,
   isCandidateSufficient,
+  isCleanupEnhancementPreset,
   isListingSafePreset,
   isUsablePaintStrength,
   meetsMinimumTrustThreshold,
@@ -788,6 +789,7 @@ test('selectReturnCandidate returns the strongest trustworthy ranked candidate w
         isSufficient: true,
         focusRegionChangeRatio: 0.08,
         maskedChangeRatio: 0.09,
+        maskedEdgeDensityDelta: -0.003,
       },
     ],
     'declutter_light',
@@ -943,9 +945,10 @@ test('vision pipeline mode splits listing safe from concept studio', () => {
   assert.equal(isListingSafePreset('remove_furniture'), false);
   assert.equal(isConceptStudioPreset('remove_furniture'), true);
   assert.equal(isConceptStudioPreset('floor_dark_hardwood'), true);
+  assert.equal(isCleanupEnhancementPreset('declutter_medium'), true);
   assert.equal(resolveVisionPipelineMode('enhance_listing_quality'), 'listing_safe');
   assert.equal(resolveVisionPipelineMode('remove_furniture'), 'concept_studio');
-  assert.equal(resolveVisionPipelineMode('declutter_medium'), 'enhancement');
+  assert.equal(resolveVisionPipelineMode('declutter_medium'), 'cleanup_enhancement');
 });
 
 test('listing-safe presets remain local only', () => {
@@ -978,6 +981,17 @@ test('open room preview uses replicate concept chain when OpenAI is unavailable'
       openAiAvailable: false,
     }),
     ['replicate_basic', 'replicate_advanced'],
+  );
+});
+
+test('medium declutter uses a multi-provider cleanup path', () => {
+  assert.deepEqual(
+    buildProviderChain({
+      preset: resolveVisionPreset('declutter_medium'),
+      userPlan: 'standard',
+      openAiAvailable: true,
+    }),
+    ['replicate_basic', 'replicate_advanced', 'openai_edit'],
   );
 });
 
@@ -2071,10 +2085,10 @@ test('declutter presets request stronger targeted small-object cleanup', () => {
   const mediumPreset = resolveVisionPreset('declutter_medium');
   const settings = getReplicateSettings('replicate_basic', mediumPreset);
 
-  assert.equal(mediumPreset.strength, 0.74);
+  assert.equal(mediumPreset.strength, 0.82);
   assert.equal(mediumPreset.outputCount, 3);
-  assert.equal(settings.guidanceScale, 8);
-  assert.equal(settings.numInferenceSteps, 38);
+  assert.equal(settings.guidanceScale, 8.6);
+  assert.equal(settings.numInferenceSteps, 42);
   assert.match(mediumPreset.basePrompt, /loose throws/i);
   assert.match(mediumPreset.basePrompt, /Preserve major furniture/i);
   assert.doesNotMatch(mediumPreset.negativePrompt, /removed sofa|removed chair|removed coffee table/i);
@@ -2114,9 +2128,9 @@ test('declutter sufficiency rejects near-original cleanup results', () => {
     isCandidateSufficient(
       {
         overallScore: 78,
-        visualChangeRatio: 0.05,
-        focusRegionChangeRatio: 0.07,
-        maskedChangeRatio: 0.09,
+        visualChangeRatio: 0.08,
+        focusRegionChangeRatio: 0.11,
+        maskedChangeRatio: 0.13,
         outsideMaskChangeRatio: 0.06,
         topHalfChangeRatio: 0.02,
         windowIntegrityChangeRatio: 0.004,
@@ -2125,6 +2139,25 @@ test('declutter sufficiency rejects near-original cleanup results', () => {
       'declutter_medium',
     ),
     true,
+  );
+});
+
+test('declutter sufficiency rejects brightness-only changes without clutter reduction', () => {
+  assert.equal(
+    isCandidateSufficient(
+      {
+        overallScore: 84,
+        visualChangeRatio: 0.09,
+        focusRegionChangeRatio: 0.1,
+        maskedChangeRatio: 0.12,
+        outsideMaskChangeRatio: 0.04,
+        topHalfChangeRatio: 0.02,
+        windowIntegrityChangeRatio: 0,
+        maskedEdgeDensityDelta: 0.001,
+      },
+      'declutter_medium',
+    ),
+    false,
   );
 });
 

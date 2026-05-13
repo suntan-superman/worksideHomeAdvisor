@@ -44,8 +44,10 @@ export async function orchestrateVisionJob({
     normalizedPresetKey.startsWith('paint_') || normalizedPresetKey.startsWith('floor_');
   const isPaintPreset = normalizedPresetKey.startsWith('paint_');
   const isFloorPreset = normalizedPresetKey.startsWith('floor_');
+  const isDeclutterPreset =
+    normalizedPresetKey === 'declutter_light' || normalizedPresetKey === 'declutter_medium';
   const exhaustProviderChain =
-    normalizedPresetKey === 'remove_furniture' || isSurfaceFinishPreset;
+    normalizedPresetKey === 'remove_furniture' || isSurfaceFinishPreset || isDeclutterPreset;
   const requiresLocalTileStoneAttempt = normalizedPresetKey === 'floor_tile_stone';
   const startedAt = Number(nowFn());
   const maxExecutionTimeMs = getVisionExecutionTimeBudgetMs(preset?.key);
@@ -66,7 +68,7 @@ export async function orchestrateVisionJob({
       return true;
     }
 
-    if (normalizedPresetKey === 'remove_furniture') {
+    if (normalizedPresetKey === 'remove_furniture' || isDeclutterPreset) {
       return true;
     }
 

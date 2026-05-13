@@ -33,6 +33,7 @@ export const VISION_PLAN_VALUES = ['standard', 'pro', 'premium'];
 const REMOVE_FURNITURE_MAX_EXECUTION_TIME_MS = 180_000;
 const REMOVE_FURNITURE_BASIC_PROVIDER_TIMEOUT_MS = 120_000;
 const REMOVE_FURNITURE_ADVANCED_PROVIDER_TIMEOUT_MS = 120_000;
+const CLEANUP_ENHANCEMENT_MAX_EXECUTION_TIME_MS = 180_000;
 export const PAINT_STRENGTH_MIN_COLOR_SHIFT = 0.12;
 export const PAINT_STRENGTH_MIN_LUMINANCE_DELTA = 0.08;
 export const PAINT_STRENGTH_MIN_PERCEPTIBILITY = 0.35;
@@ -125,9 +126,17 @@ export function isConceptStudioPreset(presetKey = '') {
   );
 }
 
+export function isCleanupEnhancementPreset(presetKey = '') {
+  return ['declutter_light', 'declutter_medium'].includes(String(presetKey || ''));
+}
+
 export function resolveVisionPipelineMode(presetKey = '') {
   if (isListingSafePreset(presetKey)) {
     return 'listing_safe';
+  }
+
+  if (isCleanupEnhancementPreset(presetKey)) {
+    return 'cleanup_enhancement';
   }
 
   if (isConceptStudioPreset(presetKey)) {
@@ -150,6 +159,16 @@ export function buildProviderChain({ preset, userPlan, openAiAvailable = false }
     return openAiAvailable
       ? ['replicate_basic', 'replicate_advanced', 'openai_edit']
       : ['replicate_basic', 'replicate_advanced'];
+  }
+
+  if (key === 'declutter_medium') {
+    return openAiAvailable
+      ? ['replicate_basic', 'replicate_advanced', 'openai_edit']
+      : ['replicate_basic', 'replicate_advanced'];
+  }
+
+  if (key === 'declutter_light') {
+    return ['replicate_basic', 'replicate_advanced'];
   }
 
   if (isFloorPreset) {
@@ -451,11 +470,18 @@ export function calculateConceptUtilityScore(candidate = {}, presetKey = '') {
       Math.abs(Number(candidate.maskedLuminanceDelta || 0)) * 1.2 +
       Number(candidate.maskedColorShiftRatio || 0) * 1.3,
   );
+  const clutterReduction = Math.min(
+    1,
+    Number(candidate.maskedChangeRatio || 0) * 1.4 +
+      Math.max(0, -Number(candidate.maskedEdgeDensityDelta || 0)) * 90,
+  );
 
   let taskScore = visibleChange;
 
   if (presetKey === 'remove_furniture' || presetKey === 'cleanup_empty_room') {
     taskScore = Math.max(visibleChange, objectRemoval);
+  } else if (isCleanupEnhancementPreset(presetKey)) {
+    taskScore = Math.max(visibleChange * 0.7, clutterReduction);
   } else if (String(presetKey || '').startsWith('paint_') || String(presetKey || '').startsWith('floor_')) {
     taskScore = Math.max(visibleChange, paintOrFloorChange);
   }
@@ -569,6 +595,9 @@ export function isUsablePaintStrength(paintStrength = {}) {
 export function getVisionExecutionTimeBudgetMs(presetKey) {
   if (presetKey === 'remove_furniture') {
     return REMOVE_FURNITURE_MAX_EXECUTION_TIME_MS;
+  }
+  if (isCleanupEnhancementPreset(presetKey)) {
+    return CLEANUP_ENHANCEMENT_MAX_EXECUTION_TIME_MS;
   }
 
   return 120_000;
@@ -712,14 +741,18 @@ export function isCandidateSufficient(candidate, presetKey) {
   }
 
   if (presetKey === 'declutter_light' || presetKey === 'declutter_medium') {
-    const minimumMaskedChange = presetKey === 'declutter_medium' ? 0.065 : 0.045;
-    const minimumFocusChange = presetKey === 'declutter_medium' ? 0.055 : 0.04;
+    const minimumMaskedChange = presetKey === 'declutter_medium' ? 0.11 : 0.06;
+    const minimumFocusChange = presetKey === 'declutter_medium' ? 0.09 : 0.05;
+    const minimumEdgeReduction = presetKey === 'declutter_medium' ? -0.0035 : -0.002;
 
     return (
       (
         Number(candidate.maskedChangeRatio || 0) >= minimumMaskedChange ||
-        Number(candidate.focusRegionChangeRatio || 0) >= minimumFocusChange ||
-        Number(candidate.visualChangeRatio || 0) >= 0.04
+        Number(candidate.focusRegionChangeRatio || 0) >= minimumFocusChange
+      ) &&
+      (
+        Number(candidate.maskedEdgeDensityDelta || 0) <= minimumEdgeReduction ||
+        Number(candidate.maskedChangeRatio || 0) >= (presetKey === 'declutter_medium' ? 0.18 : 0.1)
       ) &&
       Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.18 &&
       Number(candidate.topHalfChangeRatio ?? 1) <= 0.1 &&
@@ -936,7 +969,7 @@ export function getPreferredFinishFallbackCandidates(candidates = [], presetKey)
 export function rankCandidates(candidates = [], presetKey) {
   return [...candidates].sort((left, right) => {
     if (
-      isConceptStudioPreset(presetKey) &&
+      (isConceptStudioPreset(presetKey) || isCleanupEnhancementPreset(presetKey)) &&
       !String(presetKey || '').startsWith('paint_') &&
       !String(presetKey || '').startsWith('floor_')
     ) {

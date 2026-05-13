@@ -1,91 +1,35 @@
 export const VISION_WORKFLOW_STAGES = [
   {
     key: 'clean',
-    label: '1. First Impression',
-    title: 'First Impression',
+    label: 'Quick Actions',
+    title: 'Quick Actions',
     description:
-      'Run the fast baseline pass first so the photo improves immediately and starts from a stronger, more trustworthy foundation.',
-    nextKey: 'finish',
+      'Choose one simple action for the selected photo.',
+    nextKey: 'clean',
     groups: [
       {
-        key: 'first_impression',
-        label: 'Safe for listing preparation',
+        key: 'improve_photo',
+        label: 'Improve Photo',
         items: ['enhance_listing_quality'],
       },
-    ],
-    allowFreeform: false,
-  },
-  {
-    key: 'finish',
-    label: '2. Smart Enhancement',
-    title: 'Smart Enhancement',
-    description:
-      'Apply targeted cleanup and selective buyer-friendly improvements before you run the stricter publish-confidence pass.',
-    nextKey: 'style',
-    groups: [
       {
-        key: 'smart_cleanup',
-        label: 'Clean up visible distractions',
-        items: [
-          'declutter_light',
-          'declutter_medium',
-          'lighting_boost',
-        ],
+        key: 'clean_up_photo',
+        label: 'Clean Up Photo',
+        items: ['declutter_medium'],
       },
       {
-        key: 'finish_concepts',
-        label: 'Concept previews for planning only',
+        key: 'explore_ideas',
+        label: 'Explore Ideas',
         items: [
           'remove_furniture',
-          'cleanup_empty_room',
           'paint_warm_neutral',
-          'paint_bright_white',
-          'paint_soft_greige',
           'floor_light_wood',
-          'floor_medium_wood',
           'floor_dark_hardwood',
-          'floor_lvp_neutral',
-        ],
-      },
-      {
-        key: 'room_upgrades',
-        label: 'Concept previews for planning only',
-        items: [
           'kitchen_white_cabinets_granite',
-          'kitchen_white_cabinets_quartz',
-          'kitchen_green_cabinets_granite',
-          'kitchen_green_cabinets_quartz',
           'exterior_curb_appeal_refresh',
-          'backyard_entertaining_refresh',
-          'backyard_pool_preview',
         ],
       },
     ],
-    allowFreeform: true,
-  },
-  {
-    key: 'style',
-    label: '3. Listing Ready',
-    title: 'Listing Ready',
-    description:
-      'Run the strict publish-confidence pass. Save the winner if it reads clean and trustworthy, or step back to Smart Enhancement if it still needs work.',
-    nextKey: 'final',
-    groups: [
-      {
-        key: 'listing_ready',
-        label: 'Safe for listing preparation',
-        items: ['combined_listing_refresh'],
-      },
-    ],
-    allowFreeform: false,
-  },
-  {
-    key: 'final',
-    label: '4. Finalize',
-    title: 'Finalize',
-    description: 'Keep the winner, set flyer/report usage, and delete earlier drafts when ready.',
-    nextKey: 'final',
-    groups: [],
     allowFreeform: false,
   },
 ];
@@ -134,22 +78,22 @@ export function getVisionRecommendationLabel(presetKey, presets = []) {
   }
 
   if (presetKey === 'enhance_listing_quality') {
-    return 'First Impression';
+    return 'Improve Photo';
   }
   if (presetKey === 'combined_listing_refresh') {
-    return 'Listing Ready';
+    return 'Improve Photo';
   }
   if (presetKey === 'declutter_medium') {
-    return 'Smart Declutter+';
+    return 'Clean Up Photo';
   }
   if (presetKey === 'declutter_light') {
-    return 'Smart Declutter';
+    return 'Clean Up Photo';
   }
   if (presetKey === 'lighting_boost') {
-    return 'Lighting Recovery';
+    return 'Improve Photo';
   }
 
-  return 'Vision enhancement';
+  return 'Explore Ideas';
 }
 
 export function buildVisionWorkflowRecommendation(asset, selectedVariant = null, presets = []) {
@@ -266,7 +210,7 @@ export function buildVisionWorkflowRecommendation(asset, selectedVariant = null,
       presetKey: 'combined_listing_refresh',
       label: getVisionRecommendationLabel('combined_listing_refresh', presets),
       reason:
-        'The room now has a stable enough baseline for the stricter listing-ready pass that favors realism and publish confidence.',
+        'The room may be ready to save, or you can run a simple cleanup if it still feels busy.',
     };
   }
 
@@ -308,19 +252,35 @@ export function getPreferredVariantLabel(item) {
 }
 
 export function getVariantSummary(variant) {
+  if (variant?.metadata?.resultType === 'guidance_only') {
+    return (
+      variant?.metadata?.message ||
+      'This room will improve more from simple prep than from keeping a weak edited image.'
+    );
+  }
+
+  if (variant?.variantCategory === 'concept_preview' || variant?.metadata?.conceptOnly) {
+    return (
+      variant?.metadata?.message ||
+      variant?.metadata?.summary ||
+      'Concept preview for planning and inspiration only.'
+    );
+  }
+
   return (
+    variant?.metadata?.message ||
     variant?.metadata?.summary ||
     variant?.metadata?.warning ||
-    'This variant can be reviewed, marked preferred, and optionally used in flyer or report outputs.'
+    'Enhanced Preview ready for review.'
   );
 }
 
 export function getVariantDisclaimer(variant) {
   if (variant?.metadata?.disclaimerType === 'concept_preview') {
-    return 'AI visualizations are conceptual previews only. Actual condition, remodel results, and value impact may vary.';
+    return 'Concept previews are for planning only. Actual condition, remodel results, and value impact may vary.';
   }
 
-  return 'Enhanced images should stay truthful to the room and be reviewed before use in final marketing materials.';
+  return 'Review enhanced photos before using them in final marketing materials.';
 }
 
 export function getVariantReviewScore(variant) {
@@ -349,10 +309,7 @@ export function getVariantCreatedAtTimestamp(variant) {
 }
 
 export function getVisionWorkflowStageKeyForVariant(variant) {
-  return (
-    variant?.metadata?.workflowStageKey ||
-    getVisionWorkflowStageForPreset(variant?.metadata?.presetKey || variant?.variantType)
-  );
+  return getVisionWorkflowStageForPreset(variant?.metadata?.presetKey || variant?.variantType);
 }
 
 export function getNewestVisionVariants(variants = []) {
@@ -484,7 +441,7 @@ export function getVisionPipelinePackageSummary(variant, saveDefaults = null) {
       'This is your fast baseline improvement. Use Smart Enhancement next for clutter, lighting, or selective cleanup.';
   } else if (pipelineDescriptor?.stageKey === 'smart_enhancement') {
     deliveryMessage =
-      'This result is ready for the stricter Listing Ready pass once the room feels clean and believable.';
+      'Save this result if it clearly helps the seller, or run Clean Up Photo if the room still feels busy.';
   } else if (publishable) {
     deliveryMessage =
       'This result is strong enough to save as a listing photo and use in flyer and report workflows.';
@@ -508,30 +465,21 @@ export function getMediaAssetCreatedAtTimestamp(asset) {
 }
 
 export function getDefaultVisionStageForAsset(asset) {
-  if (asset?.assetType !== 'generated') {
-    return 'clean';
-  }
-
-  const sourceStageKey = getAssetGenerationStageKey(asset);
-  if (!sourceStageKey) {
-    return 'clean';
-  }
-
-  return getNextVisionWorkflowStageKey(sourceStageKey);
+  return 'clean';
 }
 
 export function getMediaAssetPrimaryLabel(asset) {
   if (asset?.assetType === 'generated') {
     if (asset?.generationStage === 'clean_room') {
-      return 'AI Cleaned';
+      return 'Enhanced Photo';
     }
     if (asset?.generationStage === 'finishes') {
-      return 'AI Finish Update';
+      return 'Photo Preview';
     }
     if (asset?.generationStage === 'style') {
-      return 'AI Styled';
+      return 'Concept Preview';
     }
-    return 'AI Generated';
+    return 'Enhanced Photo';
   }
 
   return 'Original';

@@ -34,15 +34,111 @@ import {
 import { listVisionPresets, resolveVisionPreset } from './vision-presets.js';
 
 const CACHE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function resolveSimpleVisionResultType({ presetKey = '', variantCategory = '', quality = '', review = {} } = {}) {
+  if (variantCategory === 'concept_preview' || isConceptStudioPreset(presetKey)) {
+    return 'concept';
+  }
+  if (
+    (presetKey === 'declutter_light' || presetKey === 'declutter_medium') &&
+    (quality === 'poor' || review?.shouldHideByDefault)
+  ) {
+    return 'guidance_only';
+  }
+  if (presetKey === 'declutter_light' || presetKey === 'declutter_medium') {
+    return 'cleanup';
+  }
+  return 'enhanced';
+}
+
+function buildSellerGuidance({ presetKey = '', candidate = {}, asset = null } = {}) {
+  const guidance = [];
+  const push = (value) => {
+    const text = String(value || '').trim();
+    if (text && !guidance.includes(text)) {
+      guidance.push(text);
+    }
+  };
+
+  for (const item of Array.isArray(candidate.recommendations) ? candidate.recommendations : []) {
+    push(item);
+  }
+  for (const item of Array.isArray(candidate.nextActions) ? candidate.nextActions : []) {
+    push(item);
+  }
+
+  const summary = String(asset?.analysis?.summary || '').toLowerCase();
+  if (presetKey === 'declutter_light' || presetKey === 'declutter_medium' || summary.includes('clutter')) {
+    push('Remove loose throw blankets, remotes, cords, papers, and small tabletop items.');
+    push('Simplify shelf decor so the room reads cleaner at a glance.');
+  }
+  push('Open blinds evenly to balance the window light.');
+  push('Retake from a slightly wider angle if the room feels crowded.');
+
+  return guidance.slice(0, 5);
+}
+
+function buildSimpleVisionMessage({ resultType = 'enhanced', preset = null, quality = '' } = {}) {
+  if (resultType === 'guidance_only') {
+    return 'This room will improve more from simple prep than from keeping a weak edited image.';
+  }
+  if (resultType === 'concept') {
+    return 'Concept preview for planning and inspiration only.';
+  }
+  if (resultType === 'cleanup') {
+    return quality === 'high'
+      ? 'Cleanup preview ready.'
+      : 'Cleanup preview ready. Review it before saving.';
+  }
+  return preset?.key === 'enhance_listing_quality'
+    ? 'Enhanced Preview ready.'
+    : 'Photo preview ready.';
+}
+
 function serializeImageJob(document, variants = []) {
   if (!document) {
     return null;
   }
 
+  const primaryVariant = variants[0] || null;
+  const primaryMetadata = primaryVariant?.metadata || {};
+  const resultType =
+    primaryVariant?.resultType ||
+    primaryMetadata.resultType ||
+    (primaryVariant
+      ? resolveSimpleVisionResultType({
+          presetKey: primaryMetadata.presetKey || primaryVariant.variantType,
+          variantCategory: primaryVariant.variantCategory,
+          quality: primaryMetadata.orchestrationQuality || '',
+          review: primaryMetadata.review || {},
+        })
+      : 'guidance_only');
+  const simpleMessage =
+    primaryVariant?.message ||
+    primaryMetadata.message ||
+    document.message ||
+    '';
+  const sellerGuidance = Array.isArray(primaryVariant?.sellerGuidance)
+    ? primaryVariant.sellerGuidance
+    : Array.isArray(primaryMetadata.sellerGuidance)
+      ? primaryMetadata.sellerGuidance
+      : [];
+  const improvementsApplied = Array.isArray(primaryVariant?.improvementsApplied)
+    ? primaryVariant.improvementsApplied
+    : Array.isArray(primaryMetadata.improvementsApplied)
+      ? primaryMetadata.improvementsApplied
+      : [];
+
   if (document.id && !document._id) {
     return {
       ...document,
       variants: document.variants || variants,
+      resultType: document.resultType || resultType,
+      imageUrl: document.imageUrl || primaryVariant?.imageUrl || '',
+      message: document.message || simpleMessage,
+      sellerGuidance: document.sellerGuidance || sellerGuidance,
+      improvementsApplied: document.improvementsApplied || improvementsApplied,
+      conceptOnly: Boolean(document.conceptOnly || resultType === 'concept'),
     };
   }
 
@@ -74,6 +170,11 @@ function serializeImageJob(document, variants = []) {
       document.selectedVariantId?.toString?.() || document.selectedVariantId || null,
     message: document.message || '',
     warning: document.warning || '',
+    resultType,
+    imageUrl: primaryVariant?.imageUrl || '',
+    sellerGuidance,
+    improvementsApplied,
+    conceptOnly: Boolean(primaryVariant?.conceptOnly || resultType === 'concept'),
     attemptCount: Number(document.attemptCount || 0),
     maxAttempts: Number(document.maxAttempts || 1),
     currentStage: document.currentStage || 'initial',
@@ -96,6 +197,19 @@ export function serializeMediaVariant(document) {
     return document;
   }
 
+  const metadata = document.metadata || {};
+  const imageUrl =
+    document.imageUrl ||
+    (document._id ? buildMediaVariantUrl(document._id.toString()) : null);
+  const resultType =
+    metadata.resultType ||
+    resolveSimpleVisionResultType({
+      presetKey: metadata.presetKey || document.variantType,
+      variantCategory: document.variantCategory || 'enhancement',
+      quality: metadata.orchestrationQuality || '',
+      review: metadata.review || {},
+    });
+
   return {
     id: document._id?.toString(),
     visionJobId:
@@ -109,9 +223,14 @@ export function serializeMediaVariant(document) {
     variantCategory: document.variantCategory || 'enhancement',
     label: document.label,
     mimeType: document.mimeType || 'image/jpeg',
-    imageUrl:
-      document.imageUrl ||
-      (document._id ? buildMediaVariantUrl(document._id.toString()) : null),
+    imageUrl,
+    resultType,
+    message: metadata.message || metadata.summary || '',
+    sellerGuidance: Array.isArray(metadata.sellerGuidance) ? metadata.sellerGuidance : [],
+    improvementsApplied: Array.isArray(metadata.improvementsApplied)
+      ? metadata.improvementsApplied
+      : [],
+    conceptOnly: Boolean(metadata.conceptOnly || resultType === 'concept'),
     storageProvider: document.storageProvider || 'local',
     storageKey: document.storageKey || null,
     byteSize: document.byteSize || null,
@@ -121,7 +240,7 @@ export function serializeMediaVariant(document) {
     selectedAt: document.selectedAt || null,
     useInBrochure: Boolean(document.useInBrochure),
     useInReport: Boolean(document.useInReport),
-    metadata: document.metadata || {},
+    metadata,
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
   };
@@ -532,7 +651,7 @@ function getPresetPromptAddon(presetKey, roomType) {
       return 'Simplify countertop objects and visual noise more aggressively while preserving cabinetry, appliances, and permanent finishes.';
     }
     if (normalizedRoomType === 'living_room') {
-      return 'Simplify shelves, side surfaces, and small portable objects more aggressively while preserving the main seating and structure.';
+      return 'Remove or simplify the loose sofa throw, small pillow clutter, shelf decor clusters, side-table objects, coffee-table distractions, cords, papers, remotes, and floor-edge clutter. Preserve the sofa, chairs, tables, rug, windows, walls, flooring, and room structure.';
     }
     return 'Simplify visible clutter more aggressively while preserving major furniture, architecture, and room proportions.';
   }
@@ -7447,18 +7566,33 @@ async function buildReviewedReplicateCandidates({
     }
 
     if (isDeclutterPreset) {
-      if (maskedChangeRatio < 0.055 && focusRegionChangeRatio < 0.045) {
+      const minimumMaskedChange = preset.key === 'declutter_medium' ? 0.11 : 0.06;
+      const minimumFocusChange = preset.key === 'declutter_medium' ? 0.09 : 0.05;
+      const minimumEdgeReduction = preset.key === 'declutter_medium' ? -0.0035 : -0.002;
+      const strongChangeWithoutEdgeReduction =
+        maskedChangeRatio >= (preset.key === 'declutter_medium' ? 0.18 : 0.1);
+
+      if (maskedChangeRatio < minimumMaskedChange && focusRegionChangeRatio < minimumFocusChange) {
         overallScore = Math.max(0, overallScore - 26);
         qualityWarning =
           'Preview not saved as a strong cleanup because the visible changes were too small.';
         rejectionCategory = 'insufficient_cleanup_change';
         shouldHideByDefault = true;
-      } else if (maskedChangeRatio >= 0.1 || focusRegionChangeRatio >= 0.08) {
+      } else if (maskedChangeRatio >= 0.14 || focusRegionChangeRatio >= 0.1) {
         overallScore = Math.min(100, overallScore + 8);
       }
 
       if (maskedEdgeDensityDelta <= -0.006) {
         overallScore = Math.min(100, overallScore + 8);
+      } else if (
+        maskedEdgeDensityDelta > minimumEdgeReduction &&
+        !strongChangeWithoutEdgeReduction
+      ) {
+        overallScore = Math.max(0, overallScore - 24);
+        qualityWarning =
+          'Preview not saved as a strong cleanup because clutter detail did not reduce enough.';
+        rejectionCategory = rejectionCategory || 'insufficient_cleanup_change';
+        shouldHideByDefault = true;
       } else if (maskedEdgeDensityDelta > 0.006) {
         overallScore = Math.max(0, overallScore - 16);
         qualityWarning =
@@ -7773,7 +7907,9 @@ async function buildReviewedOpenAiCandidates({
           debug: { strategy: 'geometric_fallback', maskCoverageRatio: null },
         };
   const maskBuffer = resolvedMask.maskBuffer;
-  const shouldProtectGeneratedStructure = isConceptStudioPreset(preset.key);
+  const isDeclutterPreset =
+    preset.key === 'declutter_light' || preset.key === 'declutter_medium';
+  const shouldProtectGeneratedStructure = isConceptStudioPreset(preset.key) || isDeclutterPreset;
   const immutableWindowMask = await buildImmutableWindowCompositeMask(sourceBuffer).catch((error) => {
     console.warn('Immutable window mask unavailable', {
       presetKey: preset.key,
@@ -7786,6 +7922,7 @@ async function buildReviewedOpenAiCandidates({
   let sourceFurnitureEdgeDensity = null;
   let paintEvaluationMaskBuffer = null;
   let sourcePaintEdgeDensity = null;
+  let sourceDeclutterEdgeDensity = null;
   let sourceFurnitureComponentMaskBuffer = null;
   let sourceFurnitureComponents = [];
   let sourceFurnitureCoverageRatio = 0;
@@ -7818,6 +7955,9 @@ async function buildReviewedOpenAiCandidates({
   if (preset.key.startsWith('paint_')) {
     paintEvaluationMaskBuffer = maskBuffer;
     sourcePaintEdgeDensity = await calculateMaskedEdgeDensity(sourceBuffer, paintEvaluationMaskBuffer);
+  }
+  if (isDeclutterPreset) {
+    sourceDeclutterEdgeDensity = await calculateMaskedEdgeDensity(sourceBuffer, maskBuffer);
   }
   const computeFurnitureCoverageIncreaseRatio = async (candidateBuffer) => {
     if (!preset.key.startsWith('floor_')) {
@@ -7891,6 +8031,7 @@ async function buildReviewedOpenAiCandidates({
   const finalizeSurfaceScopedBuffer = async (candidateBuffer) => {
     if (
       (preset.key !== 'remove_furniture' &&
+        !isDeclutterPreset &&
         !preset.key.startsWith('paint_') &&
         !preset.key.startsWith('floor_')) ||
       !maskBuffer
@@ -7913,7 +8054,7 @@ async function buildReviewedOpenAiCandidates({
       sourceBuffer,
       variantBuffer: candidateBuffer,
       maskBuffer: blendMaskBuffer,
-      maskBlur: preset.key === 'remove_furniture' ? 2.2 : 1.8,
+      maskBlur: preset.key === 'remove_furniture' ? 2.2 : isDeclutterPreset ? 2.4 : 1.8,
     });
     return restoreImmutableWindowRegions({
       sourceBuffer,
@@ -7962,6 +8103,21 @@ async function buildReviewedOpenAiCandidates({
         clearedMajorComponentCount,
         totalMajorComponentCount,
       } = await computeFurnitureRemovalMetrics(buffer));
+    }
+    if (isDeclutterPreset) {
+      maskedChangeRatio = await calculateMaskedVisualChangeRatio(sourceBuffer, buffer, maskBuffer);
+      maskedLuminanceDelta = await calculateMaskedLuminanceDelta(sourceBuffer, buffer, maskBuffer);
+      outsideMaskChangeRatio = await calculateOutsideMaskVisualChangeRatio(
+        sourceBuffer,
+        buffer,
+        maskBuffer,
+      );
+      if (sourceDeclutterEdgeDensity != null) {
+        const variantDeclutterEdgeDensity = await calculateMaskedEdgeDensity(buffer, maskBuffer);
+        maskedEdgeDensityDelta = Number(
+          (variantDeclutterEdgeDensity - sourceDeclutterEdgeDensity).toFixed(4),
+        );
+      }
     }
     if (preset.key.startsWith('floor_') || preset.key.startsWith('paint_')) {
       maskedChangeRatio = await calculateMaskedVisualChangeRatio(sourceBuffer, buffer, maskBuffer);
@@ -8414,6 +8570,21 @@ async function persistOrchestratedVisionCandidates({
         ? candidate.confidenceBadge || pipelineDescriptor.statusLabel
         : pipelineDescriptor.statusLabel;
     const trustScore = calculateRealEstateTrustScore(candidate, executionPresetKey);
+    const simpleResultType = resolveSimpleVisionResultType({
+      presetKey: preset.key,
+      variantCategory: preset.category,
+      quality: selectedCandidateQuality,
+      review: candidate.review,
+    });
+    const sellerGuidance = buildSellerGuidance({ presetKey: preset.key, candidate, asset });
+    const simpleMessage = buildSimpleVisionMessage({
+      resultType: simpleResultType,
+      preset,
+      quality: selectedCandidateQuality,
+    });
+    const simpleImprovementsApplied = Array.isArray(candidate.improvementsApplied)
+      ? candidate.improvementsApplied
+      : [];
 
     const variant = await MediaVariantModel.create({
       visionJobId: job._id,
@@ -8434,7 +8605,12 @@ async function persistOrchestratedVisionCandidates({
         warning: sanitizeVisionUserMessage(candidate.warning || renderPlan.warning, {
           presetKey: executionPresetKey,
         }),
-        summary: candidate.summary || renderPlan.summary,
+        resultType: simpleResultType,
+        imageUrl: '',
+        message: simpleMessage,
+        sellerGuidance,
+        conceptOnly: simpleResultType === 'concept',
+        summary: simpleMessage || candidate.summary || renderPlan.summary,
         differenceHint: candidate.differenceHint || renderPlan.differenceHint,
         effects: candidate.effects || renderPlan.effects,
         cropInsetPercent: candidate.cropInsetPercent || null,
@@ -8480,9 +8656,7 @@ async function persistOrchestratedVisionCandidates({
         readinessDelta: candidate.readinessDelta ?? null,
         sourceReadinessScore: candidate.sourceReadinessScore ?? null,
         renderedReadinessScore: candidate.renderedReadinessScore ?? null,
-        improvementsApplied: Array.isArray(candidate.improvementsApplied)
-          ? candidate.improvementsApplied
-          : [],
+        improvementsApplied: simpleImprovementsApplied,
         artifactFlags:
           candidate.artifactFlags && typeof candidate.artifactFlags === 'object'
             ? candidate.artifactFlags
@@ -8688,15 +8862,36 @@ export async function createImageEnhancementJob({
     if (cachedJob) {
       const cachedVariants = await loadJobVariants(cachedJob._id);
       if (cachedVariants.length) {
+        const primaryVariant = cachedVariants[0] || null;
         return {
           cached: true,
           preset,
           job: {
             ...serializeImageJob(cachedJob, cachedVariants),
-            message: cachedJob.message || 'Returning cached vision output.',
+            message:
+              primaryVariant?.message ||
+              primaryVariant?.metadata?.message ||
+              cachedJob.message ||
+              'Preview ready.',
           },
           variants: cachedVariants,
-          variant: cachedVariants[0] || null,
+          variant: primaryVariant,
+          resultType: primaryVariant?.resultType || primaryVariant?.metadata?.resultType || 'enhanced',
+          imageUrl: primaryVariant?.imageUrl || '',
+          message:
+            primaryVariant?.message ||
+            primaryVariant?.metadata?.message ||
+            cachedJob.message ||
+            'Preview ready.',
+          sellerGuidance:
+            primaryVariant?.sellerGuidance ||
+            primaryVariant?.metadata?.sellerGuidance ||
+            [],
+          improvementsApplied:
+            primaryVariant?.improvementsApplied ||
+            primaryVariant?.metadata?.improvementsApplied ||
+            [],
+          conceptOnly: Boolean(primaryVariant?.conceptOnly || primaryVariant?.metadata?.conceptOnly),
         };
       }
     }
@@ -9092,34 +9287,43 @@ export async function createImageEnhancementJob({
         ? 'Enhanced preview generated. Changes were intentionally kept conservative to preserve realism.'
         : sanitizeVisionUserMessage(responseRenderPlan.warning, { presetKey: responsePreset.key });
     job.message = safeMarketplaceFallback
-      ? requestedMode === 'freeform'
-        ? 'Custom enhancement returned as a safe fallback preview.'
-        : requestedPreset.key === 'combined_listing_refresh'
-          ? 'Listing-ready request returned as a safe fallback preview.'
-          : 'Enhancement returned as a safe fallback preview.'
+      ? 'Enhanced Preview ready.'
       : requestedMode === 'freeform'
         ? orchestrationQuality === 'high'
-          ? `Custom enhancement ready via ${providerLabel}.`
+          ? 'Custom preview ready.'
           : orchestrationQuality === 'good'
-            ? `Custom enhancement ready with a strong preview via ${providerLabel}.`
+            ? 'Custom preview ready.'
             : orchestrationQuality === 'concept'
-              ? `Custom enhancement ready as a concept preview via ${providerLabel}.`
-              : `Custom enhancement ready as a subtle preview via ${providerLabel}.`
+              ? 'Concept preview ready.'
+              : 'Enhanced Preview ready.'
         : orchestrationQuality === 'high'
-          ? `Generated via ${providerLabel}${usedFallbackVariant ? ' after fallback' : ''}.`
+          ? 'Enhanced Preview ready.'
           : orchestrationQuality === 'good'
-            ? `Strong preview generated via ${providerLabel}.`
+            ? 'Enhanced Preview ready.'
             : orchestrationQuality === 'concept'
-              ? `Concept preview generated via ${providerLabel}.`
-              : `Subtle preview generated via ${providerLabel}.`;
+              ? 'Concept preview ready.'
+              : 'Enhanced Preview ready.';
     await job.save();
+    const primaryVariant = createdVariants[0] || null;
 
     return {
       cached: false,
       preset: responsePreset,
       job: serializeImageJob(job.toObject(), createdVariants),
       variants: createdVariants,
-      variant: createdVariants[0] || null,
+      variant: primaryVariant,
+      resultType: primaryVariant?.resultType || primaryVariant?.metadata?.resultType || 'guidance_only',
+      imageUrl: primaryVariant?.imageUrl || '',
+      message: primaryVariant?.message || primaryVariant?.metadata?.message || job.message || '',
+      sellerGuidance:
+        primaryVariant?.sellerGuidance ||
+        primaryVariant?.metadata?.sellerGuidance ||
+        [],
+      improvementsApplied:
+        primaryVariant?.improvementsApplied ||
+        primaryVariant?.metadata?.improvementsApplied ||
+        [],
+      conceptOnly: Boolean(primaryVariant?.conceptOnly || primaryVariant?.metadata?.conceptOnly),
     };
   } catch (error) {
     const latestJobState = await ImageJobModel.findById(job._id).select('status').lean();
