@@ -64,6 +64,7 @@ test('task specific mask strategy uses adaptive masks for wall and floor presets
   assert.equal(getTaskSpecificMaskStrategy('paint_bright_white'), 'adaptive_wall');
   assert.equal(getTaskSpecificMaskStrategy('floor_tile_stone'), 'adaptive_floor');
   assert.equal(getTaskSpecificMaskStrategy('remove_furniture'), 'adaptive_furniture');
+  assert.equal(getTaskSpecificMaskStrategy('declutter_medium'), 'targeted_clutter_zones');
 });
 
 test('media asset source normalization preserves supported import sources', () => {
@@ -434,9 +435,14 @@ test('buildSceneAwareEnhancementRecipe keeps first-impression boosts stronger th
 
   assert.ok(firstImpressionRecipe.exposureBoost > listingRecipe.exposureBoost);
   assert.ok(firstImpressionRecipe.shadowLift > listingRecipe.shadowLift);
+  assert.ok(firstImpressionRecipe.exposureBoost >= 0.11);
+  assert.ok(firstImpressionRecipe.shadowLift >= 0.12);
+  assert.ok(firstImpressionRecipe.midtoneLift >= 0.05);
+  assert.ok(listingRecipe.exposureBoost >= 0.08);
   assert.ok(
     firstImpressionRecipe.improvementsApplied.includes('first-impression polish'),
   );
+  assert.ok(firstImpressionRecipe.improvementsApplied.includes('midtone lift'));
   assert.ok(listingRecipe.improvementsApplied.includes('tone balancing'));
 });
 
@@ -1985,6 +1991,54 @@ test('getReplicateSettings keeps remove_furniture generation bounded', () => {
   assert.equal(advancedSettings.outputCount, 1);
   assert.equal(advancedSettings.numInferenceSteps, 30);
   assert.equal(advancedSettings.timeoutMs, 45_000);
+});
+
+test('declutter presets request stronger targeted small-object cleanup', () => {
+  const mediumPreset = resolveVisionPreset('declutter_medium');
+  const settings = getReplicateSettings('replicate_basic', mediumPreset);
+
+  assert.equal(mediumPreset.strength, 0.84);
+  assert.equal(settings.guidanceScale, 8.8);
+  assert.equal(settings.numInferenceSteps, 42);
+  assert.match(mediumPreset.basePrompt, /loose throws/i);
+  assert.match(mediumPreset.basePrompt, /Preserve all major furniture/i);
+  assert.match(mediumPreset.negativePrompt, /removed sofa/i);
+});
+
+test('declutter sufficiency rejects near-original cleanup results', () => {
+  assert.equal(
+    isCandidateSufficient(
+      {
+        overallScore: 88,
+        visualChangeRatio: 0.012,
+        focusRegionChangeRatio: 0.018,
+        maskedChangeRatio: 0.02,
+        outsideMaskChangeRatio: 0.03,
+        topHalfChangeRatio: 0.01,
+        windowIntegrityChangeRatio: 0,
+        maskedEdgeDensityDelta: -0.001,
+      },
+      'declutter_medium',
+    ),
+    false,
+  );
+
+  assert.equal(
+    isCandidateSufficient(
+      {
+        overallScore: 78,
+        visualChangeRatio: 0.05,
+        focusRegionChangeRatio: 0.07,
+        maskedChangeRatio: 0.09,
+        outsideMaskChangeRatio: 0.06,
+        topHalfChangeRatio: 0.02,
+        windowIntegrityChangeRatio: 0.004,
+        maskedEdgeDensityDelta: -0.008,
+      },
+      'declutter_medium',
+    ),
+    true,
+  );
 });
 
 test('getReplicateSettings caps bright white wall samples at four outputs', () => {

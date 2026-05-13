@@ -53,12 +53,14 @@ export const VISION_PRESETS = [
     recommendedUse: ['brochure', 'report'],
     upgradeTier: 'standard',
     basePrompt:
-      'Clean up this residential interior photo for real estate listing use. Remove small clutter items from tables, counters, shelves, and floor edges. Improve brightness, neatness, and visual cleanliness. Keep all major furniture, architecture, and layout intact. Stay realistic.',
+      'Clean up this residential interior photo for real estate listing use. Remove or visually simplify small movable distractions only: loose throws, remotes, cords, scattered papers, small countertop items, shelf clutter, table clutter, and floor-edge clutter. Keep all sofas, chairs, tables, rugs, lamps, shelving, windows, architecture, layout, and finishes intact. Make the photo visibly tidier, brighter, and more buyer-friendly while staying realistic.',
     helperText:
       'Reduce small distractions and improve presentation while keeping the room believable.',
-    strength: 0.6,
-    guidanceScale: 7.5,
-    numInferenceSteps: 35,
+    strength: 0.68,
+    guidanceScale: 8.2,
+    numInferenceSteps: 38,
+    negativePrompt:
+      'removed sofa, removed chair, removed table, changed rug, changed windows, changed walls, changed flooring, new furniture, restaging, warped furniture, distorted architecture, unrealistic shadows, blurry, low quality',
     replicateModel: REPLICATE_INPAINT_MODEL,
   },
   {
@@ -75,12 +77,14 @@ export const VISION_PRESETS = [
     recommendedUse: ['report'],
     upgradeTier: 'standard',
     basePrompt:
-      'Clean and simplify this residential interior photo. Reduce visible clutter and visual noise on surfaces, shelves, side tables, and open floor areas while preserving layout and major furniture. Make the space feel open, tidy, and realistically listing-ready.',
+      'Create a visibly cleaner listing-photo version of this residential interior. Remove or simplify loose throws, remotes, cords, papers, small decor clusters, shelf clutter, table clutter, and floor-edge clutter. Straighten the visual presentation and make surfaces read cleaner. Preserve all major furniture, rugs, lamps, windows, walls, flooring, built-ins, architecture, and room layout. Do not restage the room or invent replacement objects.',
     helperText:
       'A stronger cleanup pass that pushes the room toward listing-readiness without restaging it.',
-    strength: 0.75,
-    guidanceScale: 7.5,
-    numInferenceSteps: 35,
+    strength: 0.84,
+    guidanceScale: 8.8,
+    numInferenceSteps: 42,
+    negativePrompt:
+      'removed sofa, removed chair, removed coffee table, removed rug, changed windows, changed walls, changed flooring, new furniture, restaging, empty room, warped furniture, distorted architecture, fake geometry, unrealistic shadows, blurry, low quality',
     replicateModel: REPLICATE_INPAINT_MODEL,
   },
   {

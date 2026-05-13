@@ -638,6 +638,23 @@ export function isCandidateSufficient(candidate, presetKey) {
     );
   }
 
+  if (presetKey === 'declutter_light' || presetKey === 'declutter_medium') {
+    const minimumMaskedChange = presetKey === 'declutter_medium' ? 0.065 : 0.045;
+    const minimumFocusChange = presetKey === 'declutter_medium' ? 0.055 : 0.04;
+
+    return (
+      (
+        Number(candidate.maskedChangeRatio || 0) >= minimumMaskedChange ||
+        Number(candidate.focusRegionChangeRatio || 0) >= minimumFocusChange ||
+        Number(candidate.visualChangeRatio || 0) >= 0.04
+      ) &&
+      Number(candidate.outsideMaskChangeRatio ?? 1) <= 0.18 &&
+      Number(candidate.topHalfChangeRatio ?? 1) <= 0.1 &&
+      Number(candidate.windowIntegrityChangeRatio ?? 1) <= 0.025 &&
+      Number(candidate.maskedEdgeDensityDelta ?? 0) <= 0.012
+    );
+  }
+
   if (String(presetKey || '').startsWith('floor_')) {
     if (presetKey === 'floor_tile_stone') {
       return (

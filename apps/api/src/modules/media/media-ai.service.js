@@ -1616,8 +1616,10 @@ export function buildSceneAwareEnhancementRecipe(
   const contrastDeficit = clampUnit(0.5 - Number(scene.contrastScore || 0));
   const lightingDeficit = clampUnit(0.66 - Number(scene.lightingQuality || 0));
   const clutterLevel = clampUnit(scene.clutterLevel || scene.clutterScore);
+  const furnitureDensity = clampUnit(scene.furnitureDensity);
   const windowCoverage = clampUnit(scene.windowCoverage);
   const darkWallBoost = String(scene.wallToneEstimate || '') === 'dark' ? 1 : 0;
+  const denseDarkFurnitureBoost = clampUnit((furnitureDensity - 0.28) / 0.42);
   const cropInsetRatio = isLightingBoost
     ? 0
     : isListingRefresh
@@ -1628,35 +1630,40 @@ export function buildSceneAwareEnhancementRecipe(
         ? 0.014
         : 0;
   const exposureBoost = isLightingBoost
-    ? 0.08 + brightnessDeficit * 0.16 + lightingDeficit * 0.08
+    ? 0.1 + brightnessDeficit * 0.18 + lightingDeficit * 0.1
     : isListingRefresh
-      ? 0.04 + brightnessDeficit * 0.08 + lightingDeficit * 0.03
-      : 0.06 + brightnessDeficit * 0.12 + lightingDeficit * 0.05;
+      ? 0.08 + brightnessDeficit * 0.11 + lightingDeficit * 0.05
+      : 0.11 + brightnessDeficit * 0.15 + lightingDeficit * 0.07;
   const shadowLift = isLightingBoost
-    ? 0.08 + brightnessDeficit * 0.14
+    ? 0.12 + brightnessDeficit * 0.16 + denseDarkFurnitureBoost * 0.035
     : isListingRefresh
-      ? 0.05 + brightnessDeficit * 0.08
-      : 0.06 + brightnessDeficit * 0.12;
+      ? 0.085 + brightnessDeficit * 0.1 + denseDarkFurnitureBoost * 0.025
+      : 0.12 + brightnessDeficit * 0.15 + denseDarkFurnitureBoost * 0.045;
+  const midtoneLift = isLightingBoost
+    ? 0.035 + lightingDeficit * 0.045 + contrastDeficit * 0.02
+    : isListingRefresh
+      ? 0.032 + lightingDeficit * 0.035 + contrastDeficit * 0.018
+      : 0.05 + lightingDeficit * 0.05 + contrastDeficit * 0.025;
   const highlightCompression = Math.min(
-    isLightingBoost ? 0.12 : isListingRefresh ? 0.1 : 0.08,
-    0.02 + windowCoverage * (isLightingBoost ? 0.16 : isListingRefresh ? 0.13 : 0.1),
+    isLightingBoost ? 0.18 : isListingRefresh ? 0.16 : 0.14,
+    0.04 + windowCoverage * (isLightingBoost ? 0.22 : isListingRefresh ? 0.18 : 0.16),
   );
   const contrastBoost = isLightingBoost
-    ? 0.03 + contrastDeficit * 0.07
+    ? 0.045 + contrastDeficit * 0.08
     : isListingRefresh
-      ? 0.03 + contrastDeficit * 0.08
-      : 0.05 + contrastDeficit * 0.12;
+      ? 0.055 + contrastDeficit * 0.09
+      : 0.075 + contrastDeficit * 0.13;
   const saturationBoost = isLightingBoost
-    ? 0.008 + lightingDeficit * 0.016
+    ? 0.016 + lightingDeficit * 0.02
     : isListingRefresh
-      ? 0.01 + lightingDeficit * 0.02
-      : 0.015 + lightingDeficit * 0.03;
+      ? 0.02 + lightingDeficit * 0.025
+      : 0.032 + lightingDeficit * 0.035;
   const warmthShift = Math.round(
-    (isLightingBoost ? 1 : isListingRefresh ? 1.5 : 2.5) +
-      darkWallBoost * (isLightingBoost ? 1 : 2) +
+    (isLightingBoost ? 1.5 : isListingRefresh ? 2.5 : 3.5) +
+      darkWallBoost * (isLightingBoost ? 1.2 : 2.4) +
       lightingDeficit * (isLightingBoost ? 3 : 6),
   );
-  const sharpenSigma = isLightingBoost ? 1.05 : isListingRefresh ? 1.25 : 1.1;
+  const sharpenSigma = isLightingBoost ? 1.18 : isListingRefresh ? 1.38 : 1.32;
   const improvementsApplied = [];
 
   if (exposureBoost >= 0.07) {
@@ -1664,6 +1671,9 @@ export function buildSceneAwareEnhancementRecipe(
   }
   if (shadowLift >= 0.08) {
     improvementsApplied.push('shadow lift');
+  }
+  if (midtoneLift >= 0.03) {
+    improvementsApplied.push('midtone lift');
   }
   if (contrastBoost >= 0.05) {
     improvementsApplied.push('clarity boost');
@@ -1688,6 +1698,7 @@ export function buildSceneAwareEnhancementRecipe(
     cropInsetRatio: Number(cropInsetRatio.toFixed(4)),
     exposureBoost: Number(exposureBoost.toFixed(4)),
     shadowLift: Number(shadowLift.toFixed(4)),
+    midtoneLift: Number(midtoneLift.toFixed(4)),
     highlightCompression: Number(highlightCompression.toFixed(4)),
     contrastBoost: Number(contrastBoost.toFixed(4)),
     saturationBoost: Number(saturationBoost.toFixed(4)),
@@ -2204,12 +2215,13 @@ async function renderSceneAwareEnhancementBuffer(
     const exposureFactor = 1 + recipe.exposureBoost * (0.35 + shadowMask * 0.65);
     const contrastFactor = 1 + recipe.contrastBoost * (0.4 + midtoneMask * 0.6);
     const shadowOffset = recipe.shadowLift * shadowMask * 255 * (0.35 + midtoneMask * 0.65);
+    const midtoneOffset = recipe.midtoneLift * midtoneMask * 255 * (0.2 + shadowMask * 0.35);
     const highlightOffset =
       recipe.highlightCompression * highlightMask * 255 * (0.45 + midtoneMask * 0.25);
 
-    red = red * exposureFactor + shadowOffset - highlightOffset;
-    green = green * exposureFactor + shadowOffset - highlightOffset;
-    blue = blue * exposureFactor + shadowOffset - highlightOffset;
+    red = red * exposureFactor + shadowOffset + midtoneOffset - highlightOffset;
+    green = green * exposureFactor + shadowOffset + midtoneOffset - highlightOffset;
+    blue = blue * exposureFactor + shadowOffset + midtoneOffset - highlightOffset;
 
     red = (red - 127.5) * contrastFactor + 127.5;
     green = (green - 127.5) * contrastFactor + 127.5;
@@ -3415,21 +3427,77 @@ function buildMaskShapes(metadata, presetKey, roomType) {
     ];
   }
 
-  if (presetKey === 'declutter_medium') {
+  if (presetKey === 'declutter_light' || presetKey === 'declutter_medium') {
+    const medium = presetKey === 'declutter_medium';
+
+    if (normalizedRoomType === 'living_room') {
+      return [
+        {
+          type: 'rect',
+          left: Math.round(width * 0.05),
+          top: Math.round(height * 0.24),
+          width: Math.round(width * 0.24),
+          height: Math.round(height * 0.46),
+        },
+        {
+          type: 'rect',
+          left: Math.round(width * 0.18),
+          top: Math.round(height * 0.5),
+          width: Math.round(width * 0.64),
+          height: Math.round(height * (medium ? 0.36 : 0.28)),
+        },
+        {
+          type: 'ellipse',
+          cx: Math.round(width * 0.26),
+          cy: Math.round(height * 0.61),
+          rx: Math.round(width * (medium ? 0.2 : 0.15)),
+          ry: Math.round(height * (medium ? 0.14 : 0.1)),
+        },
+        {
+          type: 'ellipse',
+          cx: Math.round(width * 0.54),
+          cy: Math.round(height * 0.7),
+          rx: Math.round(width * (medium ? 0.2 : 0.15)),
+          ry: Math.round(height * (medium ? 0.13 : 0.09)),
+        },
+        {
+          type: 'rect',
+          left: Math.round(width * 0.72),
+          top: Math.round(height * 0.52),
+          width: Math.round(width * 0.18),
+          height: Math.round(height * (medium ? 0.24 : 0.18)),
+        },
+      ];
+    }
+
     return [
       {
         type: 'rect',
-        left: Math.round(width * 0.1),
-        top: Math.round(height * 0.18),
-        width: Math.round(width * 0.8),
-        height: Math.round(height * 0.7),
+        left: Math.round(width * 0.08),
+        top: Math.round(height * 0.42),
+        width: Math.round(width * 0.84),
+        height: Math.round(height * (medium ? 0.42 : 0.32)),
+      },
+      {
+        type: 'rect',
+        left: Math.round(width * 0.08),
+        top: Math.round(height * 0.22),
+        width: Math.round(width * 0.32),
+        height: Math.round(height * (medium ? 0.36 : 0.26)),
+      },
+      {
+        type: 'rect',
+        left: Math.round(width * 0.6),
+        top: Math.round(height * 0.22),
+        width: Math.round(width * 0.32),
+        height: Math.round(height * (medium ? 0.36 : 0.26)),
       },
       {
         type: 'ellipse',
         cx: Math.round(width * 0.5),
-        cy: Math.round(height * 0.66),
-        rx: Math.round(width * 0.22),
-        ry: Math.round(height * 0.16),
+        cy: Math.round(height * 0.68),
+        rx: Math.round(width * (medium ? 0.26 : 0.2)),
+        ry: Math.round(height * (medium ? 0.16 : 0.11)),
       },
     ];
   }
@@ -5263,6 +5331,9 @@ export function getTaskSpecificMaskStrategy(presetKey = '') {
   if (normalizedPresetKey === 'remove_furniture') {
     return 'adaptive_furniture';
   }
+  if (normalizedPresetKey === 'declutter_light' || normalizedPresetKey === 'declutter_medium') {
+    return 'targeted_clutter_zones';
+  }
 
   return 'generic';
 }
@@ -6899,6 +6970,8 @@ async function buildReviewedReplicateCandidates({
     };
   });
   const maskBuffer = resolvedMask.maskBuffer;
+  const isDeclutterPreset =
+    preset.key === 'declutter_light' || preset.key === 'declutter_medium';
   const immutableWindowMask = await buildImmutableWindowCompositeMask(sourceBuffer).catch((error) => {
     console.warn('Immutable window mask unavailable', {
       presetKey: preset.key,
@@ -6911,6 +6984,7 @@ async function buildReviewedReplicateCandidates({
   let sourceFurnitureEdgeDensity = null;
   let paintEvaluationMaskBuffer = null;
   let sourcePaintEdgeDensity = null;
+  let sourceDeclutterEdgeDensity = null;
   let sourceFurnitureComponentMaskBuffer = null;
   let sourceFurnitureComponents = [];
   let sourceFurnitureCoverageRatio = 0;
@@ -6943,6 +7017,9 @@ async function buildReviewedReplicateCandidates({
   if (preset.key.startsWith('paint_')) {
     paintEvaluationMaskBuffer = maskBuffer;
     sourcePaintEdgeDensity = await calculateMaskedEdgeDensity(sourceBuffer, paintEvaluationMaskBuffer);
+  }
+  if (isDeclutterPreset) {
+    sourceDeclutterEdgeDensity = await calculateMaskedEdgeDensity(sourceBuffer, maskBuffer);
   }
   const computeFurnitureCoverageIncreaseRatio = async (candidateBuffer) => {
     if (!preset.key.startsWith('floor_')) {
@@ -7045,6 +7122,7 @@ async function buildReviewedReplicateCandidates({
   const finalizeSurfaceScopedBuffer = async (candidateBuffer) => {
     if (
       (preset.key !== 'remove_furniture' &&
+        !isDeclutterPreset &&
         !preset.key.startsWith('paint_') &&
         !preset.key.startsWith('floor_')) ||
       !maskBuffer
@@ -7061,7 +7139,7 @@ async function buildReviewedReplicateCandidates({
       sourceBuffer,
       variantBuffer: candidateBuffer,
       maskBuffer: blendMaskBuffer,
-      maskBlur: preset.key === 'remove_furniture' ? 2.2 : 1.8,
+      maskBlur: preset.key === 'remove_furniture' ? 2.2 : isDeclutterPreset ? 2.4 : 1.8,
     });
     return restoreImmutableWindowRegions({
       sourceBuffer,
@@ -7110,6 +7188,21 @@ async function buildReviewedReplicateCandidates({
         clearedMajorComponentCount,
         totalMajorComponentCount,
       } = await computeFurnitureRemovalMetrics(buffer));
+    }
+    if (isDeclutterPreset) {
+      maskedChangeRatio = await calculateMaskedVisualChangeRatio(sourceBuffer, buffer, maskBuffer);
+      maskedLuminanceDelta = await calculateMaskedLuminanceDelta(sourceBuffer, buffer, maskBuffer);
+      outsideMaskChangeRatio = await calculateOutsideMaskVisualChangeRatio(
+        sourceBuffer,
+        buffer,
+        maskBuffer,
+      );
+      if (sourceDeclutterEdgeDensity != null) {
+        const variantDeclutterEdgeDensity = await calculateMaskedEdgeDensity(buffer, maskBuffer);
+        maskedEdgeDensityDelta = Number(
+          (variantDeclutterEdgeDensity - sourceDeclutterEdgeDensity).toFixed(4),
+        );
+      }
     }
     if (preset.key.startsWith('floor_') || preset.key.startsWith('paint_')) {
       maskedChangeRatio = await calculateMaskedVisualChangeRatio(sourceBuffer, buffer, maskBuffer);
@@ -7319,6 +7412,43 @@ async function buildReviewedReplicateCandidates({
         shouldHideByDefault,
         rejectionCategory,
       });
+    }
+
+    if (isDeclutterPreset) {
+      if (maskedChangeRatio < 0.055 && focusRegionChangeRatio < 0.045) {
+        overallScore = Math.max(0, overallScore - 26);
+        qualityWarning =
+          'Preview not saved as a strong cleanup because the visible changes were too small.';
+        rejectionCategory = 'insufficient_cleanup_change';
+        shouldHideByDefault = true;
+      } else if (maskedChangeRatio >= 0.1 || focusRegionChangeRatio >= 0.08) {
+        overallScore = Math.min(100, overallScore + 8);
+      }
+
+      if (maskedEdgeDensityDelta <= -0.006) {
+        overallScore = Math.min(100, overallScore + 8);
+      } else if (maskedEdgeDensityDelta > 0.006) {
+        overallScore = Math.max(0, overallScore - 16);
+        qualityWarning =
+          'Preview needs review because the cleanup area became visually busier.';
+        rejectionCategory = rejectionCategory || 'cleanup_added_visual_noise';
+      }
+
+      if (outsideMaskChangeRatio > 0.16) {
+        overallScore = Math.max(0, overallScore - 18);
+        qualityWarning =
+          'Preview needs review because changes spread beyond the cleanup areas.';
+        rejectionCategory = rejectionCategory || 'cleanup_spread';
+        shouldHideByDefault = true;
+      }
+
+      if (topHalfChangeRatio > 0.09 || windowIntegrityChangeRatio > 0.02) {
+        overallScore = Math.max(0, overallScore - 22);
+        qualityWarning =
+          'Preview needs review because the room background changed more than expected.';
+        rejectionCategory = rejectionCategory || 'architectural_drift';
+        shouldHideByDefault = true;
+      }
     }
 
     if (preset.key.startsWith('floor_')) {
