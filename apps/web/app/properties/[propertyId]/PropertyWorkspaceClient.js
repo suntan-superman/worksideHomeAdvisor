@@ -227,6 +227,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
   const [visionGenerationElapsedSeconds, setVisionGenerationElapsedSeconds] = useState(0);
   const [visionRecoveryState, setVisionRecoveryState] = useState(null);
   const [visionCancellationPending, setVisionCancellationPending] = useState(false);
+  const [visionAdvisorGuidance, setVisionAdvisorGuidance] = useState([]);
 
   function resolveDocumentGenerationPhase(kind, job = null) {
     const kindLabel = kind === 'report' ? 'Report' : 'Flyer';
@@ -597,6 +598,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     setVisionRecoveryState(null);
     setVisionGenerationState(null);
     setVisionCancellationPending(false);
+    setVisionAdvisorGuidance([]);
   }, [mediaAssets, selectedMediaAssetId]);
 
   useEffect(() => {
@@ -738,13 +740,12 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     if (isAdvisorOnly) {
       return {
         tone: 'success',
-        title: 'Subtle preview generated',
+        title: 'Seller prep plan ready',
         message:
-          job?.warning ||
           job?.message ||
-          'This room already photographs well, so changes were intentionally kept conservative.',
+          'This room will improve more from simple prep than from keeping a weak edited image.',
         autoDismissMs: 9000,
-        shouldScroll: false,
+        shouldScroll: true,
         nextVariantId: '',
       };
     }
@@ -3152,6 +3153,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         sourceVariantId: workflowSourceVariantId || undefined,
         workflowStageKey: stageKey,
       });
+      setVisionAdvisorGuidance(
+        Array.isArray(response.sellerGuidance)
+          ? response.sellerGuidance
+          : Array.isArray(response.job?.sellerGuidance)
+            ? response.job.sellerGuidance
+            : [],
+      );
 
       if (
         response.job &&
@@ -4353,12 +4361,26 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
     const cleanupPreset = visionPresets.find((preset) => preset.key === 'declutter_medium');
     const conceptPresets = visionPresets.filter((preset) => preset.category === 'concept_preview');
     const selectedResultType = selectedVariant?.metadata?.resultType || '';
-    const isGuidanceOnlyResult = selectedResultType === 'guidance_only';
+    const isGuidanceOnlyResult =
+      selectedResultType === 'guidance_only' || (!selectedVariant && visionAdvisorGuidance.length > 0);
     const isConceptResult =
       selectedResultType === 'concept' ||
       selectedVariant?.variantCategory === 'concept_preview' ||
       selectedVariant?.metadata?.conceptOnly;
+    const selectedPhotoAnalysis = selectedMediaAsset?.analysis || {};
+    const selectedPhotoScores = [
+      typeof selectedPhotoAnalysis.overallQualityScore === 'number'
+        ? `Quality ${selectedPhotoAnalysis.overallQualityScore}/100`
+        : '',
+      typeof selectedPhotoAnalysis.lightingScore === 'number'
+        ? `Light ${selectedPhotoAnalysis.lightingScore}/100`
+        : '',
+      typeof selectedPhotoAnalysis.compositionScore === 'number'
+        ? `Composition ${selectedPhotoAnalysis.compositionScore}/100`
+        : '',
+    ].filter(Boolean);
     const resultGuidance = [
+      ...visionAdvisorGuidance,
       ...(Array.isArray(selectedVariant?.metadata?.sellerGuidance)
         ? selectedVariant.metadata.sellerGuidance
         : []),
@@ -4422,6 +4444,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                 <div className="property-media-slider-card">
                   <span className="label">Before / after slider</span>
                   <p className="property-media-variant-caption">{effectiveVisionResultSummary}</p>
+                  {selectedPhotoScores.length ? (
+                    <div className="tag-row">
+                      {selectedPhotoScores.map((score) => (
+                        <span key={score}>{score}</span>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="property-media-slider-shell">
                     <ReactCompareSlider
                       itemOne={
@@ -4448,6 +4477,13 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                   <div>
                     <span className="label">Original</span>
                     <p className="property-media-variant-caption">The actual uploaded photo.</p>
+                    {selectedPhotoScores.length ? (
+                      <div className="tag-row">
+                        {selectedPhotoScores.map((score) => (
+                          <span key={score}>{score}</span>
+                        ))}
+                      </div>
+                    ) : null}
                     <img
                       src={compareSourceImageUrl}
                       alt={compareSourceLabel || 'Original property photo'}
@@ -4496,7 +4532,7 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
         <div className="workspace-two-column vision-workflow-layout">
           <div className="content-card vision-workspace-card">
             <span className="label">Quick Actions</span>
-            <h2>Make the photo more useful</h2>
+            <h2>Photo Coach</h2>
             {selectedMediaAsset ? (
               <div className="workspace-tab-stack">
                 <div className="workspace-inner-card brochure-control-card vision-current-action-card">
@@ -4526,28 +4562,8 @@ export function PropertyWorkspaceClient({ propertyId, mapsApiKey = '' }) {
                     })}
                   </div>
                   <p className="workspace-control-note">
-                    Improve Photo is the safest choice for listing use. Clean Up Photo is for small distractions. Explore Ideas is for planning only.
+                    Improve Photo is the listing-safe image pass. Clean Up Photo now prioritizes practical seller prep guidance instead of waiting on weak AI edits. Explore Ideas is optional planning only.
                   </p>
-                  {conceptPresets.length ? (
-                    <div className="property-media-variant-list">
-                      {conceptPresets.slice(0, 8).map((preset) => (
-                        <button
-                          key={preset.key}
-                          type="button"
-                          className={
-                            activeVisionPresetKey === preset.key
-                              ? 'property-media-variant-chip active'
-                              : 'property-media-variant-chip'
-                          }
-                          onClick={() => handleGenerateVariant(preset.key)}
-                          disabled={Boolean(status) || isArchivedProperty || !selectedMediaAsset}
-                          title={preset.helperText || 'Concept preview for planning only.'}
-                        >
-                          {preset.displayName}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
                   <div className="vision-current-action-buttons vision-current-action-buttons-secondary">
                     <button
                       type="button"

@@ -34,6 +34,21 @@ import {
 import { listVisionPresets, resolveVisionPreset } from './vision-presets.js';
 
 const CACHE_WINDOW_MS = 24 * 60 * 60 * 1000;
+const CLEANUP_ADVISOR_ONLY_PRESET_KEYS = new Set(['declutter_light', 'declutter_medium']);
+
+function isGenerativeCleanupEnabled() {
+  return ['1', 'true', 'yes', 'enabled'].includes(
+    String(process.env.HOMEADVISOR_ENABLE_GENERATIVE_CLEANUP || '').trim().toLowerCase(),
+  );
+}
+
+function shouldReturnSellerPrepPlanOnly({ presetKey = '', requestedMode = 'preset' } = {}) {
+  return (
+    requestedMode === 'preset' &&
+    CLEANUP_ADVISOR_ONLY_PRESET_KEYS.has(String(presetKey || '')) &&
+    !isGenerativeCleanupEnabled()
+  );
+}
 
 function resolveSimpleVisionResultType({ presetKey = '', variantCategory = '', quality = '', review = {} } = {}) {
   if (variantCategory === 'concept_preview' || isConceptStudioPreset(presetKey)) {
@@ -76,6 +91,26 @@ function buildSellerGuidance({ presetKey = '', candidate = {}, asset = null } = 
   push('Retake from a slightly wider angle if the room feels crowded.');
 
   return guidance.slice(0, 5);
+}
+
+function buildSellerPrepPlan({ presetKey = '', asset = null } = {}) {
+  const guidance = buildSellerGuidance({ presetKey, asset });
+  const analysis = asset?.analysis || {};
+  const lightingScore = Number(analysis.lightingScore || 0);
+  const compositionScore = Number(analysis.compositionScore || 0);
+  const overallQualityScore = Number(analysis.overallQualityScore || 0);
+
+  if (lightingScore > 0 && lightingScore < 70) {
+    guidance.unshift('Turn on warm interior lights and retake when window light is even.');
+  }
+  if (compositionScore > 0 && compositionScore < 70) {
+    guidance.unshift('Retake from a straighter, slightly wider angle so buyers can read the room layout.');
+  }
+  if (overallQualityScore >= 78) {
+    guidance.push('Keep this photo in the marketing set after the room is lightly prepped.');
+  }
+
+  return [...new Set(guidance)].slice(0, 5);
 }
 
 function buildSimpleVisionMessage({ resultType = 'enhanced', preset = null, quality = '' } = {}) {
@@ -122,6 +157,8 @@ function serializeImageJob(document, variants = []) {
     ? primaryVariant.sellerGuidance
     : Array.isArray(primaryMetadata.sellerGuidance)
       ? primaryMetadata.sellerGuidance
+      : Array.isArray(document.input?.sellerGuidance)
+        ? document.input.sellerGuidance
       : [];
   const improvementsApplied = Array.isArray(primaryVariant?.improvementsApplied)
     ? primaryVariant.improvementsApplied
@@ -8730,6 +8767,61 @@ async function persistOrchestratedVisionCandidates({
   return persistedVariants;
 }
 
+async function completeSellerPrepPlanJob({ job, preset, asset, reason = 'cleanup_advisor_only' }) {
+  const sellerGuidance = buildSellerPrepPlan({ presetKey: preset.key, asset });
+  const message =
+    'Seller prep plan ready. This photo will improve more from simple room preparation than from a weak AI cleanup.';
+
+  job.status = 'completed';
+  job.provider = 'photo_coach';
+  job.attemptCount = 0;
+  job.maxAttempts = 1;
+  job.currentStage = 'completed';
+  job.fallbackMode = 'advisor_only';
+  job.failureReason = '';
+  job.outputVariantIds = [];
+  job.selectedVariantId = null;
+  job.input = {
+    ...(job.input || {}),
+    sellerGuidance,
+    orchestrationChain: [],
+    orchestrationAttempts: [],
+    orchestrationElapsedMs: 0,
+    orchestrationTimeBudgetMs: 0,
+    orchestrationStoppedEarlyReason: reason,
+    orchestrationTimeBudgetReached: false,
+    orchestrationQuality: 'advisor',
+    orchestrationDeliveryMode: 'advisor_only',
+  };
+  job.message = message;
+  job.warning =
+    'No AI-edited image was kept because seller prep guidance is the more trustworthy result for this photo.';
+  await job.save();
+
+  const serializedJob = {
+    ...serializeImageJob(job.toObject(), []),
+    resultType: 'guidance_only',
+    message,
+    sellerGuidance,
+    improvementsApplied: [],
+    conceptOnly: false,
+  };
+
+  return {
+    cached: false,
+    preset,
+    job: serializedJob,
+    variants: [],
+    variant: null,
+    resultType: 'guidance_only',
+    imageUrl: '',
+    message,
+    sellerGuidance,
+    improvementsApplied: [],
+    conceptOnly: false,
+  };
+}
+
 export async function createImageEnhancementJob({
   assetId,
   jobType = 'enhance_listing_quality',
@@ -8948,6 +9040,15 @@ export async function createImageEnhancementJob({
 
   if (typeof onJobCreated === 'function') {
     await onJobCreated(serializeImageJob(job.toObject(), []));
+  }
+
+  if (shouldReturnSellerPrepPlanOnly({ presetKey: preset.key, requestedMode })) {
+    return completeSellerPrepPlanJob({
+      job,
+      preset,
+      asset,
+      reason: 'cleanup_guidance_first',
+    });
   }
 
   try {

@@ -172,15 +172,17 @@ export function buildProviderChain({ preset, userPlan, openAiAvailable = false }
   }
 
   if (isFloorPreset) {
-    return openAiAvailable
-      ? ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp']
-      : ['replicate_basic', 'replicate_advanced', 'local_sharp'];
+    if (key === 'floor_tile_stone') {
+      return openAiAvailable
+        ? ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp']
+        : ['replicate_basic', 'replicate_advanced', 'local_sharp'];
+    }
+
+    return ['local_sharp'];
   }
 
   if (isPaintPreset) {
-    return openAiAvailable
-      ? ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp']
-      : ['replicate_basic', 'replicate_advanced', 'local_sharp'];
+    return ['local_sharp'];
   }
 
   if (preset?.providerPreference === 'local_sharp_only') {

@@ -995,14 +995,14 @@ test('medium declutter uses a multi-provider cleanup path', () => {
   );
 });
 
-test('wall paint presets now use the replicate paint pipeline', () => {
+test('wall paint presets use deterministic local paint previews', () => {
   assert.deepEqual(
     buildProviderChain({
       preset: resolveVisionPreset('paint_bright_white'),
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp'],
+    ['local_sharp'],
   );
 });
 
@@ -1272,14 +1272,14 @@ test('shouldSkipPaintGeneration never skips the hard contrast paint test preset'
   assert.equal(decision.skip, false);
 });
 
-test('floor tone presets now use the replicate finish pipeline', () => {
+test('floor tone presets use deterministic local finish previews', () => {
   assert.deepEqual(
     buildProviderChain({
       preset: resolveVisionPreset('floor_light_wood'),
       userPlan: 'premium',
       openAiAvailable: true,
     }),
-    ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp'],
+    ['local_sharp'],
   );
 });
 
@@ -1305,7 +1305,7 @@ test('tile or stone preset uses explicit material-replacement defaults', () => {
   assert.match(preset.negativePrompt, /overlay texture/i);
 });
 
-test('paint presets use the replicate paint chain before selecting a winner', async () => {
+test('paint presets select a deterministic local winner', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
@@ -1318,16 +1318,9 @@ test('paint presets use the replicate paint chain before selecting a winner', as
     providerRunners: {
       runLocalSharp: async () => {
         callOrder.push('local_sharp');
-        return [];
-      },
-      runReplicateProvider: async ({ providerKey }) => {
-        callOrder.push(providerKey);
-        if (providerKey === 'replicate_basic') {
-          return [];
-        }
-
         return [
           {
+            providerKey: 'local_sharp',
             overallScore: 80,
             maskedChangeRatio: 1,
             maskedColorShiftRatio: 0.3,
@@ -1343,9 +1336,9 @@ test('paint presets use the replicate paint chain before selecting a winner', as
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'local_sharp']);
-  assert.equal(result.providerUsed, 'replicate_advanced');
-  assert.equal(result.providerAttemptCount, 3);
+  assert.deepEqual(callOrder, ['local_sharp']);
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.providerAttemptCount, 1);
 });
 
 test('floor presets use the replicate chain when tile or stone is requested', async () => {
@@ -1424,7 +1417,7 @@ test('tile or stone floors keep the best safe replicate candidate when strict th
   assert.equal(result.quality, 'poor');
 });
 
-test('paint presets reject a subtle replicate wall repaint that misses strength enforcement', async () => {
+test('paint presets keep subtle local wall previews as advisory output', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('paint_soft_greige'),
@@ -1434,10 +1427,10 @@ test('paint presets reject a subtle replicate wall repaint that misses strength 
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runReplicateProvider: async ({ providerKey }) => {
+      runLocalSharp: async () => {
         return [
           {
-            providerKey,
+            providerKey: 'local_sharp',
             overallScore: 88,
             maskedChangeRatio: 0.045,
             maskedColorShiftRatio: 0.02,
@@ -1450,18 +1443,17 @@ test('paint presets reject a subtle replicate wall repaint that misses strength 
           },
         ];
       },
-      runLocalSharp: async () => [],
     },
   });
 
-  assert.equal(result.providerUsed, 'replicate_basic');
-  assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
   assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'poor');
 });
 
-test('paint presets accept a visibly changed warm wall candidate when the usable floor is met', async () => {
+test('paint presets accept a visibly changed local warm wall candidate', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('paint_warm_neutral'),
@@ -1471,9 +1463,9 @@ test('paint presets accept a visibly changed warm wall candidate when the usable
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runReplicateProvider: async () => [
+      runLocalSharp: async () => [
         {
-          providerKey: 'replicate_basic',
+          providerKey: 'local_sharp',
           overallScore: 58,
           maskedChangeRatio: 0.42,
           maskedColorShiftRatio: 0.13,
@@ -1485,19 +1477,17 @@ test('paint presets accept a visibly changed warm wall candidate when the usable
           newFurnitureAdditionRatio: 0,
         },
       ],
-      runOpenAiEdit: async () => [],
-      runLocalSharp: async () => [],
     },
   });
 
-  assert.equal(result.providerUsed, 'replicate_basic');
-  assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
   assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'high');
 });
 
-test('paint presets accept window-heavy warm wall candidates with high outside-mask change', async () => {
+test('paint presets accept window-heavy local wall candidates with high outside-mask change', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('paint_warm_neutral'),
@@ -1507,10 +1497,9 @@ test('paint presets accept window-heavy warm wall candidates with high outside-m
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runReplicateProvider: async () => [],
-      runOpenAiEdit: async () => [
+      runLocalSharp: async () => [
         {
-          providerKey: 'openai_edit',
+          providerKey: 'local_sharp',
           overallScore: 0,
           maskedChangeRatio: 0.8379,
           focusRegionChangeRatio: 0.5825,
@@ -1526,12 +1515,11 @@ test('paint presets accept window-heavy warm wall candidates with high outside-m
           newFurnitureAdditionRatio: 0,
         },
       ],
-      runLocalSharp: async () => [],
     },
   });
 
-  assert.equal(result.providerUsed, 'openai_edit');
-  assert.equal(result.bestVariant?.providerKey, 'openai_edit');
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
   assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'good');
@@ -1573,7 +1561,7 @@ test('paint presets keep a strong local fallback preview when strict review fiel
   assert.equal(result.quality, 'high');
 });
 
-test('dark charcoal test preset keeps the first safe visible candidate without strict paint-strength gating', async () => {
+test('dark charcoal test preset keeps the first safe local visible candidate', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('paint_dark_charcoal_test'),
@@ -1583,9 +1571,9 @@ test('dark charcoal test preset keeps the first safe visible candidate without s
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runReplicateProvider: async ({ providerKey }) => [
+      runLocalSharp: async () => [
         {
-          providerKey,
+          providerKey: 'local_sharp',
           overallScore: 0,
           maskedChangeRatio: 0.32,
           maskedColorShiftRatio: 0.11,
@@ -1597,13 +1585,11 @@ test('dark charcoal test preset keeps the first safe visible candidate without s
           newFurnitureAdditionRatio: 0,
         },
       ],
-      runOpenAiEdit: async () => [],
-      runLocalSharp: async () => [],
     },
   });
 
-  assert.equal(result.providerUsed, 'replicate_basic');
-  assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
   assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'high');
@@ -1642,12 +1628,12 @@ test('dark charcoal test preset rejects a strong but structurally unsafe diagnos
 
   assert.equal(result.providerUsed, null);
   assert.equal(result.bestVariant, null);
-  assert.equal(result.stoppedEarlyReason, 'minimum_trust_threshold_not_met');
+  assert.equal(result.stoppedEarlyReason, 'no_candidates_available');
   assert.equal(result.deliveryMode, 'none');
   assert.equal(result.quality, 'poor');
 });
 
-test('paint presets return best available advisory candidate when the time budget is reached', async () => {
+test('paint presets return best available local candidate when the time budget is reached', async () => {
   let now = 0;
   const callOrder = [];
   const result = await orchestrateVisionJob({
@@ -1660,12 +1646,12 @@ test('paint presets return best available advisory candidate when the time budge
     sourceImageBase64: 'source',
     nowFn: () => now,
     providerRunners: {
-      runReplicateProvider: async ({ providerKey }) => {
-        callOrder.push(providerKey);
+      runLocalSharp: async () => {
+        callOrder.push('local_sharp');
         now = 121_000;
         return [
           {
-            providerKey,
+            providerKey: 'local_sharp',
             overallScore: 6,
             maskedChangeRatio: 0.35,
             focusRegionChangeRatio: 0.21,
@@ -1679,27 +1665,19 @@ test('paint presets return best available advisory candidate when the time budge
           },
         ];
       },
-      runOpenAiEdit: async () => {
-        callOrder.push('openai_edit');
-        return [];
-      },
-      runLocalSharp: async () => {
-        callOrder.push('local_sharp');
-        return [];
-      },
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic']);
-  assert.equal(result.providerUsed, 'replicate_basic');
-  assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
+  assert.deepEqual(callOrder, ['local_sharp']);
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
   assert.equal(result.stoppedEarlyReason, 'time_budget_best_available');
   assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'concept');
   assert.equal(result.timeBudgetReached, true);
 });
 
-test('paint presets return a best-effort preview instead of advisor-only when a subtle safe candidate exists', async () => {
+test('paint presets return a best-effort local preview instead of advisor-only when subtle but safe', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('paint_warm_neutral'),
@@ -1709,10 +1687,9 @@ test('paint presets return a best-effort preview instead of advisor-only when a 
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runReplicateProvider: async () => [],
-      runOpenAiEdit: async () => [
+      runLocalSharp: async () => [
         {
-          providerKey: 'openai_edit',
+          providerKey: 'local_sharp',
           overallScore: 0,
           maskedChangeRatio: 0.4508,
           focusRegionChangeRatio: 0.2781,
@@ -1726,12 +1703,11 @@ test('paint presets return a best-effort preview instead of advisor-only when a 
           newFurnitureAdditionRatio: 0,
         },
       ],
-      runLocalSharp: async () => [],
     },
   });
 
-  assert.equal(result.providerUsed, 'openai_edit');
-  assert.equal(result.bestVariant?.providerKey, 'openai_edit');
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
   assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'poor');
@@ -1769,7 +1745,7 @@ test('paint ranking prefers clearer visible repaint over safer but barely change
   assert.equal(ranked[0]?.providerKey, 'replicate_advanced');
 });
 
-test('paint presets fall through to openai_edit when replicate returns nothing usable', async () => {
+test('paint presets ignore ai providers when local deterministic preview is available', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
@@ -1786,9 +1762,13 @@ test('paint presets fall through to openai_edit when replicate returns nothing u
       },
       runOpenAiEdit: async () => {
         callOrder.push('openai_edit');
+        return [];
+      },
+      runLocalSharp: async () => {
+        callOrder.push('local_sharp');
         return [
           {
-            providerKey: 'openai_edit',
+            providerKey: 'local_sharp',
             overallScore: 80,
             maskedChangeRatio: 1,
             maskedColorShiftRatio: 0.3,
@@ -1804,15 +1784,15 @@ test('paint presets fall through to openai_edit when replicate returns nothing u
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit']);
-  assert.equal(result.providerUsed, 'openai_edit');
-  assert.equal(result.bestVariant?.providerKey, 'openai_edit');
+  assert.deepEqual(callOrder, ['local_sharp']);
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
   assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'high');
 });
 
-test('paint presets fall through to local_sharp when ai providers return nothing usable', async () => {
+test('paint presets run local_sharp without ai provider attempts', async () => {
   const callOrder = [];
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
@@ -1851,7 +1831,7 @@ test('paint presets fall through to local_sharp when ai providers return nothing
     },
   });
 
-  assert.deepEqual(callOrder, ['replicate_basic', 'replicate_advanced', 'openai_edit', 'local_sharp']);
+  assert.deepEqual(callOrder, ['local_sharp']);
   assert.equal(result.providerUsed, 'local_sharp');
   assert.equal(result.bestVariant?.providerKey, 'local_sharp');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
@@ -1859,9 +1839,8 @@ test('paint presets fall through to local_sharp when ai providers return nothing
   assert.equal(result.quality, 'high');
 });
 
-test('paint presets retry with stronger settings when first pass is too subtle', async () => {
-  const seenStrengths = [];
-  let replicateCallCount = 0;
+test('paint presets do not enter adaptive ai retry loop', async () => {
+  let localCallCount = 0;
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('paint_warm_neutral'),
@@ -1871,34 +1850,11 @@ test('paint presets retry with stronger settings when first pass is too subtle',
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runReplicateProvider: async ({ providerKey, preset }) => {
-        if (providerKey !== 'replicate_basic') {
-          return [];
-        }
-
-        replicateCallCount += 1;
-        seenStrengths.push(preset.strength);
-
-        if (replicateCallCount === 1) {
-          return [
-            {
-              providerKey,
-              overallScore: 86,
-              maskedChangeRatio: 0.06,
-              maskedColorShiftRatio: 0.03,
-              maskedLuminanceDelta: 0.01,
-              maskedEdgeDensityDelta: 0.0008,
-              topHalfChangeRatio: 0.02,
-              outsideMaskChangeRatio: 0.05,
-              furnitureCoverageIncreaseRatio: 0,
-              newFurnitureAdditionRatio: 0,
-            },
-          ];
-        }
-
+      runLocalSharp: async () => {
+        localCallCount += 1;
         return [
           {
-            providerKey,
+            providerKey: 'local_sharp',
             overallScore: 90,
             maskedChangeRatio: 1,
             maskedColorShiftRatio: 0.3,
@@ -1911,14 +1867,11 @@ test('paint presets retry with stronger settings when first pass is too subtle',
           },
         ];
       },
-      runOpenAiEdit: async () => [],
-      runLocalSharp: async () => [],
     },
   });
 
-  assert.equal(replicateCallCount, 2);
-  assert.ok(seenStrengths[1] > seenStrengths[0]);
-  assert.equal(result.providerUsed, 'replicate_basic');
+  assert.equal(localCallCount, 1);
+  assert.equal(result.providerUsed, 'local_sharp');
 });
 
 test('floor presets surface the best-effort finish outcome when tile providers return nothing usable', async () => {
@@ -1943,7 +1896,7 @@ test('floor presets surface the best-effort finish outcome when tile providers r
   assert.equal(result.quality, 'poor');
 });
 
-test('floor presets keep a subtle candidate instead of dropping everything as a no-op', async () => {
+test('floor tone presets keep a deterministic local candidate', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('floor_light_wood'),
@@ -1953,10 +1906,9 @@ test('floor presets keep a subtle candidate instead of dropping everything as a 
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runLocalSharp: async () => [],
-      runReplicateProvider: async () => [
+      runLocalSharp: async () => [
         {
-          providerKey: 'replicate_basic',
+          providerKey: 'local_sharp',
           overallScore: 71,
           focusRegionChangeRatio: 0.052,
           maskedChangeRatio: 0.007,
@@ -1970,14 +1922,14 @@ test('floor presets keep a subtle candidate instead of dropping everything as a 
     },
   });
 
-  assert.equal(result.providerUsed, 'replicate_basic');
-  assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
   assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'poor');
 });
 
-test('floor presets keep even extremely subtle raw candidates instead of filtering them out', async () => {
+test('floor tone presets do not call replicate for subtle local output', async () => {
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
     preset: resolveVisionPreset('floor_light_wood'),
@@ -1987,10 +1939,9 @@ test('floor presets keep even extremely subtle raw candidates instead of filteri
     sourceBuffer: Buffer.from('source'),
     sourceImageBase64: 'source',
     providerRunners: {
-      runLocalSharp: async () => [],
-      runReplicateProvider: async () => [
+      runLocalSharp: async () => [
         {
-          providerKey: 'replicate_basic',
+          providerKey: 'local_sharp',
           overallScore: 68,
           focusRegionChangeRatio: 0.03,
           maskedChangeRatio: 0,
@@ -2004,8 +1955,8 @@ test('floor presets keep even extremely subtle raw candidates instead of filteri
     },
   });
 
-  assert.equal(result.providerUsed, 'replicate_basic');
-  assert.equal(result.bestVariant?.providerKey, 'replicate_basic');
+  assert.equal(result.providerUsed, 'local_sharp');
+  assert.equal(result.bestVariant?.providerKey, 'local_sharp');
   assert.equal(result.stoppedEarlyReason, 'ranked_best_candidate');
   assert.equal(result.deliveryMode, 'trustworthy_best_candidate');
   assert.equal(result.quality, 'poor');
@@ -2773,7 +2724,7 @@ test('vision orchestration stops after cancellation is requested between provide
   let shouldCancelChecks = 0;
   const result = await orchestrateVisionJob({
     asset: { roomLabel: 'Living room' },
-    preset: resolveVisionPreset('paint_soft_greige'),
+    preset: resolveVisionPreset('remove_furniture'),
     roomType: 'living_room',
     requestedMode: 'preset',
     userPlan: 'premium',
