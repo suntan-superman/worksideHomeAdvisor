@@ -150,6 +150,13 @@ export function trackLandingEvent(payload) {
   });
 }
 
+export function recordSupportLiveTransfer(payload) {
+  return request('/api/v1/public/support/live-transfer', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function login(payload) {
   return request('/api/v1/auth/login', {
     method: 'POST',

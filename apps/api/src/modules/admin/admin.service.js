@@ -30,6 +30,7 @@ import { ProviderModel } from '../providers/provider.model.js';
 import { PricingAnalysisModel } from '../pricing/pricing.model.js';
 import { PropertyModel } from '../properties/property.model.js';
 import { getAdminFunnelSnapshot } from '../public/public.service.js';
+import { listSupportLiveTransfers } from '../support/support-transfer.service.js';
 import { AnalysisLockModel } from '../usage/analysis-lock.model.js';
 import {
   getPricingQueryPolicy,
@@ -926,6 +927,10 @@ export async function updateAdminProviderCategoryAction(categoryKey, payload) {
 
 export async function getAdminProviderLeadSnapshot({ limit = 50 } = {}) {
   return listAdminProviderLeads({ limit });
+}
+
+export async function getAdminSupportTransferSnapshot({ limit = 50 } = {}) {
+  return listSupportLiveTransfers({ limit });
 }
 
 export async function getAdminPricingQueryPolicy() {

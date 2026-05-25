@@ -13,6 +13,7 @@ import {
   getAdminProviderCategorySnapshot,
   getAdminProviderLeadSnapshot,
   getAdminProviderSnapshot,
+  getAdminSupportTransferSnapshot,
   getAdminUsageSnapshot,
   getAdminWorkerSnapshot,
   linkAdminProviderAccountAction,
@@ -348,6 +349,16 @@ export async function adminRoutes(fastify) {
       return reply.send(await getAdminProviderLeadSnapshot(query));
     } catch (error) {
       request.log.error({ err: error }, 'admin provider leads snapshot failed');
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.get('/support/live-transfers', async (request, reply) => {
+    try {
+      const query = listQuerySchema.parse(request.query || {});
+      return reply.send(await getAdminSupportTransferSnapshot(query));
+    } catch (error) {
+      request.log.error({ err: error }, 'admin support live transfer snapshot failed');
       return reply.code(400).send({ message: error.message });
     }
   });

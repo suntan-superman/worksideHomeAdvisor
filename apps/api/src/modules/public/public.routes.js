@@ -5,6 +5,7 @@ import {
   buildSellerPreviewResponse,
   recordPublicFunnelEvent,
 } from './public.service.js';
+import { recordSupportLiveTransfer } from '../support/support-transfer.service.js';
 
 const sellerPreviewSchema = z.object({
   address: z.string().trim().min(4),
@@ -74,6 +75,36 @@ const continueSignupSchema = z.object({
   landingPath: z.string().trim().optional(),
   referrer: z.string().trim().optional(),
   previewContext: z.record(z.string(), z.unknown()).optional(),
+});
+
+const supportLiveTransferSchema = z.object({
+  product: z.string().trim().max(80).optional(),
+  tenantId: z.string().trim().max(120).optional(),
+  tenantType: z.string().trim().max(80).optional(),
+  source: z.string().trim().max(80).optional(),
+  sourceUrl: z.string().trim().max(2000).optional(),
+  appBaseUrl: z.string().trim().max(2000).optional(),
+  visitorId: z.string().trim().max(160).optional(),
+  chatSessionId: z.string().trim().max(160).optional(),
+  merxusSessionId: z.string().trim().max(160).optional(),
+  merxusRequestStatus: z.string().trim().max(80).optional(),
+  merxusStatus: z.string().trim().max(80).optional(),
+  merxusErrorMessage: z.string().trim().max(600).optional(),
+  leadName: z.string().trim().max(160).optional(),
+  leadEmail: z.string().trim().email().max(240).optional().or(z.literal('')),
+  authenticated: z.boolean().optional(),
+  userId: z.string().trim().max(80).optional(),
+  userRole: z.string().trim().max(80).optional(),
+  userEmail: z.string().trim().email().max(240).optional().or(z.literal('')),
+  propertyId: z.string().trim().max(80).optional(),
+  propertyTitle: z.string().trim().max(240).optional(),
+  workflowPhase: z.string().trim().max(160).optional(),
+  workflowStep: z.string().trim().max(160).optional(),
+  message: z.string().trim().max(1000).optional(),
+  initialMessage: z.string().trim().max(1000).optional(),
+  context: z.record(z.string(), z.unknown()).optional(),
+  homeAdvisorContext: z.record(z.string(), z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export async function publicRoutes(fastify) {
@@ -155,6 +186,22 @@ export async function publicRoutes(fastify) {
         attribution: result.attribution,
       });
     } catch (error) {
+      return reply.code(400).send({ message: error.message });
+    }
+  });
+
+  fastify.post('/support/live-transfer', async (request, reply) => {
+    try {
+      const payload = supportLiveTransferSchema.parse(request.body || {});
+      const result = await recordSupportLiveTransfer(payload);
+
+      return reply.code(202).send({
+        ok: true,
+        acceptedAt: new Date().toISOString(),
+        ...result,
+      });
+    } catch (error) {
+      request.log.error({ err: error }, 'public support live transfer record failed');
       return reply.code(400).send({ message: error.message });
     }
   });

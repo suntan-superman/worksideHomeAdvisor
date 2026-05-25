@@ -9,7 +9,7 @@ const supportLiveTransferSchema = new mongoose.Schema(
     sourceUrl: { type: String, default: '' },
     appBaseUrl: { type: String, default: '' },
     visitorId: { type: String, default: '', index: true },
-    chatSessionId: { type: String, default: '', index: true },
+    chatSessionId: { type: String, default: '' },
     merxusSessionId: { type: String, default: '', index: true },
     merxusRequestStatus: { type: String, default: '' },
     merxusErrorMessage: { type: String, default: '' },

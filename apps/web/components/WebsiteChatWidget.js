@@ -16,6 +16,7 @@ import {
   getBillingSummary,
   getWorkflow,
   listProperties,
+  recordSupportLiveTransfer,
 } from '../lib/api';
 import { getStoredSession } from '../lib/session';
 
@@ -703,6 +704,19 @@ export default function WebsiteChatWidget({
         transferPayload.context = latestHomeAdvisorContext;
       }
       const requested = await requestPublicChatHuman(activeSessionId, transferPayload);
+      const transferRecordPayload = {
+        ...transferPayload,
+        product,
+        tenantId,
+        tenantType,
+        source: 'website_chat',
+        sourceUrl: window.location.href,
+        chatSessionId: activeSessionId,
+        merxusSessionId: requested.session?.id || activeSessionId,
+        merxusRequestStatus: requested.ok ? 'accepted' : 'unknown',
+        message: 'I would like to talk to a person.',
+      };
+      recordSupportLiveTransfer(transferRecordPayload).catch(() => {});
       setHumanRequested(true);
       setTeamNotice(true);
       setMessages((current) => normalizeMessages([...current.filter((item) => item.id !== 'welcome'), requested.message].filter(Boolean)));

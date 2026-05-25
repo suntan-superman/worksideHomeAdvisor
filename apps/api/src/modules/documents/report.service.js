@@ -61,6 +61,9 @@ const REPORT_SECTION_LABELS = {
   draft_listing_description: 'Draft Listing Description',
 };
 const DEFAULT_REPORT_SECTION_IDS = Object.keys(REPORT_SECTION_LABELS);
+const ENABLE_REPORT_GOOGLE_PROVIDER_FALLBACK = ['1', 'true', 'yes', 'enabled'].includes(
+  String(process.env.GOOGLE_PLACES_ENABLE_REPORT_FALLBACK || '').trim().toLowerCase(),
+);
 
 function serializeReport(document) {
   if (!document) {
@@ -487,7 +490,7 @@ async function buildProviderRecommendations(propertyId) {
         const result = await listProvidersForProperty(propertyId, {
           categoryKey: config.categoryKey,
           limit: 2,
-          includeExternal: true,
+          includeExternal: ENABLE_REPORT_GOOGLE_PROVIDER_FALLBACK,
         });
         return { config, result };
       } catch {

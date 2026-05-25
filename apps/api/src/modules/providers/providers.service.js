@@ -130,6 +130,24 @@ const GOOGLE_PLACES_QUERY_VARIANTS_BY_CATEGORY = {
 
 const ZIP_COORDINATE_CACHE = new Map();
 const ADDRESS_COORDINATE_CACHE = new Map();
+const GOOGLE_FALLBACK_CACHE = new Map();
+
+function readPositiveNumberEnv(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+const GOOGLE_FALLBACK_CACHE_TTL_MS = Math.max(
+  5 * 60 * 1000,
+  readPositiveNumberEnv(process.env.GOOGLE_PLACES_FALLBACK_CACHE_TTL_MS, 24 * 60 * 60 * 1000),
+);
+const GOOGLE_FALLBACK_MAX_TEXT_SEARCH_ATTEMPTS = Math.max(
+  1,
+  Math.min(readPositiveNumberEnv(process.env.GOOGLE_PLACES_FALLBACK_MAX_TEXT_SEARCH_ATTEMPTS, 1), 3),
+);
+const GOOGLE_FALLBACK_ENABLE_LEGACY_TEXTSEARCH = ['1', 'true', 'yes', 'enabled'].includes(
+  String(process.env.GOOGLE_PLACES_ENABLE_LEGACY_TEXTSEARCH || '').trim().toLowerCase(),
+);
 
 function slugify(value) {
   return String(value || '')
@@ -1085,26 +1103,34 @@ async function getPropertyCoordinates(property = {}) {
     return getZipCoordinates(property?.zip);
   }
 
-  try {
-    const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
-    url.searchParams.set('address', fullAddress);
-    url.searchParams.set('key', env.GOOGLE_MAPS_SERVER_API_KEY);
+  return (await geocodeAddressQuery(fullAddress)) || getZipCoordinates(property?.zip);
+}
 
-    const response = await fetch(url);
-    if (!response.ok) {
-      return getZipCoordinates(property?.zip);
-    }
+function buildGoogleFallbackCacheKey(property = {}, { categoryKey = '', limit = 5 } = {}) {
+  return [
+    normalizeString(property?._id?.toString?.() || property?.id || ''),
+    normalizeString(categoryKey),
+    normalizeZip(property?.zip),
+    normalizeString(property?.city).toLowerCase(),
+    normalizeString(property?.state).toLowerCase(),
+    Math.max(1, Math.min(Number(limit || 5), 5)),
+  ].join('|');
+}
 
-    const payload = await response.json();
-    const location = payload?.results?.[0]?.geometry?.location;
-    if (typeof location?.lat === 'number' && typeof location?.lng === 'number') {
-      return { lat: location.lat, lng: location.lng };
-    }
-  } catch {
-    return getZipCoordinates(property?.zip);
+function getCachedGoogleFallbackResult(cacheKey) {
+  const cached = GOOGLE_FALLBACK_CACHE.get(cacheKey);
+  if (!cached || cached.expiresAt <= Date.now()) {
+    GOOGLE_FALLBACK_CACHE.delete(cacheKey);
+    return null;
   }
+  return cached.value;
+}
 
-  return getZipCoordinates(property?.zip);
+function setCachedGoogleFallbackResult(cacheKey, value) {
+  GOOGLE_FALLBACK_CACHE.set(cacheKey, {
+    value,
+    expiresAt: Date.now() + GOOGLE_FALLBACK_CACHE_TTL_MS,
+  });
 }
 
 async function requestGoogleFallbackPlaces(textQuery, { limit = 5, locationBias = null } = {}) {
@@ -1361,6 +1387,18 @@ function buildGoogleFallbackSummary({
 
 async function searchGoogleFallbackProviders(property, { categoryKey = '', limit = 5 } = {}) {
   const locationLabel = buildPropertyLocationQuery(property) || [property?.city, property?.state, property?.zip].filter(Boolean).join(', ');
+  const normalizedLimit = Math.max(1, Math.min(Number(limit || 5), 5));
+  const cacheKey = buildGoogleFallbackCacheKey(property, { categoryKey, limit: normalizedLimit });
+  const cachedResult = getCachedGoogleFallbackResult(cacheKey);
+  if (cachedResult) {
+    return {
+      ...cachedResult,
+      summary: {
+        ...(cachedResult.summary || {}),
+        cacheHit: true,
+      },
+    };
+  }
 
   if (!env.GOOGLE_MAPS_SERVER_API_KEY) {
     return {
@@ -1424,10 +1462,13 @@ async function searchGoogleFallbackProviders(property, { categoryKey = '', limit
   try {
     const propertyCoordinates = await getPropertyCoordinates(property);
     let latestDiagnostic = '';
+    let attemptCount = 0;
+    const textSearchQueries = fallbackQueries.slice(0, GOOGLE_FALLBACK_MAX_TEXT_SEARCH_ATTEMPTS);
 
-    for (const textQuery of fallbackQueries) {
+    for (const textQuery of textSearchQueries) {
+      attemptCount += 1;
       const { items: places, diagnostic } = await requestGoogleFallbackPlaces(textQuery, {
-        limit,
+        limit: normalizedLimit,
         locationBias: propertyCoordinates,
       });
       if (diagnostic) {
@@ -1435,9 +1476,9 @@ async function searchGoogleFallbackProviders(property, { categoryKey = '', limit
       }
 
       if (places.length) {
-        return {
+        const result = {
           items: places
-            .slice(0, Math.max(1, Math.min(Number(limit || 5), 5)))
+            .slice(0, normalizedLimit)
             .map((place) => buildExternalProviderFallbackItem(place, categoryKey, property)),
           diagnostic: '',
           summary: buildGoogleFallbackSummary({
@@ -1448,44 +1489,51 @@ async function searchGoogleFallbackProviders(property, { categoryKey = '', limit
             queryUsed: textQuery,
             searchMode: 'places_search_text',
             resultCount: places.length,
-            attemptCount: fallbackQueries.indexOf(textQuery) + 1,
+            attemptCount,
             locationLabel,
           }),
         };
+        setCachedGoogleFallbackResult(cacheKey, result);
+        return result;
       }
     }
 
-    for (const textQuery of fallbackQueries) {
-      const { items: places, diagnostic } = await requestGoogleLegacyTextSearch(textQuery, {
-        limit,
-        locationBias: propertyCoordinates,
-      });
-      if (diagnostic) {
-        latestDiagnostic = latestDiagnostic || diagnostic;
-      }
+    if (GOOGLE_FALLBACK_ENABLE_LEGACY_TEXTSEARCH) {
+      for (const textQuery of textSearchQueries) {
+        attemptCount += 1;
+        const { items: places, diagnostic } = await requestGoogleLegacyTextSearch(textQuery, {
+          limit: normalizedLimit,
+          locationBias: propertyCoordinates,
+        });
+        if (diagnostic) {
+          latestDiagnostic = latestDiagnostic || diagnostic;
+        }
 
-      if (places.length) {
-        return {
-          items: places
-            .slice(0, Math.max(1, Math.min(Number(limit || 5), 5)))
-            .map((place) => buildLegacyGoogleProviderFallbackItem(place, categoryKey, property)),
-          diagnostic: '',
-          summary: buildGoogleFallbackSummary({
-            enabled: true,
-            triggered: true,
-            status: 'results',
-            triggerReason: 'requested',
-            queryUsed: textQuery,
-            searchMode: 'places_legacy_textsearch',
-            resultCount: places.length,
-            attemptCount: fallbackQueries.indexOf(textQuery) + 1,
-            locationLabel,
-          }),
-        };
+        if (places.length) {
+          const result = {
+            items: places
+              .slice(0, normalizedLimit)
+              .map((place) => buildLegacyGoogleProviderFallbackItem(place, categoryKey, property)),
+            diagnostic: '',
+            summary: buildGoogleFallbackSummary({
+              enabled: true,
+              triggered: true,
+              status: 'results',
+              triggerReason: 'requested',
+              queryUsed: textQuery,
+              searchMode: 'places_legacy_textsearch',
+              resultCount: places.length,
+              attemptCount,
+              locationLabel,
+            }),
+          };
+          setCachedGoogleFallbackResult(cacheKey, result);
+          return result;
+        }
       }
     }
 
-    return {
+    const result = {
       items: [],
       diagnostic: latestDiagnostic,
       summary: buildGoogleFallbackSummary({
@@ -1496,11 +1544,13 @@ async function searchGoogleFallbackProviders(property, { categoryKey = '', limit
         queryUsed: fallbackQueries[0] || '',
         searchMode: latestDiagnostic ? 'fallback_failed' : 'none',
         resultCount: 0,
-        attemptCount: fallbackQueries.length * 2,
+        attemptCount,
         locationLabel,
         diagnostic: latestDiagnostic,
       }),
     };
+    setCachedGoogleFallbackResult(cacheKey, result);
+    return result;
   } catch (error) {
     logError('provider.google_fallback_search_failed', error, {
       categoryKey,
@@ -2316,7 +2366,7 @@ export async function listProvidersForProperty(
     })
     .slice(0, Math.max(1, Number(limit || 3)));
 
-  const googleFallbackResult = !rankedProviders.length || includeExternal
+  const googleFallbackResult = includeExternal
     ? await searchGoogleFallbackProviders(property, {
         categoryKey: resolvedCategoryKey,
         limit: Math.max(1, Math.min(Number(limit || 5), 5)),

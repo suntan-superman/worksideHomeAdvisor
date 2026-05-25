@@ -466,6 +466,110 @@ export async function sendProviderLeadEmail({
   });
 }
 
+function buildSupportLiveTransferAlertHtml({
+  leadName = '',
+  leadEmail = '',
+  sourceUrl = '',
+  chatSessionId = '',
+  userRole = '',
+  propertyTitle = '',
+  workflowPhase = '',
+  workflowStep = '',
+  message = '',
+  appBaseUrl = '',
+}) {
+  const detailRows = [
+    ['Lead', `${leadName || 'Unknown'}${leadEmail ? ` <${leadEmail}>` : ''}`],
+    ['Source URL', sourceUrl || 'Not provided'],
+    ['Merxus session', chatSessionId || 'Not provided'],
+    ['Role', userRole || 'Unknown'],
+    ['Property', propertyTitle || 'Not provided'],
+    ['Workflow', [workflowPhase, workflowStep].filter(Boolean).join(' / ') || 'Not provided'],
+  ];
+  const rowsHtml = detailRows
+    .map(
+      ([label, value]) => `
+        <tr>
+          <td style="padding: 8px 12px; font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.moss}; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #ead9cb;">${escapeHtml(label)}</td>
+          <td style="padding: 8px 12px; font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.slate}; font-size: 14px; border-bottom: 1px solid #ead9cb;">${escapeHtml(value)}</td>
+        </tr>
+      `,
+    )
+    .join('');
+
+  return renderEmailShell({
+    eyebrow: 'Live support requested',
+    title: 'A Home Advisor visitor asked for a person.',
+    intro: 'Merxus accepted the handoff. This HomeAdvisor record preserves the lead, property context, and source path for follow-up.',
+    bodyHtml: `
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse; margin: 0 0 22px; background: #f6efe8; border: 1px solid #ead9cb; border-radius: 18px; overflow: hidden;">
+        ${rowsHtml}
+      </table>
+      ${
+        message
+          ? `<div style="margin: 0 0 22px; padding: 18px; border-radius: 18px; background: #fff8f2; border: 1px solid #f1d1be;">
+              <div style="font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.ink}; font-size: 16px; font-weight: 700; margin-bottom: 8px;">Visitor message</div>
+              <div style="font-family: Arial, sans-serif; color: ${BRAND_TOKENS.colors.slate}; font-size: 15px; line-height: 1.7;">${escapeHtml(message)}</div>
+            </div>`
+          : ''
+      }
+      <div style="margin: 0 0 18px;">
+        ${renderButton('Open HomeAdvisor', appBaseUrl || env.PUBLIC_WEB_URL)}
+      </div>
+    `.trim(),
+    footerNote: `${BRANDING.footerCopy} ${BRANDING.supportEmail}`,
+  });
+}
+
+export async function sendSupportLiveTransferAlert({
+  leadName = '',
+  leadEmail = '',
+  sourceUrl = '',
+  chatSessionId = '',
+  userRole = '',
+  propertyTitle = '',
+  workflowPhase = '',
+  workflowStep = '',
+  message = '',
+  appBaseUrl = '',
+} = {}) {
+  const to = getAdminAlertEmail();
+  await deliverEmail({
+    to,
+    subject: `Live support requested: ${leadName || leadEmail || 'HomeAdvisor visitor'}`,
+    text: [
+      'Live support requested',
+      '',
+      `Lead: ${leadName || 'Unknown'}`,
+      leadEmail ? `Email: ${leadEmail}` : '',
+      sourceUrl ? `Source URL: ${sourceUrl}` : '',
+      chatSessionId ? `Merxus session: ${chatSessionId}` : '',
+      userRole ? `Role: ${userRole}` : '',
+      propertyTitle ? `Property: ${propertyTitle}` : '',
+      workflowPhase || workflowStep ? `Workflow: ${[workflowPhase, workflowStep].filter(Boolean).join(' / ')}` : '',
+      message ? `Message: ${message}` : '',
+      '',
+      `Open HomeAdvisor: ${appBaseUrl || env.PUBLIC_WEB_URL}`,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    html: buildSupportLiveTransferAlertHtml({
+      leadName,
+      leadEmail,
+      sourceUrl,
+      chatSessionId,
+      userRole,
+      propertyTitle,
+      workflowPhase,
+      workflowStep,
+      message,
+      appBaseUrl,
+    }),
+    logLabel: 'Support live transfer alert',
+    logMeta: { leadEmail, chatSessionId, sourceUrl },
+  });
+}
+
 function buildSellerProviderMatchHtml({
   propertyAddress = '',
   categoryLabel = '',
