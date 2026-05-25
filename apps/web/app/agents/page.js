@@ -2,19 +2,21 @@ import Link from 'next/link';
 import { buildLandingSearchParams } from '@workside/utils';
 
 import { AppFrame } from '../../components/AppFrame';
-import { FinalCTASection } from '../../components/landing/FinalCTASection';
-import { HeroSection } from '../../components/landing/HeroSection';
-import { HowItWorksSection } from '../../components/landing/HowItWorksSection';
 import { LandingMetaTracker } from '../../components/landing/LandingMetaTracker';
-import { PricingTeaserSection } from '../../components/landing/PricingTeaserSection';
-import { TrustSignalSection } from '../../components/landing/TrustSignalSection';
-import { ValueCardRow } from '../../components/landing/ValueCardRow';
-import { getAgentLandingVariant } from '../../components/landing/copyVariants';
 
 export const metadata = {
   title: 'Agent Access | Workside Home Advisor',
-  description: 'Use Workside to win more listings, guide prep faster, and present polished seller-facing reports.',
+  description: 'Win more listings with seller prep plans, reports, pricing guidance, and marketing outputs.',
 };
+
+const AGENT_OUTPUTS = [
+  ['Seller Report', 'A polished summary for the homeowner conversation.'],
+  ['Marketing Flyer', 'Shareable property marketing without starting from scratch.'],
+  ['Agent Dashboard', 'Listings, tasks, reports, and prep status in one place.'],
+  ['Seller Workflow', 'A clear path from first meeting to market-ready.'],
+];
+
+const AGENT_TRUST = ['Seller-ready reports', 'Photo feedback', 'Prep checklists', 'Marketing outputs'];
 
 export default function AgentLandingPage({ searchParams }) {
   const source =
@@ -27,7 +29,6 @@ export default function AgentLandingPage({ searchParams }) {
   const ad = typeof searchParams?.ad === 'string' ? searchParams.ad : '';
   const anonymousId =
     typeof searchParams?.anonymousId === 'string' ? searchParams.anonymousId : '';
-  const copyVariant = getAgentLandingVariant({ source, campaign, medium });
   const signupHref = `/auth?${buildLandingSearchParams(
     {
       source,
@@ -43,31 +44,6 @@ export default function AgentLandingPage({ searchParams }) {
       role: 'agent',
     },
   ).toString()}`;
-  const dashboardHref = `/dashboard?${buildLandingSearchParams(
-    {
-      source,
-      campaign,
-      medium,
-      adset,
-      ad,
-      anonymousId,
-      roleIntent: 'agent',
-    },
-    {
-      role: 'agent',
-    },
-  ).toString()}`;
-  const sellerHref = `/sell?${buildLandingSearchParams(
-    {
-      source,
-      campaign,
-      medium,
-      adset,
-      ad,
-      anonymousId,
-      roleIntent: 'seller',
-    },
-  ).toString()}`;
 
   return (
     <AppFrame>
@@ -81,102 +57,77 @@ export default function AgentLandingPage({ searchParams }) {
         adset={adset}
         ad={ad}
       />
-      <HeroSection
-        eyebrow={copyVariant.eyebrow}
-        title={copyVariant.title}
-        subtitle={copyVariant.subtitle}
-        actions={
-          <>
+
+      <section className="marketing-hero marketing-hero-agent">
+        <div className="marketing-hero-copy">
+          <span className="hero-kicker">For real estate agents</span>
+          <h1>Win listings with a better prep plan.</h1>
+          <p>
+            Give sellers pricing guidance, prep checklists, photo feedback, reports, and marketing
+            outputs before the home hits the market.
+          </p>
+          <div className="cta-row">
             <Link href={signupHref} className="button-primary">
-              {copyVariant.primaryCta}
+              Start Agent Workspace
             </Link>
-            <Link href={dashboardHref} className="button-secondary">
-              {copyVariant.secondaryCta}
-            </Link>
-          </>
-        }
-        aside={
-          <div className="landing-report-shell">
-            <span className="label">Report preview shell</span>
-            <h3>Seller-ready presentation</h3>
-            <ul className="landing-bullet-list">
-              {(copyVariant.themePills || [
-                'Pricing strategy summary',
-                'Prep plan and provider support',
-                'Marketing materials handoff',
-              ]).map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
+            <a className="button-secondary" href="#agent-outputs">
+              See Sample Seller Report
+            </a>
           </div>
-        }
-      />
+        </div>
+        <div className="marketing-hero-visual" aria-label="Workside agent dashboard preview">
+          <img src="/marketing/agent-better-prep-plan.png" alt="Workside Home Advisor agent dashboard mockup" />
+        </div>
+      </section>
 
-      <ValueCardRow items={copyVariant.valueItems} />
+      <section id="agent-outputs" className="marketing-output-section">
+        <div className="marketing-section-heading">
+          <span className="label">Listing tools</span>
+          <h2>Show sellers a plan before they choose an agent.</h2>
+        </div>
+        <div className="marketing-output-grid">
+          {AGENT_OUTPUTS.map(([title, body]) => (
+            <article key={title} className="marketing-output-card">
+              <span className="marketing-output-mark" aria-hidden="true" />
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
 
-      <HowItWorksSection
-        steps={[
-          {
-            title: 'Open the property workspace',
-            body: 'Start a listing with the address, property facts, and pricing context already ready to present.',
-          },
-          {
-            title: 'Guide the seller through prep',
-            body: 'Use the workflow rail, checklist, providers, and photo guidance to create momentum quickly.',
-          },
-          {
-            title: 'Ship the polished outputs',
-            body: 'Turn the property into seller-facing reports and marketing materials without leaving the system.',
-          },
-        ]}
-      />
+      <section className="marketing-flow" aria-label="Agent listing prep flow">
+        {[
+          ['Add a Property', 'Address + seller context'],
+          ['Build the Plan', 'Pricing, photos, prep, reports'],
+          ['Win the Meeting', 'Clear next steps and polished outputs'],
+        ].map(([title, body], index) => (
+          <article key={title} className="marketing-flow-step">
+            <span className={`marketing-flow-icon marketing-flow-icon-${index + 1}`} aria-hidden="true">
+              <span />
+            </span>
+            <h2>{title}</h2>
+            <p>{body}</p>
+          </article>
+        ))}
+      </section>
 
-      <TrustSignalSection
-        eyebrow="Trust"
-        title="Help agents look prepared before the listing presentation starts."
-        body="The agent funnel should feel like a listing advantage, not a generic SaaS pitch. The credibility comes from showing seller-facing structure, repeatable workflow, and clean outputs."
-        items={[
-          {
-            eyebrow: 'Seller-facing',
-            title: 'Reports should look presentation-ready',
-            body: 'Agents need pricing and prep outputs they can confidently show to homeowners during live conversations.',
-          },
-          {
-            eyebrow: 'Workflow',
-            title: 'Every step should reduce listing friction',
-            body: 'Pricing, checklist progress, photos, providers, and materials should feel connected so the agent can move the listing forward without context switching.',
-          },
-          {
-            eyebrow: 'Capacity',
-            title: 'Billing should map to active listing volume',
-            body: 'The product is more believable when the subscription model reflects how agents actually manage multiple properties at once.',
-          },
-        ]}
-      />
+      <section className="marketing-trust-row" aria-label="Agent value signals">
+        {AGENT_TRUST.map((item) => (
+          <div key={item}>
+            <span aria-hidden="true" />
+            <strong>{item}</strong>
+          </div>
+        ))}
+      </section>
 
-      <PricingTeaserSection
-        eyebrow="Agent billing"
-        title="Professional value, framed around active property capacity."
-        body="Agent plans should feel like listing acceleration tools, not generic software subscriptions."
-        bullets={[
-          'Active property limits that map to the real listing pipeline.',
-          'Seller-facing outputs that justify the subscription quickly.',
-          'Clear route into the existing property dashboard and workspace.',
-        ]}
-        primaryHref={signupHref}
-        primaryLabel="Create agent account"
-        secondaryHref={dashboardHref}
-        secondaryLabel="View dashboard preview"
-      />
-
-      <FinalCTASection
-        title={copyVariant.finalTitle}
-        body={copyVariant.finalBody}
-        primaryHref={signupHref}
-        primaryLabel={copyVariant.primaryCta}
-        secondaryHref={sellerHref}
-        secondaryLabel="See seller funnel"
-      />
+      <section className="marketing-final-band">
+        <h2>Start your agent workspace in minutes.</h2>
+        <Link href={signupHref} className="button-primary">
+          Start Agent Workspace
+        </Link>
+      </section>
     </AppFrame>
   );
 }
+

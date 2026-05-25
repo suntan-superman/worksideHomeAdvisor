@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { normalizeLandingAttribution } from '@workside/utils';
@@ -15,18 +14,18 @@ import {
 import { setStoredAttributionDraft } from '../../lib/attribution-draft';
 import { trackMetaPixelEvent } from '../../lib/meta-pixel';
 import { EmailGateModal } from './EmailGateModal';
-import { FinalCTASection } from './FinalCTASection';
-import { HeroSection } from './HeroSection';
-import { HowItWorksSection } from './HowItWorksSection';
-import { MiniOnboardingCard } from './MiniOnboardingCard';
-import { PricingTeaserSection } from './PricingTeaserSection';
-import { ResultPreviewCard } from './ResultPreviewCard';
-import { TrustSignalSection } from './TrustSignalSection';
-import { ValueCardRow } from './ValueCardRow';
-import { getSellerLandingVariant } from './copyVariants';
 
 const SELLER_LANDING_DRAFT_KEY = 'worksideSellerLandingDraft';
 const LANDING_ANONYMOUS_ID_KEY = 'worksideLandingAnonymousId';
+
+const SELLER_OUTPUTS = [
+  ['Seller Report', 'A clean plan sellers can save, share, and act on.'],
+  ['Pricing Story', 'A plain-English range and market narrative.'],
+  ['Prep Checklist', 'The next steps that matter before listing.'],
+  ['Marketing Flyer', 'A sharper handoff for the launch conversation.'],
+];
+
+const TRUST_ITEMS = ['AI-guided', 'Human support available', 'Local providers', 'Seller-first workflow'];
 
 function normalizeState(value) {
   return String(value || '').trim().toUpperCase().slice(0, 2);
@@ -37,14 +36,10 @@ function isValidEmail(value) {
 }
 
 function getOrCreateAnonymousId() {
-  if (typeof window === 'undefined') {
-    return '';
-  }
+  if (typeof window === 'undefined') return '';
 
   const existingId = window.localStorage.getItem(LANDING_ANONYMOUS_ID_KEY);
-  if (existingId) {
-    return existingId;
-  }
+  if (existingId) return existingId;
 
   const nextId =
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -52,6 +47,14 @@ function getOrCreateAnonymousId() {
       : `anon_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   window.localStorage.setItem(LANDING_ANONYMOUS_ID_KEY, nextId);
   return nextId;
+}
+
+function FlowIcon({ index }) {
+  return (
+    <span className={`marketing-flow-icon marketing-flow-icon-${index}`} aria-hidden="true">
+      <span />
+    </span>
+  );
 }
 
 export function SellerLandingClient({
@@ -82,14 +85,6 @@ export function SellerLandingClient({
   const [gateLoading, setGateLoading] = useState(false);
   const [toast, setToast] = useState(null);
 
-  const previewCategories = useMemo(
-    () => preview?.previewProviderCategories || ['cleaners', 'photographers'],
-    [preview?.previewProviderCategories],
-  );
-  const copyVariant = useMemo(
-    () => getSellerLandingVariant({ source, campaign, medium }),
-    [campaign, medium, source],
-  );
   const attribution = useMemo(
     () =>
       normalizeLandingAttribution({
@@ -111,9 +106,7 @@ export function SellerLandingClient({
   }, []);
 
   useEffect(() => {
-    if (!anonymousId) {
-      return;
-    }
+    if (!anonymousId) return;
 
     setStoredAttributionDraft({
       ...attribution,
@@ -123,9 +116,7 @@ export function SellerLandingClient({
   }, [anonymousId, attribution]);
 
   useEffect(() => {
-    if (!anonymousId || !preview) {
-      return;
-    }
+    if (!anonymousId || !preview) return;
 
     setStoredAttributionDraft(
       {
@@ -154,6 +145,20 @@ export function SellerLandingClient({
       ...current,
       [field]: field === 'state' ? normalizeState(value) : value,
     }));
+  }
+
+  function scrollToStart() {
+    document.getElementById('seller-start')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function openEmailGate() {
+    setEmailGateOpen(true);
+    trackLandingEvent({
+      name: 'seller_email_gate_viewed',
+      anonymousId,
+      roleIntent: 'seller',
+      ...attribution,
+    }).catch(() => {});
   }
 
   async function handlePreviewSubmit(event) {
@@ -189,6 +194,8 @@ export function SellerLandingClient({
           marketReadyScore: response.marketReadyScore,
         },
       }).catch(() => {});
+
+      openEmailGate();
     } catch (requestError) {
       setToast({
         tone: 'error',
@@ -200,16 +207,6 @@ export function SellerLandingClient({
     }
   }
 
-  function openEmailGate() {
-    setEmailGateOpen(true);
-    trackLandingEvent({
-      name: 'seller_email_gate_viewed',
-      anonymousId,
-      roleIntent: 'seller',
-      ...attribution,
-    }).catch(() => {});
-  }
-
   async function handleEmailGateSubmit(event) {
     event.preventDefault();
 
@@ -217,7 +214,7 @@ export function SellerLandingClient({
       setToast({
         tone: 'error',
         title: 'Valid email required',
-        message: 'Enter a valid email so we can carry your preview into the full plan.',
+        message: 'Enter a valid email so we can create your seller workspace.',
       });
       return;
     }
@@ -330,48 +327,69 @@ export function SellerLandingClient({
         onClose={() => setToast(null)}
       />
 
-      <HeroSection
-        eyebrow={copyVariant.heroEyebrow}
-        title={copyVariant.heroTitle}
-        subtitle={copyVariant.heroSubtitle}
-        actions={
-          <>
-            <button type="button" className="button-primary" onClick={openEmailGate}>
-              {copyVariant.primaryCta}
+      <section className="marketing-hero marketing-hero-seller">
+        <div className="marketing-hero-copy">
+          <span className="hero-kicker">For home sellers</span>
+          <h1>Sell your home with a smarter prep plan.</h1>
+          <p>Get pricing guidance, prep priorities, photo feedback, and local provider help before you list.</p>
+          <div className="cta-row">
+            <button type="button" className="button-primary" onClick={scrollToStart}>
+              Start My Seller Plan
             </button>
-            <a href="#sell-how-it-works" className="button-secondary">
-              {copyVariant.secondaryCta}
+            <a className="button-secondary" href="#seller-outputs">
+              See Example Report
             </a>
-          </>
-        }
-        aside={
-          <div className="landing-hero-metrics">
-            <div className="landing-mini-panel">
-              <span className="label">{copyVariant.heroPanelLabel}</span>
-              <strong>{preview?.estimatedRange?.mid ? `Midpoint ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(preview.estimatedRange.mid)}` : 'Address to preview in under a minute'}</strong>
-              <p>{copyVariant.heroPanelBody}</p>
-            </div>
-            <div className="landing-mini-panel">
-              <span className="label">{copyVariant.themeEyebrow || 'Preview categories'}</span>
-              <div className="tag-row">
-                {(copyVariant.themePills || previewCategories).map((category) => (
-                  <span key={category}>{category}</span>
-                ))}
-              </div>
-            </div>
           </div>
-        }
-      />
+        </div>
+        <div className="marketing-hero-visual" aria-label="Workside seller dashboard preview">
+          <img src="/marketing/seller-prep-before-list.png" alt="Workside Home Advisor seller dashboard mockup" />
+        </div>
+      </section>
 
-      <ValueCardRow
-        items={copyVariant.valueItems}
-      />
+      <section className="marketing-flow" aria-label="Simple selling plan flow">
+        {[
+          ['Enter Your Property', 'Address + basic details'],
+          ['Get Your Prep Plan', 'Pricing range, photo readiness, checklist'],
+          ['List With Confidence', 'Reports, flyers, providers, marketing'],
+        ].map(([title, body], index) => (
+          <article key={title} className="marketing-flow-step">
+            <FlowIcon index={index + 1} />
+            <h2>{title}</h2>
+            <p>{body}</p>
+          </article>
+        ))}
+      </section>
 
-      <MiniOnboardingCard
-        title="Start with the property basics."
-        subtitle="This is the first slice of the real workflow, not a dead-end marketing form."
-        footer={<p>We only need enough detail to show a useful preview and create momentum.</p>}
-      >
+      <section id="seller-outputs" className="marketing-output-section">
+        <div className="marketing-section-heading">
+          <span className="label">Outputs</span>
+          <h2>Everything you need before the listing conversation.</h2>
+        </div>
+        <div className="marketing-output-grid">
+          {SELLER_OUTPUTS.map(([title, body]) => (
+            <article key={title} className="marketing-output-card">
+              <span className="marketing-output-mark" aria-hidden="true" />
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="marketing-trust-row" aria-label="Trust signals">
+        {TRUST_ITEMS.map((item) => (
+          <div key={item}>
+            <span aria-hidden="true" />
+            <strong>{item}</strong>
+          </div>
+        ))}
+      </section>
+
+      <section id="seller-start" className="marketing-start-panel">
+        <div>
+          <span className="label">Start</span>
+          <h2>Enter your address and create your seller workspace.</h2>
+        </div>
         <form className="landing-onboarding-form" onSubmit={handlePreviewSubmit}>
           <label>
             Property address
@@ -460,92 +478,18 @@ export function SellerLandingClient({
               />
             </label>
           </div>
-          <div className="landing-onboarding-actions">
-            <button type="submit" className="button-primary" disabled={loadingPreview}>
-              {loadingPreview ? 'Building preview...' : 'Preview my selling plan'}
-            </button>
-            <button type="button" className="button-secondary" onClick={openEmailGate}>
-              Skip to signup
-            </button>
-          </div>
+          <button type="submit" className="button-primary" disabled={loadingPreview}>
+            {loadingPreview ? 'Creating plan...' : 'Start your selling plan in minutes'}
+          </button>
         </form>
-      </MiniOnboardingCard>
-
-      <ResultPreviewCard preview={preview} loading={loadingPreview} onUnlock={openEmailGate} />
-
-      <section className="landing-slab landing-provider-support">
-        <div className="landing-section-header">
-          <span className="label">Provider support</span>
-          <h2>We can bring local help into the plan once the property starts moving.</h2>
-          <p>Photographers, cleaners, stagers, inspectors, and other prep categories can follow the same workflow instead of living in separate tabs and browser searches.</p>
-        </div>
-        <div className="tag-row">
-          {['Cleaners', 'Photographers', 'Stagers', 'Landscapers', 'Inspectors', 'Handymen'].map((item) => (
-            <span key={item}>{item}</span>
-          ))}
-        </div>
       </section>
 
-      <TrustSignalSection
-        eyebrow="Trust"
-        title="Built to guide real sellers, not just collect leads."
-        body="Workside should feel credible before billing ever appears. Trust starts with clear workflow language, grounded provider framing, and honest visibility into what is self-reported versus verified."
-        items={[
-          {
-            eyebrow: 'Homeowners',
-            title: 'Built for people who have never sold before',
-            body: 'The funnel starts with plain-language property questions and carries naturally into a guided workspace instead of dropping users into a complicated dashboard.',
-          },
-          {
-            eyebrow: 'Providers',
-            title: 'Provider trust is explicit, not implied',
-            body: 'Profiles distinguish self-reported credentials from verified ones so sellers can see the difference before they request help.',
-          },
-          {
-            eyebrow: 'Momentum',
-            title: 'Partial value appears before signup',
-            body: 'Price band, readiness, and first prep actions show up early so the user understands what the subscription is actually unlocking.',
-          },
-        ]}
-      />
-
-      <div id="sell-how-it-works">
-        <HowItWorksSection
-          steps={[
-            {
-              title: 'Enter the property basics',
-              body: 'Start with the address and a few facts so Workside can frame the first decisions.',
-            },
-            {
-              title: 'Get a partial result quickly',
-              body: 'Show the price band, readiness signal, and first prep moves before forcing account creation.',
-            },
-            {
-              title: 'Continue into the guided workspace',
-              body: 'Verify your account, save the property, and unlock the full checklist, providers, and exports.',
-            },
-          ]}
-        />
-      </div>
-
-      <PricingTeaserSection
-        title={copyVariant.pricingTitle}
-        body={copyVariant.pricingBody}
-        bullets={copyVariant.pricingBullets}
-        primaryHref="/auth?mode=signup&role=seller"
-        primaryLabel="Create seller account"
-        secondaryHref="/dashboard"
-        secondaryLabel="View workspace preview"
-      />
-
-      <FinalCTASection
-        title={copyVariant.finalTitle}
-        body={copyVariant.finalBody}
-        primaryHref="/auth?mode=signup&role=seller"
-        primaryLabel={copyVariant.primaryCta}
-        secondaryHref="/dashboard"
-        secondaryLabel="See the seller dashboard"
-      />
+      <section className="marketing-final-band">
+        <h2>Start your selling plan in minutes.</h2>
+        <button type="button" className="button-primary" onClick={scrollToStart}>
+          Start My Seller Plan
+        </button>
+      </section>
 
       <EmailGateModal
         open={emailGateOpen}
@@ -562,3 +506,4 @@ export function SellerLandingClient({
     </>
   );
 }
+
