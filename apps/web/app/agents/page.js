@@ -5,6 +5,7 @@ import { AppFrame } from '../../components/AppFrame';
 import { FinalCTASection } from '../../components/landing/FinalCTASection';
 import { HeroSection } from '../../components/landing/HeroSection';
 import { HowItWorksSection } from '../../components/landing/HowItWorksSection';
+import { LandingMetaTracker } from '../../components/landing/LandingMetaTracker';
 import { PricingTeaserSection } from '../../components/landing/PricingTeaserSection';
 import { TrustSignalSection } from '../../components/landing/TrustSignalSection';
 import { ValueCardRow } from '../../components/landing/ValueCardRow';
@@ -70,6 +71,16 @@ export default function AgentLandingPage({ searchParams }) {
 
   return (
     <AppFrame>
+      <LandingMetaTracker
+        roleIntent="agent"
+        contentName="Agent landing page"
+        contentCategory="agent_landing"
+        source={source}
+        campaign={campaign}
+        medium={medium}
+        adset={adset}
+        ad={ad}
+      />
       <HeroSection
         eyebrow={copyVariant.eyebrow}
         title={copyVariant.title}

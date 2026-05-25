@@ -13,6 +13,7 @@ import {
   trackLandingEvent,
 } from '../../lib/api';
 import { setStoredAttributionDraft } from '../../lib/attribution-draft';
+import { trackMetaPixelEvent } from '../../lib/meta-pixel';
 import { EmailGateModal } from './EmailGateModal';
 import { FinalCTASection } from './FinalCTASection';
 import { HeroSection } from './HeroSection';
@@ -256,6 +257,22 @@ export function SellerLandingClient({
           postalCode: form.postalCode,
         },
       }).catch(() => {});
+      trackMetaPixelEvent(
+        'Lead',
+        {
+          content_name: 'Seller email gate',
+          content_category: 'seller_landing',
+          role_intent: 'seller',
+          source: attribution.source,
+          campaign: attribution.campaign,
+          medium: attribution.medium,
+          adset: attribution.adset,
+          ad: attribution.ad,
+        },
+        {
+          eventId: `seller_email_submitted_${anonymousId || gateEmail}`,
+        },
+      );
 
       if (typeof window !== 'undefined') {
         window.sessionStorage.setItem(

@@ -1,4 +1,5 @@
 import { AppFrame } from '../../components/AppFrame';
+import { LandingMetaTracker } from '../../components/landing/LandingMetaTracker';
 import { SellerLandingClient } from '../../components/landing/SellerLandingClient';
 
 export const metadata = {
@@ -19,6 +20,16 @@ export default function SellerLandingPage({ searchParams }) {
 
   return (
     <AppFrame>
+      <LandingMetaTracker
+        roleIntent="seller"
+        contentName="Seller landing page"
+        contentCategory="seller_landing"
+        source={source}
+        campaign={campaign}
+        medium={medium}
+        adset={adset}
+        ad={ad}
+      />
       <SellerLandingClient
         source={source}
         campaign={campaign}
