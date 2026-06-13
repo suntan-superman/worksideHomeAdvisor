@@ -150,6 +150,13 @@ export function requestPublicChatHuman(sessionId, body = {}) {
   });
 }
 
+export function submitPublicChatAnswerFeedback(sessionId, body = {}) {
+  return publicChatRequest(`/chat/public/session/${encodeURIComponent(sessionId)}/answer-feedback`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export function sendPublicChatTranscript(sessionId, body = {}) {
   return publicChatRequest(`/chat/public/session/${encodeURIComponent(sessionId)}/transcript`, {
     method: 'POST',

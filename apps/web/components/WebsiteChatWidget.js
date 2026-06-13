@@ -10,6 +10,7 @@ import {
   requestPublicChatHuman,
   sendPublicChatMessage,
   sendPublicChatTranscript,
+  submitPublicChatAnswerFeedback,
   timeoutPublicChatSession,
 } from '../lib/public-chat';
 import {
@@ -39,6 +40,41 @@ function messageKey(message) {
 function isInboundMessage(message) {
   const sender = String(message?.sender || message?.role || '').toLowerCase();
   return Boolean(message?.body) && message.id !== 'welcome' && sender !== 'visitor' && sender !== 'user';
+}
+
+function isAssistantMessage(message) {
+  const sender = String(message?.sender || message?.role || '').toLowerCase();
+  return Boolean(message?.body) && message.id !== 'welcome' && ['ai', 'assistant'].includes(sender);
+}
+
+function isVisitorMessage(message) {
+  const sender = String(message?.sender || message?.role || '').toLowerCase();
+  return Boolean(message?.body) && ['visitor', 'user'].includes(sender);
+}
+
+function answerFeedbackKey(message = {}) {
+  return message.id || `${message.sender || message.role}:${message.body}:${message.createdAt || ''}`;
+}
+
+function getLatestAnswerFeedbackTarget(messages = []) {
+  const visibleMessages = messages.filter((message) => Boolean(message?.body) && message.id !== 'welcome');
+  const lastConversationalIndex = visibleMessages.findLastIndex((message) => {
+    const sender = String(message?.sender || message?.role || '').toLowerCase();
+    return ['ai', 'assistant', 'visitor', 'user', 'agent', 'human'].includes(sender);
+  });
+  const assistant = visibleMessages[lastConversationalIndex];
+  if (!isAssistantMessage(assistant)) return null;
+
+  const previousVisitor = visibleMessages
+    .slice(0, lastConversationalIndex)
+    .findLast((message) => isVisitorMessage(message));
+  if (!previousVisitor) return null;
+
+  return {
+    assistant,
+    question: previousVisitor.body,
+    messageId: answerFeedbackKey(assistant),
+  };
 }
 
 function hasNewInboundMessage(previousMessages = [], nextMessages = []) {
@@ -287,6 +323,7 @@ function SpinnerIcon({ size = 18 }) {
 export default function WebsiteChatWidget({
   product = 'home_advisor',
   tenantId = 'home-advisor-platform',
+  tenantName = 'Workside Home Advisor',
   tenantType = 'platform',
 }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -309,6 +346,7 @@ export default function WebsiteChatWidget({
   const [lastActivityAt, setLastActivityAt] = useState(() => Number(getStoredValue('lastActivityAt')) || Date.now());
   const [storedSession, setStoredSession] = useState(null);
   const [homeAdvisorContext, setHomeAdvisorContext] = useState(null);
+  const [answerFeedback, setAnswerFeedback] = useState({});
   const visitorId = useMemo(getVisitorId, []);
   const threadRef = useRef(null);
   const messagesRef = useRef(messages);
@@ -327,6 +365,10 @@ export default function WebsiteChatWidget({
   const leadNameError = shouldShowLead && leadTouched.name && !leadNameReady ? 'Name must be at least 3 characters.' : '';
   const leadEmailError = shouldShowLead && leadTouched.email && !leadEmailReady ? 'Enter a valid email address.' : '';
   const talkToPersonDisabled = isSending || humanRequested || (!isLoggedIn && !leadCaptured);
+  const latestAnswerFeedbackTarget = useMemo(() => getLatestAnswerFeedbackTarget(messages), [messages]);
+  const latestAnswerFeedbackState = latestAnswerFeedbackTarget
+    ? answerFeedback[latestAnswerFeedbackTarget.messageId]
+    : null;
 
   function markConversationEnded(nextMessages = messagesRef.current) {
     setMessages(nextMessages?.length ? nextMessages : messagesRef.current);
@@ -484,6 +526,7 @@ export default function WebsiteChatWidget({
     setConfirmEndChat(false);
     setEmailTranscriptOnEnd(true);
     setConversationEnded(false);
+    setAnswerFeedback({});
     setError('');
     recordActivity();
   }
@@ -727,6 +770,50 @@ export default function WebsiteChatWidget({
     }
   }
 
+  async function handleAnswerFeedback(target, rating) {
+    if (!target || !target.messageId) return;
+    recordActivity();
+    setAnswerFeedback((current) => ({
+      ...current,
+      [target.messageId]: { status: rating === 'helpful' ? 'acknowledged' : 'submitting' },
+    }));
+
+    if (rating === 'helpful') return;
+
+    if (!sessionId) {
+      setAnswerFeedback((current) => ({
+        ...current,
+        [target.messageId]: { status: 'failed' },
+      }));
+      return;
+    }
+
+    try {
+      await submitPublicChatAnswerFeedback(sessionId, {
+        product,
+        tenantId,
+        tenantName,
+        visitorId,
+        rating: 'not_helpful',
+        question: target.question,
+        answer: target.assistant.body,
+        messageId: target.messageId,
+        sourceUrl: window.location.href,
+        authenticated: Boolean(storedSession?.user),
+        appBaseUrl: window.location.origin,
+      });
+      setAnswerFeedback((current) => ({
+        ...current,
+        [target.messageId]: { status: 'acknowledged' },
+      }));
+    } catch (_) {
+      setAnswerFeedback((current) => ({
+        ...current,
+        [target.messageId]: { status: 'failed' },
+      }));
+    }
+  }
+
   return (
     <div className="website-chat-widget" aria-live="polite">
       {isOpen ? (
@@ -765,9 +852,37 @@ export default function WebsiteChatWidget({
 
           <div className="website-chat-thread" ref={threadRef}>
             {messages.map((message) => (
-              <div key={message.id || `${message.sender}-${message.body}`} className={`website-chat-message ${message.role || message.sender}`}>
-                {message.sender === 'agent' ? <UserIcon size={14} /> : null}
-                <span>{renderMessageBody(message.body)}</span>
+              <div key={message.id || `${message.sender}-${message.body}`} className="website-chat-message-group">
+                <div className={`website-chat-message ${message.role || message.sender}`}>
+                  {message.sender === 'agent' ? <UserIcon size={14} /> : null}
+                  <span>{renderMessageBody(message.body)}</span>
+                </div>
+                {latestAnswerFeedbackTarget?.messageId === answerFeedbackKey(message) ? (
+                  <div className="website-chat-feedback" aria-label="Rate this answer">
+                    {latestAnswerFeedbackState?.status === 'acknowledged' ? (
+                      <span>Thanks for the feedback.</span>
+                    ) : (
+                      <>
+                        <span>Was this helpful?</span>
+                        <button
+                          type="button"
+                          onClick={() => handleAnswerFeedback(latestAnswerFeedbackTarget, 'helpful')}
+                          disabled={latestAnswerFeedbackState?.status === 'submitting'}
+                        >
+                          Yes
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAnswerFeedback(latestAnswerFeedbackTarget, 'not_helpful')}
+                          disabled={latestAnswerFeedbackState?.status === 'submitting'}
+                        >
+                          No
+                        </button>
+                        {latestAnswerFeedbackState?.status === 'failed' ? <small>Feedback could not be sent.</small> : null}
+                      </>
+                    )}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>

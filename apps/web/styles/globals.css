@@ -5051,6 +5051,16 @@ select {
   background: #fffaf3;
 }
 
+.website-chat-message-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.website-chat-message-group:has(.website-chat-message.visitor) {
+  align-items: flex-end;
+}
+
 .website-chat-message span {
   white-space: pre-wrap;
 }
@@ -5075,6 +5085,44 @@ select {
 .website-chat-message.agent {
   border-color: rgba(70, 99, 79, 0.24);
   background: rgba(245, 250, 245, 0.94);
+}
+
+.website-chat-feedback {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 86%;
+  margin: 4px 0 0 2px;
+  color: #6c7681;
+  font-size: 11px;
+}
+
+.website-chat-feedback button {
+  min-height: 24px;
+  border: 1px solid rgba(25, 33, 42, 0.14);
+  border-radius: 999px;
+  padding: 2px 9px;
+  color: var(--ink);
+  background: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.website-chat-feedback button:hover:not(:disabled) {
+  border-color: rgba(70, 99, 79, 0.42);
+  background: rgba(245, 250, 245, 0.94);
+}
+
+.website-chat-feedback button:disabled {
+  opacity: 0.64;
+  cursor: not-allowed;
+}
+
+.website-chat-feedback small {
+  flex-basis: 100%;
+  color: #8a3f33;
+  font-size: 11px;
 }
 
 .website-chat-lead {
